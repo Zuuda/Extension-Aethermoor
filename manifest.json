@@ -1,0 +1,10 @@
+{
+  "display_name": "Aethermoor Resolver",
+  "loading_order": 10,
+  "requires": [],
+  "optional": [],
+  "dependencies": [],
+  "js": "index.js",
+  "author": "Aethermoor project",
+  "version": "0.1.0"
+}

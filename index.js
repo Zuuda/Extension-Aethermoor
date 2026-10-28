@@ -2681,6 +2681,379 @@ function spawnEncounter(test) {
         rewards: encounterRewards
     };
 }
+const QUEST_REWARD_TABLES = {
+    1: {
+        low: [
+            { rank: 'F', gates: 1, xp: 60,   silver: 6,   repSteps: 1, salvageRarity: 'common',   salvageStat: 2 },
+            { rank: 'E', gates: 1, xp: 90,   silver: 9,   repSteps: 1, salvageRarity: 'common',   salvageStat: 2 },
+            { rank: 'D', gates: 1, xp: 180,  silver: 18,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 }
+        ],
+        high: [
+            { rank: 'D', gates: 2, xp: 180,  silver: 18,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 },
+            { rank: 'C', gates: 2, xp: 300,  silver: 30,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 },
+            { rank: 'B', gates: 3, xp: 540,  silver: 54,  repSteps: 2, salvageRarity: 'rare',     salvageStat: 5 }
+        ]
+    },
+    2: {
+        low: [
+            { rank: 'F', gates: 1, xp: 160,  silver: 16,  repSteps: 1, salvageRarity: 'common',   salvageStat: 4 },
+            { rank: 'E', gates: 1, xp: 240,  silver: 24,  repSteps: 1, salvageRarity: 'common',   salvageStat: 4 },
+            { rank: 'D', gates: 1, xp: 480,  silver: 48,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 }
+        ],
+        high: [
+            { rank: 'D', gates: 2, xp: 480,  silver: 48,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 },
+            { rank: 'C', gates: 3, xp: 800,  silver: 80,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 },
+            { rank: 'B', gates: 3, xp: 1440, silver: 144, repSteps: 2, salvageRarity: 'rare',     salvageStat: 7 }
+        ]
+    },
+    3: {
+        low: [
+            { rank: 'F', gates: 1, xp: 260,  silver: 26,  repSteps: 1, salvageRarity: 'common',   salvageStat: 7 },
+            { rank: 'E', gates: 1, xp: 390,  silver: 39,  repSteps: 1, salvageRarity: 'common',   salvageStat: 7 },
+            { rank: 'D', gates: 2, xp: 780,  silver: 78,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 }
+        ],
+        high: [
+            { rank: 'D', gates: 2, xp: 780,  silver: 78,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 },
+            { rank: 'C', gates: 3, xp: 1300, silver: 130, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 },
+            { rank: 'B', gates: 4, xp: 2340, silver: 234, repSteps: 2, salvageRarity: 'rare',     salvageStat: 10 }
+        ]
+    },
+    4: {
+        low: [
+            { rank: 'F', gates: 1, xp: 360,  silver: 36,  repSteps: 1, salvageRarity: 'common',   salvageStat: 9 },
+            { rank: 'E', gates: 1, xp: 540,  silver: 54,  repSteps: 1, salvageRarity: 'common',   salvageStat: 9 },
+            { rank: 'D', gates: 2, xp: 1080, silver: 108, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 }
+        ],
+        high: [
+            { rank: 'D', gates: 2, xp: 1080, silver: 108, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 },
+            { rank: 'C', gates: 3, xp: 1800, silver: 180, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 },
+            { rank: 'B', gates: 4, xp: 3240, silver: 324, repSteps: 2, salvageRarity: 'rare',     salvageStat: 12 }
+        ]
+    },
+    5: {
+        low: [
+            { rank: 'F', gates: 1, xp: 460,  silver: 46,  repSteps: 1, salvageRarity: 'common',   salvageStat: 12 },
+            { rank: 'E', gates: 1, xp: 690,  silver: 69,  repSteps: 1, salvageRarity: 'common',   salvageStat: 12 },
+            { rank: 'D', gates: 2, xp: 1380, silver: 138, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 }
+        ],
+        high: [
+            { rank: 'D', gates: 2, xp: 1380, silver: 138, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 },
+            { rank: 'C', gates: 3, xp: 2300, silver: 230, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 },
+            { rank: 'B', gates: 4, xp: 4140, silver: 414, repSteps: 2, salvageRarity: 'rare',     salvageStat: 15 }
+        ]
+    }
+};
+
+const QUEST_RANK_LABELS = {
+    F: 'Chore',
+    E: 'Local',
+    D: 'Minor',
+    C: 'Regional',
+    B: 'Major'
+};
+
+const QUEST_SALVAGE_SLOTS = [
+    { owner: 'tansy', slot: 'weapon',     variant: null },
+    { owner: 'tansy', slot: 'gloves',     variant: null },
+    { owner: 'tansy', slot: 'chest',      variant: null },
+    { owner: 'tansy', slot: 'trousers',   variant: null },
+    { owner: 'tansy', slot: 'ring1',      variant: 'vitality' },
+    { owner: 'tansy', slot: 'ring1',      variant: 'luck' },
+    { owner: 'tansy', slot: 'neck',       variant: 'vitality' },
+    { owner: 'tansy', slot: 'headgear',   variant: 'luck' },
+    { owner: 'tansy', slot: 'boots',      variant: 'vitality' },
+    { owner: 'qtik',  slot: 'ring1',      variant: 'bulwark' },
+    { owner: 'qtik',  slot: 'ring1',      variant: 'vitality' },
+    { owner: 'qtik',  slot: 'amulet',     variant: 'bulwark' },
+    { owner: 'qtik',  slot: 'amulet',     variant: 'vitality' },
+    { owner: 'qtik',  slot: 'wristCuffs', variant: 'bulwark' },
+    { owner: 'qtik',  slot: 'wristCuffs', variant: 'vitality' }
+];
+
+function normalizeQuestRepTier(value) {
+    assert(
+        typeof value === 'string',
+        'repTier must be a string'
+    );
+
+    const tier = value
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        .trim()
+        .toLowerCase();
+
+    if (
+        tier === 'unknown' ||
+        tier === 'slightly known'
+    ) {
+        return {
+            band: 'low',
+            label:
+                tier === 'unknown'
+                    ? 'Unknown'
+                    : 'Slightly Known'
+        };
+    }
+
+    if (
+        tier === 'known' ||
+        tier === 'well respected' ||
+        tier === 'renowned'
+    ) {
+        const labelByTier = {
+            known: 'Known',
+            'well respected': 'Well Respected',
+            renowned: 'Renowned'
+        };
+
+        return {
+            band: 'high',
+            label: labelByTier[tier]
+        };
+    }
+
+    throw new Error(
+        `Unsupported reputation tier: ${value}`
+    );
+}
+
+function makeQuestSalvage(zone, slotRoll, row) {
+    int(slotRoll, 'salvageSlotRoll', 1);
+
+    assert(
+        slotRoll <= QUEST_SALVAGE_SLOTS.length,
+        `salvageSlotRoll must be 1-${QUEST_SALVAGE_SLOTS.length}`
+    );
+
+    const slot =
+        QUEST_SALVAGE_SLOTS[slotRoll - 1];
+
+    const rarityInfo =
+        LOOT_RARITY_INFO[row.salvageRarity];
+
+    const material =
+        ZONE_LOOT_MATERIALS[zone];
+
+    const slotNames = {
+        weapon: 'Focus',
+        gloves: 'Bracers',
+        chest: 'Chest',
+        trousers: 'Trousers',
+        ring1: 'Ring',
+        neck: 'Necklace',
+        headgear: 'Headgear',
+        boots: 'Boots',
+        amulet: 'Amulet',
+        wristCuffs: 'Wrist Cuffs'
+    };
+
+    const variantName = slot.variant
+        ? ` ${slot.variant[0].toUpperCase()}${slot.variant.slice(1)}`
+        : '';
+
+    const ownerName =
+        slot.owner === 'qtik'
+            ? "Q'tik"
+            : 'Tansy';
+
+    const stat =
+        row.salvageStat;
+
+    return {
+        name:
+            `${ownerName} ${material}${variantName} ` +
+            `${slotNames[slot.slot]} (Stat ${stat})`,
+        owner: slot.owner,
+        slot: slot.slot,
+        variant: slot.variant,
+        rarity: rarityInfo.label,
+        rarityColor: rarityInfo.color,
+        rawStat: stat,
+        sellValue: 2 * stat,
+        bound: false,
+        classRestricted: false,
+        tradeStreamEligible: true,
+        bonus: lootBonus(
+            slot.owner,
+            slot.slot,
+            slot.variant,
+            stat
+        )
+    };
+}
+
+function resolveQuestSeed(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'quest requires state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        state.encounter &&
+        typeof state.encounter === 'object',
+        'quest requires state.encounter'
+    );
+
+    const zone =
+        test.zone ?? state.zone;
+
+    assert(
+        Number.isInteger(zone) && ZONES[zone],
+        `Unknown zone: ${zone}`
+    );
+
+    const rep =
+        normalizeQuestRepTier(test.repTier);
+
+    int(test.questRoll, 'questRoll', 1);
+    int(test.salvageSlotRoll, 'salvageSlotRoll', 1);
+
+    assert(
+        test.questRoll <= 3,
+        'questRoll must be 1-3'
+    );
+
+    assert(
+        test.salvageSlotRoll <= QUEST_SALVAGE_SLOTS.length,
+        `salvageSlotRoll must be 1-${QUEST_SALVAGE_SLOTS.length}`
+    );
+
+    const sourceSeed =
+        state.encounter.questSeed;
+
+    assert(
+        sourceSeed &&
+        (
+            sourceSeed.result ===
+                'genuine_unclaimed_quest_or_dungeon_hook' ||
+            sourceSeed.result ===
+                'diegetic_quest_breadcrumb'
+        ),
+        'Quest offer requires a locked quest-trigger seed'
+    );
+
+    const seed = {
+        zone,
+        repTier: rep.label,
+        questRoll: test.questRoll,
+        salvageSlotRoll: test.salvageSlotRoll,
+        source: sourceSeed.source,
+        sourceRoll: sourceSeed.roll,
+        sourceResult: sourceSeed.result
+    };
+
+    const existing =
+        state.activeQuest;
+
+    if (
+        existing &&
+        existing.status !== 'complete'
+    ) {
+        const existingSeed = existing.seed || {};
+
+        const matches =
+            existingSeed.zone === seed.zone &&
+            existingSeed.repTier === seed.repTier &&
+            existingSeed.questRoll === seed.questRoll &&
+            existingSeed.salvageSlotRoll === seed.salvageSlotRoll &&
+            existingSeed.source === seed.source &&
+            existingSeed.sourceRoll === seed.sourceRoll &&
+            existingSeed.sourceResult === seed.sourceResult;
+
+        assert(
+            matches,
+            'An active quest is already locked with a different seed'
+        );
+
+        return {
+            ok: true,
+            created: false,
+            quest: existing,
+            state
+        };
+    }
+
+    const table =
+        QUEST_REWARD_TABLES[zone][rep.band];
+
+    const row =
+        table[test.questRoll - 1];
+
+    assert(
+        row,
+        'No quest table entry exists for these inputs'
+    );
+
+    const salvage = makeQuestSalvage(
+        zone,
+        test.salvageSlotRoll,
+        row
+    );
+
+    const tier =
+        ZONES[zone].tier;
+
+    const quest = {
+        id:
+            `quest-${state.encounter.id}-` +
+            `${row.rank}-${test.questRoll}`,
+        title:
+            `Rank ${row.rank} ${QUEST_RANK_LABELS[row.rank]}`,
+        rank: row.rank,
+        gates: row.gates,
+        status: 'offered',
+        seed,
+
+        /*
+         * The model writes the scene-specific truth and objective.
+         * Future gates are intentionally not generated here.
+         */
+        coreTruth: null,
+        currentGate: {
+            step: 1,
+            total: row.gates,
+            mode:
+                row.gates === 1
+                    ? 'arrival_warmup'
+                    : 'traversal_discovery',
+            objective: null
+        },
+
+        payout: {
+            xp: row.xp,
+            silver: row.silver,
+            repSteps: row.repSteps
+        },
+
+        intermediateGateBonus: {
+            xp: 100 * tier,
+            silver: 10 * tier,
+            applies:
+                row.gates > 1
+        },
+
+        salvage,
+
+        town:
+            test.town ||
+            null,
+
+        repTierAtOffer:
+            rep.label
+    };
+
+    state.activeQuest =
+        quest;
+
+    return {
+        ok: true,
+        created: true,
+        quest,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -3143,9 +3516,13 @@ function resolveBatch(args) {
              case 'world_seeds':
                  result = resolveWorldSeeds(test);
                  break;
-             case 'loot':
-                 result = resolveLootSeed(test);
-                 break;
+                case 'loot':
+                    result = resolveLootSeed(test);
+                    break;
+
+                case 'quest':
+                    result = resolveQuestSeed(test);
+                    break;
 
                 default:
                     throw new Error(
@@ -3583,7 +3960,8 @@ function registerTools() {
                                     'consume_belt',
                                     'reference',
                                     'world_seeds',
-                                    'loot'
+                                    'loot',
+                                    'quest'
                                 ]
                             },
 
@@ -3674,6 +4052,32 @@ function registerTools() {
 
                             crew: {
                                 type: 'object'
+                            },
+                            repTier: {
+                                type: 'string',
+                                enum: [
+                                    'Unknown',
+                                    'Slightly Known',
+                                    'Known',
+                                    'Well Respected',
+                                    'Renowned'
+                                ]
+                            },
+
+                            questRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 3
+                            },
+
+                            salvageSlotRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 15
+                            },
+
+                            town: {
+                                type: 'string'
                             },
 
                             curiosityRoll: {

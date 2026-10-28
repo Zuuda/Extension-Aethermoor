@@ -1144,7 +1144,6 @@ function resolveTurn({
             );
         } else {
 
-        } else {
             /*
              * Drinking removes Fire/Ice bonuses, not ordinary
              * attack rolls, criticals, or Tansy's active command.

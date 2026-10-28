@@ -1396,7 +1396,13 @@ const ELITE_LEVELS = {
     5: { mid: 23, high: 25 }
 };
 
-const BOSS_LEVELS = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25 };
+const BOSS_LEVELS = {
+    1: 5,
+    2: 10,
+    3: 15,
+    4: 20,
+    5: 25
+};
 
 const PASSIVES = {
     1: 'armor_sunder',
@@ -1413,32 +1419,60 @@ function spawnEncounter(test) {
             zone: test.zone,
             bracket: test.bracket || 'mid',
             composition: test.composition || 2,
-            encounterId: test.encounterId || `normal-pack-z${test.zone}`
+            encounterId:
+                test.encounterId ||
+                `normal-pack-z${test.zone}`
         });
     }
 
-    assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
-    assert(kind === 'elite' || kind === 'boss',
-        `Unsupported encounter type: ${kind}`);
-    assert(Number.isInteger(test.passiveRoll) && PASSIVES[test.passiveRoll],
-        'Elite/boss spawn requires passiveRoll from 1 to 4');
+    assert(
+        ZONES[test.zone],
+        `Unknown zone: ${test.zone}`
+    );
+
+    assert(
+        kind === 'elite' || kind === 'boss',
+        `Unsupported encounter type: ${kind}`
+    );
+
+    assert(
+        Number.isInteger(test.passiveRoll) &&
+        PASSIVES[test.passiveRoll],
+        'Elite/boss spawn requires passiveRoll from 1 to 4'
+    );
 
     let level;
+
     if (kind === 'elite') {
         const bracket = test.bracket || 'mid';
-        assert(bracket === 'mid' || bracket === 'high',
-            'Elite bracket must be mid or high');
+
+        assert(
+            bracket === 'mid' || bracket === 'high',
+            'Elite bracket must be mid or high'
+        );
+
         level = ELITE_LEVELS[test.zone][bracket];
     } else {
         level = BOSS_LEVELS[test.zone];
     }
 
-    const id = test.encounterId || `${kind}-z${test.zone}`;
-    const foe = createFoe({ id: `${id}-${kind}`, level, role: kind });
-    const rawStat = ZONES[test.zone].base + (kind === 'elite' ? 1 : 5);
+    const id =
+        test.encounterId ||
+        `${kind}-z${test.zone}`;
+
+    const foe = createFoe({
+        id: `${id}-${kind}`,
+        level,
+        role: kind
+    });
+
+    const rawStat =
+        ZONES[test.zone].base +
+        (kind === 'elite' ? 1 : 5);
 
     return {
         ok: true,
+
         encounter: {
             id,
             status: 'active',
@@ -1450,15 +1484,22 @@ function spawnEncounter(test) {
             passive: PASSIVES[test.passiveRoll],
             passiveStacks: 0,
             nextTelegraph: null,
-            used: { stun: false, icePatch: false },
+            used: {
+                stun: false,
+                icePatch: false
+            },
             hexStacks: {},
             exposed: 0
         },
+
         rewards: {
             baseKillXp: mobStats(level, kind).xpBase,
             xpOnKillDependsOnCrewLevel: true,
             guaranteedGear: {
-                rarity: kind === 'elite' ? 'uncommon' : 'epic',
+                rarity:
+                    kind === 'elite'
+                        ? 'uncommon'
+                        : 'epic',
                 rawStat,
                 pawnSilver: 2 * rawStat,
                 slotPending: true
@@ -1798,14 +1839,16 @@ function registerTools() {
                             minimum: 1,
                             maximum: 6
                         },
-
                         encounterId: {
                             type: 'string'
-                            passiveRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 4
-},
+                        },
+
+                        passiveRoll: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 4
+                        },
+
 
                         },
 

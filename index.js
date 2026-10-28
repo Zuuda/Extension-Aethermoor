@@ -3297,6 +3297,180 @@ function resolveQuestAction(test) {
 
     return result;
 }
+function equipBagItem(stateInput, itemIndex) {
+    assert(
+        stateInput &&
+        typeof stateInput === 'object',
+        'gear equip requires state'
+    );
+
+    const state = clone(stateInput);
+
+    assert(
+        state.crew &&
+        state.inventory &&
+        Array.isArray(state.inventory.bagReserves),
+        'Gear equip requires crew and inventory.bagReserves'
+    );
+
+    int(
+        itemIndex,
+        'itemIndex'
+    );
+
+    assert(
+        itemIndex < state.inventory.bagReserves.length,
+        `No bag item at index ${itemIndex}`
+    );
+
+    const item =
+        state.inventory.bagReserves[itemIndex];
+
+    assert(
+        item &&
+        item.owner &&
+        ['tansy', 'qtik'].includes(item.owner),
+        'Item is not equippable by the crew'
+    );
+
+    assert(
+        !item.classRestricted,
+        'Class-restricted item cannot be equipped'
+    );
+
+    assert(
+        typeof item.slot === 'string',
+        'Gear item has no equipment slot'
+    );
+
+    assert(
+        Number.isInteger(item.rawStat) &&
+        item.rawStat > 0,
+        'Gear item needs a positive rawStat'
+    );
+
+    const ownerSlots =
+        item.owner === 'tansy'
+            ? TANSY_SLOTS
+            : QTIK_SLOTS;
+
+    assert(
+        ownerSlots.includes(item.slot),
+        `Invalid ${item.owner} equipment slot: ${item.slot}`
+    );
+
+    if (item.owner === 'tansy' && MODULAR_TANSY.has(item.slot)) {
+        assert(
+            ['vitality', 'luck'].includes(item.variant),
+            `Tansy ${item.slot} requires vitality or luck variant`
+        );
+    }
+
+    if (item.owner === 'qtik') {
+        assert(
+            ['vitality', 'bulwark'].includes(item.variant),
+            `Q'tik ${item.slot} requires vitality or bulwark variant`
+        );
+    }
+
+    const oldDerived =
+        derived(state.crew);
+
+    const character =
+        state.crew[item.owner];
+
+    const oldItem =
+        state.crew.gear[item.owner][item.slot] || null;
+
+    const equippedItem = {
+        name: item.name,
+        stat: item.rawStat,
+        variant: item.variant || null,
+        rarity: item.rarity || null,
+        bound: true,
+        classRestricted: false
+    };
+
+    /*
+     * Remove the selected reserve item before adding the replaced item,
+     * so the returned bag index cannot accidentally refer to the new copy.
+     */
+    state.inventory.bagReserves.splice(itemIndex, 1);
+
+    if (oldItem && Number(oldItem.stat) > 0) {
+        state.inventory.bagReserves.push({
+            name: oldItem.name || 'Replaced gear',
+            owner: item.owner,
+            slot: item.slot,
+            variant: oldItem.variant || null,
+            rarity: oldItem.rarity || null,
+            rawStat: oldItem.stat,
+            bound: Boolean(oldItem.bound),
+            classRestricted: false,
+            tradeStreamEligible: !oldItem.bound,
+            bonus: lootBonus(
+                item.owner,
+                item.slot,
+                oldItem.variant || null,
+                oldItem.stat
+            )
+        });
+    }
+
+    state.crew.gear[item.owner][item.slot] =
+        equippedItem;
+
+    const newDerived =
+        derived(state.crew);
+
+    /*
+     * Preserve current HP when MaxHP changes, adjusting it by the
+     * MaxHP delta and clamping it to the new maximum.
+     */
+    if (item.owner === 'qtik') {
+        character.hp = Math.max(
+            0,
+            Math.min(
+                newDerived.qtikMaxHp,
+                character.hp +
+                (
+                    newDerived.qtikMaxHp -
+                    oldDerived.qtikMaxHp
+                )
+            )
+        );
+    } else {
+        character.hp = Math.max(
+            0,
+            Math.min(
+                newDerived.tansyMaxHp,
+                character.hp +
+                (
+                    newDerived.tansyMaxHp -
+                    oldDerived.tansyMaxHp
+                )
+            )
+        );
+    }
+
+    state.crew.qtik.maxHp =
+        newDerived.qtikMaxHp;
+    state.crew.qtik.def =
+        newDerived.def;
+    state.crew.qtik.regen =
+        newDerived.regen;
+    state.crew.tansy.maxHp =
+        newDerived.tansyMaxHp;
+
+    return {
+        ok: true,
+        equipped: equippedItem,
+        replaced: oldItem,
+        derivedBefore: oldDerived,
+        derivedAfter: newDerived,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -3695,6 +3869,18 @@ function resolveBatch(args) {
             let result;
 
             switch (test.kind) {
+                case 'gear':
+                assert(
+                test.action === 'equip',
+                `${name}: unsupported gear action '${test.action}'`
+            );
+
+                    result = equipBagItem(
+                        test.state,
+                        test.itemIndex
+                    );
+                    break;
+
                 case 'spawn':
                     result = spawnEncounter(test);
                     break;
@@ -4208,7 +4394,8 @@ function registerTools() {
                                     'reference',
                                     'world_seeds',
                                     'loot',
-                                    'quest'
+                                    'quest',
+                                    'gear'
                                 ]
                             },
 

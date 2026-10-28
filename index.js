@@ -1194,6 +1194,196 @@ function register(name, displayName, description, parameters, operation) {
         stealth: false
     });
 }
+function resolveBatch(args) {
+    function resolveWorldSeeds(test) {
+    const result = {
+        ok: true,
+        applicable: {},
+        findings: {}
+    };
+
+    /*
+     * These inputs describe whether the relevant game situation happened.
+     * The resolver does not invent that situation.
+     */
+    const {
+        curiosityRoll,
+        rumorRoll,
+        packDropRoll,
+        newWildernessSite = false,
+        investigatedRumor = false,
+        packLooted = false
+    } = test;
+
+    if (curiosityRoll !== undefined) {
+        assert(
+            Number.isInteger(curiosityRoll) &&
+            curiosityRoll >= 1 &&
+            curiosityRoll <= 10,
+            'curiosityRoll must be 1-10'
+        );
+
+        result.applicable.curiosity = newWildernessSite;
+
+        if (!newWildernessSite) {
+            result.findings.curiosity = 'not_applicable';
+        } else if (curiosityRoll <= 7) {
+            result.findings.curiosity = 'nothing_hidden';
+        } else if (curiosityRoll === 8) {
+            result.findings.curiosity = 'hidden_lore_or_shortcut';
+        } else if (curiosityRoll === 9) {
+            result.findings.curiosity = 'trap_or_ambush_hazard';
+        } else {
+            result.findings.curiosity = 'hidden_loot_stash';
+        }
+    }
+
+    if (rumorRoll !== undefined) {
+        assert(
+            Number.isInteger(rumorRoll) &&
+            rumorRoll >= 1 &&
+            rumorRoll <= 5,
+            'rumorRoll must be 1-5'
+        );
+
+        result.applicable.rumor = investigatedRumor;
+
+        if (!investigatedRumor) {
+            result.findings.rumor = 'not_applicable';
+        } else if (rumorRoll <= 3) {
+            result.findings.rumor =
+                'travelogue_flub_benign_oddity';
+        } else if (rumorRoll === 4) {
+            result.findings.rumor =
+                'already_cleared_by_other_immortals';
+        } else {
+            result.findings.rumor =
+                'genuine_unclaimed_quest_or_dungeon_hook';
+        }
+    }
+
+    if (packDropRoll !== undefined) {
+        assert(
+            Number.isInteger(packDropRoll) &&
+            packDropRoll >= 1 &&
+            packDropRoll <= 10,
+            'packDropRoll must be 1-10'
+        );
+
+        result.applicable.packDrop = packLooted;
+
+        if (!packLooted) {
+            result.findings.packDrop = 'not_applicable';
+        } else if (packDropRoll <= 8) {
+            result.findings.packDrop = 'auto_salvage_only';
+        } else if (packDropRoll === 9) {
+            result.findings.packDrop = 'wild_equipment_drop';
+        } else {
+            result.findings.packDrop =
+                'diegetic_quest_breadcrumb';
+        }
+    }
+
+    result.unlocks = {
+        loot:
+            result.findings.curiosity === 'hidden_loot_stash' ||
+            result.findings.packDrop === 'wild_equipment_drop',
+
+        quest:
+            result.findings.rumor ===
+                'genuine_unclaimed_quest_or_dungeon_hook' ||
+            result.findings.packDrop ===
+                'diegetic_quest_breadcrumb'
+    };
+
+    return result;
+}
+
+    assert(
+        Array.isArray(args.cases) && args.cases.length > 0,
+        'Batch mode requires a non-empty cases array'
+    );
+
+    const results = [];
+
+    for (let index = 0; index < args.cases.length; index++) {
+        const test = args.cases[index];
+        const name = test.name || `case_${index + 1}`;
+
+        try {
+            let result;
+
+            switch (test.kind) {
+                case 'turn':
+                    result = resolveTurn({
+                        state: test.state,
+                        actions: test.actions,
+                        rolls: test.rolls,
+                        rewardMode: test.rewardMode || 'deferred'
+                    });
+                    break;
+
+                case 'consume_belt':
+                    result = consumeBelt({
+                        belt: test.belt,
+                        items: test.items
+                    });
+                    break;
+
+                case 'reference':
+                    result = {
+                        ok: true,
+                        zone: test.zone
+                            ? vendorStock(test.zone)
+                            : undefined,
+                        mob: test.mob
+                            ? mobStats(test.mob.level, test.mob.role)
+                            : undefined,
+                        crew: test.crew
+                            ? derived(test.crew)
+                            : undefined,
+                        nextXp: test.crew
+                            ? nextXp(test.crew.level)
+                            : undefined
+                    };
+                    break;
+
+                case 'world_seeds':
+                    result = resolveWorldSeeds(test);
+                    break;
+
+                default:
+                    throw new Error(
+                        `Unknown batch case kind: ${test.kind}`
+                    );
+            }
+
+            results.push({
+                name,
+                ok: result.ok !== false,
+                result
+            });
+        } catch (error) {
+            results.push({
+                name,
+                ok: false,
+                error: error instanceof Error
+                    ? error.message
+                    : String(error)
+            });
+        }
+    }
+
+    const passed = results.filter(item => item.ok).length;
+
+    return {
+        ok: passed === results.length,
+        total: results.length,
+        passed,
+        failed: results.length - passed,
+        results
+    };
+}
 
 function registerTools() {
     const context = getContext();
@@ -1202,59 +1392,146 @@ function registerTools() {
         return;
     }
 
-    register(
-        'aethermoorResolveTurnV2',
-        'Aethermoor: Resolve Turn',
-        'Resolve one declared PvE turn. Supply the prior locked state. Does not choose actions or narrate.',
-        {
-            type: 'object',
-            properties: {
-                state: { type: 'object' },
-                actions: {
-                    type: 'object',
-                    properties: {
-                        qtik: {
-                            type: 'string',
-                            enum: [
-                                'fire_melee', 'ice_melee', 'stun',
-                                'ice_patch', 'frost_stomp', 'drink'
-                            ]
-                        },
-                        tansy: {
-                            type: 'string',
-                            enum: [
-                                'visor', 'vitals', 'hamstring',
-                                'recall', 'surge'
-                            ]
-                        },
-                        target: { type: 'string' },
-                        item: { type: 'string' }
+   register(
+    'aethermoorResolveTurnV2',
+    'Aethermoor: Resolve Turn or Batch',
+    [
+        'Resolve one declared PvE turn, or evaluate multiple independent',
+        'mechanics cases in one call. Does not choose actions or narrate.',
+        'Single mode uses state and actions. Batch mode uses cases.'
+    ].join(' '),
+    {
+        type: 'object',
+        properties: {
+            state: {
+                type: 'object',
+                description:
+                    'Previous locked state for single-turn mode'
+            },
+
+            actions: {
+                type: 'object',
+                properties: {
+                    qtik: {
+                        type: 'string',
+                        enum: [
+                            'fire_melee',
+                            'ice_melee',
+                            'stun',
+                            'ice_patch',
+                            'frost_stomp',
+                            'drink'
+                        ]
                     },
-                    required: ['qtik', 'tansy', 'target']
-                },
-                rolls: {
-                    type: 'object',
-                    properties: {
-                        player: {
-                            type: 'array',
-                            items: { type: 'integer' }
-                        },
-                        enemy: {
-                            type: 'array',
-                            items: { type: 'integer' }
-                        }
+                    tansy: {
+                        type: 'string',
+                        enum: [
+                            'visor',
+                            'vitals',
+                            'hamstring',
+                            'recall',
+                            'surge'
+                        ]
                     },
-                    required: ['player', 'enemy']
-                },
-                rewardMode: {
-                    type: 'string',
-                    enum: ['immediate', 'deferred']
+                    target: {
+                        type: 'string'
+                    },
+                    item: {
+                        type: 'string'
+                    }
                 }
             },
-            required: ['state', 'actions']
-        },
-        resolveTurn
-    );
+
+            rolls: {
+                type: 'object',
+                properties: {
+                    player: {
+                        type: 'array',
+                        items: { type: 'integer' }
+                    },
+                    enemy: {
+                        type: 'array',
+                        items: { type: 'integer' }
+                    }
+                }
+            },
+
+            rewardMode: {
+                type: 'string',
+                enum: ['immediate', 'deferred']
+            },
+
+            cases: {
+                type: 'array',
+                description:
+                    'Independent cases for batch mode',
+                items: {
+                    type: 'object',
+                    properties: {
+                        name: { type: 'string' },
+
+                        kind: {
+                            type: 'string',
+                            enum: [
+                                'turn',
+                                'consume_belt',
+                                'reference',
+                                'world_seeds'
+                            ]
+                        },
+
+                        state: { type: 'object' },
+                        actions: { type: 'object' },
+                        rolls: { type: 'object' },
+                        rewardMode: {
+                            type: 'string',
+                            enum: ['immediate', 'deferred']
+                        },
+
+                        belt: {
+                            type: 'array',
+                            items: { type: 'string' }
+                        },
+                        items: {
+                            type: 'array',
+                            items: { type: 'string' }
+                        },
+
+                        zone: { type: 'integer' },
+                        mob: { type: 'object' },
+                        crew: { type: 'object' },
+
+                        curiosityRoll: { type: 'integer' },
+                        rumorRoll: { type: 'integer' },
+                        packDropRoll: { type: 'integer' },
+                        newWildernessSite: {
+                            type: 'boolean'
+                        },
+                        investigatedRumor: {
+                            type: 'boolean'
+                        },
+                        packLooted: {
+                            type: 'boolean'
+                        }
+                    },
+                    required: ['name', 'kind']
+                }
+            }
+        }
+    },
+    args => {
+        if (Array.isArray(args.cases)) {
+            return resolveBatch(args);
+        }
+
+        return resolveTurn({
+            state: args.state,
+            actions: args.actions,
+            rolls: args.rolls,
+            rewardMode: args.rewardMode || 'immediate'
+        });
+    }
+);
 
     register(
         'aethermoorConsumeBeltV2',

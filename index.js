@@ -3071,9 +3071,12 @@ function resolveBatch(args) {
                     };
                     break;
 
-                case 'world_seeds':
-                    result = resolveWorldSeeds(test);
-                    break;
+             case 'world_seeds':
+                 result = resolveWorldSeeds(test);
+                 break;
+             case 'loot':
+                 result = resolveLootSeed(test);
+                 break;
 
                 default:
                     throw new Error(
@@ -3151,6 +3154,333 @@ function resolveBatch(args) {
         passed,
         failed: results.length - passed,
         results
+    };
+}
+const LOOT_RARITY_INFO = {
+    common: {
+        label: 'Common',
+        color: '#ffffff'
+    },
+    uncommon: {
+        label: 'Uncommon',
+        color: '#4ade80'
+    },
+    rare: {
+        label: 'Rare',
+        color: '#38bdf8'
+    },
+    epic: {
+        label: 'Epic',
+        color: '#c084fc'
+    },
+    legendary: {
+        label: 'Legendary',
+        color: '#fbbf24'
+    }
+};
+
+const ZONE_LOOT_MATERIALS = {
+    1: 'Valley Iron',
+    2: 'Fen-Bronze',
+    3: 'Cold Bog-Iron',
+    4: 'Karst Chitin',
+    5: 'Highgate Steel'
+};
+
+const LOOT_SLOT_TABLE = {
+    1: {
+        slot: 'weapon',
+        owner: 'tansy',
+        variant: null,
+        usable: true
+    },
+    2: {
+        slot: 'gloves',
+        owner: 'tansy',
+        variant: null,
+        usable: true
+    },
+    3: {
+        slot: 'chest',
+        owner: 'tansy',
+        variant: null,
+        usable: true
+    },
+    4: {
+        slot: 'trousers',
+        owner: 'tansy',
+        variant: null,
+        usable: true
+    },
+    5: {
+        slot: 'ring1',
+        owner: 'tansy',
+        variant: 'vitality',
+        usable: true
+    },
+    6: {
+        slot: 'ring1',
+        owner: 'tansy',
+        variant: 'luck',
+        usable: true
+    },
+    7: {
+        slot: 'neck',
+        owner: 'tansy',
+        variant: 'vitality',
+        usable: true
+    },
+    8: {
+        slot: 'boots',
+        owner: 'tansy',
+        variant: 'luck',
+        usable: true
+    },
+    9: {
+        slot: 'ring1',
+        owner: 'qtik',
+        variant: 'bulwark',
+        usable: true
+    },
+    10: {
+        slot: 'ring1',
+        owner: 'qtik',
+        variant: 'vitality',
+        usable: true
+    },
+    11: {
+        slot: 'amulet',
+        owner: 'qtik',
+        variant: 'bulwark',
+        usable: true
+    },
+    12: {
+        slot: 'wristCuffs',
+        owner: 'qtik',
+        variant: 'vitality',
+        usable: true
+    },
+    13: {
+        slot: 'heavy_plate',
+        owner: null,
+        variant: null,
+        usable: false,
+        restriction: 'Off-Class Heavy Plate / Brigandine'
+    },
+    14: {
+        slot: 'great_weapon',
+        owner: null,
+        variant: null,
+        usable: false,
+        restriction: 'Off-Class 2H Greatsword / Halberd'
+    },
+    15: {
+        slot: 'shield',
+        owner: null,
+        variant: null,
+        usable: false,
+        restriction: 'Off-Class Tower Shield / Buckler'
+    },
+    16: {
+        slot: 'skill_tome',
+        owner: null,
+        variant: null,
+        usable: false,
+        restriction: 'Off-Class Martial / Mage Skill Tome'
+    }
+};
+
+function lootRarityFromRoll(roll) {
+    int(roll, 'rarityRoll', 1);
+    assert(
+        roll <= 6,
+        'rarityRoll must be 1-6'
+    );
+
+    if (roll <= 3) return 'common';
+    if (roll <= 5) return 'uncommon';
+    return 'rare';
+}
+
+function lootStatFromRarity(zone, rarity) {
+    const base = ZONES[zone].base;
+
+    if (rarity === 'common') return base;
+    if (rarity === 'uncommon') return base + 1;
+    if (rarity === 'rare') return base + 3;
+    if (rarity === 'epic') return base + 5;
+    if (rarity === 'legendary') return base + 8;
+
+    throw new Error(
+        `Unsupported loot rarity: ${rarity}`
+    );
+}
+
+function lootBonus(owner, slot, variant, stat) {
+    const result = {
+        crewAtk: 0,
+        tansyMaxHp: 0,
+        qtikMaxHp: 0,
+        frontlineDef: 0,
+        crewLuk: 0
+    };
+
+    if (owner === 'tansy') {
+        if (slot === 'weapon') {
+            result.crewAtk = stat * 2;
+        } else if (slot === 'gloves') {
+            result.crewAtk = stat;
+        } else if (
+            slot === 'chest' ||
+            slot === 'trousers'
+        ) {
+            result.tansyMaxHp = stat * 5;
+            result.crewLuk = 1;
+        } else if (variant === 'vitality') {
+            result.tansyMaxHp = stat * 5;
+        } else if (variant === 'luck') {
+            result.crewLuk = stat;
+        }
+    }
+
+    if (owner === 'qtik') {
+        if (variant === 'bulwark') {
+            result.frontlineDef = stat * 2;
+        } else if (variant === 'vitality') {
+            result.qtikMaxHp = stat * 15;
+        }
+    }
+
+    return result;
+}
+
+function lootItemName(material, loot, stat) {
+    if (!loot.usable) {
+        return `${material} ${loot.restriction}`;
+    }
+
+    const ownerName =
+        loot.owner === 'qtik'
+            ? "Q'tik"
+            : 'Tansy';
+
+    const variantName = loot.variant
+        ? ` ${loot.variant[0].toUpperCase()}${loot.variant.slice(1)}`
+        : '';
+
+    const slotNames = {
+        weapon: 'Focus',
+        gloves: 'Bracers',
+        chest: 'Chest',
+        trousers: 'Trousers',
+        ring1: 'Band',
+        neck: 'Necklace',
+        boots: 'Boots',
+        amulet: 'Amulet',
+        wristCuffs: 'Wrist Cuffs'
+    };
+
+    const baseName =
+        slotNames[loot.slot] || loot.slot;
+
+    return `${ownerName} ${material}${variantName} ${baseName} (Stat ${stat})`;
+}
+
+function resolveLootSeed(test) {
+    assert(
+        ZONES[test.zone],
+        `Unknown zone: ${test.zone}`
+    );
+
+    assert(
+        ['wild', 'elite', 'boss'].includes(test.source),
+        `Unsupported loot source: ${test.source}`
+    );
+
+    assert(
+        Number.isInteger(test.slotRoll) &&
+        test.slotRoll >= 1 &&
+        test.slotRoll <= 16,
+        'slotRoll must be 1-16'
+    );
+
+    const loot = LOOT_SLOT_TABLE[test.slotRoll];
+    const material =
+        ZONE_LOOT_MATERIALS[test.zone];
+
+    let rarity;
+
+    if (test.source === 'wild') {
+        assert(
+            Number.isInteger(test.rarityRoll),
+            'Wild loot requires rarityRoll from 1 to 6'
+        );
+
+        rarity =
+            lootRarityFromRoll(test.rarityRoll);
+    } else if (test.source === 'elite') {
+        rarity = 'uncommon';
+    } else {
+        rarity = 'epic';
+    }
+
+    const rarityInfo =
+        LOOT_RARITY_INFO[rarity];
+
+    const rawStat =
+        test.source === 'elite'
+            ? ZONES[test.zone].base + 1
+            : test.source === 'boss'
+                ? ZONES[test.zone].base + 5
+                : lootStatFromRarity(
+                    test.zone,
+                    rarity
+                );
+
+    const bonus = lootBonus(
+        loot.owner,
+        loot.slot,
+        loot.variant,
+        rawStat
+    );
+
+    const item = {
+        name: lootItemName(
+            material,
+            loot,
+            rawStat
+        ),
+        source: test.source,
+        slot: loot.slot,
+        owner: loot.owner,
+        variant: loot.variant,
+        rarity: rarityInfo.label,
+        rarityColor: rarityInfo.color,
+        rawStat,
+        bound: false,
+        sellValue: rawStat * 2,
+        bonus
+    };
+
+    if (!loot.usable) {
+        item.classRestricted = true;
+        item.restriction = loot.restriction;
+        item.tradeStreamEligible = true;
+        item.bonus = {
+            crewAtk: 0,
+            tansyMaxHp: 0,
+            qtikMaxHp: 0,
+            frontlineDef: 0,
+            crewLuk: 0
+        };
+    } else {
+        item.classRestricted = false;
+        item.tradeStreamEligible = false;
+    }
+
+    return {
+        ok: true,
+        item
     };
 }
 
@@ -3267,7 +3597,8 @@ function registerTools() {
                                     'turn',
                                     'consume_belt',
                                     'reference',
-                                    'world_seeds'
+                                    'world_seeds',
+                                    'loot'
                                 ]
                             },
 

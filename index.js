@@ -4318,14 +4318,14 @@ function resolveBatch(args) {
                         test.action === 'equip',
                         `${name}: unsupported gear action '${test.action}'`
                     );
-                case 'vendor':
-                    result = resolveVendorAction(test);
-                    break;
-
                     result = equipBagItem(
                         test.state,
                         test.itemIndex
                     );
+                    break;
+
+                case 'vendor':
+                    result = resolveVendorAction(test);
                     break;
 
                 case 'trade':
@@ -4847,8 +4847,7 @@ function registerTools() {
                                     'quest',
                                     'gear',
                                     'trade',
-                                    'stock',
-                                    'buy'
+                                    'vendor'                                    
                                 ]
                             },
 
@@ -4886,11 +4885,39 @@ function registerTools() {
                                 }
                             },
 
-                            zone: {
+                             zone: {
                                 type: 'integer'
                             },
 
+                            owner: {
+                                type: 'string',
+                                enum: ['tansy', 'qtik']
+                            },
+
+                            slot: {
+                                type: 'string',
+                                enum: [
+                                    'weapon',
+                                    'gloves',
+                                    'chest',
+                                    'trousers',
+                                    'headgear',
+                                    'boots',
+                                    'neck',
+                                    'ring1',
+                                    'ring2',
+                                    'amulet',
+                                    'wristCuffs'
+                                ]
+                            },
+
+                            variant: {
+                                type: 'string',
+                                enum: ['vitality', 'luck', 'bulwark']
+                            },
+
                             source: {
+
                                 type: 'string',
                                 enum: ['wild', 'elite', 'boss']
                             },
@@ -4976,7 +5003,9 @@ function registerTools() {
                                     'equip',
                                     'pawn',
                                     'list',
-                                    'settle'
+                                    'settle',
+                                    'stock',
+                                    'buy'
                                 ]
                             },
 

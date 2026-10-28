@@ -3471,6 +3471,247 @@ function equipBagItem(stateInput, itemIndex) {
         state
     };
 }
+function resolveTradeAction(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'trade action requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.crew ||= {};
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+    state.inventory.activeTradeListings ||= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves),
+        'inventory.bagReserves must be an array'
+    );
+
+    assert(
+        Array.isArray(state.inventory.activeTradeListings),
+        'inventory.activeTradeListings must be an array'
+    );
+
+    assert(
+        ['pawn', 'list', 'settle'].includes(test.action),
+        `Unsupported trade action: ${test.action}`
+    );
+
+    const result = {
+        ok: true,
+        action: test.action,
+        silverGained: 0,
+        item: null,
+        state
+    };
+
+    if (test.action === 'pawn') {
+        int(test.itemIndex, 'itemIndex', 0);
+
+        assert(
+            test.itemIndex < state.inventory.bagReserves.length,
+            `No bag item at index ${test.itemIndex}`
+        );
+
+        const item =
+            state.inventory.bagReserves[test.itemIndex];
+
+        assert(
+            item &&
+            Number.isInteger(item.rawStat) &&
+            item.rawStat > 0,
+            'Bag item has no pawnable rawStat'
+        );
+
+        const value =
+            item.rawStat * 2;
+
+        state.inventory.bagReserves.splice(
+            test.itemIndex,
+            1
+        );
+
+        state.crew.purse =
+            Number(state.crew.purse || 0) +
+            value;
+
+        result.silverGained = value;
+        result.item = item;
+        result.pawnValue = value;
+
+        return result;
+    }
+
+    if (test.action === 'list') {
+        int(test.itemIndex, 'itemIndex', 0);
+
+        assert(
+            state.inventory.activeTradeListings.length < 3,
+            'Trade-Stream already has three active listings'
+        );
+
+        assert(
+            test.itemIndex < state.inventory.bagReserves.length,
+            `No bag item at index ${test.itemIndex}`
+        );
+
+        const item =
+            state.inventory.bagReserves[test.itemIndex];
+
+        assert(
+            item &&
+            item.bound !== true &&
+            item.tradeStreamEligible !== false,
+            'Only unbound Trade-Stream-eligible gear may be listed'
+        );
+
+        assert(
+            Number.isInteger(item.rawStat) &&
+            item.rawStat > 0,
+            'Listed item needs a positive rawStat'
+        );
+
+        state.inventory.bagReserves.splice(
+            test.itemIndex,
+            1
+        );
+
+        state.inventory.activeTradeListings.push({
+            ...item,
+            listingId:
+                test.listingId ||
+                `listing-${state.inventory.activeTradeListings.length + 1}`,
+            listedAt: test.listedAt || null
+        });
+
+        result.item =
+            state.inventory.activeTradeListings[
+                state.inventory.activeTradeListings.length - 1
+            ];
+
+        return result;
+    }
+
+    assert(
+        Number.isInteger(test.listingIndex) &&
+        test.listingIndex >= 0,
+        'settle requires listingIndex'
+    );
+
+    assert(
+        test.listingIndex <
+        state.inventory.activeTradeListings.length,
+        `No active listing at index ${test.listingIndex}`
+    );
+
+    assert(
+        Number.isInteger(test.tradeRoll) &&
+        test.tradeRoll >= 1 &&
+        test.tradeRoll <= 6,
+        'tradeRoll must be 1-6'
+    );
+
+    const listing =
+        state.inventory.activeTradeListings[
+            test.listingIndex
+        ];
+
+    assert(
+        listing &&
+        listing.bound !== true,
+        'Bound gear cannot be settled through Trade-Stream'
+    );
+
+    const rarity =
+        String(listing.rarity || 'Common')
+            .toLowerCase();
+
+    const stat =
+        listing.tradeStat ||
+        listing.rawStat;
+
+    assert(
+        Number.isInteger(stat) &&
+        stat > 0,
+        'Trade listing needs a positive trade stat'
+    );
+
+    let multiplier;
+
+    if (test.tradeRoll === 1) {
+        state.inventory.activeTradeListings.splice(
+            test.listingIndex,
+            1
+        );
+
+        state.inventory.bagReserves.push(listing);
+
+        result.status = 'unsold';
+        result.item = listing;
+        result.silverGained = 0;
+
+        return result;
+    }
+
+    if (test.tradeRoll === 2) {
+        multiplier =
+            rarity === 'common'
+                ? 5
+                : rarity === 'uncommon'
+                    ? 8
+                    : 15;
+    } else if (test.tradeRoll === 3) {
+        multiplier =
+            rarity === 'common'
+                ? 6
+                : rarity === 'uncommon'
+                    ? 9
+                    : 18;
+    } else if (test.tradeRoll === 4) {
+        multiplier =
+            rarity === 'common'
+                ? 7
+                : rarity === 'uncommon'
+                    ? 11
+                    : 20;
+    } else if (test.tradeRoll === 5) {
+        multiplier =
+            rarity === 'common'
+                ? 9
+                : rarity === 'uncommon'
+                    ? 13
+                    : 25;
+    } else {
+        multiplier =
+            rarity === 'common'
+                ? 12
+                : rarity === 'uncommon'
+                    ? 16
+                    : 35;
+    }
+
+    const proceeds =
+        stat * multiplier;
+
+    state.inventory.activeTradeListings.splice(
+        test.listingIndex,
+        1
+    );
+
+    state.crew.purse =
+        Number(state.crew.purse || 0) +
+        proceeds;
+
+    result.status = 'sold';
+    result.item = listing;
+    result.silverGained = proceeds;
+    result.multiplier = multiplier;
+
+    return result;
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -3870,15 +4111,19 @@ function resolveBatch(args) {
 
             switch (test.kind) {
                 case 'gear':
-                assert(
-                test.action === 'equip',
-                `${name}: unsupported gear action '${test.action}'`
-            );
+                    assert(
+                        test.action === 'equip',
+                        `${name}: unsupported gear action '${test.action}'`
+                    );
 
                     result = equipBagItem(
                         test.state,
                         test.itemIndex
                     );
+                    break;
+
+                case 'trade':
+                    result = resolveTradeAction(test);
                     break;
 
                 case 'spawn':
@@ -4394,7 +4639,8 @@ function registerTools() {
                                     'world_seeds',
                                     'loot',
                                     'quest',
-                                    'gear'
+                                    'gear',
+                                    'trade'
                                 ]
                             },
 
@@ -4519,7 +4765,10 @@ function registerTools() {
                                     'decline',
                                     'clear_gate',
                                     'complete',
-                                    'equip'
+                                    'equip',
+                                    'pawn',
+                                    'list',
+                                    'settle'
                                 ]
                             },
 

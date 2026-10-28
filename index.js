@@ -4758,7 +4758,7 @@ function registerTools() {
                             town: {
                                 type: 'string'
                             },
-                                                        action: {
+                            action: {
                                 type: 'string',
                                 enum: [
                                     'accept',
@@ -4770,6 +4770,30 @@ function registerTools() {
                                     'list',
                                     'settle'
                                 ]
+                            },
+
+                            itemIndex: {
+                                type: 'integer',
+                                minimum: 0
+                            },
+
+                            listingId: {
+                                type: 'string'
+                            },
+
+                            listingIndex: {
+                                type: 'integer',
+                                minimum: 0
+                            },
+
+                            tradeRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 6
+                            },
+
+                            listedAt: {
+                                type: 'string'
                             },
 
                             nextGateMode: {

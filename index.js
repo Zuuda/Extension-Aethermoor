@@ -2485,11 +2485,14 @@ cases: {
                 }
             }
         },
-        required: ['name', 'kind']
-    }
+        cases: {
+    // case schema
+}
+        } // closes properties
+    }     // closes top-level schema
 },
+        args => {
 
-    args => {
         if (Array.isArray(args.cases)) {
             return resolveBatch(args);
         }

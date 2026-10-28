@@ -1216,11 +1216,15 @@ return result;
 
 function createFoe({ id, level, role }) {
     const stats = mobStats(level, role);
+
     return {
         id,
         level,
         role,
-        hp: stats.maxHp
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        atk: stats.atk,
+        def: stats.def
     };
 }
 
@@ -1268,6 +1272,138 @@ function register(name, displayName, description, parameters, operation) {
         stealth: false
     });
 }
+const NORMAL_BRACKETS = {
+    1: {
+        low:  { level: 2,  xpSwarm: 24,  xpMixed: 16 },
+        mid:  { level: 3,  xpSwarm: 36,  xpMixed: 24 },
+        high: { level: 4,  xpSwarm: 60,  xpMixed: 40 }
+    },
+    2: {
+        low:  { level: 7, xpSwarm: 105, xpMixed: 70 },
+        mid:  { level: 8, xpSwarm: 120, xpMixed: 80 },
+        high: { level: 9, xpSwarm: 135, xpMixed: 90 }
+    },
+    3: {
+        low:  { level: 12, xpSwarm: 180, xpMixed: 120 },
+        mid:  { level: 13, xpSwarm: 195, xpMixed: 130 },
+        high: { level: 14, xpSwarm: 210, xpMixed: 140 }
+    },
+    4: {
+        low:  { level: 17, xpSwarm: 255, xpMixed: 170 },
+        mid:  { level: 18, xpSwarm: 270, xpMixed: 180 },
+        high: { level: 19, xpSwarm: 285, xpMixed: 190 }
+    },
+    5: {
+        low:  { level: 22, xpSwarm: 330, xpMixed: 220 },
+        mid:  { level: 23, xpSwarm: 345, xpMixed: 230 },
+        high: { level: 24, xpSwarm: 360, xpMixed: 240 }
+    }
+};
+
+const PACK_COMPOSITIONS = {
+    1: ['brute', 'brute', 'brute'],
+
+    2: ['brute', 'mender', 'archer'],
+
+    3: ['brute', 'archer', 'archer'],
+
+    4: ['brute', 'hexer', 'mender'],
+
+    5: ['brute', 'buffer', 'archer'],
+
+    6: ['brute', 'hexer', 'archer']
+};
+
+function spawnNormalPack({
+    zone,
+    bracket = 'mid',
+    composition = 2,
+    encounterId = `normal-pack-z${zone}`
+}) {
+    assert(
+        Number.isInteger(zone) && ZONES[zone],
+        `Unknown zone: ${zone}`
+    );
+
+    assert(
+        NORMAL_BRACKETS[zone] &&
+        NORMAL_BRACKETS[zone][bracket],
+        `Invalid bracket for zone ${zone}: ${bracket}`
+    );
+
+    assert(
+        Number.isInteger(composition) &&
+        PACK_COMPOSITIONS[composition],
+        `Pack composition must be an integer from 1 to 6`
+    );
+
+    const zoneData = ZONES[zone];
+    const bracketData = NORMAL_BRACKETS[zone][bracket];
+    const roles = PACK_COMPOSITIONS[composition];
+
+    const foes = roles.map((role, index) =>
+        createFoe({
+            id: `${encounterId}-${role}-${index + 1}`,
+            level: bracketData.level,
+            role
+        })
+    );
+
+    const mixed = composition !== 1;
+    const xp = mixed
+        ? bracketData.xpMixed
+        : bracketData.xpSwarm;
+
+    const autoSalvage =
+        foes.length * (2 * zoneData.tier);
+
+    return {
+        ok: true,
+        encounter: {
+            id: encounterId,
+            status: 'active',
+            turn: 0,
+            zone,
+            type: 'normal_pack',
+            bracket,
+            composition,
+            compositionName: mixed
+                ? 'Mixed Tactical Squad'
+                : 'Pure Fodder Swarm',
+            enemyTier: zoneData.tier,
+            foes,
+            used: {
+                stun: false,
+                icePatch: false
+            },
+            hexStacks: {},
+            exposed: 0
+        },
+        rewards: {
+            listedPackXp: xp,
+            autoSalvage: autoSalvage,
+            foeCount: foes.length
+        }
+    };
+}
+
+function spawnEncounter(test) {
+    const kind = test.encounterType || 'normal_pack';
+
+    assert(
+        kind === 'normal_pack',
+        `Unsupported encounter type: ${kind}`
+    );
+
+    return spawnNormalPack({
+        zone: test.zone,
+        bracket: test.bracket || 'mid',
+        composition: test.composition || 2,
+        encounterId: test.encounterId
+            || `normal-pack-z${test.zone}`
+    });
+}
+
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
     const result = {
@@ -1388,6 +1524,10 @@ function resolveBatch(args) {
             let result;
 
             switch (test.kind) {
+                                    case 'spawn':
+                    result = spawnEncounter(test);
+                    break;
+
                 case 'turn':
                     result = resolveTurn({
                         state: test.state,
@@ -1552,6 +1692,7 @@ function registerTools() {
                         kind: {
                             type: 'string',
                             enum: [
+                                'spawn',
                                 'turn',
                                 'consume_belt',
                                 'reference',
@@ -1576,7 +1717,28 @@ function registerTools() {
                             items: { type: 'string' }
                         },
 
-                        zone: { type: 'integer' },
+                                               zone: { type: 'integer' },
+
+                        encounterType: {
+                            type: 'string',
+                            enum: ['normal_pack']
+                        },
+
+                        bracket: {
+                            type: 'string',
+                            enum: ['low', 'mid', 'high']
+                        },
+
+                        composition: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 6
+                        },
+
+                        encounterId: {
+                            type: 'string'
+                        },
+
                         mob: { type: 'object' },
                         crew: { type: 'object' },
 
@@ -1588,6 +1750,11 @@ function registerTools() {
                         },
                         investigatedRumor: {
                             type: 'boolean'
+                        },
+                        packLooted: {
+                            type: 'boolean'
+                        }
+
                         },
                         packLooted: {
                             type: 'boolean'

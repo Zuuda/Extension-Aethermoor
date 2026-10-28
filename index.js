@@ -285,30 +285,68 @@ function checkTape(state, rolls) {
 }
 
 function dealDamage(state, target, amount, kills) {
+    const hits = [];
+    let remaining = Number(amount);
+    let current = target;
+
+    assert(
+        Number.isFinite(remaining) && remaining >= 0,
+        `Damage must be a finite non-negative number: ${amount}`
+    );
+
+    while (current && remaining > 0) {
+        const applied = Math.min(current.hp, remaining);
+
+        current.hp -= applied;
+        remaining -= applied;
+
+        hits.push({
+            id: current.id,
+            damage: applied,
+            hp: current.hp,
+            overkillAfterHit: remaining
+        });
+
+        if (current.hp === 0) {
+            kills.push({
+                id: current.id,
+                level: current.level,
+                role: current.role
+            });
+        }
+
+        if (remaining > 0) {
+            // Spill into the living foe with the lowest current HP.
+            // Encounter order breaks ties.
+            current = live(state)
+                .map(foe => ({
+                    foe,
+                    index: state.encounter.foes.indexOf(foe)
+                }))
+                .sort((a, b) =>
+                    a.foe.hp - b.foe.hp || a.index - b.index
+                )[0]?.foe ?? null;
+        } else {
+            current = null;
+        }
+    }
+
+    return hits;
+}
+
 function finalizeEncounterRewards(state, slainIds) {
     const encounter = state.encounter;
     const crew = state.crew;
 
     assert(
-        encounter &&
-        encounter.rewards,
+        encounter && encounter.rewards,
         'Encounter has no locked reward data'
     );
 
-    const slainIdSet = new Set(slainIds);
-
-    const slainFoes = encounter.foes.filter(
-        foe => slainIdSet.has(foe.id)
-    );
-
-    const encounterCleared =
-        live(state).length === 0;
-
-    if (!encounterCleared) {
+    if (live(state).length > 0) {
         return {
             xp: 0,
             silver: 0,
-            applied: false,
             resolved: false,
             encounterCleared: false,
             loot: [],
@@ -327,23 +365,13 @@ function finalizeEncounterRewards(state, slainIds) {
     const trophies = [];
 
     if (encounter.type === 'normal_pack') {
-        /*
-         * Normal packs always use their locked aggregate reward.
-         * This is independent of the number of foes in the pack.
-         */
-        xp = Number(
-            encounter.rewards.listedPackXp
-        );
-
-        silver = Number(
-            encounter.rewards.autoSalvage
-        );
+        xp = encounter.rewards.listedPackXp;
+        silver = encounter.rewards.autoSalvage;
 
         assert(
             Number.isInteger(xp) && xp >= 0,
             'Locked normal-pack XP is invalid'
         );
-
         assert(
             Number.isInteger(silver) && silver >= 0,
             'Locked normal-pack salvage is invalid'
@@ -352,32 +380,32 @@ function finalizeEncounterRewards(state, slainIds) {
         encounter.type === 'elite' ||
         encounter.type === 'boss'
     ) {
-        /*
-         * Elite and Boss encounters contain one foe.
-         * Their XP receives the crew-level gap modifier.
-         * They do not receive normal-pack auto-salvage silver.
-         */
-        for (const foe of slainFoes) {
-            xp += xpForKill(
-                crew.level,
-                foe
-            );
-        }
-
-        const guaranteedGear =
-            encounter.rewards.guaranteedGear;
+        const slain = new Set(slainIds);
+        const slainFoes = encounter.foes.filter(
+            foe => slain.has(foe.id)
+        );
 
         assert(
-            guaranteedGear &&
-            Number.isInteger(guaranteedGear.rawStat),
+            slainFoes.length === 1,
+            'Elite/Boss clear requires its slain foe'
+        );
+
+        xp = xpForKill(crew.level, slainFoes[0]);
+        silver = 0;
+
+        const gear = encounter.rewards.guaranteedGear;
+        assert(
+            gear &&
+            Number.isInteger(gear.rawStat) &&
+            Number.isInteger(gear.pawnSilver),
             'Elite/Boss guaranteed gear is missing'
         );
 
         loot.push({
             kind: 'guaranteed_gear_pending_slot',
-            rarity: guaranteedGear.rarity,
-            rawStat: guaranteedGear.rawStat,
-            pawnSilver: guaranteedGear.pawnSilver,
+            rarity: gear.rarity,
+            rawStat: gear.rawStat,
+            pawnSilver: gear.pawnSilver,
             bound: false,
             slotPending: true
         });
@@ -398,26 +426,12 @@ function finalizeEncounterRewards(state, slainIds) {
         );
     }
 
-    assert(
-        Number.isInteger(xp) && xp >= 0,
-        'Final XP reward is invalid'
-    );
-
-    assert(
-        Number.isInteger(silver) && silver >= 0,
-        'Final silver reward is invalid'
-    );
-
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
-
-    const applied =
-        state.rewardMode === 'immediate';
 
     return {
         xp,
         silver,
-        applied,
         resolved: true,
         encounterCleared: true,
         loot,

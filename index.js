@@ -565,13 +565,13 @@ function resolveTurn({
             target = brute;
         }
 
-        const fireDamage =
-            actions.qtik === 'fire_melee'
-                ? Math.max(
-                    3,
-                    Math.floor(effectiveAttack / 5)
-                )
-                : 0;
+const fireDamage =
+    actions.qtik === 'fire_melee'
+        ? Math.max(
+            3,
+            Math.floor(crewStats.atk / 5)
+        )
+        : 0;
 
         const isCritical =
             p === 6 ||

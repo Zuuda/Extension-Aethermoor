@@ -4519,7 +4519,8 @@ function registerTools() {
                                     'accept',
                                     'decline',
                                     'clear_gate',
-                                    'complete'
+                                    'complete',
+                                    'equip'
                                 ]
                             },
 

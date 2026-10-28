@@ -280,44 +280,119 @@ function dealDamage(state, target, amount, kills) {
     return hits;
 }
 
-function resolveTurn({ state, actions, rolls, rewardMode = 'immediate' }) {
+function resolveTurn({
+    state,
+    actions,
+    rolls,
+    rewardMode = 'immediate'
+}) {
     const s = clone(state);
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
 
-    assert(['immediate', 'deferred'].includes(rewardMode),
-        'rewardMode must be immediate or deferred');
-    assert(['fire_melee', 'ice_melee', 'stun', 'ice_patch',
-        'frost_stomp', 'drink'].includes(actions.qtik),
-        `Unsupported Q'tik action: ${actions.qtik}`);
-    assert(['visor', 'vitals', 'hamstring', 'recall',
-        'surge'].includes(actions.tansy),
-        `Unsupported Tansy action: ${actions.tansy}`);
+    assert(
+        ['immediate', 'deferred'].includes(rewardMode),
+        'rewardMode must be immediate or deferred'
+    );
+
+    assert(
+        [
+            'fire_melee',
+            'ice_melee',
+            'stun',
+            'ice_patch',
+            'frost_stomp',
+            'drink'
+        ].includes(actions.qtik),
+        `Unsupported Q'tik action: ${actions.qtik}`
+    );
+
+    assert(
+        [
+            'visor',
+            'vitals',
+            'hamstring',
+            'recall',
+            'surge'
+        ].includes(actions.tansy),
+        `Unsupported Tansy action: ${actions.tansy}`
+    );
+
     assert(live(s).length > 0, 'No living foes');
 
-    encounter.used ||= { stun: false, icePatch: false };
+    /*
+     * All derived combat values come from validate().
+     * Do not read duplicated values such as crew.luk or crew.atk,
+     * because those fields may be absent or stale in the locked state.
+     */
+    const crewStats = {
+        atk: Number(initial.atk),
+        def: Number(initial.def),
+        luk: Number(initial.luk),
+        qtikMaxHp: Number(initial.qtikMaxHp),
+        tansyMaxHp: Number(initial.tansyMaxHp),
+        regen: Number(initial.regen)
+    };
+
+    for (const [name, value] of Object.entries(crewStats)) {
+        assert(
+            Number.isFinite(value),
+            `Derived crew stat ${name} is not finite`
+        );
+    }
+
+    encounter.used ||= {
+        stun: false,
+        icePatch: false
+    };
+
     encounter.hexStacks ||= {};
     encounter.exposed ||= 0;
     encounter.turn = (encounter.turn || 0) + 1;
 
-    if (actions.qtik === 'stun' || actions.qtik === 'ice_patch') {
-        const key = actions.qtik === 'stun' ? 'stun' : 'icePatch';
-        assert(!encounter.used[key], `${key} already used this fight`);
-        encounter.used[key] = true;
+    if (actions.qtik === 'stun') {
+        assert(
+            !encounter.used.stun,
+            'Stun has already been used this fight'
+        );
+        encounter.used.stun = true;
+    }
+
+    if (actions.qtik === 'ice_patch') {
+        assert(
+            !encounter.used.icePatch,
+            'Ice Patch has already been used this fight'
+        );
+        encounter.used.icePatch = true;
     }
 
     if (actions.qtik === 'drink') {
-        assert(['basic_health_potion', 'mid_health_potion',
-            'cleansing_tonic'].includes(actions.item),
-            'Specify a supported belt item');
+        assert(
+            typeof actions.item === 'string',
+            'Drink requires an item ID'
+        );
+
+        assert(
+            [
+                'basic_health_potion',
+                'mid_health_potion',
+                'cleansing_tonic'
+            ].includes(actions.item),
+            `Unsupported belt item: ${actions.item}`
+        );
+
         c.belt = consumeBelt({
-            belt: c.belt, items: [actions.item]
+            belt: c.belt,
+            items: [actions.item]
         }).remainingBelt;
     }
 
     if (actions.tansy === 'surge') {
-        c.weasels.active = 2 + 2 * Math.floor(c.level / 2);
+        c.weasels.active = Math.min(
+            c.weasels.max,
+            2 + 2 * Math.floor(c.level / 2)
+        );
     }
 
     const tape = checkTape(s, rolls);
@@ -325,174 +400,600 @@ function resolveTurn({ state, actions, rolls, rewardMode = 'immediate' }) {
     const kills = [];
     const startingCount = live(s).length;
 
-    for (let ex = 0; ex < 3 && live(s).length &&
-        c.qtik.hp > 0 && c.tansy.hp > 0; ex++) {
-
+    for (
+        let ex = 0;
+        ex < 3 &&
+        live(s).length > 0 &&
+        c.qtik.hp > 0 &&
+        c.tansy.hp > 0;
+        ex++
+    ) {
         const p = tape.player[ex];
         const e = tape.enemy[ex];
 
-        const patch = actions.qtik === 'ice_patch';
-        const hamstring = actions.tansy === 'hamstring';
-        const missLimit = patch ? (hamstring ? 4 : 3) :
-            (hamstring ? 2 : 1);
-        const enemyMiss = e <= missLimit ||
+        const patchActive = actions.qtik === 'ice_patch';
+        const hamstringActive = actions.tansy === 'hamstring';
+
+        /*
+         * Enemy miss ranges:
+         * Normal: E1
+         * Hamstring: E1-E2
+         * Ice Patch: E1-E3
+         * Ice Patch + Hamstring: E1-E4
+         */
+        const missLimit = patchActive
+            ? hamstringActive ? 4 : 3
+            : hamstringActive ? 2 : 1;
+
+        const enemyMiss =
+            e <= missLimit ||
             (actions.qtik === 'stun' && ex === 0);
 
+        /*
+         * Recalculate active Hexer penalties from living Hexers only.
+         */
         const hexPenalty = Object.entries(encounter.hexStacks)
             .reduce((total, [id, stacks]) => {
-                const hexer = live(s).find(f => f.id === id);
-                return total + (hexer ? 2 * enemyTier(hexer.level) * stacks : 0);
+                const hexer = live(s).find(
+                    foe => foe.id === id && foe.role === 'hexer'
+                );
+
+                if (!hexer) return total;
+
+                return total +
+                    2 *
+                    enemyTier(hexer.level) *
+                    Number(stacks);
             }, 0);
 
-        const directed = ['visor', 'vitals', 'hamstring']
-            .includes(actions.tansy);
-        const weaselAtk = actions.tansy === 'recall' ? 0 :
-            c.weasels.active * (directed && !patch ? 2 : 1);
-        const gearAndBaseAtk = initial.atk -
-            2 * int(state.crew.weasels.active, 'initial weasels');
-        const atk = Math.max(0, gearAndBaseAtk + weaselAtk - hexPenalty);
-        const defense = Math.max(0, initial.def - hexPenalty +
-            (actions.qtik === 'ice_melee' ? 2 : 0));
+        assert(
+            Number.isFinite(hexPenalty),
+            'Hex penalty is not finite'
+        );
 
-        const brute = live(s).find(f => f.role === 'brute');
-        let target = live(s).find(f => f.id === actions.target);
-        assert(target, `Target ${actions.target} is not alive`);
+        const directed =
+            actions.tansy === 'visor' ||
+            actions.tansy === 'vitals' ||
+            actions.tansy === 'hamstring';
 
-        if (brute && target.role !== 'brute' &&
-            !enemyMiss && actions.tansy !== 'visor' &&
-            actions.qtik !== 'frost_stomp') {
+        const weaselAttack = actions.tansy === 'recall'
+            ? 0
+            : c.weasels.active *
+                (
+                    directed && !patchActive
+                        ? 2
+                        : 1
+                );
+
+        /*
+         * Crew ATK consists of base/gear ATK plus current summon ATK.
+         * Remove the old summon contribution from the derived value before
+         * adding the action-specific current summon contribution.
+         */
+        const initialWeaselAttack =
+            Number(state.crew.weasels.active);
+
+        assert(
+            Number.isFinite(initialWeaselAttack),
+            'Initial weasel count is not finite'
+        );
+
+        const baseAndGearAttack =
+            crewStats.atk -
+            2 * initialWeaselAttack;
+
+        const effectiveAttack = Math.max(
+            0,
+            baseAndGearAttack +
+            weaselAttack -
+            hexPenalty
+        );
+
+        const effectiveDefense = Math.max(
+            0,
+            crewStats.def -
+            hexPenalty +
+            (
+                actions.qtik === 'ice_melee'
+                    ? 2
+                    : 0
+            )
+        );
+
+        const brute = live(s).find(
+            foe => foe.role === 'brute'
+        );
+
+        let target = live(s).find(
+            foe => foe.id === actions.target
+        );
+
+        assert(
+            target,
+            `Target ${actions.target} is not alive`
+        );
+
+        /*
+         * A living Brute guards single-target attacks against backliners
+         * unless Visor bypasses Guard or the attack is Frost Stomp.
+         */
+        if (
+            brute &&
+            target.role !== 'brute' &&
+            !enemyMiss &&
+            actions.tansy !== 'visor' &&
+            actions.qtik !== 'frost_stomp'
+        ) {
             target = brute;
         }
 
-        const fire = actions.qtik === 'fire_melee'
-            ? Math.max(3, Math.floor(atk / 5)) : 0;
-        const crit = p === 6 || (actions.tansy === 'vitals' && p === 5);
-        const vitals = actions.tansy === 'vitals' && !crit &&
-            p >= 2 && p <= 4
-            ? Math.min(target.def, Math.floor(c.weasels.active / 2))
-            : 0;
-        const exposed = p === 1 ? 0 : encounter.exposed;
-        if (p !== 1) encounter.exposed = 0;
+        const fireDamage =
+            actions.qtik === 'fire_melee'
+                ? Math.max(
+                    3,
+                    Math.floor(effectiveAttack / 5)
+                )
+                : 0;
+
+        const isCritical =
+            p === 6 ||
+            (
+                actions.tansy === 'vitals' &&
+                p === 5
+            );
+
+        const vitalsBonus =
+            actions.tansy === 'vitals' &&
+            !isCritical &&
+            p >= 2 &&
+            p <= 4
+                ? Math.min(
+                    target.def,
+                    Math.floor(c.weasels.active / 2)
+                )
+                : 0;
+
+        const exposedBonus =
+            p === 1
+                ? 0
+                : Number(encounter.exposed || 0);
+
+        if (p !== 1) {
+            encounter.exposed = 0;
+        }
 
         let damage = 0;
         let hits = [];
+        let playerEffects = [];
+
+        /*
+         * STUN strips four times enemy tier from the target's DEF
+         * for this turn.
+         */
+        const strippedDefense =
+            actions.qtik === 'stun'
+                ? 4 * enemyTier(target.level)
+                : 0;
+
+        const effectiveTargetDefense = Math.max(
+            0,
+            target.def - strippedDefense
+        );
 
         if (actions.qtik === 'frost_stomp') {
-            // AoE has one separately calculated hit per live foe.
-            for (const foe of [...live(s)]) {
-                const base = Math.max(0, Math.floor((atk - foe.def) / 2));
-                const amount = (p === 1 ? Math.max(1, Math.floor(base / 2)) :
-                    base + p) +
-                    (foe.id === target.id ? (crit ? c.luk : vitals) + exposed : 0);
-                if (foe.hp > 0) {
-                    const applied = Math.min(foe.hp, amount);
-                    foe.hp -= applied;
-                    hits.push({ id: foe.id, damage: applied, hp: foe.hp });
-                    if (foe.hp === 0) {
-                        kills.push({
-                            id: foe.id,
-                            xp: xpForKill(c.level, foe),
-                            silver: 2 * enemyTier(foe.level)
-                        });
-                    }
+            /*
+             * Frost Stomp hits every living foe.
+             */
+            const liveTargets = [...live(s)];
+
+            for (const foe of liveTargets) {
+                const baseStomp = Math.max(
+                    0,
+                    Math.floor(
+                        (
+                            effectiveAttack -
+                            foe.def
+                        ) / 2
+                    )
+                );
+
+                let stompDamage;
+
+                if (p === 1) {
+                    stompDamage = Math.max(
+                        1,
+                        Math.floor(baseStomp / 2)
+                    );
+                } else {
+                    stompDamage = baseStomp + p;
+                }
+
+                if (foe.id === target.id) {
+                    stompDamage += isCritical
+                        ? crewStats.luk
+                        : vitalsBonus;
+
+                    stompDamage += exposedBonus;
+                }
+
+                stompDamage = Math.max(
+                    1,
+                    Number(stompDamage)
+                );
+
+                assert(
+                    Number.isFinite(stompDamage),
+                    `Frost Stomp damage is not finite against ${foe.id}`
+                );
+
+                const applied = Math.min(
+                    foe.hp,
+                    stompDamage
+                );
+
+                foe.hp -= applied;
+
+                hits.push({
+                    id: foe.id,
+                    damage: applied,
+                    hp: foe.hp
+                });
+
+                if (foe.hp === 0) {
+                    kills.push({
+                        id: foe.id,
+                        xp: xpForKill(c.level, foe),
+                        silver: 2 * enemyTier(foe.level)
+                    });
                 }
             }
-        } else {
-            const strippedDef = actions.qtik === 'stun'
-                ? 4 * enemyTier(target.level) : 0;
-            const effectiveTargetDef = Math.max(0, target.def - strippedDef);
-            const physical = actions.tansy === 'recall'
-                ? 2 * c.level + (p === 1 ? 0 : p)
-                : p === 1 ? 1
-                : crit
-                    ? Math.max(6 + c.luk,
-                        atk - effectiveTargetDef + 6 + c.luk)
-                    : Math.max(1, atk - effectiveTargetDef + p + vitals);
 
-            damage = physical + fire + exposed;
-            hits = dealDamage(s, target, damage, kills);
+            damage = hits.reduce(
+                (sum, hit) => sum + hit.damage,
+                0
+            );
+        } else {
+            let physicalDamage;
+
+            if (actions.qtik === 'drink') {
+                /*
+                 * Drinking still performs the crew's basic physical attack
+                 * without Fire or Ice bonus.
+                 */
+                physicalDamage = p === 1
+                    ? 1
+                    : Math.max(
+                        1,
+                        effectiveAttack -
+                        effectiveTargetDefense +
+                        p +
+                        vitalsBonus
+                    );
+            } else if (actions.tansy === 'recall') {
+                physicalDamage = p === 1
+                    ? 1
+                    : Math.max(
+                        1,
+                        2 * c.level +
+                        p
+                    );
+            } else if (p === 1) {
+                physicalDamage = 1;
+            } else if (isCritical) {
+                physicalDamage = Math.max(
+                    6 + crewStats.luk,
+                    effectiveAttack -
+                    effectiveTargetDefense +
+                    6 +
+                    crewStats.luk
+                );
+            } else {
+                physicalDamage = Math.max(
+                    1,
+                    effectiveAttack -
+                    effectiveTargetDefense +
+                    p +
+                    vitalsBonus
+                );
+            }
+
+            damage =
+                Number(physicalDamage) +
+                Number(fireDamage) +
+                Number(exposedBonus);
+
+            assert(
+                Number.isFinite(damage),
+                [
+                    'Player damage is not finite',
+                    `physical=${physicalDamage}`,
+                    `fire=${fireDamage}`,
+                    `exposed=${exposedBonus}`,
+                    `attack=${effectiveAttack}`,
+                    `targetDef=${effectiveTargetDefense}`,
+                    `luk=${crewStats.luk}`
+                ].join(' | ')
+            );
+
+            hits = dealDamage(
+                s,
+                target,
+                damage,
+                kills
+            );
         }
 
-        // A slain foe cannot attack or cast later in this exchange.
-        const activeBrutes = live(s).filter(f =>
-            ['brute', 'elite', 'boss'].includes(f.role));
+        /*
+         * Critical correction:
+         * If player damage killed the final foe, the enemy does not retaliate
+         * and the turn ends immediately. This also prevents later exchanges
+         * from being processed against an already-cleared encounter.
+         */
+        if (live(s).length === 0) {
+            logs.push({
+                exchange: ex + 1,
+                playerRoll: p,
+                enemyRoll: null,
+                target: target.id,
+                crit: isCritical,
+                damage,
+                hits,
+                enemyMiss: null,
+                frontlineDamage: 0,
+                backlineDamage: 0,
+                effects: [
+                    ...playerEffects,
+                    'Final foe slain before enemy response'
+                ],
+                qtikHp: c.qtik.hp,
+                tansyHp: c.tansy.hp,
+                livingFoes: []
+            });
+
+            break;
+        }
+
+        /*
+         * Only living frontline foes deal frontline damage.
+         */
+        const activeFrontliners = live(s).filter(
+            foe => [
+                'brute',
+                'elite',
+                'boss'
+            ].includes(foe.role)
+        );
+
         let frontlineDamage = 0;
         let backlineDamage = 0;
-        const effects = [];
+        const effects = [...playerEffects];
 
-        if (!enemyMiss && live(s).length) {
-            if (activeBrutes.length) {
-                const lead = activeBrutes[0];
-                let base = Math.max(1,
-                    Math.round((lead.atk - defense) / 10));
-                if (actions.qtik === 'ice_melee') base = Math.max(1, base - 1);
-                if (hamstring) {
-                    base = Math.max(1,
-                        base - Math.floor(c.weasels.active / 6));
+        if (!enemyMiss && live(s).length > 0) {
+            if (activeFrontliners.length > 0) {
+                const lead = activeFrontliners[0];
+
+                let baseBleed = Math.max(
+                    1,
+                    Math.round(
+                        (
+                            lead.atk -
+                            effectiveDefense
+                        ) / 10
+                    )
+                );
+
+                if (actions.qtik === 'ice_melee') {
+                    baseBleed = Math.max(
+                        1,
+                        baseBleed - 1
+                    );
                 }
-                base += enemyTier(lead.level) * (activeBrutes.length - 1);
-                frontlineDamage = base +
-                    (e === 6 ? 4 : e === 5 ? 2 : e >= 3 ? 1 : 0);
+
+                if (hamstringActive) {
+                    baseBleed = Math.max(
+                        1,
+                        baseBleed -
+                        Math.floor(
+                            c.weasels.active / 6
+                        )
+                    );
+                }
+
+                baseBleed +=
+                    enemyTier(lead.level) *
+                    Math.max(
+                        0,
+                        activeFrontliners.length - 1
+                    );
+
+                const rollDamage =
+                    e === 6
+                        ? 4
+                        : e === 5
+                            ? 2
+                            : e >= 3
+                                ? 1
+                                : 0;
+
+                frontlineDamage =
+                    baseBleed +
+                    rollDamage;
             }
 
             for (const foe of live(s)) {
-                const t = enemyTier(foe.level);
+                const foeTier = enemyTier(foe.level);
+
                 if (foe.role === 'archer') {
-                    backlineDamage += 4 * t * (e === 6 ? 2 : 1);
-                } else if (foe.role === 'mender') {
+                    const amount =
+                        4 *
+                        foeTier *
+                        (
+                            e === 6
+                                ? 2
+                                : 1
+                        );
+
+                    backlineDamage += amount;
+
+                    effects.push(
+                        `${foe.id} dealt ${amount} damage to Tansy`
+                    );
+                }
+
+                if (foe.role === 'mender') {
                     const wounded = live(s)
-                        .filter(f => f.hp < mobStats(f.level, f.role).maxHp)
-                        .sort((a, b) =>
-                            a.hp / mobStats(a.level, a.role).maxHp -
-                            b.hp / mobStats(b.level, b.role).maxHp)[0];
+                        .filter(ally => {
+                            const stats = mobStats(
+                                ally.level,
+                                ally.role
+                            );
+
+                            return ally.hp < stats.maxHp;
+                        })
+                        .sort((a, b) => {
+                            const aStats = mobStats(
+                                a.level,
+                                a.role
+                            );
+                            const bStats = mobStats(
+                                b.level,
+                                b.role
+                            );
+
+                            return (
+                                a.hp / aStats.maxHp
+                            ) - (
+                                b.hp / bStats.maxHp
+                            );
+                        })[0];
+
                     if (wounded) {
-                        const amount = Math.min(10 * t,
-                            mobStats(wounded.level, wounded.role).maxHp -
-                            wounded.hp);
+                        const woundedStats = mobStats(
+                            wounded.level,
+                            wounded.role
+                        );
+
+                        const amount = Math.min(
+                            10 * foeTier,
+                            woundedStats.maxHp -
+                            wounded.hp
+                        );
+
                         wounded.hp += amount;
-                        effects.push(`${foe.id} healed ${wounded.id} for ${amount}`);
+
+                        effects.push(
+                            `${foe.id} healed ` +
+                            `${wounded.id} for ${amount}`
+                        );
                     }
-                } else if (foe.role === 'hexer' &&
-                    !(actions.tansy === 'visor' && e <= 4)) {
+                }
+
+                if (
+                    foe.role === 'hexer' &&
+                    !(
+                        actions.tansy === 'visor' &&
+                        e >= 2 &&
+                        e <= 4
+                    )
+                ) {
                     encounter.hexStacks[foe.id] =
-                        (encounter.hexStacks[foe.id] || 0) + 1;
-                    effects.push(`${foe.id} added a hex stack`);
-                } else if (foe.role === 'buffer') {
-                    // Applied on this hit; expires when this Buffer dies.
+                        (
+                            encounter.hexStacks[foe.id] || 0
+                        ) + 1;
+
+                    effects.push(
+                        `${foe.id} added one hex stack`
+                    );
+                }
+
+                if (foe.role === 'buffer') {
                     encounter.bufferId = foe.id;
-                    effects.push(`${foe.id} activated its buff`);
+
+                    effects.push(
+                        `${foe.id} activated its buffer`
+                    );
                 }
             }
 
-            const buffer = live(s).find(f => f.id === encounter.bufferId);
-            if (buffer && activeBrutes.length) {
-                frontlineDamage += enemyTier(buffer.level);
+            const livingBuffer = live(s).find(
+                foe => foe.id === encounter.bufferId
+            );
+
+            if (
+                livingBuffer &&
+                activeFrontliners.length > 0
+            ) {
+                frontlineDamage += enemyTier(
+                    livingBuffer.level
+                );
             }
         }
 
-        c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
-        c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
+        c.qtik.hp = Math.max(
+            0,
+            c.qtik.hp - frontlineDamage
+        );
+
+        c.tansy.hp = Math.max(
+            0,
+            c.tansy.hp - backlineDamage
+        );
+
         if (c.qtik.hp > 0) {
-            c.qtik.hp = Math.min(initial.qtikMaxHp,
-                c.qtik.hp + initial.regen);
+            c.qtik.hp = Math.min(
+                crewStats.qtikMaxHp,
+                c.qtik.hp + crewStats.regen
+            );
         }
 
-        if (actions.tansy === 'visor' && e === 1 && live(s).length) {
-            encounter.exposed = initial.luk;
+        /*
+         * Visor Ex1 fumble exposes the enemy to the next crew hit.
+         */
+        if (
+            actions.tansy === 'visor' &&
+            e === 1 &&
+            live(s).length > 0
+        ) {
+            encounter.exposed = crewStats.luk;
+            effects.push(
+                `Target exposed for +${crewStats.luk} damage`
+            );
         }
 
-        // Only an actual health potion can auto-trigger.
-        if (c.qtik.hp > 0 &&
-            c.qtik.hp * 4 <= initial.qtikMaxHp) {
-            const item = c.belt.find(id =>
-                ['basic_health_potion', 'mid_health_potion'].includes(id));
+        /*
+         * Automatic belt use only applies to Q'tik's own health reaching
+         * 25% or less. Explicit RP consumption should use the belt tool.
+         */
+        if (
+            c.qtik.hp > 0 &&
+            c.qtik.hp * 4 <= crewStats.qtikMaxHp
+        ) {
+            const item = c.belt.find(
+                id => [
+                    'basic_health_potion',
+                    'mid_health_potion'
+                ].includes(id)
+            );
+
             if (item) {
                 c.belt = consumeBelt({
-                    belt: c.belt, items: [item]
+                    belt: c.belt,
+                    items: [item]
                 }).remainingBelt;
-                const heal = item === 'mid_health_potion' ? 120 : 50;
-                c.qtik.hp = Math.min(initial.qtikMaxHp, c.qtik.hp + heal);
-                effects.push(`Auto-consumed ${item}: +${heal} HP`);
+
+                const heal =
+                    item === 'mid_health_potion'
+                        ? 120
+                        : 50;
+
+                c.qtik.hp = Math.min(
+                    crewStats.qtikMaxHp,
+                    c.qtik.hp + heal
+                );
+
+                effects.push(
+                    `Auto-consumed ${item}: +${heal} HP`
+                );
             }
         }
 
@@ -501,7 +1002,7 @@ function resolveTurn({ state, actions, rolls, rewardMode = 'immediate' }) {
             playerRoll: p,
             enemyRoll: e,
             target: target.id,
-            crit,
+            crit: isCritical,
             damage,
             hits,
             enemyMiss,
@@ -510,25 +1011,51 @@ function resolveTurn({ state, actions, rolls, rewardMode = 'immediate' }) {
             effects,
             qtikHp: c.qtik.hp,
             tansyHp: c.tansy.hp,
-            livingFoes: live(s).map(f => ({ id: f.id, hp: f.hp }))
+            livingFoes: live(s).map(
+                foe => ({
+                    id: foe.id,
+                    hp: foe.hp
+                })
+            )
         });
     }
 
-    const gainedXp = kills.reduce((sum, kill) => sum + kill.xp, 0);
-    const gainedSilver = kills.reduce((sum, kill) => sum + kill.silver, 0);
+    const gainedXp = kills.reduce(
+        (sum, kill) => sum + kill.xp,
+        0
+    );
+
+    const gainedSilver = kills.reduce(
+        (sum, kill) => sum + kill.silver,
+        0
+    );
+
     let levelUps = [];
 
     if (rewardMode === 'immediate') {
-        levelUps = applyXp(c, gainedXp);
+        levelUps = applyXp(
+            c,
+            gainedXp
+        );
+
         c.purse += gainedSilver;
     }
 
+    /*
+     * Remove status entries belonging to slain Hexers.
+     */
     encounter.hexStacks = Object.fromEntries(
         Object.entries(encounter.hexStacks)
-            .filter(([id]) => live(s).some(f => f.id === id))
+            .filter(([id]) =>
+                live(s).some(foe => foe.id === id)
+            )
     );
 
-    return {
+    if (live(s).length === 0) {
+        encounter.status = 'cleared';
+    }
+
+    const result = {
         ok: true,
         turn: encounter.turn,
         rolls: tape,
@@ -540,10 +1067,24 @@ function resolveTurn({ state, actions, rolls, rewardMode = 'immediate' }) {
             applied: rewardMode === 'immediate'
         },
         levelUps,
-        packCleared: startingCount > 0 && live(s).length === 0,
+        packCleared:
+            startingCount > 0 &&
+            live(s).length === 0,
         state: s,
         derived: derived(c)
     };
+
+    /*
+     * Final result validation prevents NaN from being serialized as null.
+     */
+    const serialized = JSON.stringify(result);
+
+    assert(
+        !serialized.includes('null'),
+        'Resolver produced null in its output; likely non-finite combat math'
+    );
+
+    return result;
 }
 
 function createFoe({ id, level, role }) {

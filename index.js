@@ -161,8 +161,14 @@ function validate(state) {
     int(c.tansy.hp, 'tansy.hp');
     assert(c.qtik.hp <= d.qtikMaxHp, 'Q\'tik HP exceeds derived maximum');
     assert(c.tansy.hp <= d.tansyMaxHp, 'Tansy HP exceeds derived maximum');
-    assert(Array.isArray(c.belt) && c.belt.length <= 4,
-        'Belt must contain at most four item IDs');
+    assert(
+        Array.isArray(c.qtik.belt) && c.qtik.belt.length <= 4,
+        "Q'tik's belt must contain at most four item IDs"
+    );
+    assert(
+        Array.isArray(c.tansy.belt) && c.tansy.belt.length <= 4,
+        "Tansy's belt must contain at most four item IDs"
+    );
 
     assert(Array.isArray(state.encounter.foes), 'Encounter needs foes');
     const ids = new Set();
@@ -203,27 +209,50 @@ function xpForKill(crewLevel, foe) {
 }
 
 function applyXp(crew, xp) {
-    const changes = [];
+    assert(
+        Number.isInteger(xp) && xp >= 0,
+        'XP reward must be a non-negative integer'
+    );
+
     crew.xp += xp;
+    const changes = [];
 
     while (crew.xp >= nextXp(crew.level)) {
         const before = derived(crew);
-        const cost = nextXp(crew.level);
-        crew.xp -= cost;
-        crew.level++;
+        const xpCost = nextXp(crew.level);
+
+        crew.xp -= xpCost;
+        crew.level += 1;
 
         const after = derived(crew);
-        crew.qtik.hp = Math.min(after.qtikMaxHp,
-            crew.qtik.hp + after.qtikMaxHp - before.qtikMaxHp);
-        crew.tansy.hp = Math.min(after.tansyMaxHp,
-            crew.tansy.hp + after.tansyMaxHp - before.tansyMaxHp);
+
+        // Preserve the existing level-up HP increase: maximum HP gained
+        // is also added to current HP, capped at the new maximum.
+        crew.qtik.hp = Math.min(
+            after.qtikMaxHp,
+            crew.qtik.hp + (after.qtikMaxHp - before.qtikMaxHp)
+        );
+
+        crew.tansy.hp = Math.min(
+            after.tansyMaxHp,
+            crew.tansy.hp + (after.tansyMaxHp - before.tansyMaxHp)
+        );
+
+        // Keep the saved readouts synchronized with derived stats.
+        crew.qtik.maxHp = after.qtikMaxHp;
+        crew.qtik.def = after.def;
+        crew.qtik.regen = after.regen;
+        crew.tansy.maxHp = after.tansyMaxHp;
+
         changes.push({
             level: crew.level,
+            xpRemaining: crew.xp,
             nextXp: nextXp(crew.level),
             before,
             after
         });
     }
+
     return changes;
 }
 
@@ -317,6 +346,89 @@ function dealDamage(state, target, amount, kills) {
     return hits;
 }
 
+function applyBeltItem(state, item, recipient) {
+    const crew = state.crew;
+    const encounter = state.encounter;
+
+    assert(
+        recipient === 'qtik' || recipient === 'tansy',
+        `Invalid potion recipient: ${recipient}`
+    );
+
+    assert(
+        [
+            'basic_health_potion',
+            'mid_health_potion',
+            'cleansing_tonic'
+        ].includes(item),
+        `Unsupported belt item: ${item}`
+    );
+
+    crew[recipient].belt = consumeBelt({
+        belt: crew[recipient].belt,
+        items: [item]
+    }).remainingBelt;
+
+    if (
+        item === 'basic_health_potion' ||
+        item === 'mid_health_potion'
+    ) {
+        const amount =
+            item === 'mid_health_potion' ? 120 : 50;
+
+        const character = crew[recipient];
+        const maxHp = recipient === 'qtik'
+            ? derived(crew).qtikMaxHp
+            : derived(crew).tansyMaxHp;
+
+        const beforeHp = character.hp;
+
+        character.hp = Math.min(
+            maxHp,
+            character.hp + amount
+        );
+
+        return {
+            item,
+            recipient,
+            effect: 'heal',
+            requested: amount,
+            healed: character.hp - beforeHp,
+            hp: character.hp,
+            maxHp
+        };
+    }
+
+    const stackEntry = Object.entries(
+        encounter.hexStacks || {}
+    ).find(([, stacks]) => stacks > 0);
+
+    if (!stackEntry) {
+        return {
+            item,
+            recipient,
+            effect: 'cleanse',
+            stacksRemoved: 0,
+            note: 'No active Hexer debuff to remove'
+        };
+    }
+
+    const [hexerId, stacks] = stackEntry;
+
+    if (stacks === 1) {
+        delete encounter.hexStacks[hexerId];
+    } else {
+        encounter.hexStacks[hexerId] = stacks - 1;
+    }
+
+    return {
+        item,
+        recipient,
+        effect: 'cleanse',
+        stacksRemoved: 1,
+        source: hexerId
+    };
+}
 
 function resolveTurn({
     state,
@@ -405,25 +517,24 @@ function resolveTurn({
         encounter.used.icePatch = true;
     }
 
+let itemUse = null;
+
+    const itemUse = {};
+
     if (actions.qtik === 'drink') {
         assert(
-            typeof actions.item === 'string',
-            'Drink requires an item ID'
+            typeof actions.qtikItem === 'string',
+            "Q'tik drink action requires actions.qtikItem"
         );
+        itemUse.qtik = applyBeltItem(s, actions.qtikItem, 'qtik');
+    }
 
+    if (actions.tansy === 'drink') {
         assert(
-            [
-                'basic_health_potion',
-                'mid_health_potion',
-                'cleansing_tonic'
-            ].includes(actions.item),
-            `Unsupported belt item: ${actions.item}`
+            typeof actions.tansyItem === 'string',
+            "Tansy drink action requires actions.tansyItem"
         );
-
-        c.belt = consumeBelt({
-            belt: c.belt,
-            items: [actions.item]
-        }).remainingBelt;
+        itemUse.tansy = applyBeltItem(s, actions.tansyItem, 'tansy');
     }
 
     if (actions.tansy === 'surge') {
@@ -494,14 +605,16 @@ function resolveTurn({
             actions.tansy === 'vitals' ||
             actions.tansy === 'hamstring';
 
-        const weaselAttack = actions.tansy === 'recall'
-            ? 0
-            : c.weasels.active *
-                (
-                    directed && !patchActive
-                        ? 2
-                        : 1
-                );
+        const weaselAttack =
+            actions.tansy === 'recall' || actions.tansy === 'drink'
+                ? 0
+                : c.weasels.active *
+                    (
+                        directed && !patchActive
+                            ? 2
+                            : 1
+                    );
+
 
         /*
          * Crew ATK consists of base/gear ATK plus current summon ATK.
@@ -998,44 +1111,7 @@ const fireDamage =
             );
         }
 
-        /*
-         * Automatic belt use only applies to Q'tik's own health reaching
-         * 25% or less. Explicit RP consumption should use the belt tool.
-         */
-        if (
-            c.qtik.hp > 0 &&
-            c.qtik.hp * 4 <= crewStats.qtikMaxHp
-        ) {
-            const item = c.belt.find(
-                id => [
-                    'basic_health_potion',
-                    'mid_health_potion'
-                ].includes(id)
-            );
-
-            if (item) {
-                c.belt = consumeBelt({
-                    belt: c.belt,
-                    items: [item]
-                }).remainingBelt;
-
-                const heal =
-                    item === 'mid_health_potion'
-                        ? 120
-                        : 50;
-
-                c.qtik.hp = Math.min(
-                    crewStats.qtikMaxHp,
-                    c.qtik.hp + heal
-                );
-
-                effects.push(
-                    `Auto-consumed ${item}: +${heal} HP`
-                );
-            }
-        }
-
-        logs.push({
+            logs.push({
             exchange: ex + 1,
             playerRoll: p,
             enemyRoll: e,
@@ -1097,6 +1173,7 @@ const fireDamage =
         ok: true,
         turn: encounter.turn,
         rolls: tape,
+        itemUse,
         exchanges: logs,
         kills,
         rewards: {
@@ -1423,22 +1500,27 @@ function registerTools() {
                             'drink'
                         ]
                     },
-                    tansy: {
+                                        tansy: {
                         type: 'string',
                         enum: [
                             'visor',
                             'vitals',
                             'hamstring',
                             'recall',
-                            'surge'
+                            'surge',
+                            'drink'
                         ]
                     },
                     target: {
                         type: 'string'
                     },
-                    item: {
+                    qtikItem: {
+                        type: 'string'
+                    },
+                    tansyItem: {
                         type: 'string'
                     }
+
                 }
             },
 

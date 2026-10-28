@@ -1841,136 +1841,192 @@ function spawnEncounter(test) {
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
-    const result = {
-        ok: true,
-        applicable: {},
-        findings: {}
-    };
+        const result = {
+            ok: true,
+            applicable: {},
+            findings: {}
+        };
 
-    /*
-     * These inputs describe whether the relevant game situation happened.
-     * The resolver does not invent that situation.
-     */
-    const {
-        curiosityRoll,
-        rumorRoll,
-        packDropRoll,
-        newWildernessSite = false,
-        investigatedRumor = false,
-        packLooted = false
-    } = test;
+        const {
+            curiosityRoll,
+            rumorRoll,
+            packDropRoll,
+            newWildernessSite = false,
+            investigatedRumor = false,
+            packLooted = false
+        } = test;
 
-    if (curiosityRoll !== undefined) {
-        assert(
-            Number.isInteger(curiosityRoll) &&
-            curiosityRoll >= 1 &&
-            curiosityRoll <= 10,
-            'curiosityRoll must be 1-10'
-        );
+        if (curiosityRoll !== undefined) {
+            assert(
+                Number.isInteger(curiosityRoll) &&
+                curiosityRoll >= 1 &&
+                curiosityRoll <= 10,
+                'curiosityRoll must be 1-10'
+            );
 
-        result.applicable.curiosity = newWildernessSite;
+            result.applicable.curiosity =
+                newWildernessSite;
 
-        if (!newWildernessSite) {
-            result.findings.curiosity = 'not_applicable';
-        } else if (curiosityRoll <= 7) {
-            result.findings.curiosity = 'nothing_hidden';
-        } else if (curiosityRoll === 8) {
-            result.findings.curiosity = 'hidden_lore_or_shortcut';
-        } else if (curiosityRoll === 9) {
-            result.findings.curiosity = 'trap_or_ambush_hazard';
-        } else {
-            result.findings.curiosity = 'hidden_loot_stash';
+            if (!newWildernessSite) {
+                result.findings.curiosity =
+                    'not_applicable';
+            } else if (curiosityRoll <= 7) {
+                result.findings.curiosity =
+                    'nothing_hidden';
+            } else if (curiosityRoll === 8) {
+                result.findings.curiosity =
+                    'hidden_lore_or_shortcut';
+            } else if (curiosityRoll === 9) {
+                result.findings.curiosity =
+                    'trap_or_ambush_hazard';
+            } else {
+                result.findings.curiosity =
+                    'hidden_loot_stash';
+            }
         }
-    }
 
-    if (rumorRoll !== undefined) {
-        assert(
-            Number.isInteger(rumorRoll) &&
-            rumorRoll >= 1 &&
-            rumorRoll <= 5,
-            'rumorRoll must be 1-5'
-        );
+        if (rumorRoll !== undefined) {
+            assert(
+                Number.isInteger(rumorRoll) &&
+                rumorRoll >= 1 &&
+                rumorRoll <= 5,
+                'rumorRoll must be 1-5'
+            );
 
-        result.applicable.rumor = investigatedRumor;
+            result.applicable.rumor =
+                investigatedRumor;
 
-        if (!investigatedRumor) {
-            result.findings.rumor = 'not_applicable';
-        } else if (rumorRoll <= 3) {
-            result.findings.rumor =
-                'travelogue_flub_benign_oddity';
-        } else if (rumorRoll === 4) {
-            result.findings.rumor =
-                'already_cleared_by_other_immortals';
-        } else {
-            result.findings.rumor =
-                'genuine_unclaimed_quest_or_dungeon_hook';
+            if (!investigatedRumor) {
+                result.findings.rumor =
+                    'not_applicable';
+            } else if (rumorRoll <= 3) {
+                result.findings.rumor =
+                    'travelogue_flub_benign_oddity';
+            } else if (rumorRoll === 4) {
+                result.findings.rumor =
+                    'already_cleared_by_other_immortals';
+            } else {
+                result.findings.rumor =
+                    'genuine_unclaimed_quest_or_dungeon_hook';
+            }
         }
-    }
 
-    if (packDropRoll !== undefined) {
-        assert(
-            Number.isInteger(packDropRoll) &&
-            packDropRoll >= 1 &&
-            packDropRoll <= 10,
-            'packDropRoll must be 1-10'
-        );
+        if (packDropRoll !== undefined) {
+            assert(
+                Number.isInteger(packDropRoll) &&
+                packDropRoll >= 1 &&
+                packDropRoll <= 10,
+                'packDropRoll must be 1-10'
+            );
 
-        result.applicable.packDrop = packLooted;
+            result.applicable.packDrop =
+                packLooted;
 
-        if (!packLooted) {
-            result.findings.packDrop = 'not_applicable';
-        } else if (packDropRoll <= 8) {
-            result.findings.packDrop = 'auto_salvage_only';
-        } else if (packDropRoll === 9) {
-            result.findings.packDrop = 'wild_equipment_drop';
-        } else {
-            result.findings.packDrop =
-                'diegetic_quest_breadcrumb';
+            if (!packLooted) {
+                result.findings.packDrop =
+                    'not_applicable';
+            } else if (packDropRoll <= 8) {
+                result.findings.packDrop =
+                    'auto_salvage_only';
+            } else if (packDropRoll === 9) {
+                result.findings.packDrop =
+                    'wild_equipment_drop';
+            } else {
+                result.findings.packDrop =
+                    'diegetic_quest_breadcrumb';
+            }
         }
+
+        result.unlocks = {
+            loot:
+                result.findings.curiosity ===
+                    'hidden_loot_stash' ||
+                result.findings.packDrop ===
+                    'wild_equipment_drop',
+
+            quest:
+                result.findings.rumor ===
+                    'genuine_unclaimed_quest_or_dungeon_hook' ||
+                result.findings.packDrop ===
+                    'diegetic_quest_breadcrumb'
+        };
+
+        return result;
     }
-
-    result.unlocks = {
-        loot:
-            result.findings.curiosity === 'hidden_loot_stash' ||
-            result.findings.packDrop === 'wild_equipment_drop',
-
-        quest:
-            result.findings.rumor ===
-                'genuine_unclaimed_quest_or_dungeon_hook' ||
-            result.findings.packDrop ===
-                'diegetic_quest_breadcrumb'
-    };
-
-    return result;
-}
 
     assert(
-        Array.isArray(args.cases) && args.cases.length > 0,
+        Array.isArray(args.cases) &&
+        args.cases.length > 0,
         'Batch mode requires a non-empty cases array'
     );
 
     const results = [];
 
-    for (let index = 0; index < args.cases.length; index++) {
+    for (
+        let index = 0;
+        index < args.cases.length;
+        index++
+    ) {
         const test = args.cases[index];
-        const name = test.name || `case_${index + 1}`;
+        const name =
+            test.name ||
+            `case_${index + 1}`;
 
         try {
+            assert(
+                test &&
+                typeof test === 'object',
+                `${name}: case must be an object`
+            );
+
             let result;
 
             switch (test.kind) {
-                                    case 'spawn':
+                case 'spawn':
                     result = spawnEncounter(test);
                     break;
 
-                case 'turn':
+                case 'turn': {
+                    assert(
+                        test.state &&
+                        typeof test.state === 'object',
+                        `${name}: turn case requires state`
+                    );
+
+                    assert(
+                        test.actions &&
+                        typeof test.actions === 'object',
+                        [
+                            `${name}: turn case requires actions`,
+                            'with qtik, tansy, and target fields'
+                        ].join(' ')
+                    );
+
+                    assert(
+                        typeof test.actions.qtik === 'string',
+                        `${name}: actions.qtik is required`
+                    );
+
+                    assert(
+                        typeof test.actions.tansy === 'string',
+                        `${name}: actions.tansy is required`
+                    );
+
+                    assert(
+                        typeof test.actions.target === 'string',
+                        `${name}: actions.target is required`
+                    );
+
                     result = resolveTurn({
                         state: test.state,
                         actions: test.actions,
                         rolls: test.rolls,
-                        rewardMode: test.rewardMode || 'deferred'
+                        rewardMode:
+                            test.rewardMode ||
+                            'deferred'
                     });
                     break;
+                }
 
                 case 'consume_belt':
                     result = consumeBelt({
@@ -1986,7 +2042,10 @@ function resolveBatch(args) {
                             ? vendorStock(test.zone)
                             : undefined,
                         mob: test.mob
-                            ? mobStats(test.mob.level, test.mob.role)
+                            ? mobStats(
+                                test.mob.level,
+                                test.mob.role
+                            )
                             : undefined,
                         crew: test.crew
                             ? derived(test.crew)
@@ -1998,12 +2057,14 @@ function resolveBatch(args) {
                     break;
 
                 case 'world_seeds':
-                    result = resolveWorldSeeds(test);
+                    result =
+                        resolveWorldSeeds(test);
                     break;
 
                 default:
                     throw new Error(
-                        `Unknown batch case kind: ${test.kind}`
+                        `${name}: unknown batch case kind ` +
+                        `'${test.kind}'`
                     );
             }
 
@@ -2023,7 +2084,8 @@ function resolveBatch(args) {
         }
     }
 
-    const passed = results.filter(item => item.ok).length;
+    const passed =
+        results.filter(item => item.ok).length;
 
     return {
         ok: passed === results.length,

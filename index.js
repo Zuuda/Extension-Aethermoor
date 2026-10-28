@@ -82,48 +82,135 @@ function mobStats(level, role) {
 }
 
 function gearBonus(owner, slot, item) {
-    if (!item) return { atk: 0, def: 0, hp: 0, luk: 0 };
+    /*
+     * Empty slot objects are treated as empty gear. This allows compact
+     * test fixtures such as gear: { tansy: {}, qtik: {} }.
+     */
+    if (
+        item === null ||
+        item === undefined ||
+        Object.keys(item).length === 0
+    ) {
+        return {
+            atk: 0,
+            def: 0,
+            hp: 0,
+            luk: 0
+        };
+    }
 
-    const stat = int(item.stat, `${owner}.${slot}.stat`);
+    const stat = int(
+        item.stat,
+        `${owner}.${slot}.stat`
+    );
+
     const variant = item.variant;
-    const result = { atk: 0, def: 0, hp: 0, luk: 0 };
+
+    const result = {
+        atk: 0,
+        def: 0,
+        hp: 0,
+        luk: 0
+    };
 
     if (owner === 'tansy') {
-        assert(TANSY_SLOTS.includes(slot), `Invalid Tansy slot: ${slot}`);
-        if (slot === 'weapon') result.atk = 2 * stat;
-        else if (slot === 'gloves') result.atk = stat;
-        else if (slot === 'chest' || slot === 'trousers') {
+        assert(
+            TANSY_SLOTS.includes(slot),
+            `Invalid Tansy slot: ${slot}`
+        );
+
+        if (slot === 'weapon') {
+            result.atk = 2 * stat;
+        } else if (slot === 'gloves') {
+            result.atk = stat;
+        } else if (
+            slot === 'chest' ||
+            slot === 'trousers'
+        ) {
             result.hp = 5 * stat;
             result.luk = stat > 0 ? 1 : 0;
         } else {
-            assert(MODULAR_TANSY.has(slot), `Invalid Tansy slot: ${slot}`);
+            assert(
+                MODULAR_TANSY.has(slot),
+                `Invalid Tansy slot: ${slot}`
+            );
+
             if (stat > 0) {
-                assert(['vitality', 'luck'].includes(variant),
-                    `${slot} needs exactly one tuning variant`);
-                if (variant === 'vitality') result.hp = 5 * stat;
-                else result.luk = stat;
+                assert(
+                    ['vitality', 'luck'].includes(variant),
+                    `${slot} needs exactly one tuning variant`
+                );
+
+                if (variant === 'vitality') {
+                    result.hp = 5 * stat;
+                } else {
+                    result.luk = stat;
+                }
             }
         }
     } else if (owner === 'qtik') {
-        assert(QTIK_SLOTS.includes(slot), `Invalid Q'tik slot: ${slot}`);
+        assert(
+            QTIK_SLOTS.includes(slot),
+            `Invalid Q'tik slot: ${slot}`
+        );
+
         if (stat > 0) {
-            assert(['vitality', 'bulwark'].includes(variant),
-                `${slot} needs exactly one tuning variant`);
-            if (variant === 'vitality') result.hp = 15 * stat;
-            else result.def = 2 * stat;
+            assert(
+                ['vitality', 'bulwark'].includes(variant),
+                `${slot} needs exactly one tuning variant`
+            );
+
+            if (variant === 'vitality') {
+                result.hp = 15 * stat;
+            } else {
+                result.def = 2 * stat;
+            }
         }
     } else {
-        throw new Error(`Unknown gear owner: ${owner}`);
+        throw new Error(
+            `Unknown gear owner: ${owner}`
+        );
     }
+
     return result;
 }
 
 function derived(crew) {
-    const level = int(crew.level, 'crew.level', 1);
-    const weasels = int(crew.weasels.active, 'weasels.active');
-    const maxWeasels = 2 + 2 * Math.floor(level / 2);
-    assert(weasels <= maxWeasels,
-        `Active weasels ${weasels} exceed level cap ${maxWeasels}`);
+    assert(
+        crew && typeof crew === 'object',
+        'Crew state is required'
+    );
+
+    const level = int(
+        crew.level,
+        'crew.level',
+        1
+    );
+
+    assert(
+        crew.weasels &&
+        typeof crew.weasels === 'object',
+        'Crew weasel state is required'
+    );
+
+    const weasels = int(
+        crew.weasels.active,
+        'weasels.active'
+    );
+
+    const maxWeasels =
+        2 + 2 * Math.floor(level / 2);
+
+    assert(
+        weasels <= maxWeasels,
+        `Active weasels ${weasels} exceed level cap ${maxWeasels}`
+    );
+
+    const tansyGear =
+        crew.gear?.tansy || {};
+
+    const qtikGear =
+        crew.gear?.qtik || {};
 
     const totals = {
         atk: 2 * level + 2 * weasels,
@@ -134,54 +221,354 @@ function derived(crew) {
     };
 
     for (const slot of TANSY_SLOTS) {
-        const bonus = gearBonus('tansy', slot, crew.gear.tansy[slot]);
+        const bonus = gearBonus(
+            'tansy',
+            slot,
+            tansyGear[slot]
+        );
+
         totals.atk += bonus.atk;
         totals.luk += bonus.luk;
         totals.tansyMaxHp += bonus.hp;
     }
+
     for (const slot of QTIK_SLOTS) {
-        const bonus = gearBonus('qtik', slot, crew.gear.qtik[slot]);
+        const bonus = gearBonus(
+            'qtik',
+            slot,
+            qtikGear[slot]
+        );
+
         totals.def += bonus.def;
         totals.qtikMaxHp += bonus.hp;
     }
 
-    totals.regen = Math.round(totals.qtikMaxHp / 100);
+    totals.regen =
+        Math.round(totals.qtikMaxHp / 100);
+
     return totals;
 }
-
 function validate(state) {
-    assert(ZONES[state.zone], `Unknown zone: ${state.zone}`);
-    assert(state.crew && state.encounter, 'Need crew and encounter');
+    assert(
+        state &&
+        typeof state === 'object',
+        'State object is required'
+    );
+
+    assert(
+        ZONES[state.zone],
+        `Unknown zone: ${state.zone}`
+    );
+
+    assert(
+        state.crew &&
+        state.encounter,
+        'Need crew and encounter'
+    );
+
     const c = state.crew;
+    const encounter = state.encounter;
+
+    assert(
+        c.qtik &&
+        typeof c.qtik === 'object',
+        "Q'tik state is required"
+    );
+
+    assert(
+        c.tansy &&
+        typeof c.tansy === 'object',
+        "Tansy state is required"
+    );
+
+    assert(
+        c.weasels &&
+        typeof c.weasels === 'object',
+        'Weasel state is required'
+    );
+
+    assert(
+        c.gear &&
+        typeof c.gear === 'object',
+        'Crew gear state is required'
+    );
+
+    /*
+     * derived() accepts missing slot entries and compact empty gear
+     * containers, but the two owner containers must exist.
+     */
+    assert(
+        c.gear.tansy &&
+        typeof c.gear.tansy === 'object',
+        "Tansy's gear container is required"
+    );
+
+    assert(
+        c.gear.qtik &&
+        typeof c.gear.qtik === 'object',
+        "Q'tik's gear container is required"
+    );
+
     const d = derived(c);
 
     int(c.xp, 'crew.xp');
     int(c.purse, 'crew.purse');
     int(c.qtik.hp, 'qtik.hp');
     int(c.tansy.hp, 'tansy.hp');
-    assert(c.qtik.hp <= d.qtikMaxHp, 'Q\'tik HP exceeds derived maximum');
-    assert(c.tansy.hp <= d.tansyMaxHp, 'Tansy HP exceeds derived maximum');
+
     assert(
-        Array.isArray(c.qtik.belt) && c.qtik.belt.length <= 4,
+        c.qtik.hp <= d.qtikMaxHp,
+        "Q'tik HP exceeds derived maximum"
+    );
+
+    assert(
+        c.tansy.hp <= d.tansyMaxHp,
+        'Tansy HP exceeds derived maximum'
+    );
+
+    assert(
+        Array.isArray(c.qtik.belt) &&
+        c.qtik.belt.length <= 4,
         "Q'tik's belt must contain at most four item IDs"
     );
+
     assert(
-        Array.isArray(c.tansy.belt) && c.tansy.belt.length <= 4,
+        Array.isArray(c.tansy.belt) &&
+        c.tansy.belt.length <= 4,
         "Tansy's belt must contain at most four item IDs"
     );
 
-    assert(Array.isArray(state.encounter.foes), 'Encounter needs foes');
+    assert(
+        typeof encounter.id === 'string' &&
+        encounter.id.length > 0,
+        'Encounter needs a non-empty ID'
+    );
+
+    assert(
+        [
+            'normal_pack',
+            'elite',
+            'boss'
+        ].includes(encounter.type),
+        `Unsupported encounter type: ${encounter.type}`
+    );
+
+    assert(
+        Number.isInteger(encounter.turn) &&
+        encounter.turn >= 0,
+        'Encounter turn must be a non-negative integer'
+    );
+
+    assert(
+        Array.isArray(encounter.foes),
+        'Encounter needs a foes array'
+    );
+
+    assert(
+        encounter.foes.length > 0,
+        'Encounter needs at least one foe'
+    );
+
     const ids = new Set();
-    for (const foe of state.encounter.foes) {
-        assert(typeof foe.id === 'string' && !ids.has(foe.id),
-            'Each foe needs a unique string ID');
+
+    for (const foe of encounter.foes) {
+        assert(
+            foe &&
+            typeof foe === 'object',
+            'Each foe must be an object'
+        );
+
+        assert(
+            typeof foe.id === 'string' &&
+            foe.id.length > 0 &&
+            !ids.has(foe.id),
+            'Each foe needs a unique non-empty string ID'
+        );
+
         ids.add(foe.id);
 
-        const expected = mobStats(foe.level, foe.role);
-        int(foe.hp, `${foe.id}.hp`);
-        assert(foe.hp <= expected.maxHp, `${foe.id} HP exceeds maximum`);
-        // Stats are derived, not accepted as editable combat inputs.
+        const expected =
+            mobStats(
+                foe.level,
+                foe.role
+            );
+
+        int(
+            foe.level,
+            `${foe.id}.level`,
+            1
+        );
+
+        int(
+            foe.hp,
+            `${foe.id}.hp`
+        );
+
+        int(
+            foe.maxHp,
+            `${foe.id}.maxHp`
+        );
+
+        int(
+            foe.atk,
+            `${foe.id}.atk`
+        );
+
+        int(
+            foe.def,
+            `${foe.id}.def`
+        );
+
+        assert(
+            foe.maxHp === expected.maxHp,
+            `${foe.id} maxHp does not match ` +
+            `${foe.role} formula`
+        );
+
+        assert(
+            foe.atk === expected.atk,
+            `${foe.id} atk does not match ` +
+            `${foe.role} formula`
+        );
+
+        assert(
+            foe.def === expected.def,
+            `${foe.id} def does not match ` +
+            `${foe.role} formula`
+        );
+
+        assert(
+            foe.hp <= foe.maxHp,
+            `${foe.id} HP exceeds maximum`
+        );
     }
+
+    if (encounter.type === 'normal_pack') {
+        assert(
+            encounter.foes.length === 3,
+            'Normal packs must contain exactly three foes'
+        );
+
+        assert(
+            encounter.composition >= 1 &&
+            encounter.composition <= 6,
+            'Normal pack composition must be 1-6'
+        );
+
+        if (encounter.composition === 1) {
+            assert(
+                encounter.foes.every(
+                    foe => foe.role === 'brute'
+                ),
+                'Pure Fodder packs must contain three Brutes'
+            );
+        } else {
+            assert(
+                encounter.foes.filter(
+                    foe => foe.role === 'brute'
+                ).length === 1,
+                'Mixed packs must contain one Brute'
+            );
+
+            assert(
+                encounter.foes.filter(
+                    foe => [
+                        'mender',
+                        'archer',
+                        'hexer',
+                        'buffer'
+                    ].includes(foe.role)
+                ).length === 2,
+                'Mixed packs must contain two Specialists'
+            );
+        }
+
+        assert(
+            encounter.rewards &&
+            encounter.rewards.kind === 'normal_pack',
+            'Normal pack reward metadata is required'
+        );
+
+        assert(
+            encounter.rewards.foeCount === 3,
+            'Normal pack reward foeCount must be 3'
+        );
+
+        int(
+            encounter.rewards.listedPackXp,
+            'normal pack listedPackXp'
+        );
+
+        int(
+            encounter.rewards.autoSalvage,
+            'normal pack autoSalvage'
+        );
+    }
+
+    if (
+        encounter.type === 'elite' ||
+        encounter.type === 'boss'
+    ) {
+        assert(
+            encounter.foes.length === 1,
+            'Elite and Boss encounters must contain one foe'
+        );
+
+        assert(
+            encounter.foes[0].role === encounter.type,
+            `${encounter.type} encounter needs a ` +
+            `${encounter.type} foe`
+        );
+
+        assert(
+            encounter.rewards &&
+            encounter.rewards.kind === encounter.type,
+            `${encounter.type} reward metadata is required`
+        );
+
+        int(
+            encounter.rewards.baseKillXp,
+            `${encounter.type} baseKillXp`
+        );
+
+        const gear =
+            encounter.rewards.guaranteedGear;
+
+        assert(
+            gear &&
+            Number.isInteger(gear.rawStat) &&
+            Number.isInteger(gear.pawnSilver),
+            `${encounter.type} guaranteed gear metadata is required`
+        );
+
+        const expectedRawStat =
+            ZONES[state.zone].base +
+            (
+                encounter.type === 'elite'
+                    ? 1
+                    : 5
+            );
+
+        assert(
+            gear.rawStat === expectedRawStat,
+            `${encounter.type} guaranteed gear stat does not ` +
+            'match zone'
+        );
+
+        assert(
+            gear.pawnSilver === 2 * gear.rawStat,
+            `${encounter.type} guaranteed gear pawn value ` +
+            'does not match raw stat'
+        );
+
+        if (encounter.type === 'boss') {
+            assert(
+                encounter.rewards.bossTrophy === true,
+                'Boss encounter must carry a trophy reward'
+            );
+        }
+    }
+
     return d;
 }
 

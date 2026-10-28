@@ -1073,18 +1073,33 @@ function resolveTurn({
         state: s,
         derived: derived(c)
     };
+// Reject NaN and Infinity, but allow intentional null values.
+const assertNoNonFinite = (value, path = 'result') => {
+    if (typeof value === 'number') {
+        assert(
+            Number.isFinite(value),
+            `${path} contains a non-finite number`
+        );
+        return;
+    }
 
-    /*
-     * Final result validation prevents NaN from being serialized as null.
-     */
-    const serialized = JSON.stringify(result);
+    if (Array.isArray(value)) {
+        value.forEach((item, index) => {
+            assertNoNonFinite(item, `${path}[${index}]`);
+        });
+        return;
+    }
 
-    assert(
-        !serialized.includes('null'),
-        'Resolver produced null in its output; likely non-finite combat math'
-    );
+    if (value !== null && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value)) {
+            assertNoNonFinite(child, `${path}.${key}`);
+        }
+    }
+};
 
-    return result;
+assertNoNonFinite(result);
+return result;
+
 }
 
 function createFoe({ id, level, role }) {

@@ -1388,20 +1388,84 @@ function spawnNormalPack({
 }
 
 function spawnEncounter(test) {
+const ELITE_LEVELS = {
+    1: { mid: 4, high: 5 },
+    2: { mid: 8, high: 10 },
+    3: { mid: 13, high: 15 },
+    4: { mid: 18, high: 20 },
+    5: { mid: 23, high: 25 }
+};
+
+const BOSS_LEVELS = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25 };
+
+const PASSIVES = {
+    1: 'armor_sunder',
+    2: 'grave_chill',
+    3: 'withering_lethargy',
+    4: 'serrated_bleed'
+};
+
+function spawnEncounter(test) {
     const kind = test.encounterType || 'normal_pack';
 
-    assert(
-        kind === 'normal_pack',
-        `Unsupported encounter type: ${kind}`
-    );
+    if (kind === 'normal_pack') {
+        return spawnNormalPack({
+            zone: test.zone,
+            bracket: test.bracket || 'mid',
+            composition: test.composition || 2,
+            encounterId: test.encounterId || `normal-pack-z${test.zone}`
+        });
+    }
 
-    return spawnNormalPack({
-        zone: test.zone,
-        bracket: test.bracket || 'mid',
-        composition: test.composition || 2,
-        encounterId: test.encounterId
-            || `normal-pack-z${test.zone}`
-    });
+    assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
+    assert(kind === 'elite' || kind === 'boss',
+        `Unsupported encounter type: ${kind}`);
+    assert(Number.isInteger(test.passiveRoll) && PASSIVES[test.passiveRoll],
+        'Elite/boss spawn requires passiveRoll from 1 to 4');
+
+    let level;
+    if (kind === 'elite') {
+        const bracket = test.bracket || 'mid';
+        assert(bracket === 'mid' || bracket === 'high',
+            'Elite bracket must be mid or high');
+        level = ELITE_LEVELS[test.zone][bracket];
+    } else {
+        level = BOSS_LEVELS[test.zone];
+    }
+
+    const id = test.encounterId || `${kind}-z${test.zone}`;
+    const foe = createFoe({ id: `${id}-${kind}`, level, role: kind });
+    const rawStat = ZONES[test.zone].base + (kind === 'elite' ? 1 : 5);
+
+    return {
+        ok: true,
+        encounter: {
+            id,
+            status: 'active',
+            turn: 0,
+            zone: test.zone,
+            type: kind,
+            enemyTier: enemyTier(level),
+            foes: [foe],
+            passive: PASSIVES[test.passiveRoll],
+            passiveStacks: 0,
+            nextTelegraph: null,
+            used: { stun: false, icePatch: false },
+            hexStacks: {},
+            exposed: 0
+        },
+        rewards: {
+            baseKillXp: mobStats(level, kind).xpBase,
+            xpOnKillDependsOnCrewLevel: true,
+            guaranteedGear: {
+                rarity: kind === 'elite' ? 'uncommon' : 'epic',
+                rawStat,
+                pawnSilver: 2 * rawStat,
+                slotPending: true
+            },
+            bossTrophy: kind === 'boss'
+        }
+    };
 }
 
 function resolveBatch(args) {
@@ -1721,7 +1785,7 @@ function registerTools() {
 
                         encounterType: {
                             type: 'string',
-                            enum: ['normal_pack']
+                            enum: ['normal_pack', 'elite', 'boss']
                         },
 
                         bracket: {
@@ -1737,6 +1801,12 @@ function registerTools() {
 
                         encounterId: {
                             type: 'string'
+                            passiveRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 4
+},
+
                         },
 
                         mob: { type: 'object' },

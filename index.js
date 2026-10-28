@@ -702,6 +702,30 @@ function telegraphEffects(encounter) {
         }
     }[encounter.nextTelegraph] || null;
 }
+
+function currentHexPenaltyForState(state) {
+    const encounter = state.encounter;
+
+    return Object.entries(
+        encounter.hexStacks || {}
+    ).reduce((total, [id, stacks]) => {
+        const hexer = live(state).find(
+            foe =>
+                foe.id === id &&
+                foe.role === 'hexer'
+        );
+
+        if (!hexer) {
+            return total;
+        }
+
+        return total +
+            2 *
+            enemyTier(hexer.level) *
+            Number(stacks);
+    }, 0);
+}
+
 function resolveTurn({
     state,
     actions,
@@ -833,6 +857,195 @@ function resolveTurn({
     const kills = [];
     const startingCount = live(s).length;
     let weaselsDestroyed = 0;
+    /*
+     * Pure Fodder Blitz:
+     * A pure three-Brute pack can be resolved in one page when
+     * effective Crew ATK exceeds Brute DEF and Q'tik's net damage
+     * remains below 15% of her MaxHP.
+     */
+    let fodderBlitz = null;
+
+    const isPureFodder =
+        encounter.type === 'normal_pack' &&
+        encounter.composition === 1 &&
+        live(s).length > 0 &&
+        live(s).every(foe => foe.role === 'brute');
+
+    if (isPureFodder) {
+        const directed =
+            actions.tansy === 'visor' ||
+            actions.tansy === 'vitals' ||
+            actions.tansy === 'hamstring';
+
+        const blitzWeaselAttack =
+            actions.tansy === 'recall'
+                ? 0
+                : c.weasels.active *
+                    (directed ? 2 : 1);
+
+        const blitzAttack =
+            (
+                actions.tansy === 'recall'
+                    ? 2 * c.level
+                    : baseAndGearAttack + blitzWeaselAttack
+            ) -
+            currentHexPenaltyForState(s) -
+            passiveAttackPenalty(encounter);
+
+        const blitzTarget =
+            live(s).find(foe => foe.role === 'brute');
+
+        const blitzDefense =
+            blitzTarget?.def ?? 0;
+
+        const qDef =
+            crewStats.def +
+            (
+                actions.qtik === 'ice_melee'
+                    ? 2
+                    : 0
+            );
+
+        const liveBruteCount =
+            live(s).filter(
+                foe => foe.role === 'brute'
+            ).length;
+
+        const lead =
+            live(s).find(
+                foe => foe.role === 'brute'
+            );
+
+        const tier =
+            lead
+                ? enemyTier(lead.level)
+                : 1;
+
+        let singleBaseBleed = lead
+            ? Math.max(
+                1,
+                Math.round(
+                    (lead.atk - qDef) / 10
+                )
+            )
+            : 0;
+
+        if (actions.qtik === 'ice_melee') {
+            singleBaseBleed = Math.max(
+                1,
+                singleBaseBleed - 1
+            );
+        }
+
+        const packBaseBleed =
+            singleBaseBleed +
+            tier * Math.max(
+                0,
+                liveBruteCount - 1
+            );
+
+        const enemyDamage =
+            tape.enemy.reduce(
+                (total, enemyRoll) => {
+                    if (enemyRoll === 1) {
+                        return total;
+                    }
+
+                    const rollDamage =
+                        enemyRoll === 6
+                            ? 4
+                            : enemyRoll === 5
+                                ? 2
+                                : enemyRoll >= 3
+                                    ? 1
+                                    : 0;
+
+                    return total +
+                        packBaseBleed +
+                        rollDamage;
+                },
+                0
+            );
+
+        const blitzRegen =
+            crewStats.regen * 3;
+
+        const netDamage =
+            Math.max(
+                0,
+                enemyDamage - blitzRegen
+            );
+
+        const damageThreshold =
+            crewStats.qtikMaxHp * 0.15;
+
+        const eligible =
+            Number.isFinite(blitzAttack) &&
+            blitzAttack > blitzDefense &&
+            netDamage < damageThreshold;
+
+        if (eligible) {
+            const blitzKills =
+                live(s).map(foe => ({
+                    id: foe.id,
+                    level: foe.level,
+                    role: foe.role
+                }));
+
+            for (const foe of live(s)) {
+                foe.hp = 0;
+            }
+
+            kills.push(...blitzKills);
+
+            c.qtik.hp = Math.min(
+                crewStats.qtikMaxHp,
+                Math.max(
+                    0,
+                    c.qtik.hp - netDamage
+                )
+            );
+
+            fodderBlitz = {
+                active: true,
+                effectiveAttack: blitzAttack,
+                targetDefense: blitzDefense,
+                enemyDamage,
+                regeneration: blitzRegen,
+                netDamage,
+                threshold: damageThreshold,
+                foeCount: blitzKills.length
+            };
+
+            logs.push({
+                exchange: 'blitz',
+                fastForwarded: true,
+                playerRolls: tape.player,
+                enemyRolls: tape.enemy,
+                target: blitzTarget.id,
+                crit: false,
+                damage: null,
+                hits: blitzKills.map(kill => ({
+                    id: kill.id,
+                    damage: 'full_clear',
+                    hp: 0,
+                    overkillAfterHit: 0
+                })),
+                enemyMiss: null,
+                frontlineDamage: enemyDamage,
+                backlineDamage: 0,
+                effectiveRegen: crewStats.regen,
+                effects: [
+                    'Pure Fodder Blitz',
+                    `${blitzKills.length} Brutes cleared`,
+                    `Net Q'tik damage: ${netDamage}`
+                ],
+                qtikHp: c.qtik.hp,
+                tansyHp: c.tansy.hp,
+                livingFoes: []
+            });
+        }
+    }
 
     function lowestHpFoe() {
         // Stable sorting preserves encounter order for ties.
@@ -892,7 +1105,7 @@ function resolveTurn({
     }
 
     for (
-        let ex = 0;
+        let ex = fodderBlitz ? 3 : 0;
         ex < 3 &&
         live(s).length > 0 &&
         c.qtik.hp > 0 &&
@@ -1601,6 +1814,7 @@ function resolveTurn({
         turnEffects,
         weaselsDestroyed,
         momentum,
+        fodderBlitz,
         kills,
         rewards: {
             xp: encounterRewards.xp,

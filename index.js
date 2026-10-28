@@ -2398,6 +2398,14 @@ function spawnNormalPack({
         2 *
         zoneData.tier;
 
+    const lockedRewards = {
+        kind: 'normal_pack',
+        listedPackXp,
+        autoSalvage,
+        foeCount: foes.length,
+        resolved: false
+    };
+
     return {
         ok: true,
 
@@ -2417,16 +2425,17 @@ function spawnNormalPack({
             foes,
 
             /*
-             * These values are locked at spawn and must be used
-             * when the encounter is eventually cleared.
+             * These fields are deliberately null at spawn.
+             * They become locked only when the corresponding event
+             * actually occurs in the scene.
              */
-            rewards: {
-                kind: 'normal_pack',
-                listedPackXp,
-                autoSalvage,
-                foeCount: foes.length,
-                resolved: false
-            },
+            packDropRoll: null,
+            curiosityRoll: null,
+            rumorRoll: null,
+            lootSeed: null,
+            questSeed: null,
+
+            rewards: lockedRewards,
 
             used: {
                 stun: false,
@@ -2436,13 +2445,7 @@ function spawnNormalPack({
             exposed: 0
         },
 
-        rewards: {
-            kind: 'normal_pack',
-            listedPackXp,
-            autoSalvage,
-            foeCount: foes.length,
-            resolved: false
-        }
+        rewards: lockedRewards
     };
 }
 
@@ -2584,7 +2587,20 @@ function spawnEncounter(test) {
                 PASSIVES[test.passiveRoll],
             passiveStacks: 0,
             nextTelegraph: null,
+
+            /*
+             * These fields are deliberately null at spawn.
+             * Elite/Boss loot and trophies are selected only when
+             * the encounter is cleared.
+             */
+            packDropRoll: null,
+            curiosityRoll: null,
+            rumorRoll: null,
+            lootSeed: null,
+            questSeed: null,
+
             rewards: encounterRewards,
+
             used: {
                 stun: false,
                 icePatch: false

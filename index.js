@@ -602,6 +602,12 @@ function resolveTurn({
     );
 
     assert(
+        actions &&
+        typeof actions === 'object',
+        'Turn actions are required'
+    );
+
+    assert(
         [
             'fire_melee',
             'ice_melee',
@@ -625,7 +631,15 @@ function resolveTurn({
         `Unsupported Tansy action: ${actions.tansy}`
     );
 
-    assert(live(s).length > 0, 'No living foes');
+    assert(
+        typeof actions.target === 'string',
+        'A combat target is required'
+    );
+
+    assert(
+        live(s).length > 0,
+        'No living foes'
+    );
 
     const crewStats = {
         atk: Number(initial.atk),
@@ -650,7 +664,18 @@ function resolveTurn({
 
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
-    encounter.turn = Number(encounter.turn || 0) + 1;
+    encounter.passiveStacks =
+        Number(encounter.passiveStacks || 0);
+    encounter.turn =
+        Number(encounter.turn || 0) + 1;
+
+    /*
+     * A Stun cancels an already-primed Elite/Boss telegraph before
+     * Ex1. It still creates the normal next-turn telegraph after
+     * this turn if the encounter remains active.
+     */
+    let activeTelegraph =
+        telegraphEffects(encounter);
 
     if (actions.qtik === 'stun') {
         assert(
@@ -659,6 +684,8 @@ function resolveTurn({
         );
 
         encounter.used.stun = true;
+        encounter.nextTelegraph = null;
+        activeTelegraph = null;
     }
 
     if (actions.qtik === 'ice_patch') {
@@ -762,10 +789,10 @@ function resolveTurn({
             'Hex penalty is not finite'
         );
 
-        const passiveAttackPenaltyValue =
+        const attackPenalty =
             passiveAttackPenalty(encounter);
 
-        const passiveDefensePenaltyValue =
+        const defensePenalty =
             passiveDefensePenalty(encounter);
 
         const effectiveRegen =
@@ -783,10 +810,9 @@ function resolveTurn({
             actions.tansy === 'hamstring';
 
         /*
-         * Q'tik drinking does not affect the summons.
-         * Tansy drinking leaves summons undirected, so they still
-         * contribute +1 ATK each.
-         * Recall suppresses them completely.
+         * Q'tik drinking does not affect Tansy's summons.
+         * Tansy drinking leaves the summons undirected at +1 ATK each.
+         * Recall suppresses their attack entirely.
          */
         const weaselAttack =
             actions.tansy === 'recall'
@@ -815,14 +841,14 @@ function resolveTurn({
             baseAndGearAttack +
             weaselAttack -
             hexPenalty -
-            passiveAttackPenaltyValue
+            attackPenalty
         );
 
         const effectiveDefense = Math.max(
             0,
             crewStats.def -
             hexPenalty -
-            passiveDefensePenaltyValue +
+            defensePenalty +
             (
                 actions.qtik === 'ice_melee'
                     ? 2
@@ -886,30 +912,28 @@ function resolveTurn({
             encounter.exposed = 0;
         }
 
+        const telegraphDefenseBonus =
+            activeTelegraph &&
+            Number(activeTelegraph.defenseBonus || 0);
+
         let damage = 0;
         let hits = [];
         const playerEffects = [];
-
-        const strippedDefense =
-            actions.qtik === 'stun'
-                ? 4 * enemyTier(target.level)
-                : 0;
-
-        const effectiveTargetDefense = Math.max(
-            0,
-            target.def - strippedDefense
-        );
 
         if (actions.qtik === 'frost_stomp') {
             const liveTargets = [...live(s)];
 
             for (const foe of liveTargets) {
+                const foeDefense =
+                    foe.def +
+                    telegraphDefenseBonus;
+
                 const baseStomp = Math.max(
                     0,
                     Math.floor(
                         (
                             effectiveAttack -
-                            foe.def
+                            foeDefense
                         ) / 2
                     )
                 );
@@ -957,8 +981,13 @@ function resolveTurn({
                 if (foe.hp === 0) {
                     kills.push({
                         id: foe.id,
-                        xp: xpForKill(c.level, foe),
-                        silver: 2 * enemyTier(foe.level)
+                        xp: xpForKill(
+                            c.level,
+                            foe
+                        ),
+                        silver: 2 * enemyTier(
+                            foe.level
+                        )
                     });
                 }
             }
@@ -968,6 +997,18 @@ function resolveTurn({
                 0
             );
         } else {
+            const strippedDefense =
+                actions.qtik === 'stun'
+                    ? 4 * enemyTier(target.level)
+                    : 0;
+
+            const effectiveTargetDefense = Math.max(
+                0,
+                target.def +
+                telegraphDefenseBonus -
+                strippedDefense
+            );
+
             let physicalDamage;
 
             if (actions.qtik === 'drink') {
@@ -1068,12 +1109,24 @@ function resolveTurn({
 
         let frontlineDamage = 0;
         let backlineDamage = 0;
-        let passiveHealing = 0;
+        let enemyHitCount = 0;
         const effects = [...playerEffects];
+
+        /*
+         * Berserk's extra debuff stack applies to specialist
+         * on-hit debuffs. A Hexer therefore adds two stacks on
+         * a qualifying hit while Berserk is active.
+         */
+        const specialistDebuffStacks =
+            activeTelegraph &&
+            activeTelegraph.extraDebuffStacks
+                ? 2
+                : 1;
 
         if (!enemyMiss) {
             if (activeFrontliners.length > 0) {
-                const lead = activeFrontliners[0];
+                const lead =
+                    activeFrontliners[0];
 
                 let baseBleed = Math.max(
                     1,
@@ -1109,15 +1162,12 @@ function resolveTurn({
                         activeFrontliners.length - 1
                     );
 
-                const telegraph =
-                    telegraphEffects(encounter);
-
                 if (
-                    telegraph &&
-                    telegraph.bleedMultiplier
+                    activeTelegraph &&
+                    activeTelegraph.bleedMultiplier
                 ) {
                     baseBleed *=
-                        telegraph.bleedMultiplier;
+                        activeTelegraph.bleedMultiplier;
 
                     effects.push(
                         'Telegraph doubled Base Bleed'
@@ -1140,33 +1190,71 @@ function resolveTurn({
                     baseBleed +
                     rollDamage;
 
+                enemyHitCount += 1;
+
+                /*
+                 * Spiked Carapace reflects one loose melee
+                 * weasel per enemy exchange. Fire Melee and
+                 * Recall avoid the reflection.
+                 */
                 if (
-                    telegraph &&
-                    telegraph.destroysMeleeWeasel &&
+                    activeTelegraph &&
+                    activeTelegraph.reflectsMeleeWeasel &&
+                    e >= 2 &&
+                    actions.qtik !== 'fire_melee' &&
+                    actions.tansy !== 'recall'
+                ) {
+                    const reflected =
+                        Math.min(
+                            c.weasels.active,
+                            1
+                        );
+
+                    c.weasels.active -=
+                        reflected;
+
+                    if (reflected > 0) {
+                        effects.push(
+                            'Spiked Carapace slew ' +
+                            `${reflected} melee weasel`
+                        );
+                    }
+                }
+
+                /*
+                 * Sweeping Cleave destroys one loose melee
+                 * weasel and splashes 10% of Tansy's MaxHP.
+                 */
+                if (
+                    activeTelegraph &&
+                    activeTelegraph.destroysMeleeWeasel &&
                     e >= 2 &&
                     actions.tansy !== 'recall'
                 ) {
-                    const destroyed = Math.min(
-                        c.weasels.active,
-                        1
-                    );
+                    const destroyed =
+                        Math.min(
+                            c.weasels.active,
+                            1
+                        );
 
-                    c.weasels.active -= destroyed;
+                    c.weasels.active -=
+                        destroyed;
 
                     if (destroyed > 0) {
                         effects.push(
-                            `Sweeping Cleave destroyed ` +
+                            'Sweeping Cleave destroyed ' +
                             `${destroyed} melee weasel`
                         );
                     }
 
                     const splash = Math.ceil(
                         crewStats.tansyMaxHp *
-                        telegraph.tansySplashPercent /
+                        activeTelegraph.tansySplashPercent /
                         100
                     );
 
-                    backlineDamage += splash;
+                    backlineDamage +=
+                        splash;
 
                     effects.push(
                         `Sweeping Cleave dealt ${splash} ` +
@@ -1189,7 +1277,10 @@ function resolveTurn({
                                 : 1
                         );
 
-                    backlineDamage += amount;
+                    backlineDamage +=
+                        amount;
+
+                    enemyHitCount += 1;
 
                     effects.push(
                         `${foe.id} dealt ${amount} ` +
@@ -1226,10 +1317,11 @@ function resolveTurn({
                         })[0];
 
                     if (wounded) {
-                        const woundedStats = mobStats(
-                            wounded.level,
-                            wounded.role
-                        );
+                        const woundedStats =
+                            mobStats(
+                                wounded.level,
+                                wounded.role
+                            );
 
                         const amount = Math.min(
                             10 * foeTier,
@@ -1237,7 +1329,8 @@ function resolveTurn({
                             wounded.hp
                         );
 
-                        wounded.hp += amount;
+                        wounded.hp +=
+                            amount;
 
                         effects.push(
                             `${foe.id} healed ` +
@@ -1246,26 +1339,31 @@ function resolveTurn({
                     }
                 }
 
-                if (
-                    foe.role === 'hexer' &&
-                    !(
+                if (foe.role === 'hexer') {
+                    const blocked =
                         actions.tansy === 'visor' &&
                         e >= 2 &&
-                        e <= 4
-                    )
-                ) {
-                    encounter.hexStacks[foe.id] =
-                        (
-                            encounter.hexStacks[foe.id] || 0
-                        ) + 1;
+                        e <= 4;
 
-                    effects.push(
-                        `${foe.id} added one hex stack`
-                    );
+                    if (!blocked) {
+                        encounter.hexStacks[foe.id] =
+                            (
+                                encounter.hexStacks[foe.id] ||
+                                0
+                            ) +
+                            specialistDebuffStacks;
+
+                        effects.push(
+                            `${foe.id} added ` +
+                            `${specialistDebuffStacks} ` +
+                            'hex stack(s)'
+                        );
+                    }
                 }
 
                 if (foe.role === 'buffer') {
-                    encounter.bufferId = foe.id;
+                    encounter.bufferId =
+                        foe.id;
 
                     effects.push(
                         `${foe.id} activated its buffer`
@@ -1281,37 +1379,58 @@ function resolveTurn({
                 livingBuffer &&
                 activeFrontliners.length > 0
             ) {
-                frontlineDamage += enemyTier(
-                    livingBuffer.level
-                );
+                frontlineDamage +=
+                    enemyTier(
+                        livingBuffer.level
+                    );
             }
 
-            const telegraph =
-                telegraphEffects(encounter);
-
+            /*
+             * Aether-Drain heals once per enemy hit.
+             * The boss/elite is preferred as the healing target.
+             */
             if (
-                telegraph &&
-                telegraph.healPerHit
+                activeTelegraph &&
+                activeTelegraph.healPerHit &&
+                enemyHitCount > 0
             ) {
-                passiveHealing =
-                    telegraph.healPerHit;
+                const drainTarget =
+                    live(s).find(
+                        foe =>
+                            foe.role === 'elite' ||
+                            foe.role === 'boss'
+                    ) ||
+                    live(s)[0];
 
-                effects.push(
-                    `Aether-Drain restored ` +
-                    `${passiveHealing} enemy HP`
-                );
-            }
+                if (drainTarget) {
+                    const drainStats =
+                        mobStats(
+                            drainTarget.level,
+                            drainTarget.role
+                        );
 
-            if (
-                telegraph &&
-                telegraph.extraDebuffStacks
-            ) {
-                effects.push(
-                    'Berserk added one extra debuff stack'
-                );
+                    const healing =
+                        activeTelegraph.healPerHit *
+                        enemyHitCount;
+
+                    drainTarget.hp = Math.min(
+                        drainStats.maxHp,
+                        drainTarget.hp + healing
+                    );
+
+                    effects.push(
+                        `Aether-Drain restored ` +
+                        `${healing} enemy HP`
+                    );
+                }
             }
         }
 
+        /*
+         * Elite/Boss passive stacks are gained on successful
+         * enemy exchanges. Specialist debuffs have their own
+         * stack handling above.
+         */
         if (
             (
                 encounter.type === 'elite' ||
@@ -1320,8 +1439,11 @@ function resolveTurn({
             !enemyMiss &&
             encounter.passive
         ) {
-            encounter.passiveStacks =
-                Number(encounter.passiveStacks || 0) + 1;
+            encounter.passiveStacks +=
+                activeTelegraph &&
+                activeTelegraph.extraDebuffStacks
+                    ? 2
+                    : 1;
 
             effects.push(
                 `${encounter.passive} stack ` +
@@ -1361,28 +1483,13 @@ function resolveTurn({
             }
         }
 
-        if (passiveHealing > 0) {
-            const livingEnemy = live(s)[0];
-
-            if (livingEnemy) {
-                const stats = mobStats(
-                    livingEnemy.level,
-                    livingEnemy.role
-                );
-
-                livingEnemy.hp = Math.min(
-                    stats.maxHp,
-                    livingEnemy.hp + passiveHealing
-                );
-            }
-        }
-
         if (
             actions.tansy === 'visor' &&
             e === 1 &&
             live(s).length > 0
         ) {
-            encounter.exposed = crewStats.luk;
+            encounter.exposed =
+                crewStats.luk;
 
             effects.push(
                 `Target exposed for +${crewStats.luk} damage`
@@ -1430,19 +1537,27 @@ function resolveTurn({
             gainedXp
         );
 
-        c.purse += gainedSilver;
+        c.purse +=
+            gainedSilver;
     }
 
-    encounter.hexStacks = Object.fromEntries(
-        Object.entries(encounter.hexStacks)
-            .filter(([id]) =>
-                live(s).some(foe => foe.id === id)
+    encounter.hexStacks =
+        Object.fromEntries(
+            Object.entries(
+                encounter.hexStacks
+            ).filter(([id]) =>
+                live(s).some(
+                    foe => foe.id === id
+                )
             )
-    );
+        );
 
     if (live(s).length === 0) {
-        encounter.status = 'cleared';
-        encounter.nextTelegraph = null;
+        encounter.status =
+            'cleared';
+
+        encounter.nextTelegraph =
+            null;
     } else if (
         encounter.type === 'elite' ||
         encounter.type === 'boss'
@@ -1466,7 +1581,8 @@ function resolveTurn({
             );
     }
 
-    const finalStats = derived(c);
+    const finalStats =
+        derived(c);
 
     c.qtik.maxHp =
         finalStats.qtikMaxHp;
@@ -1490,7 +1606,8 @@ function resolveTurn({
         rewards: {
             xp: gainedXp,
             silver: gainedSilver,
-            applied: rewardMode === 'immediate'
+            applied:
+                rewardMode === 'immediate'
         },
         levelUps,
         packCleared:

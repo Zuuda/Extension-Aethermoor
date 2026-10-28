@@ -3157,26 +3157,11 @@ function resolveBatch(args) {
     };
 }
 const LOOT_RARITY_INFO = {
-    common: {
-        label: 'Common',
-        color: '#ffffff'
-    },
-    uncommon: {
-        label: 'Uncommon',
-        color: '#4ade80'
-    },
-    rare: {
-        label: 'Rare',
-        color: '#38bdf8'
-    },
-    epic: {
-        label: 'Epic',
-        color: '#c084fc'
-    },
-    legendary: {
-        label: 'Legendary',
-        color: '#fbbf24'
-    }
+    common:   { label: 'Common',   color: '#ffffff' },
+    uncommon: { label: 'Uncommon', color: '#4ade80' },
+    rare:     { label: 'Rare',     color: '#38bdf8' },
+    epic:     { label: 'Epic',     color: '#c084fc' },
+    legendary:{ label: 'Legendary',color: '#fbbf24' }
 };
 
 const ZONE_LOOT_MATERIALS = {
@@ -3187,113 +3172,70 @@ const ZONE_LOOT_MATERIALS = {
     5: 'Highgate Steel'
 };
 
-const LOOT_SLOT_TABLE = {
-    1: {
-        slot: 'weapon',
-        owner: 'tansy',
-        variant: null,
-        usable: true
-    },
-    2: {
-        slot: 'gloves',
-        owner: 'tansy',
-        variant: null,
-        usable: true
-    },
-    3: {
-        slot: 'chest',
-        owner: 'tansy',
-        variant: null,
-        usable: true
-    },
-    4: {
-        slot: 'trousers',
-        owner: 'tansy',
-        variant: null,
-        usable: true
-    },
-    5: {
-        slot: 'ring1',
-        owner: 'tansy',
-        variant: 'vitality',
-        usable: true
-    },
-    6: {
-        slot: 'ring1',
-        owner: 'tansy',
-        variant: 'luck',
-        usable: true
-    },
-    7: {
-        slot: 'neck',
-        owner: 'tansy',
-        variant: 'vitality',
-        usable: true
-    },
-    8: {
-        slot: 'boots',
-        owner: 'tansy',
-        variant: 'luck',
-        usable: true
-    },
-    9: {
-        slot: 'ring1',
-        owner: 'qtik',
-        variant: 'bulwark',
-        usable: true
-    },
-    10: {
-        slot: 'ring1',
-        owner: 'qtik',
-        variant: 'vitality',
-        usable: true
-    },
-    11: {
-        slot: 'amulet',
-        owner: 'qtik',
-        variant: 'bulwark',
-        usable: true
-    },
-    12: {
-        slot: 'wristCuffs',
-        owner: 'qtik',
-        variant: 'vitality',
-        usable: true
-    },
-    13: {
-        slot: 'heavy_plate',
+function usable(owner, slot, variant = null) {
+    return { owner, slot, variant, usable: true };
+}
+
+function restricted(slot, restriction) {
+    return {
         owner: null,
+        slot,
         variant: null,
         usable: false,
-        restriction: 'Off-Class Heavy Plate / Brigandine'
-    },
-    14: {
-        slot: 'great_weapon',
-        owner: null,
-        variant: null,
-        usable: false,
-        restriction: 'Off-Class 2H Greatsword / Halberd'
-    },
-    15: {
-        slot: 'shield',
-        owner: null,
-        variant: null,
-        usable: false,
-        restriction: 'Off-Class Tower Shield / Buckler'
-    },
-    16: {
-        slot: 'skill_tome',
-        owner: null,
-        variant: null,
-        usable: false,
-        restriction: 'Off-Class Martial / Mage Skill Tome'
-    }
-};
+        restriction
+    };
+}
+
+const OFF_CLASS_LOOT = [
+    restricted('heavy_plate', 'Off-Class Heavy Plate / Brigandine'),
+    restricted('great_weapon', 'Off-Class 2H Greatsword / Halberd'),
+    restricted('shield', 'Off-Class Tower Shield / Buckler'),
+    restricted(
+        'heavy_mail',
+        'Off-Class Heavy Mail Gauntlets / Greathelm'
+    ),
+    restricted(
+        'skill_tome',
+        'Off-Class Martial / Mage Skill Tome'
+    )
+];
+
+/*
+ * These are separate source tables. Keep their order aligned with
+ * the original SillyTavern random-option lists.
+ */
+const WILD_ELITE_LOOT_SLOTS = [
+    usable('tansy', 'weapon'),
+    usable('tansy', 'gloves'),
+    usable('tansy', 'chest'),
+    usable('tansy', 'trousers'),
+    usable('tansy', 'ring1', 'vitality'),
+    usable('tansy', 'ring1', 'luck'),
+    usable('tansy', 'neck', 'vitality'),
+    usable('tansy', 'boots', 'luck'),
+    usable('qtik', 'ring1', 'bulwark'),
+    usable('qtik', 'ring1', 'vitality'),
+    usable('qtik', 'amulet', 'bulwark'),
+    usable('qtik', 'wristCuffs', 'vitality'),
+    ...OFF_CLASS_LOOT
+];
+
+const BOSS_LOOT_SLOTS = [
+    usable('tansy', 'weapon'),
+    usable('tansy', 'gloves'),
+    usable('tansy', 'chest'),
+    usable('tansy', 'trousers'),
+    usable('tansy', 'ring1', 'vitality'),
+    usable('tansy', 'neck', 'luck'),
+    usable('qtik', 'ring1', 'bulwark'),
+    usable('qtik', 'amulet', 'vitality'),
+    usable('qtik', 'wristCuffs', 'bulwark'),
+    ...OFF_CLASS_LOOT
+];
 
 function lootRarityFromRoll(roll) {
-    int(roll, 'rarityRoll', 1);
     assert(
-        roll <= 6,
+        Number.isInteger(roll) && roll >= 1 && roll <= 6,
         'rarityRoll must be 1-6'
     );
 
@@ -3311,9 +3253,7 @@ function lootStatFromRarity(zone, rarity) {
     if (rarity === 'epic') return base + 5;
     if (rarity === 'legendary') return base + 8;
 
-    throw new Error(
-        `Unsupported loot rarity: ${rarity}`
-    );
+    throw new Error(`Unsupported loot rarity: ${rarity}`);
 }
 
 function lootBonus(owner, slot, variant, stat) {
@@ -3330,10 +3270,7 @@ function lootBonus(owner, slot, variant, stat) {
             result.crewAtk = stat * 2;
         } else if (slot === 'gloves') {
             result.crewAtk = stat;
-        } else if (
-            slot === 'chest' ||
-            slot === 'trousers'
-        ) {
+        } else if (slot === 'chest' || slot === 'trousers') {
             result.tansyMaxHp = stat * 5;
             result.crewLuk = 1;
         } else if (variant === 'vitality') {
@@ -3359,10 +3296,9 @@ function lootItemName(material, loot, stat) {
         return `${material} ${loot.restriction}`;
     }
 
-    const ownerName =
-        loot.owner === 'qtik'
-            ? "Q'tik"
-            : 'Tansy';
+    const ownerName = loot.owner === 'qtik'
+        ? "Q'tik"
+        : 'Tansy';
 
     const variantName = loot.variant
         ? ` ${loot.variant[0].toUpperCase()}${loot.variant.slice(1)}`
@@ -3380,73 +3316,43 @@ function lootItemName(material, loot, stat) {
         wristCuffs: 'Wrist Cuffs'
     };
 
-    const baseName =
-        slotNames[loot.slot] || loot.slot;
-
-    return `${ownerName} ${material}${variantName} ${baseName} (Stat ${stat})`;
+    return `${ownerName} ${material}${variantName} ` +
+        `${slotNames[loot.slot]} (Stat ${stat})`;
 }
 
 function resolveLootSeed(test) {
-    assert(
-        ZONES[test.zone],
-        `Unknown zone: ${test.zone}`
-    );
+    assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
 
     assert(
         ['wild', 'elite', 'boss'].includes(test.source),
         `Unsupported loot source: ${test.source}`
     );
 
+    const slots = test.source === 'boss'
+        ? BOSS_LOOT_SLOTS
+        : WILD_ELITE_LOOT_SLOTS;
+
     assert(
         Number.isInteger(test.slotRoll) &&
         test.slotRoll >= 1 &&
-        test.slotRoll <= 16,
-        'slotRoll must be 1-16'
+        test.slotRoll <= slots.length,
+        `slotRoll must be 1-${slots.length} for ${test.source}`
     );
 
-    const loot = LOOT_SLOT_TABLE[test.slotRoll];
-    const material =
-        ZONE_LOOT_MATERIALS[test.zone];
+    const loot = slots[test.slotRoll - 1];
 
-    let rarity;
+    const rarity = test.source === 'wild'
+        ? lootRarityFromRoll(test.rarityRoll)
+        : test.source === 'elite'
+            ? 'uncommon'
+            : 'epic';
 
-    if (test.source === 'wild') {
-        assert(
-            Number.isInteger(test.rarityRoll),
-            'Wild loot requires rarityRoll from 1 to 6'
-        );
-
-        rarity =
-            lootRarityFromRoll(test.rarityRoll);
-    } else if (test.source === 'elite') {
-        rarity = 'uncommon';
-    } else {
-        rarity = 'epic';
-    }
-
-    const rarityInfo =
-        LOOT_RARITY_INFO[rarity];
-
-    const rawStat =
-        test.source === 'elite'
-            ? ZONES[test.zone].base + 1
-            : test.source === 'boss'
-                ? ZONES[test.zone].base + 5
-                : lootStatFromRarity(
-                    test.zone,
-                    rarity
-                );
-
-    const bonus = lootBonus(
-        loot.owner,
-        loot.slot,
-        loot.variant,
-        rawStat
-    );
+    const rarityInfo = LOOT_RARITY_INFO[rarity];
+    const rawStat = lootStatFromRarity(test.zone, rarity);
 
     const item = {
         name: lootItemName(
-            material,
+            ZONE_LOOT_MATERIALS[test.zone],
             loot,
             rawStat
         ),
@@ -3459,29 +3365,29 @@ function resolveLootSeed(test) {
         rawStat,
         bound: false,
         sellValue: rawStat * 2,
-        bonus
+        bonus: lootBonus(
+            loot.owner,
+            loot.slot,
+            loot.variant,
+            rawStat
+        ),
+        classRestricted: !loot.usable,
+
+        // Any never-equipped gear is unbound and may be listed.
+        tradeStreamEligible: true
     };
 
     if (!loot.usable) {
-        item.classRestricted = true;
         item.restriction = loot.restriction;
-        item.tradeStreamEligible = true;
-        item.bonus = {
-            crewAtk: 0,
-            tansyMaxHp: 0,
-            qtikMaxHp: 0,
-            frontlineDef: 0,
-            crewLuk: 0
-        };
-    } else {
-        item.classRestricted = false;
-        item.tradeStreamEligible = false;
     }
 
-    return {
-        ok: true,
-        item
-    };
+    // The Trade-Stream values skill tomes using S=10. Their
+    // NPC pawn value still follows the raw-stat gear rule.
+    if (loot.slot === 'skill_tome') {
+        item.tradeStat = 10;
+    }
+
+    return { ok: true, item };
 }
 
 function registerTools() {
@@ -3636,7 +3542,7 @@ function registerTools() {
                                 }
                             },
 
-                                                        zone: {
+                            zone: {
                                 type: 'integer'
                             },
 
@@ -3648,7 +3554,7 @@ function registerTools() {
                             slotRoll: {
                                 type: 'integer',
                                 minimum: 1,
-                                maximum: 16
+                                maximum: 17
                             },
 
                             rarityRoll: {
@@ -3659,20 +3565,12 @@ function registerTools() {
 
                             encounterType: {
                                 type: 'string',
-                                enum: [
-                                    'normal_pack',
-                                    'elite',
-                                    'boss'
-                                ]
+                                enum: ['normal_pack', 'elite', 'boss']
                             },
 
                             bracket: {
                                 type: 'string',
-                                enum: [
-                                    'low',
-                                    'mid',
-                                    'high'
-                                ]
+                                enum: ['low', 'mid', 'high']
                             },
 
                             composition: {

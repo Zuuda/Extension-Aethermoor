@@ -3714,7 +3714,8 @@ function resolveTradeAction(test) {
 }
 function resolveVendorAction(test) {
     assert(
-        Number.isInteger(test.zone) && ZONES[test.zone],
+        Number.isInteger(test.zone) &&
+        ZONES[test.zone],
         `Unknown zone: ${test.zone}`
     );
 
@@ -3730,16 +3731,52 @@ function resolveVendorAction(test) {
         { owner: 'tansy', slot: 'chest', variants: [null] },
         { owner: 'tansy', slot: 'trousers', variants: [null] },
 
-        { owner: 'tansy', slot: 'headgear', variants: ['vitality', 'luck'] },
-        { owner: 'tansy', slot: 'boots', variants: ['vitality', 'luck'] },
-        { owner: 'tansy', slot: 'neck', variants: ['vitality', 'luck'] },
-        { owner: 'tansy', slot: 'ring1', variants: ['vitality', 'luck'] },
-        { owner: 'tansy', slot: 'ring2', variants: ['vitality', 'luck'] },
+        {
+            owner: 'tansy',
+            slot: 'headgear',
+            variants: ['vitality', 'luck']
+        },
+        {
+            owner: 'tansy',
+            slot: 'boots',
+            variants: ['vitality', 'luck']
+        },
+        {
+            owner: 'tansy',
+            slot: 'neck',
+            variants: ['vitality', 'luck']
+        },
+        {
+            owner: 'tansy',
+            slot: 'ring1',
+            variants: ['vitality', 'luck']
+        },
+        {
+            owner: 'tansy',
+            slot: 'ring2',
+            variants: ['vitality', 'luck']
+        },
 
-        { owner: 'qtik', slot: 'ring1', variants: ['bulwark', 'vitality'] },
-        { owner: 'qtik', slot: 'ring2', variants: ['bulwark', 'vitality'] },
-        { owner: 'qtik', slot: 'amulet', variants: ['bulwark', 'vitality'] },
-        { owner: 'qtik', slot: 'wristCuffs', variants: ['bulwark', 'vitality'] }
+        {
+            owner: 'qtik',
+            slot: 'ring1',
+            variants: ['bulwark', 'vitality']
+        },
+        {
+            owner: 'qtik',
+            slot: 'ring2',
+            variants: ['bulwark', 'vitality']
+        },
+        {
+            owner: 'qtik',
+            slot: 'amulet',
+            variants: ['bulwark', 'vitality']
+        },
+        {
+            owner: 'qtik',
+            slot: 'wristCuffs',
+            variants: ['bulwark', 'vitality']
+        }
     ];
 
     const slotNames = {
@@ -3756,42 +3793,56 @@ function resolveVendorAction(test) {
         wristCuffs: 'Wrist Cuffs'
     };
 
-    const variantTitle = variant =>
-        variant
-            ? `${variant[0].toUpperCase()}${variant.slice(1)}`
-            : null;
+    const variantTitle = variant => {
+        if (!variant) return null;
+
+        return (
+            variant[0].toUpperCase() +
+            variant.slice(1)
+        );
+    };
 
     if (test.action === 'stock') {
         const state = test.state || {};
         const gear = state.crew?.gear || {};
 
-        const catalog = definitions.map((definition, index) => {
-            const equipped =
-                gear[definition.owner]?.[definition.slot];
+        const catalog = definitions.map(
+            (definition, index) => {
+                const equipped =
+                    gear[definition.owner]?.[definition.slot];
 
-            const equippedStat =
-                Number(equipped?.stat || 0);
+                const equippedStat =
+                    Number(equipped?.stat || 0);
 
-            return {
-                number: index + 1,
-                owner: definition.owner,
-                slot: definition.slot,
-                equippedStat,
-                upgradeable: equippedStat < stat,
-                price,
-                stat,
-                variants: definition.variants.map(variant => ({
-                    variant,
-                    label: variantTitle(variant),
-                    bonus: lootBonus(
-                        definition.owner,
-                        definition.slot,
-                        variant,
-                        stat
+                const upgradeable =
+                    equippedStat < stat;
+
+                return {
+                    number: index + 1,
+                    owner: definition.owner,
+                    slot: definition.slot,
+                    slotName: slotNames[definition.slot],
+                    equippedStat,
+                    stat,
+                    price,
+                    pawnValue,
+                    upgradeable,
+                    skip: !upgradeable,
+                    variants: definition.variants.map(
+                        variant => ({
+                            variant,
+                            label: variantTitle(variant),
+                            bonus: lootBonus(
+                                definition.owner,
+                                definition.slot,
+                                variant,
+                                stat
+                            )
+                        })
                     )
-                }))
-            };
-        });
+                };
+            }
+        );
 
         return {
             ok: true,
@@ -3801,6 +3852,17 @@ function resolveVendorAction(test) {
             stat,
             price,
             pawnValue,
+            upgradeableSlots: catalog
+                .filter(entry => entry.upgradeable)
+                .map(entry => entry.number),
+            skipSlots: catalog
+                .filter(entry => entry.skip)
+                .map(entry => ({
+                    number: entry.number,
+                    owner: entry.owner,
+                    slot: entry.slot,
+                    equippedStat: entry.equippedStat
+                })),
             catalog
         };
     }
@@ -3852,6 +3914,18 @@ function resolveVendorAction(test) {
     assert(
         definition,
         `Invalid ${test.owner} vendor slot: ${test.slot}`
+    );
+
+    const equipped =
+        state.crew.gear[test.owner]?.[test.slot];
+
+    const equippedStat =
+        Number(equipped?.stat || 0);
+
+    assert(
+        equippedStat < stat,
+        `${test.owner} ${test.slot} already meets ` +
+        `the Zone ${zone} vendor floor of Stat ${stat}`
     );
 
     const variant =

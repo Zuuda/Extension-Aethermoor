@@ -1376,10 +1376,7 @@ function resolveTurn({
 
     /*
      * Swarm Momentum occurs once after a completed three-exchange
-     * turn, provided the encounter and both characters survive.
-     *
-     * The quota uses the active count BEFORE reformation.
-     * Missing weasels from earlier turns can also reform.
+     * turn. Only weasels destroyed during this turn can reform.
      */
     let momentum = null;
 
@@ -1390,16 +1387,20 @@ function resolveTurn({
         c.tansy.hp > 0
     ) {
         const activeBefore = c.weasels.active;
-        const quota = 1 + Math.floor(activeBefore / 4);
+        const quota =
+            1 + Math.floor(activeBefore / 4);
+
         const restored = Math.min(
-            maxWeasels - activeBefore,
-            quota
+            weaselsDestroyed,
+            quota,
+            maxWeasels - activeBefore
         );
 
         c.weasels.active += restored;
 
         momentum = {
             activeBefore,
+            destroyedThisTurn: weaselsDestroyed,
             quota,
             restored,
             activeAfter: c.weasels.active,

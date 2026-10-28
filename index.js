@@ -721,13 +721,27 @@ function dealDamage(state, target, amount, kills) {
     return hits;
 }
 
-function finalizeEncounterRewards(state, slainIds) {
+function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
     const encounter = state.encounter;
     const crew = state.crew;
 
     assert(
         encounter && encounter.rewards,
         'Encounter has no locked reward data'
+    );
+
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+    state.inventory.activeTradeListings ||= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves),
+        'inventory.bagReserves must be an array'
+    );
+
+    assert(
+        Array.isArray(state.inventory.activeTradeListings),
+        'inventory.activeTradeListings must be an array'
     );
 
     if (live(state).length > 0) {
@@ -746,6 +760,11 @@ function finalizeEncounterRewards(state, slainIds) {
         'Encounter rewards have already been resolved'
     );
 
+    const slain = new Set(slainIds);
+    const slainFoes = encounter.foes.filter(
+        foe => slain.has(foe.id)
+    );
+
     let xp = 0;
     let silver = 0;
     const loot = [];
@@ -759,6 +778,7 @@ function finalizeEncounterRewards(state, slainIds) {
             Number.isInteger(xp) && xp >= 0,
             'Locked normal-pack XP is invalid'
         );
+
         assert(
             Number.isInteger(silver) && silver >= 0,
             'Locked normal-pack salvage is invalid'
@@ -767,35 +787,42 @@ function finalizeEncounterRewards(state, slainIds) {
         encounter.type === 'elite' ||
         encounter.type === 'boss'
     ) {
-        const slain = new Set(slainIds);
-        const slainFoes = encounter.foes.filter(
-            foe => slain.has(foe.id)
-        );
-
         assert(
             slainFoes.length === 1,
             'Elite/Boss clear requires its slain foe'
         );
 
         xp = xpForKill(crew.level, slainFoes[0]);
-        silver = 0;
 
-        const gear = encounter.rewards.guaranteedGear;
+        const guaranteedGear =
+            encounter.rewards.guaranteedGear;
+
         assert(
-            gear &&
-            Number.isInteger(gear.rawStat) &&
-            Number.isInteger(gear.pawnSilver),
+            guaranteedGear &&
+            Number.isInteger(guaranteedGear.rawStat),
             'Elite/Boss guaranteed gear is missing'
         );
 
-        loot.push({
-            kind: 'guaranteed_gear_pending_slot',
-            rarity: gear.rarity,
-            rawStat: gear.rawStat,
-            pawnSilver: gear.pawnSilver,
-            bound: false,
-            slotPending: true
+        const generated = resolveLootSeed({
+            zone: encounter.zone,
+            source: encounter.type,
+            slotRoll: lootRolls.slotRoll
         });
+
+        const item = {
+            ...generated.item,
+            acquiredFrom: encounter.type,
+            acquiredAtEncounter: encounter.id,
+            bound: false
+        };
+
+        assert(
+            item.rawStat === guaranteedGear.rawStat,
+            'Generated Elite/Boss gear stat does not match locked reward'
+        );
+
+        state.inventory.bagReserves.push(item);
+        loot.push(item);
 
         if (
             encounter.type === 'boss' &&
@@ -811,6 +838,40 @@ function finalizeEncounterRewards(state, slainIds) {
         throw new Error(
             `Unsupported encounter reward type: ${encounter.type}`
         );
+    }
+
+    /*
+     * Normal-pack Wild or Curiosity loot is resolved only if its seed
+     * was already locked when the scene event happened.
+     */
+    if (
+        encounter.type === 'normal_pack' &&
+        encounter.lootSeed
+    ) {
+        const seed = encounter.lootSeed;
+
+        assert(
+            seed.result === 'wild_equipment_drop' ||
+            seed.result === 'hidden_loot_stash',
+            `Unsupported locked loot seed: ${seed.result}`
+        );
+
+        const generated = resolveLootSeed({
+            zone: encounter.zone,
+            source: 'wild',
+            slotRoll: lootRolls.slotRoll,
+            rarityRoll: lootRolls.rarityRoll
+        });
+
+        const item = {
+            ...generated.item,
+            acquiredFrom: seed.source,
+            acquiredAtEncounter: encounter.id,
+            bound: false
+        };
+
+        state.inventory.bagReserves.push(item);
+        loot.push(item);
     }
 
     encounter.status = 'cleared';
@@ -1119,7 +1180,10 @@ function resolveTurn({
     rolls,
     rewardMode = 'immediate'
 }) {
-    const s = clone(state);
+   const s = clone(state);
+    s.inventory ||= {};
+    s.inventory.bagReserves ||= [];
+    s.inventory.activeTradeListings ||= [];
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
@@ -2130,8 +2194,13 @@ function resolveTurn({
 
     const encounterRewards = finalizeEncounterRewards(
         s,
-        kills.map(kill => kill.id)
-    );
+        kills.map(kill => kill.id),
+        {
+            slotRoll: rolls?.lootSlotRoll,
+            rarityRoll: rolls?.lootRarityRoll
+        }
+);
+
 
     let levelUps = [];
 
@@ -3473,6 +3542,16 @@ function registerTools() {
                             type: 'integer',
                             minimum: 1,
                             maximum: 4
+                        },
+                        lootSlotRoll: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 17
+                        },
+                        lootRarityRoll: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 6
                         }
                     }
                 },

@@ -1387,7 +1387,6 @@ function spawnNormalPack({
     };
 }
 
-function spawnEncounter(test) {
 const ELITE_LEVELS = {
     1: { mid: 4, high: 5 },
     2: { mid: 8, high: 10 },

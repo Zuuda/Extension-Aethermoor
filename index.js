@@ -677,7 +677,6 @@ function telegraphEffects(encounter) {
         }
     }[encounter.nextTelegraph] || null;
 }
-
 function resolveTurn({
     state,
     actions,
@@ -693,45 +692,32 @@ function resolveTurn({
         ['immediate', 'deferred'].includes(rewardMode),
         'rewardMode must be immediate or deferred'
     );
-
     assert(
-        actions &&
-        typeof actions === 'object',
+        actions && typeof actions === 'object',
         'Turn actions are required'
     );
-
     assert(
         [
-            'fire_melee',
-            'ice_melee',
-            'stun',
-            'ice_patch',
-            'frost_stomp',
-            'drink'
+            'fire_melee', 'ice_melee', 'stun',
+            'ice_patch', 'frost_stomp', 'drink'
         ].includes(actions.qtik),
         `Unsupported Q'tik action: ${actions.qtik}`
     );
-
     assert(
         [
-            'visor',
-            'vitals',
-            'hamstring',
-            'recall',
-            'surge',
-            'drink'
+            'visor', 'vitals', 'hamstring',
+            'recall', 'surge', 'drink'
         ].includes(actions.tansy),
         `Unsupported Tansy action: ${actions.tansy}`
     );
-
     assert(
         typeof actions.target === 'string',
         'A combat target is required'
     );
-
+    assert(live(s).length > 0, 'No living foes');
     assert(
-        live(s).length > 0,
-        'No living foes'
+        live(s).some(foe => foe.id === actions.target),
+        `Target ${actions.target} is not alive`
     );
 
     const crewStats = {
@@ -750,33 +736,35 @@ function resolveTurn({
         );
     }
 
-    encounter.used ||= {
-        stun: false,
-        icePatch: false
-    };
+    const maxWeasels = 2 + 2 * Math.floor(c.level / 2);
+    c.weasels.max = maxWeasels;
 
+    const baseAndGearAttack =
+        crewStats.atk - 2 * state.crew.weasels.active;
+
+    encounter.used ||= { stun: false, icePatch: false };
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
-    encounter.passiveStacks =
-        Number(encounter.passiveStacks || 0);
-    encounter.turn =
-        Number(encounter.turn || 0) + 1;
+    encounter.passiveStacks = Number(encounter.passiveStacks || 0);
+    encounter.turn = Number(encounter.turn || 0) + 1;
 
-    /*
-     * A Stun cancels an already-primed Elite/Boss telegraph before
-     * Ex1. It still creates the normal next-turn telegraph after
-     * this turn if the encounter remains active.
-     */
-    let activeTelegraph =
-        telegraphEffects(encounter);
+    const previousTelegraph = encounter.nextTelegraph;
+    let activeTelegraph = telegraphEffects(encounter);
+    const turnEffects = [];
 
     if (actions.qtik === 'stun') {
         assert(
             !encounter.used.stun,
             'Stun has already been used this fight'
         );
-
         encounter.used.stun = true;
+
+        if (activeTelegraph) {
+            turnEffects.push(
+                `Stun cancelled ${telegraphLabel(previousTelegraph)}`
+            );
+        }
+
         encounter.nextTelegraph = null;
         activeTelegraph = null;
     }
@@ -786,7 +774,6 @@ function resolveTurn({
             !encounter.used.icePatch,
             'Ice Patch has already been used this fight'
         );
-
         encounter.used.icePatch = true;
     }
 
@@ -797,38 +784,87 @@ function resolveTurn({
             typeof actions.qtikItem === 'string',
             "Q'tik drink action requires actions.qtikItem"
         );
-
         itemUse.qtik = applyBeltItem(
-            s,
-            actions.qtikItem,
-            'qtik'
+            s, actions.qtikItem, 'qtik'
         );
     }
 
     if (actions.tansy === 'drink') {
         assert(
             typeof actions.tansyItem === 'string',
-            "Tansy drink action requires actions.tansyItem"
+            'Tansy drink action requires actions.tansyItem'
         );
-
         itemUse.tansy = applyBeltItem(
-            s,
-            actions.tansyItem,
-            'tansy'
+            s, actions.tansyItem, 'tansy'
         );
     }
 
     if (actions.tansy === 'surge') {
-        c.weasels.active = Math.min(
-            c.weasels.max,
-            2 + 2 * Math.floor(c.level / 2)
-        );
+        c.weasels.active = maxWeasels;
     }
 
     const tape = checkTape(s, rolls);
     const logs = [];
     const kills = [];
     const startingCount = live(s).length;
+    let weaselsDestroyed = 0;
+
+    function lowestHpFoe() {
+        // Stable sorting preserves encounter order for ties.
+        return [...live(s)].sort((a, b) => a.hp - b.hp)[0];
+    }
+
+    function currentHexPenalty() {
+        return Object.entries(encounter.hexStacks)
+            .reduce((total, [id, stacks]) => {
+                const hexer = live(s).find(
+                    foe => foe.id === id && foe.role === 'hexer'
+                );
+                return total + (
+                    hexer
+                        ? 2 * enemyTier(hexer.level) * Number(stacks)
+                        : 0
+                );
+            }, 0);
+    }
+
+    function currentBuffer() {
+        return live(s).find(
+            foe =>
+                foe.id === encounter.bufferId &&
+                foe.role === 'buffer'
+        );
+    }
+
+    function enemyDefense(foe) {
+        const buffer = currentBuffer();
+        const bufferBonus = buffer
+            ? 3 * enemyTier(buffer.level)
+            : 0;
+
+        const telegraphBonus = activeTelegraph
+            ? Number(activeTelegraph.defenseBonus || 0)
+            : 0;
+
+        const stunReduction = actions.qtik === 'stun'
+            ? 4 * enemyTier(foe.level)
+            : 0;
+
+        return Math.max(
+            0,
+            foe.def + bufferBonus + telegraphBonus - stunReduction
+        );
+    }
+
+    function destroyWeasel(effects, cause) {
+        const destroyed = Math.min(c.weasels.active, 1);
+        c.weasels.active -= destroyed;
+        weaselsDestroyed += destroyed;
+
+        if (destroyed > 0) {
+            effects.push(`${cause} destroyed 1 melee weasel`);
+        }
+    }
 
     for (
         let ex = 0;
@@ -840,126 +876,65 @@ function resolveTurn({
     ) {
         const p = tape.player[ex];
         const e = tape.enemy[ex];
+        const effects = [];
 
-        const patchActive =
-            actions.qtik === 'ice_patch';
-
-        const hamstringActive =
-            actions.tansy === 'hamstring';
+        const patchActive = actions.qtik === 'ice_patch';
+        const hamstringActive = actions.tansy === 'hamstring';
 
         const missLimit = patchActive
-            ? hamstringActive ? 4 : 3
-            : hamstringActive ? 2 : 1;
+            ? (hamstringActive ? 4 : 3)
+            : (hamstringActive ? 2 : 1);
 
         const enemyMiss =
             e <= missLimit ||
-            (
-                actions.qtik === 'stun' &&
-                ex === 0
-            );
+            (actions.qtik === 'stun' && ex === 0);
 
-        const hexPenalty = Object.entries(
-            encounter.hexStacks
-        ).reduce((total, [id, stacks]) => {
-            const hexer = live(s).find(
-                foe =>
-                    foe.id === id &&
-                    foe.role === 'hexer'
-            );
+        const hexPenalty = currentHexPenalty();
 
-            if (!hexer) {
-                return total;
-            }
-
-            return total +
-                2 *
-                enemyTier(hexer.level) *
-                Number(stacks);
-        }, 0);
-
-        assert(
-            Number.isFinite(hexPenalty),
-            'Hex penalty is not finite'
-        );
-
-        const attackPenalty =
-            passiveAttackPenalty(encounter);
-
-        const defensePenalty =
-            passiveDefensePenalty(encounter);
-
-        const effectiveRegen =
-            crewStats.regen -
-            passiveRegenPenalty(encounter);
-
-        assert(
-            Number.isFinite(effectiveRegen),
-            'Effective regeneration is not finite'
-        );
-
-        const directed =
-            actions.tansy === 'visor' ||
-            actions.tansy === 'vitals' ||
-            actions.tansy === 'hamstring';
+        const directed = [
+            'visor', 'vitals', 'hamstring'
+        ].includes(actions.tansy);
 
         /*
-         * Q'tik drinking does not affect Tansy's summons.
-         * Tansy drinking leaves the summons undirected at +1 ATK each.
-         * Recall suppresses their attack entirely.
+         * Tansy's action controls summons.
+         * Q'tik drinking has no effect on their contribution.
          */
-        const weaselAttack =
-            actions.tansy === 'recall'
-                ? 0
-                : c.weasels.active *
-                    (
-                        directed && !patchActive
-                            ? 2
-                            : 1
-                    );
+        const weaselAttack = actions.tansy === 'recall'
+            ? 0
+            : c.weasels.active *
+                (directed && !patchActive ? 2 : 1);
 
-        const initialWeaselAttack =
-            Number(state.crew.weasels.active);
-
-        assert(
-            Number.isFinite(initialWeaselAttack),
-            'Initial weasel count is not finite'
-        );
-
-        const baseAndGearAttack =
-            crewStats.atk -
-            2 * initialWeaselAttack;
+        const unpenalizedAttack = actions.tansy === 'recall'
+            ? 2 * c.level
+            : baseAndGearAttack + weaselAttack;
 
         const effectiveAttack = Math.max(
             0,
-            baseAndGearAttack +
-            weaselAttack -
+            unpenalizedAttack -
             hexPenalty -
-            attackPenalty
+            passiveAttackPenalty(encounter)
         );
 
         const effectiveDefense = Math.max(
             0,
             crewStats.def -
             hexPenalty -
-            defensePenalty +
-            (
-                actions.qtik === 'ice_melee'
-                    ? 2
-                    : 0
-            )
-        );
-
-        const brute = live(s).find(
-            foe => foe.role === 'brute'
+            passiveDefensePenalty(encounter) +
+            (actions.qtik === 'ice_melee' ? 2 : 0)
         );
 
         let target = live(s).find(
             foe => foe.id === actions.target
         );
 
-        assert(
-            target,
-            `Target ${actions.target} is not alive`
+        // Once the declared target dies, continue against lowest HP.
+        if (!target) {
+            target = lowestHpFoe();
+            effects.push(`Retargeted to ${target.id}`);
+        }
+
+        const brute = live(s).find(
+            foe => foe.role === 'brute'
         );
 
         if (
@@ -969,203 +944,137 @@ function resolveTurn({
             actions.tansy !== 'visor' &&
             actions.qtik !== 'frost_stomp'
         ) {
+            effects.push(`${brute.id} intercepted with Guard`);
             target = brute;
         }
 
-        const fireDamage =
-            actions.qtik === 'fire_melee'
-                ? Math.max(
-                    3,
-                    Math.floor(crewStats.atk / 5)
-                )
-                : 0;
+        /*
+         * Fire uses current action/summon contribution before
+         * ATK debuffs. Withering and Hexer penalties cannot reduce it.
+         */
+        const fireDamage = actions.qtik === 'fire_melee'
+            ? Math.max(3, Math.floor(unpenalizedAttack / 5))
+            : 0;
 
         const isCritical =
             p === 6 ||
-            (
-                actions.tansy === 'vitals' &&
-                p === 5
-            );
+            (actions.tansy === 'vitals' && p === 5);
+
+        const targetDefense = enemyDefense(target);
 
         const vitalsBonus =
             actions.tansy === 'vitals' &&
-            !isCritical &&
-            p >= 2 &&
-            p <= 4
+            p >= 2 && p <= 4
                 ? Math.min(
-                    target.def,
+                    targetDefense,
                     Math.floor(c.weasels.active / 2)
                 )
                 : 0;
 
-        const exposedBonus =
-            Number(encounter.exposed || 0);
+        /*
+         * A miss does not consume Exposed.
+         * The bonus is spent on the next successful physical hit.
+         */
+        const exposedBonus = p === 1
+            ? 0
+            : encounter.exposed;
 
         if (p !== 1) {
             encounter.exposed = 0;
         }
 
-        const telegraphDefenseBonus =
-            activeTelegraph &&
-            Number(activeTelegraph.defenseBonus || 0);
-
         let damage = 0;
         let hits = [];
-        const playerEffects = [];
 
         if (actions.qtik === 'frost_stomp') {
-            const liveTargets = [...live(s)];
-
-            for (const foe of liveTargets) {
-                const foeDefense =
-                    foe.def +
-                    telegraphDefenseBonus;
-
+            for (const foe of [...live(s)]) {
                 const baseStomp = Math.max(
                     0,
                     Math.floor(
-                        (
-                            effectiveAttack -
-                            foeDefense
-                        ) / 2
+                        (effectiveAttack - enemyDefense(foe)) / 2
                     )
                 );
 
-                let stompDamage =
-                    p === 1
-                        ? Math.max(
-                            1,
-                            Math.floor(baseStomp / 2)
-                        )
-                        : baseStomp + p;
+                let amount = p === 1
+                    ? Math.max(1, Math.floor(baseStomp / 2))
+                    : baseStomp + p;
 
-                if (foe.id === target.id) {
-                    stompDamage += isCritical
-                        ? crewStats.luk
-                        : vitalsBonus;
-
-                    stompDamage += exposedBonus;
+                if (foe.id === target.id && p !== 1) {
+                    amount += (
+                        isCritical ? crewStats.luk : vitalsBonus
+                    ) + exposedBonus;
                 }
 
-                stompDamage = Math.max(
-                    1,
-                    Number(stompDamage)
-                );
-
                 assert(
-                    Number.isFinite(stompDamage),
-                    `Frost Stomp damage is not finite against ${foe.id}`
+                    Number.isFinite(amount),
+                    `Frost Stomp damage is invalid against ${foe.id}`
                 );
 
-                const applied = Math.min(
-                    foe.hp,
-                    stompDamage
-                );
-
+                const applied = Math.min(foe.hp, amount);
                 foe.hp -= applied;
 
                 hits.push({
                     id: foe.id,
                     damage: applied,
                     hp: foe.hp,
-                    overkillAfterHit: 0
+                    // AoE overflow is not transferred in this version.
+                    overkillAfterHit: amount - applied
                 });
 
                 if (foe.hp === 0) {
                     kills.push({
                         id: foe.id,
-                        xp: xpForKill(
-                            c.level,
-                            foe
-                        ),
-                        silver: 2 * enemyTier(
-                            foe.level
-                        )
+                        level: foe.level,
+                        role: foe.role
                     });
                 }
             }
 
             damage = hits.reduce(
-                (sum, hit) => sum + hit.damage,
-                0
+                (sum, hit) => sum + hit.damage, 0
             );
         } else {
-            const strippedDefense =
-                actions.qtik === 'stun'
-                    ? 4 * enemyTier(target.level)
-                    : 0;
+            /*
+             * Drinking removes Fire/Ice bonuses, not ordinary
+             * attack rolls, criticals, or Tansy's active command.
+             */
+            const physicalDamage = p === 1
+                ? 1
+                : isCritical
+                    ? Math.max(
+                        6 + crewStats.luk,
+                        effectiveAttack -
+                        targetDefense +
+                        6 + crewStats.luk
+                    )
+                    : Math.max(
+                        1,
+                        effectiveAttack -
+                        targetDefense +
+                        p + vitalsBonus
+                    );
 
-            const effectiveTargetDefense = Math.max(
-                0,
-                target.def +
-                telegraphDefenseBonus -
-                strippedDefense
-            );
-
-            let physicalDamage;
-
-            if (actions.qtik === 'drink') {
-                physicalDamage =
-                    p === 1
-                        ? 1
-                        : Math.max(
-                            1,
-                            effectiveAttack -
-                            effectiveTargetDefense +
-                            p
-                        );
-            } else if (actions.tansy === 'recall') {
-                physicalDamage =
-                    p === 1
-                        ? 1
-                        : Math.max(
-                            1,
-                            2 * c.level + p
-                        );
-            } else if (p === 1) {
-                physicalDamage = 1;
-            } else if (isCritical) {
-                physicalDamage = Math.max(
-                    6 + crewStats.luk,
-                    effectiveAttack -
-                    effectiveTargetDefense +
-                    6 +
-                    crewStats.luk
-                );
-            } else {
-                physicalDamage = Math.max(
-                    1,
-                    effectiveAttack -
-                    effectiveTargetDefense +
-                    p +
-                    vitalsBonus
-                );
-            }
-
-            damage =
-                Number(physicalDamage) +
-                Number(fireDamage) +
-                Number(exposedBonus);
+            damage = physicalDamage + fireDamage + exposedBonus;
 
             assert(
                 Number.isFinite(damage),
-                [
-                    'Player damage is not finite',
-                    `physical=${physicalDamage}`,
-                    `fire=${fireDamage}`,
-                    `exposed=${exposedBonus}`,
-                    `attack=${effectiveAttack}`,
-                    `targetDef=${effectiveTargetDefense}`,
-                    `luk=${crewStats.luk}`
-                ].join(' | ')
+                'Player damage is not finite'
             );
 
-            hits = dealDamage(
-                s,
-                target,
-                damage,
-                kills
-            );
+            hits = dealDamage(s, target, damage, kills);
+        }
+
+        /*
+         * Thorns reflects on melee participation each exchange,
+         * including an enemy miss. Fire Melee and Recall avoid it.
+         */
+        if (
+            activeTelegraph?.reflectsMeleeWeasel &&
+            actions.qtik !== 'fire_melee' &&
+            actions.tansy !== 'recall' &&
+            live(s).length > 0
+        ) {
+            destroyWeasel(effects, 'Spiked Carapace');
         }
 
         if (live(s).length === 0) {
@@ -1181,409 +1090,264 @@ function resolveTurn({
                 frontlineDamage: 0,
                 backlineDamage: 0,
                 effects: [
-                    ...playerEffects,
+                    ...effects,
                     'Final foe slain before enemy response'
                 ],
                 qtikHp: c.qtik.hp,
                 tansyHp: c.tansy.hp,
                 livingFoes: []
             });
-
             break;
         }
 
-        const activeFrontliners = live(s).filter(
-            foe => [
-                'brute',
-                'elite',
-                'boss'
-            ].includes(foe.role)
+        const frontliners = live(s).filter(
+            foe => ['brute', 'elite', 'boss'].includes(foe.role)
+        );
+
+        const bruteAlive = live(s).some(
+            foe => foe.role === 'brute'
         );
 
         let frontlineDamage = 0;
         let backlineDamage = 0;
         let enemyHitCount = 0;
-        const effects = [...playerEffects];
-
-        /*
-         * Berserk's extra debuff stack applies to specialist
-         * on-hit debuffs. A Hexer therefore adds two stacks on
-         * a qualifying hit while Berserk is active.
-         */
-        const specialistDebuffStacks =
-            activeTelegraph &&
-            activeTelegraph.extraDebuffStacks
-                ? 2
-                : 1;
 
         if (!enemyMiss) {
-            if (activeFrontliners.length > 0) {
-                const lead =
-                    activeFrontliners[0];
+            /*
+             * A successful Buffer cast activates its non-stacking
+             * aura. DEF matters on subsequent player exchanges.
+             * Base Bleed matters on this enemy response.
+             */
+            const castingBuffer = live(s).find(
+                foe => foe.role === 'buffer'
+            );
+
+            if (castingBuffer) {
+                encounter.bufferId = castingBuffer.id;
+                effects.push(
+                    `${castingBuffer.id} activated ` +
+                    `+${3 * enemyTier(castingBuffer.level)} Pack DEF`
+                );
+            }
+
+            if (frontliners.length > 0) {
+                const lead = frontliners[0];
 
                 let baseBleed = Math.max(
                     1,
-                    Math.round(
-                        (
-                            lead.atk -
-                            effectiveDefense
-                        ) / 10
-                    )
+                    Math.round((lead.atk - effectiveDefense) / 10)
                 );
 
                 if (actions.qtik === 'ice_melee') {
-                    baseBleed = Math.max(
-                        1,
-                        baseBleed - 1
-                    );
+                    baseBleed = Math.max(1, baseBleed - 1);
                 }
 
                 if (hamstringActive) {
                     baseBleed = Math.max(
                         1,
                         baseBleed -
-                        Math.floor(
-                            c.weasels.active / 6
-                        )
+                        Math.floor(c.weasels.active / 6)
                     );
                 }
 
-                baseBleed +=
-                    enemyTier(lead.level) *
-                    Math.max(
-                        0,
-                        activeFrontliners.length - 1
-                    );
+                baseBleed += enemyTier(lead.level) *
+                    Math.max(0, frontliners.length - 1);
 
-                if (
-                    activeTelegraph &&
-                    activeTelegraph.bleedMultiplier
-                ) {
-                    baseBleed *=
-                        activeTelegraph.bleedMultiplier;
-
-                    effects.push(
-                        'Telegraph doubled Base Bleed'
-                    );
+                const buffer = currentBuffer();
+                if (buffer) {
+                    baseBleed += enemyTier(buffer.level);
                 }
 
-                baseBleed +=
-                    passiveBleedBonus(encounter);
+                if (activeTelegraph?.bleedMultiplier) {
+                    baseBleed *= activeTelegraph.bleedMultiplier;
+                    effects.push('Telegraph doubled Base Bleed');
+                }
 
-                const rollDamage =
-                    e === 6
-                        ? 4
-                        : e === 5
-                            ? 2
-                            : e >= 3
-                                ? 1
-                                : 0;
+                const rollDamage = e === 6
+                    ? 4
+                    : e === 5
+                        ? 2
+                        : e >= 3 ? 1 : 0;
 
                 frontlineDamage =
                     baseBleed +
-                    rollDamage;
+                    rollDamage +
+                    passiveBleedBonus(encounter);
 
-                enemyHitCount += 1;
+                enemyHitCount++;
 
-                /*
-                 * Spiked Carapace reflects one loose melee
-                 * weasel per enemy exchange. Fire Melee and
-                 * Recall avoid the reflection.
-                 */
                 if (
-                    activeTelegraph &&
-                    activeTelegraph.reflectsMeleeWeasel &&
-                    e >= 2 &&
-                    actions.qtik !== 'fire_melee' &&
+                    activeTelegraph?.destroysMeleeWeasel &&
                     actions.tansy !== 'recall'
                 ) {
-                    const reflected =
-                        Math.min(
-                            c.weasels.active,
-                            1
-                        );
-
-                    c.weasels.active -=
-                        reflected;
-
-                    if (reflected > 0) {
-                        effects.push(
-                            'Spiked Carapace slew ' +
-                            `${reflected} melee weasel`
-                        );
-                    }
-                }
-
-                /*
-                 * Sweeping Cleave destroys one loose melee
-                 * weasel and splashes 10% of Tansy's MaxHP.
-                 */
-                if (
-                    activeTelegraph &&
-                    activeTelegraph.destroysMeleeWeasel &&
-                    e >= 2 &&
-                    actions.tansy !== 'recall'
-                ) {
-                    const destroyed =
-                        Math.min(
-                            c.weasels.active,
-                            1
-                        );
-
-                    c.weasels.active -=
-                        destroyed;
-
-                    if (destroyed > 0) {
-                        effects.push(
-                            'Sweeping Cleave destroyed ' +
-                            `${destroyed} melee weasel`
-                        );
-                    }
+                    destroyWeasel(effects, 'Sweeping Cleave');
 
                     const splash = Math.ceil(
                         crewStats.tansyMaxHp *
-                        activeTelegraph.tansySplashPercent /
-                        100
+                        activeTelegraph.tansySplashPercent / 100
                     );
 
-                    backlineDamage +=
-                        splash;
-
+                    backlineDamage += splash;
                     effects.push(
-                        `Sweeping Cleave dealt ${splash} ` +
-                        'splash damage to Tansy'
+                        `Sweeping Cleave dealt ${splash} splash to Tansy`
                     );
                 }
             }
 
             for (const foe of live(s)) {
-                const foeTier =
-                    enemyTier(foe.level);
+                const tier = enemyTier(foe.level);
 
                 if (foe.role === 'archer') {
-                    const amount =
-                        4 *
-                        foeTier *
-                        (
-                            e === 6
-                                ? 2
-                                : 1
-                        );
-
-                    backlineDamage +=
-                        amount;
-
-                    enemyHitCount += 1;
+                    const amount = 4 * tier * (e === 6 ? 2 : 1);
+                    backlineDamage += amount;
+                    enemyHitCount++;
 
                     effects.push(
-                        `${foe.id} dealt ${amount} ` +
-                        'damage to Tansy'
+                        `${foe.id} dealt ${amount} damage to Tansy`
                     );
                 }
 
                 if (foe.role === 'mender') {
-                    const wounded = live(s)
-                        .filter(ally => {
-                            const stats = mobStats(
-                                ally.level,
-                                ally.role
-                            );
-
-                            return ally.hp < stats.maxHp;
-                        })
-                        .sort((a, b) => {
-                            const aStats = mobStats(
-                                a.level,
-                                a.role
-                            );
-
-                            const bStats = mobStats(
-                                b.level,
-                                b.role
-                            );
-
-                            return (
-                                a.hp / aStats.maxHp
-                            ) - (
-                                b.hp / bStats.maxHp
-                            );
-                        })[0];
-
-                    if (wounded) {
-                        const woundedStats =
-                            mobStats(
-                                wounded.level,
-                                wounded.role
-                            );
-
-                        const amount = Math.min(
-                            10 * foeTier,
-                            woundedStats.maxHp -
-                            wounded.hp
-                        );
-
-                        wounded.hp +=
-                            amount;
+                    if (!bruteAlive) {
+                        frontlineDamage++;
+                        enemyHitCount++;
 
                         effects.push(
-                            `${foe.id} healed ` +
-                            `${wounded.id} for ${amount}`
+                            `${foe.id} dealt 1 panicked melee bleed`
                         );
+                    } else {
+                        const wounded = [...live(s)]
+                            .filter(ally =>
+                                ally.hp <
+                                mobStats(ally.level, ally.role).maxHp
+                            )
+                            .sort((a, b) =>
+                                a.hp /
+                                    mobStats(a.level, a.role).maxHp -
+                                b.hp /
+                                    mobStats(b.level, b.role).maxHp
+                            )[0];
+
+                        if (wounded) {
+                            const amount = Math.min(
+                                10 * tier,
+                                mobStats(
+                                    wounded.level, wounded.role
+                                ).maxHp - wounded.hp
+                            );
+
+                            wounded.hp += amount;
+                            effects.push(
+                                `${foe.id} healed ${wounded.id} for ${amount}`
+                            );
+                        }
                     }
                 }
 
                 if (foe.role === 'hexer') {
                     const blocked =
                         actions.tansy === 'visor' &&
-                        e >= 2 &&
-                        e <= 4;
+                        e >= 2 && e <= 4;
 
                     if (!blocked) {
+                        const stacks = 1 +
+                            Number(
+                                activeTelegraph?.extraDebuffStacks || 0
+                            );
+
                         encounter.hexStacks[foe.id] =
-                            (
-                                encounter.hexStacks[foe.id] ||
-                                0
-                            ) +
-                            specialistDebuffStacks;
+                            Number(encounter.hexStacks[foe.id] || 0) +
+                            stacks;
 
                         effects.push(
-                            `${foe.id} added ` +
-                            `${specialistDebuffStacks} ` +
-                            'hex stack(s)'
+                            `${foe.id} added ${stacks} hex stack(s)`
                         );
                     }
                 }
+            }
 
-                if (foe.role === 'buffer') {
-                    encounter.bufferId =
-                        foe.id;
+            if (
+                ['elite', 'boss'].includes(encounter.type) &&
+                encounter.passive &&
+                frontliners.length > 0
+            ) {
+                const blocked =
+                    actions.tansy === 'visor' &&
+                    e >= 2 && e <= 4;
 
+                if (!blocked) {
+                    const stacks =
+                        (e === 6 ? 2 : 1) +
+                        Number(
+                            activeTelegraph?.extraDebuffStacks || 0
+                        );
+
+                    encounter.passiveStacks += stacks;
                     effects.push(
-                        `${foe.id} activated its buffer`
+                        `${encounter.passive} stack ` +
+                        `${encounter.passiveStacks}`
                     );
+                } else {
+                    effects.push('Visor blocked passive debuff');
                 }
             }
 
-            const livingBuffer = live(s).find(
-                foe => foe.id === encounter.bufferId
-            );
-
             if (
-                livingBuffer &&
-                activeFrontliners.length > 0
-            ) {
-                frontlineDamage +=
-                    enemyTier(
-                        livingBuffer.level
-                    );
-            }
-
-            /*
-             * Aether-Drain heals once per enemy hit.
-             * The boss/elite is preferred as the healing target.
-             */
-            if (
-                activeTelegraph &&
-                activeTelegraph.healPerHit &&
+                activeTelegraph?.healPerHit &&
                 enemyHitCount > 0
             ) {
                 const drainTarget =
-                    live(s).find(
-                        foe =>
-                            foe.role === 'elite' ||
-                            foe.role === 'boss'
-                    ) ||
-                    live(s)[0];
+                    live(s).find(foe =>
+                        ['elite', 'boss'].includes(foe.role)
+                    ) || live(s)[0];
 
-                if (drainTarget) {
-                    const drainStats =
-                        mobStats(
-                            drainTarget.level,
-                            drainTarget.role
-                        );
+                const maxHp = mobStats(
+                    drainTarget.level, drainTarget.role
+                ).maxHp;
 
-                    const healing =
-                        activeTelegraph.healPerHit *
-                        enemyHitCount;
+                const requested =
+                    activeTelegraph.healPerHit * enemyHitCount;
 
-                    drainTarget.hp = Math.min(
-                        drainStats.maxHp,
-                        drainTarget.hp + healing
-                    );
+                const healed = Math.min(
+                    requested, maxHp - drainTarget.hp
+                );
 
-                    effects.push(
-                        `Aether-Drain restored ` +
-                        `${healing} enemy HP`
-                    );
-                }
+                drainTarget.hp += healed;
+                effects.push(
+                    `Aether-Drain restored ${healed} enemy HP`
+                );
             }
         }
+
+        c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
+        c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
 
         /*
-         * Elite/Boss passive stacks are gained on successful
-         * enemy exchanges. Specialist debuffs have their own
-         * stack handling above.
+         * End-of-exchange regeneration includes any Grave-Chill
+         * stacks inflicted during this exchange.
          */
-        if (
-            (
-                encounter.type === 'elite' ||
-                encounter.type === 'boss'
-            ) &&
-            !enemyMiss &&
-            encounter.passive
-        ) {
-            encounter.passiveStacks +=
-                activeTelegraph &&
-                activeTelegraph.extraDebuffStacks
-                    ? 2
-                    : 1;
-
-            effects.push(
-                `${encounter.passive} stack ` +
-                `${encounter.passiveStacks}`
-            );
-        }
-
-        c.qtik.hp = Math.max(
-            0,
-            c.qtik.hp - frontlineDamage
-        );
-
-        c.tansy.hp = Math.max(
-            0,
-            c.tansy.hp - backlineDamage
-        );
+        const effectiveRegen =
+            crewStats.regen - passiveRegenPenalty(encounter);
 
         if (c.qtik.hp > 0) {
-            if (effectiveRegen > 0) {
-                c.qtik.hp = Math.min(
+            c.qtik.hp = Math.max(
+                0,
+                Math.min(
                     crewStats.qtikMaxHp,
                     c.qtik.hp + effectiveRegen
-                );
-            } else if (effectiveRegen < 0) {
-                const internalDamage =
-                    Math.abs(effectiveRegen);
+                )
+            );
 
-                c.qtik.hp = Math.max(
-                    0,
-                    c.qtik.hp - internalDamage
-                );
-
+            if (effectiveRegen < 0) {
                 effects.push(
                     `Negative regeneration dealt ` +
-                    `${internalDamage} internal damage`
+                    `${-effectiveRegen} internal damage`
                 );
             }
         }
 
-        if (
-            actions.tansy === 'visor' &&
-            e === 1 &&
-            live(s).length > 0
-        ) {
-            encounter.exposed =
-                crewStats.luk;
-
+        if (actions.tansy === 'visor' && e === 1) {
+            encounter.exposed = crewStats.luk;
             effects.push(
                 `Target exposed for +${crewStats.luk} damage`
             );
@@ -1600,106 +1364,118 @@ function resolveTurn({
             enemyMiss,
             frontlineDamage,
             backlineDamage,
+            effectiveRegen,
             effects,
             qtikHp: c.qtik.hp,
             tansyHp: c.tansy.hp,
             livingFoes: live(s).map(
-                foe => ({
-                    id: foe.id,
-                    hp: foe.hp
-                })
+                foe => ({ id: foe.id, hp: foe.hp })
             )
         });
     }
 
-    const slainIds = kills.map(
-        kill => kill.id
-    );
-
     /*
-     * Resolve XP, silver, and guaranteed encounter rewards
-     * exactly once after the full encounter is cleared.
+     * Swarm Momentum occurs once after a completed three-exchange
+     * turn, provided the encounter and both characters survive.
+     *
+     * The quota uses the active count BEFORE reformation.
+     * Missing weasels from earlier turns can also reform.
      */
-    s.rewardMode = rewardMode;
+    let momentum = null;
 
-    const encounterRewards =
-        finalizeEncounterRewards(
-            s,
-            slainIds
+    if (
+        logs.length === 3 &&
+        live(s).length > 0 &&
+        c.qtik.hp > 0 &&
+        c.tansy.hp > 0
+    ) {
+        const activeBefore = c.weasels.active;
+        const quota = 1 + Math.floor(activeBefore / 4);
+        const restored = Math.min(
+            maxWeasels - activeBefore,
+            quota
         );
 
-    const gainedXp =
-        encounterRewards.xp;
+        c.weasels.active += restored;
 
-    const gainedSilver =
-        encounterRewards.silver;
+        momentum = {
+            activeBefore,
+            quota,
+            restored,
+            activeAfter: c.weasels.active,
+            maximum: maxWeasels
+        };
+
+        if (restored > 0) {
+            turnEffects.push(
+                `Swarm Momentum reformed ${restored} weasel(s)`
+            );
+        }
+    }
+
+    const encounterRewards = finalizeEncounterRewards(
+        s,
+        kills.map(kill => kill.id)
+    );
 
     let levelUps = [];
 
-    if (rewardMode === 'immediate') {
-        levelUps = applyXp(
-            c,
-            gainedXp
-        );
-
-        c.purse +=
-            gainedSilver;
+    if (
+        rewardMode === 'immediate' &&
+        encounterRewards.resolved
+    ) {
+        levelUps = applyXp(c, encounterRewards.xp);
+        c.purse += encounterRewards.silver;
     }
 
-    encounter.hexStacks =
-        Object.fromEntries(
-            Object.entries(
-                encounter.hexStacks
-            ).filter(([id]) =>
-                live(s).some(
-                    foe => foe.id === id
-                )
+    encounter.hexStacks = Object.fromEntries(
+        Object.entries(encounter.hexStacks)
+            .filter(([id]) =>
+                live(s).some(foe => foe.id === id)
             )
-        );
+    );
+
+    if (!currentBuffer()) {
+        delete encounter.bufferId;
+    }
 
     if (live(s).length === 0) {
-        encounter.status =
-            'cleared';
-
-        encounter.nextTelegraph =
-            null;
+        encounter.status = 'cleared';
+        encounter.nextTelegraph = null;
     } else if (
-        encounter.type === 'elite' ||
-        encounter.type === 'boss'
+        ['elite', 'boss'].includes(encounter.type) &&
+        c.qtik.hp > 0 &&
+        c.tansy.hp > 0
     ) {
         const telegraphRoll =
-            rolls &&
-            Number.isInteger(rolls.telegraph)
+            rolls?.telegraph !== undefined
                 ? rolls.telegraph
                 : roll(s, 4);
 
         assert(
+            Number.isInteger(telegraphRoll) &&
             telegraphRoll >= 1 &&
             telegraphRoll <= 4,
             'Telegraph roll must be 1-4'
         );
 
-        encounter.nextTelegraph =
-            chooseNextTelegraph(
-                encounter,
-                telegraphRoll
-            );
+        /*
+         * Preserve the previous selection for the no-repeat check,
+         * including when Stun cancelled its effects this turn.
+         */
+        encounter.nextTelegraph = previousTelegraph;
+        encounter.nextTelegraph = chooseNextTelegraph(
+            encounter, telegraphRoll
+        );
     }
 
-    const finalStats =
-        derived(c);
+    c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
 
-    c.qtik.maxHp =
-        finalStats.qtikMaxHp;
-
-    c.qtik.def =
-        finalStats.def;
-
-    c.qtik.regen =
-        finalStats.regen;
-
-    c.tansy.maxHp =
-        finalStats.tansyMaxHp;
+    const finalStats = derived(c);
+    c.qtik.maxHp = finalStats.qtikMaxHp;
+    c.qtik.def = finalStats.def;
+    c.qtik.regen = finalStats.regen;
+    c.tansy.maxHp = finalStats.tansyMaxHp;
 
     const result = {
         ok: true,
@@ -1707,70 +1483,51 @@ function resolveTurn({
         rolls: tape,
         itemUse,
         exchanges: logs,
+        turnEffects,
+        weaselsDestroyed,
+        momentum,
         kills,
         rewards: {
-            xp: gainedXp,
-            silver: gainedSilver,
+            xp: encounterRewards.xp,
+            silver: encounterRewards.silver,
             applied:
                 rewardMode === 'immediate' &&
                 encounterRewards.resolved,
-            resolved:
-                encounterRewards.resolved,
-            loot:
-                encounterRewards.loot,
-            trophies:
-                encounterRewards.trophies
+            resolved: encounterRewards.resolved,
+            loot: encounterRewards.loot,
+            trophies: encounterRewards.trophies
         },
         levelUps,
         packCleared:
-            startingCount > 0 &&
-            live(s).length === 0,
+            startingCount > 0 && live(s).length === 0,
         state: s,
         derived: finalStats
     };
 
-    const assertNoNonFinite = (
-        value,
-        path = 'result'
-    ) => {
+    function assertNoNonFinite(value, path = 'result') {
         if (typeof value === 'number') {
             assert(
                 Number.isFinite(value),
                 `${path} contains a non-finite number`
             );
-
             return;
         }
 
         if (Array.isArray(value)) {
-            value.forEach((item, index) => {
-                assertNoNonFinite(
-                    item,
-                    `${path}[${index}]`
-                );
-            });
-
+            value.forEach((child, index) =>
+                assertNoNonFinite(child, `${path}[${index}]`)
+            );
             return;
         }
 
-        if (
-            value !== null &&
-            typeof value === 'object'
-        ) {
-            for (
-                const [key, child] of
-                Object.entries(value)
-            ) {
-                assertNoNonFinite(
-                    child,
-                    `${path}.${key}`
-                );
+        if (value !== null && typeof value === 'object') {
+            for (const [key, child] of Object.entries(value)) {
+                assertNoNonFinite(child, `${path}.${key}`);
             }
         }
-    };
+    }
 
     assertNoNonFinite(result);
-
     return result;
 }
 

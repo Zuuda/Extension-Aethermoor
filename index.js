@@ -429,6 +429,161 @@ function applyBeltItem(state, item, recipient) {
         source: hexerId
     };
 }
+const ELITE_BOSS_TELEGRAPHS = [
+    'berserk_heavy_windup',
+    'spiked_carapace',
+    'sweeping_cleave',
+    'aether_drain'
+];
+
+function passiveState(encounter) {
+    if (
+        encounter.type !== 'elite' &&
+        encounter.type !== 'boss'
+    ) {
+        return null;
+    }
+
+    if (!encounter.passive) {
+        return null;
+    }
+
+    encounter.passiveStacks =
+        Number(encounter.passiveStacks || 0);
+
+    return {
+        name: encounter.passive,
+        stacks: encounter.passiveStacks
+    };
+}
+
+function passiveAttackPenalty(encounter) {
+    const passive = passiveState(encounter);
+
+    if (
+        !passive ||
+        passive.name !== 'withering_lethargy'
+    ) {
+        return 0;
+    }
+
+    return 2 * passive.stacks;
+}
+
+function passiveDefensePenalty(encounter) {
+    const passive = passiveState(encounter);
+
+    if (
+        !passive ||
+        passive.name !== 'armor_sunder'
+    ) {
+        return 0;
+    }
+
+    return 2 * passive.stacks;
+}
+
+function passiveRegenPenalty(encounter) {
+    const passive = passiveState(encounter);
+
+    if (
+        !passive ||
+        passive.name !== 'grave_chill'
+    ) {
+        return 0;
+    }
+
+    return 2 * passive.stacks;
+}
+
+function passiveBleedBonus(encounter) {
+    const passive = passiveState(encounter);
+
+    if (
+        !passive ||
+        passive.name !== 'serrated_bleed'
+    ) {
+        return 0;
+    }
+
+    return passive.stacks;
+}
+
+function chooseNextTelegraph(encounter, rollValue) {
+    assert(
+        encounter.type === 'elite' ||
+        encounter.type === 'boss',
+        'Only elites and bosses can have telegraphs'
+    );
+
+    const rollIndex =
+        ((Number(rollValue) - 1) %
+            ELITE_BOSS_TELEGRAPHS.length +
+            ELITE_BOSS_TELEGRAPHS.length) %
+        ELITE_BOSS_TELEGRAPHS.length;
+
+    const previous = encounter.nextTelegraph;
+    let selected =
+        ELITE_BOSS_TELEGRAPHS[rollIndex];
+
+    /*
+     * The engine forbids back-to-back telegraph repeats.
+     */
+    if (
+        selected === previous
+    ) {
+        selected =
+            ELITE_BOSS_TELEGRAPHS[
+                (rollIndex + 1) %
+                ELITE_BOSS_TELEGRAPHS.length
+            ];
+    }
+
+    return selected;
+}
+
+function telegraphLabel(telegraph) {
+    const labels = {
+        berserk_heavy_windup:
+            'Berserk / Heavy Wind-Up',
+        spiked_carapace:
+            'Spiked Carapace / Thorns Guard',
+        sweeping_cleave:
+            'Sweeping Cleave / Shockwave',
+        aether_drain:
+            'Aether-Drain / Life-Siphon'
+    };
+
+    return labels[telegraph] || telegraph;
+}
+
+function telegraphEffects(encounter) {
+    return {
+        berserk_heavy_windup: {
+            name: 'berserk_heavy_windup',
+            bleedMultiplier: 2,
+            extraDebuffStacks: 1
+        },
+
+        spiked_carapace: {
+            name: 'spiked_carapace',
+            defenseBonus: 6 * encounter.enemyTier,
+            reflectsMeleeWeasel: true
+        },
+
+        sweeping_cleave: {
+            name: 'sweeping_cleave',
+            destroysMeleeWeasel: true,
+            tansySplashPercent: 10
+        },
+
+        aether_drain: {
+            name: 'aether_drain',
+            healPerHit: 10 * encounter.enemyTier,
+            targetsRaisedShadow: true
+        }
+    }[encounter.nextTelegraph] || null;
+}
 
 function resolveTurn({
     state,
@@ -701,10 +856,19 @@ const fireDamage =
                 )
                 : 0;
 
-        const exposedBonus =
-            p === 1
-                ? 0
-                : Number(encounter.exposed || 0);
+        /*
+         * Visor Ex1 exposes the target for the next Crew hit.
+         * A P:1 attack still deals its minimum 1 physical damage,
+         * then receives the exposed LUK bonus.
+         */
+        const exposedBonus = Number(
+            encounter.exposed || 0
+        );
+
+        if (p !== 1) {
+            encounter.exposed = 0;
+        }
+
 
         if (p !== 1) {
             encounter.exposed = 0;
@@ -903,6 +1067,7 @@ const fireDamage =
 
         /*
          * Only living frontline foes deal frontline damage.
+         * Elite and Boss passive effects are applied only on enemy hits.
          */
         const activeFrontliners = live(s).filter(
             foe => [
@@ -914,6 +1079,7 @@ const fireDamage =
 
         let frontlineDamage = 0;
         let backlineDamage = 0;
+        let passiveHealing = 0;
         const effects = [...playerEffects];
 
         if (!enemyMiss && live(s).length > 0) {
@@ -954,6 +1120,24 @@ const fireDamage =
                         activeFrontliners.length - 1
                     );
 
+                const telegraph =
+                    telegraphEffects(encounter);
+
+                if (
+                    telegraph &&
+                    telegraph.bleedMultiplier
+                ) {
+                    baseBleed *=
+                        telegraph.bleedMultiplier;
+
+                    effects.push(
+                        'Telegraph doubled Base Bleed'
+                    );
+                }
+
+                baseBleed +=
+                    passiveBleedBonus(encounter);
+
                 const rollDamage =
                     e === 6
                         ? 4
@@ -966,6 +1150,41 @@ const fireDamage =
                 frontlineDamage =
                     baseBleed +
                     rollDamage;
+
+                if (
+                    telegraph &&
+                    telegraph.destroysMeleeWeasel &&
+                    e >= 2 &&
+                    actions.tansy !== 'recall'
+                ) {
+                    const destroyed =
+                        Math.min(
+                            c.weasels.active,
+                            1
+                        );
+
+                    c.weasels.active -= destroyed;
+
+                    if (destroyed > 0) {
+                        effects.push(
+                            'Sweeping Cleave destroyed ' +
+                            `${destroyed} melee weasel`
+                        );
+                    }
+
+                    const splash = Math.ceil(
+                        crewStats.tansyMaxHp *
+                        telegraph.tansySplashPercent /
+                        100
+                    );
+
+                    backlineDamage += splash;
+
+                    effects.push(
+                        `Sweeping Cleave dealt ${splash} ` +
+                        'splash damage to Tansy'
+                    );
+                }
             }
 
             for (const foe of live(s)) {
@@ -984,7 +1203,8 @@ const fireDamage =
                     backlineDamage += amount;
 
                     effects.push(
-                        `${foe.id} dealt ${amount} damage to Tansy`
+                        `${foe.id} dealt ${amount} ` +
+                        'damage to Tansy'
                     );
                 }
 
@@ -1075,6 +1295,51 @@ const fireDamage =
                     livingBuffer.level
                 );
             }
+
+            const telegraph =
+                telegraphEffects(encounter);
+
+            if (
+                telegraph &&
+                telegraph.healPerHit
+            ) {
+                passiveHealing =
+                    telegraph.healPerHit;
+
+                effects.push(
+                    `Aether-Drain restored ` +
+                    `${passiveHealing} enemy HP`
+                );
+            }
+
+            if (
+                telegraph &&
+                telegraph.extraDebuffStacks
+            ) {
+                effects.push(
+                    'Berserk added one extra debuff stack'
+                );
+            }
+        }
+
+        if (
+            encounter.type === 'elite' ||
+            encounter.type === 'boss'
+        ) {
+            if (
+                !enemyMiss &&
+                encounter.passive
+            ) {
+                encounter.passiveStacks =
+                    Number(
+                        encounter.passiveStacks || 0
+                    ) + 1;
+
+                effects.push(
+                    `${encounter.passive} stack ` +
+                    `${encounter.passiveStacks}`
+                );
+            }
         }
 
         c.qtik.hp = Math.max(
@@ -1090,9 +1355,41 @@ const fireDamage =
         if (c.qtik.hp > 0) {
             c.qtik.hp = Math.min(
                 crewStats.qtikMaxHp,
-                c.qtik.hp + crewStats.regen
+                c.qtik.hp + effectiveRegen
             );
         }
+
+        if (
+            passiveState(encounter)?.name === 'grave_chill' &&
+            effectiveRegen === 0 &&
+            c.qtik.hp > 0
+        ) {
+            c.qtik.hp = Math.max(
+                0,
+                c.qtik.hp - 1
+            );
+
+            effects.push(
+                'Grave-Chill dealt 1 internal damage'
+            );
+        }
+
+        if (passiveHealing > 0) {
+            const livingEnemy = live(s)[0];
+
+            if (livingEnemy) {
+                const stats = mobStats(
+                    livingEnemy.level,
+                    livingEnemy.role
+                );
+
+                livingEnemy.hp = Math.min(
+                    stats.maxHp,
+                    livingEnemy.hp + passiveHealing
+                );
+            }
+        }
+
 
         /*
          * Visor Ex1 fumble exposes the enemy to the next crew hit.
@@ -1164,7 +1461,35 @@ const fireDamage =
 
     if (live(s).length === 0) {
         encounter.status = 'cleared';
+        encounter.nextTelegraph = null;
+    } else if (
+        encounter.type === 'elite' ||
+        encounter.type === 'boss'
+    ) {
+        const telegraphRoll =
+            rolls &&
+            Number.isInteger(rolls.telegraph)
+                ? rolls.telegraph
+                : roll(s, 4);
+
+        assert(
+            telegraphRoll >= 1 &&
+            telegraphRoll <= 4,
+            'Telegraph roll must be 1-4'
+        );
+
+        encounter.nextTelegraph =
+            chooseNextTelegraph(
+                encounter,
+                telegraphRoll
+            );
     }
+    const finalStats = derived(c);
+
+    c.qtik.maxHp = finalStats.qtikMaxHp;
+    c.qtik.def = finalStats.def;
+    c.qtik.regen = finalStats.regen;
+    c.tansy.maxHp = finalStats.tansyMaxHp;
 
     const result = {
         ok: true,
@@ -1183,7 +1508,8 @@ const fireDamage =
             startingCount > 0 &&
             live(s).length === 0,
         state: s,
-        derived: derived(c)
+        derived: finalStats
+
     };
 // Reject NaN and Infinity, but allow intentional null values.
 const assertNoNonFinite = (value, path = 'result') => {
@@ -1775,6 +2101,11 @@ function registerTools() {
                     enemy: {
                         type: 'array',
                         items: { type: 'integer' }
+                    },
+                    telegraph: {
+                        type: 'integer',
+                        minimum: 1,
+                        maximum: 4
                     }
                 }
             },

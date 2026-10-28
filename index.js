@@ -536,12 +536,11 @@ const itemUse = {};
         itemUse.tansy = applyBeltItem(s, actions.tansyItem, 'tansy');
     }
 
-    if (actions.tansy === 'surge') {
-        c.weasels.active = Math.min(
-            c.weasels.max,
-            2 + 2 * Math.floor(c.level / 2)
-        );
-    }
+if (actions.tansy === 'surge') {
+    c.weasels.active =
+        2 + 2 * Math.floor(c.level / 2);
+}
+
 
     const tape = checkTape(s, rolls);
     const logs = [];

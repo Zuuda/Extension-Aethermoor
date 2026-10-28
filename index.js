@@ -3054,6 +3054,249 @@ function resolveQuestSeed(test) {
         state
     };
 }
+function resolveQuestAction(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'quest action requires state'
+    );
+
+    const state = clone(test.state);
+    const quest = state.activeQuest;
+
+    assert(
+        quest &&
+        typeof quest === 'object',
+        'No active quest'
+    );
+
+    assert(
+        [
+            'accept',
+            'decline',
+            'clear_gate',
+            'complete'
+        ].includes(test.action),
+        `Unsupported quest action: ${test.action}`
+    );
+
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+    state.inventory.activeTradeListings ||= [];
+
+    const result = {
+        ok: true,
+        action: test.action,
+        rewards: {
+            xp: 0,
+            silver: 0,
+            repSteps: 0,
+            loot: []
+        },
+        state
+    };
+
+    if (test.action === 'accept') {
+        assert(
+            quest.status === 'offered',
+            `Quest cannot be accepted from status ${quest.status}`
+        );
+
+        quest.status = 'in_progress';
+
+        return result;
+    }
+
+    if (test.action === 'decline') {
+        assert(
+            quest.status === 'offered',
+            `Quest cannot be declined from status ${quest.status}`
+        );
+
+        quest.status = 'declined';
+
+        return result;
+    }
+
+    assert(
+        quest.status === 'in_progress',
+        `Quest action requires an in-progress quest, got ${quest.status}`
+    );
+
+    if (test.action === 'clear_gate') {
+        assert(
+            quest.currentGate &&
+            Number.isInteger(quest.currentGate.step),
+            'Quest current gate is invalid'
+        );
+
+        assert(
+            quest.currentGate.step < quest.gates,
+            'Final gate must use complete, not clear_gate'
+        );
+
+        const enemyTier =
+            ZONES[quest.seed.zone].tier;
+
+        const milestone = {
+            xp: 100 * enemyTier,
+            silver: 10 * enemyTier
+        };
+
+        quest.currentGate.step += 1;
+
+        const nextModes = [
+            'traversal_discovery',
+            'brain_social_heist',
+            'combat_twist_showdown'
+        ];
+
+        const selectedMode =
+            test.nextGateMode ||
+            nextModes[
+                (quest.currentGate.step - 1) %
+                nextModes.length
+            ];
+
+        assert(
+            nextModes.includes(selectedMode),
+            `Unsupported next gate mode: ${selectedMode}`
+        );
+
+        quest.currentGate.mode =
+            selectedMode;
+
+        quest.currentGate.objective =
+            test.nextGateObjective || null;
+
+        result.rewards.xp =
+            milestone.xp;
+
+        result.rewards.silver =
+            milestone.silver;
+
+        if (test.rewardMode === 'immediate') {
+            const levelUps =
+                applyXp(
+                    state.crew,
+                    milestone.xp
+                );
+
+            state.crew.purse +=
+                milestone.silver;
+
+            result.levelUps =
+                levelUps;
+        } else {
+            result.levelUps = [];
+        }
+
+        return result;
+    }
+
+    assert(
+        quest.currentGate.step === quest.gates,
+        'Quest cannot complete before its final gate'
+    );
+
+    const payout =
+        quest.payout;
+
+    assert(
+        payout &&
+        Number.isInteger(payout.xp) &&
+        Number.isInteger(payout.silver) &&
+        Number.isInteger(payout.repSteps),
+        'Quest payout is invalid'
+    );
+
+    const salvage =
+        quest.salvage;
+
+    assert(
+        salvage &&
+        typeof salvage === 'object',
+        'Quest salvage is missing'
+    );
+
+    quest.status = 'complete';
+
+    result.rewards.xp =
+        payout.xp;
+
+    result.rewards.silver =
+        payout.silver;
+
+    result.rewards.repSteps =
+        payout.repSteps;
+
+    const acquiredSalvage = {
+        ...salvage,
+        acquiredFrom: 'quest',
+        acquiredAtQuest: quest.id,
+        bound: false
+    };
+
+    state.inventory.bagReserves.push(
+        acquiredSalvage
+    );
+
+    result.rewards.loot.push(
+        acquiredSalvage
+    );
+
+    const town =
+        test.town ||
+        quest.town;
+
+    if (town) {
+        state.reputation ||= {};
+        state.reputation[town] ||= {
+            tier: 'Unknown',
+            steps: 0
+        };
+
+        state.reputation[town].steps +=
+            payout.repSteps;
+
+        const tierOrder = [
+            'Unknown',
+            'Slightly Known',
+            'Known',
+            'Well Respected',
+            'Renowned'
+        ];
+
+        const rep =
+            state.reputation[town];
+
+        const rung =
+            Math.floor(rep.steps / 2);
+
+        rep.tier =
+            tierOrder[
+                Math.min(
+                    rung,
+                    tierOrder.length - 1
+                )
+            ];
+    }
+
+    if (test.rewardMode === 'immediate') {
+        result.levelUps =
+            applyXp(
+                state.crew,
+                payout.xp
+            );
+
+        state.crew.purse +=
+            payout.silver;
+    } else {
+        result.levelUps = [];
+    }
+
+    return result;
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -3521,7 +3764,11 @@ function resolveBatch(args) {
                     break;
 
                 case 'quest':
-                    result = resolveQuestSeed(test);
+                    if (test.action) {
+                        result = resolveQuestAction(test);
+                    } else {
+                        result = resolveQuestSeed(test);
+                    }
                     break;
 
                 default:
@@ -4077,6 +4324,28 @@ function registerTools() {
                             },
 
                             town: {
+                                type: 'string'
+                            },
+                                                        action: {
+                                type: 'string',
+                                enum: [
+                                    'accept',
+                                    'decline',
+                                    'clear_gate',
+                                    'complete'
+                                ]
+                            },
+
+                            nextGateMode: {
+                                type: 'string',
+                                enum: [
+                                    'traversal_discovery',
+                                    'brain_social_heist',
+                                    'combat_twist_showdown'
+                                ]
+                            },
+
+                            nextGateObjective: {
                                 type: 'string'
                             },
 

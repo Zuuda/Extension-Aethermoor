@@ -1849,9 +1849,6 @@ function registerTools() {
                             maximum: 4
                         },
 
-
-                        },
-
                         mob: { type: 'object' },
                         crew: { type: 'object' },
 

@@ -2313,216 +2313,309 @@ function resolveBatch(args) {
 
 function registerTools() {
     const context = getContext();
+
     if (!context?.registerFunctionTool) {
-        console.warn('Aethermoor Engine: function tools unavailable');
+        console.warn(
+            'Aethermoor Engine: function tools unavailable'
+        );
         return;
     }
 
-   register(
-    'aethermoorResolveTurnV2',
-    'Aethermoor: Resolve Turn or Batch',
-    [
-        'Resolve one declared PvE turn, or evaluate multiple independent',
-        'mechanics cases in one call. Does not choose actions or narrate.',
-        'Single mode uses state and actions. Batch mode uses cases.'
-    ].join(' '),
-    {
-        type: 'object',
-        properties: {
-            state: {
-                type: 'object',
-                description:
-                    'Previous locked state for single-turn mode'
-            },
+    register(
+        'aethermoorResolveTurnV2',
+        'Aethermoor: Resolve Turn or Batch',
+        [
+            'Resolve one declared PvE turn, or evaluate multiple independent',
+            'mechanics cases in one call. Does not choose actions or narrate.',
+            'Single mode uses state and actions. Batch mode uses cases.'
+        ].join(' '),
+        {
+            type: 'object',
+            properties: {
+                state: {
+                    type: 'object',
+                    description:
+                        'Previous locked state for single-turn mode'
+                },
 
-            actions: {
-                type: 'object',
-                properties: {
-                    qtik: {
-                        type: 'string',
-                        enum: [
-                            'fire_melee',
-                            'ice_melee',
-                            'stun',
-                            'ice_patch',
-                            'frost_stomp',
-                            'drink'
-                        ]
-                    },
-                                        tansy: {
-                        type: 'string',
-                        enum: [
-                            'visor',
-                            'vitals',
-                            'hamstring',
-                            'recall',
-                            'surge',
-                            'drink'
-                        ]
-                    },
-                    target: {
-                        type: 'string'
-                    },
-                    qtikItem: {
-                        type: 'string'
-                    },
-                    tansyItem: {
-                        type: 'string'
-                    }
-
-                }
-            },
-
-            rolls: {
-                type: 'object',
-                properties: {
-                    player: {
-                        type: 'array',
-                        items: { type: 'integer' }
-                    },
-                    enemy: {
-                        type: 'array',
-                        items: { type: 'integer' }
-                    },
-                    telegraph: {
-                        type: 'integer',
-                        minimum: 1,
-                        maximum: 4
-                    }
-                }
-            },
-
-            rewardMode: {
-                type: 'string',
-                enum: ['immediate', 'deferred']
-            },
-
-cases: {
-    type: 'array',
-    description: 'Independent mechanics cases with optional assertions',
-    items: {
-        type: 'object',
-        properties: {
-            name: { type: 'string' },
-
-            kind: {
-                type: 'string',
-                enum: [
-                    'spawn',
-                    'turn',
-                    'consume_belt',
-                    'reference',
-                    'world_seeds'
-                ]
-            },
-
-            state: { type: 'object' },
-            actions: { type: 'object' },
-            rolls: { type: 'object' },
-            rewardMode: {
-                type: 'string',
-                enum: ['immediate', 'deferred']
-            },
-
-            belt: {
-                type: 'array',
-                items: { type: 'string' }
-            },
-            items: {
-                type: 'array',
-                items: { type: 'string' }
-            },
-
-            zone: { type: 'integer' },
-            encounterType: {
-                type: 'string',
-                enum: ['normal_pack', 'elite', 'boss']
-            },
-            bracket: {
-                type: 'string',
-                enum: ['low', 'mid', 'high']
-            },
-            composition: {
-                type: 'integer',
-                minimum: 1,
-                maximum: 6
-            },
-            encounterId: { type: 'string' },
-            passiveRoll: {
-                type: 'integer',
-                minimum: 1,
-                maximum: 4
-            },
-
-            mob: { type: 'object' },
-            crew: { type: 'object' },
-
-            curiosityRoll: { type: 'integer' },
-            rumorRoll: { type: 'integer' },
-            packDropRoll: { type: 'integer' },
-            newWildernessSite: { type: 'boolean' },
-            investigatedRumor: { type: 'boolean' },
-            packLooted: { type: 'boolean' },
-
-            expectError: {
-                type: 'string',
-                description: 'Expected error substring for negative tests'
-            },
-            expect: {
-                type: 'array',
-                description: 'Assertions against returned result paths',
-                items: {
+                actions: {
                     type: 'object',
                     properties: {
-                        path: { type: 'string' },
-                        exists: { type: 'boolean' },
-                        equals: {},
-                        notEquals: {},
-                        minimum: { type: 'number' },
-                        maximum: { type: 'number' }
-                    },
-                    required: ['path']
+                        qtik: {
+                            type: 'string',
+                            enum: [
+                                'fire_melee',
+                                'ice_melee',
+                                'stun',
+                                'ice_patch',
+                                'frost_stomp',
+                                'drink'
+                            ]
+                        },
+                        tansy: {
+                            type: 'string',
+                            enum: [
+                                'visor',
+                                'vitals',
+                                'hamstring',
+                                'recall',
+                                'surge',
+                                'drink'
+                            ]
+                        },
+                        target: {
+                            type: 'string'
+                        },
+                        qtikItem: {
+                            type: 'string'
+                        },
+                        tansyItem: {
+                            type: 'string'
+                        }
+                    }
+                },
+
+                rolls: {
+                    type: 'object',
+                    properties: {
+                        player: {
+                            type: 'array',
+                            items: {
+                                type: 'integer'
+                            }
+                        },
+                        enemy: {
+                            type: 'array',
+                            items: {
+                                type: 'integer'
+                            }
+                        },
+                        telegraph: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 4
+                        }
+                    }
+                },
+
+                rewardMode: {
+                    type: 'string',
+                    enum: [
+                        'immediate',
+                        'deferred'
+                    ]
+                },
+
+                cases: {
+                    type: 'array',
+                    description:
+                        'Independent mechanics cases with optional assertions',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: {
+                                type: 'string'
+                            },
+
+                            kind: {
+                                type: 'string',
+                                enum: [
+                                    'spawn',
+                                    'turn',
+                                    'consume_belt',
+                                    'reference',
+                                    'world_seeds'
+                                ]
+                            },
+
+                            state: {
+                                type: 'object'
+                            },
+
+                            actions: {
+                                type: 'object'
+                            },
+
+                            rolls: {
+                                type: 'object'
+                            },
+
+                            rewardMode: {
+                                type: 'string',
+                                enum: [
+                                    'immediate',
+                                    'deferred'
+                                ]
+                            },
+
+                            belt: {
+                                type: 'array',
+                                items: {
+                                    type: 'string'
+                                }
+                            },
+
+                            items: {
+                                type: 'array',
+                                items: {
+                                    type: 'string'
+                                }
+                            },
+
+                            zone: {
+                                type: 'integer'
+                            },
+
+                            encounterType: {
+                                type: 'string',
+                                enum: [
+                                    'normal_pack',
+                                    'elite',
+                                    'boss'
+                                ]
+                            },
+
+                            bracket: {
+                                type: 'string',
+                                enum: [
+                                    'low',
+                                    'mid',
+                                    'high'
+                                ]
+                            },
+
+                            composition: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 6
+                            },
+
+                            encounterId: {
+                                type: 'string'
+                            },
+
+                            passiveRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 4
+                            },
+
+                            mob: {
+                                type: 'object'
+                            },
+
+                            crew: {
+                                type: 'object'
+                            },
+
+                            curiosityRoll: {
+                                type: 'integer'
+                            },
+
+                            rumorRoll: {
+                                type: 'integer'
+                            },
+
+                            packDropRoll: {
+                                type: 'integer'
+                            },
+
+                            newWildernessSite: {
+                                type: 'boolean'
+                            },
+
+                            investigatedRumor: {
+                                type: 'boolean'
+                            },
+
+                            packLooted: {
+                                type: 'boolean'
+                            },
+
+                            expectError: {
+                                type: 'string',
+                                description:
+                                    'Expected error substring for negative tests'
+                            },
+
+                            expect: {
+                                type: 'array',
+                                description:
+                                    'Assertions against returned result paths',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        path: {
+                                            type: 'string'
+                                        },
+                                        exists: {
+                                            type: 'boolean'
+                                        },
+                                        equals: {},
+                                        notEquals: {},
+                                        minimum: {
+                                            type: 'number'
+                                        },
+                                        maximum: {
+                                            type: 'number'
+                                        }
+                                    },
+                                    required: [
+                                        'path'
+                                    ]
+                                }
+                            }
+                        },
+                        required: [
+                            'name',
+                            'kind'
+                        ]
+                    }
                 }
             }
         },
-        cases: {
-    // case schema
-}
-        } // closes properties
-    }     // closes top-level schema
-},
         args => {
+            if (Array.isArray(args.cases)) {
+                return resolveBatch(args);
+            }
 
-        if (Array.isArray(args.cases)) {
-            return resolveBatch(args);
+            return resolveTurn({
+                state: args.state,
+                actions: args.actions,
+                rolls: args.rolls,
+                rewardMode:
+                    args.rewardMode || 'immediate'
+            });
         }
-
-        return resolveTurn({
-            state: args.state,
-            actions: args.actions,
-            rolls: args.rolls,
-            rewardMode: args.rewardMode || 'immediate'
-        });
-    }
-);
+    );
 
     register(
         'aethermoorConsumeBeltV2',
         'Aethermoor: Consume Belt',
-        'Deduct explicitly named item IDs. Does not decide why or who receives them.',
+        [
+            'Deduct explicitly named item IDs.',
+            'Does not decide why or who receives them.'
+        ].join(' '),
         {
             type: 'object',
             properties: {
                 belt: {
                     type: 'array',
-                    items: { type: 'string' }
+                    items: {
+                        type: 'string'
+                    }
                 },
                 items: {
                     type: 'array',
-                    items: { type: 'string' }
+                    items: {
+                        type: 'string'
+                    }
                 }
             },
-            required: ['belt', 'items']
+            required: [
+                'belt',
+                'items'
+            ]
         },
         consumeBelt
     );
@@ -2530,29 +2623,47 @@ cases: {
     register(
         'aethermoorReferenceV2',
         'Aethermoor: Mechanics Reference',
-        'Get zone vendor prices, mob stats, XP thresholds, or derived crew statistics.',
+        [
+            'Get zone vendor prices, mob stats, XP thresholds,',
+            'or derived crew statistics.'
+        ].join(' '),
         {
             type: 'object',
             properties: {
-                zone: { type: 'integer' },
-                mob: { type: 'object' },
-                crew: { type: 'object' }
+                zone: {
+                    type: 'integer'
+                },
+                mob: {
+                    type: 'object'
+                },
+                crew: {
+                    type: 'object'
+                }
             }
         },
         args => ({
             ok: true,
-            zone: args.zone ? vendorStock(args.zone) : undefined,
-            mob: args.mob
-                ? mobStats(args.mob.level, args.mob.role)
+            zone: args.zone
+                ? vendorStock(args.zone)
                 : undefined,
-            crew: args.crew ? derived(args.crew) : undefined,
+            mob: args.mob
+                ? mobStats(
+                    args.mob.level,
+                    args.mob.role
+                )
+                : undefined,
+            crew: args.crew
+                ? derived(args.crew)
+                : undefined,
             nextXp: args.crew
                 ? nextXp(args.crew.level)
                 : undefined
         })
     );
 
-    console.log('Aethermoor Engine function tools registered');
+    console.log(
+        'Aethermoor Engine function tools registered'
+    );
 }
 
 // Same startup approach as the working VrCombat prototype.

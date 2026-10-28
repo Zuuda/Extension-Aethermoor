@@ -3075,8 +3075,7 @@ function resolveQuestAction(test) {
             'accept',
             'decline',
             'clear_gate',
-            'complete',
-            'equip'
+            'complete'            
         ].includes(test.action),
         `Unsupported quest action: ${test.action}`
     );

@@ -1750,15 +1750,10 @@ const NORMAL_BRACKETS = {
 
 const PACK_COMPOSITIONS = {
     1: ['brute', 'brute', 'brute'],
-
     2: ['brute', 'mender', 'archer'],
-
     3: ['brute', 'archer', 'archer'],
-
     4: ['brute', 'hexer', 'mender'],
-
     5: ['brute', 'buffer', 'archer'],
-
     6: ['brute', 'hexer', 'archer']
 };
 
@@ -1769,7 +1764,8 @@ function spawnNormalPack({
     encounterId = `normal-pack-z${zone}`
 }) {
     assert(
-        Number.isInteger(zone) && ZONES[zone],
+        Number.isInteger(zone) &&
+        ZONES[zone],
         `Unknown zone: ${zone}`
     );
 
@@ -1782,31 +1778,44 @@ function spawnNormalPack({
     assert(
         Number.isInteger(composition) &&
         PACK_COMPOSITIONS[composition],
-        `Pack composition must be an integer from 1 to 6`
+        'Pack composition must be an integer from 1 to 6'
     );
 
-    const zoneData = ZONES[zone];
-    const bracketData = NORMAL_BRACKETS[zone][bracket];
-    const roles = PACK_COMPOSITIONS[composition];
+    const zoneData =
+        ZONES[zone];
 
-    const foes = roles.map((role, index) =>
-        createFoe({
-            id: `${encounterId}-${role}-${index + 1}`,
-            level: bracketData.level,
-            role
-        })
-    );
+    const bracketData =
+        NORMAL_BRACKETS[zone][bracket];
 
-    const mixed = composition !== 1;
-    const xp = mixed
-        ? bracketData.xpMixed
-        : bracketData.xpSwarm;
+    const roles =
+        PACK_COMPOSITIONS[composition];
+
+    const foes =
+        roles.map((role, index) =>
+            createFoe({
+                id:
+                    `${encounterId}-${role}-${index + 1}`,
+                level: bracketData.level,
+                role
+            })
+        );
+
+    const pureFodder =
+        composition === 1;
+
+    const listedPackXp =
+        pureFodder
+            ? bracketData.xpSwarm
+            : bracketData.xpMixed;
 
     const autoSalvage =
-        foes.length * (2 * zoneData.tier);
+        foes.length *
+        2 *
+        zoneData.tier;
 
     return {
         ok: true,
+
         encounter: {
             id: encounterId,
             status: 'active',
@@ -1815,11 +1824,25 @@ function spawnNormalPack({
             type: 'normal_pack',
             bracket,
             composition,
-            compositionName: mixed
-                ? 'Mixed Tactical Squad'
-                : 'Pure Fodder Swarm',
+            compositionName:
+                pureFodder
+                    ? 'Pure Fodder Swarm'
+                    : 'Mixed Tactical Squad',
             enemyTier: zoneData.tier,
             foes,
+
+            /*
+             * These values are locked at spawn and must be used
+             * when the encounter is eventually cleared.
+             */
+            rewards: {
+                kind: 'normal_pack',
+                listedPackXp,
+                autoSalvage,
+                foeCount: foes.length,
+                resolved: false
+            },
+
             used: {
                 stun: false,
                 icePatch: false
@@ -1827,10 +1850,13 @@ function spawnNormalPack({
             hexStacks: {},
             exposed: 0
         },
+
         rewards: {
-            listedPackXp: xp,
-            autoSalvage: autoSalvage,
-            foeCount: foes.length
+            kind: 'normal_pack',
+            listedPackXp,
+            autoSalvage,
+            foeCount: foes.length,
+            resolved: false
         }
     };
 }
@@ -1859,13 +1885,19 @@ const PASSIVES = {
 };
 
 function spawnEncounter(test) {
-    const kind = test.encounterType || 'normal_pack';
+    const kind =
+        test.encounterType ||
+        'normal_pack';
 
     if (kind === 'normal_pack') {
         return spawnNormalPack({
             zone: test.zone,
-            bracket: test.bracket || 'mid',
-            composition: test.composition || 2,
+            bracket:
+                test.bracket ||
+                'mid',
+            composition:
+                test.composition ||
+                2,
             encounterId:
                 test.encounterId ||
                 `normal-pack-z${test.zone}`
@@ -1878,7 +1910,8 @@ function spawnEncounter(test) {
     );
 
     assert(
-        kind === 'elite' || kind === 'boss',
+        kind === 'elite' ||
+        kind === 'boss',
         `Unsupported encounter type: ${kind}`
     );
 
@@ -1891,31 +1924,65 @@ function spawnEncounter(test) {
     let level;
 
     if (kind === 'elite') {
-        const bracket = test.bracket || 'mid';
+        const bracket =
+            test.bracket ||
+            'mid';
 
         assert(
-            bracket === 'mid' || bracket === 'high',
+            bracket === 'mid' ||
+            bracket === 'high',
             'Elite bracket must be mid or high'
         );
 
-        level = ELITE_LEVELS[test.zone][bracket];
+        level =
+            ELITE_LEVELS[test.zone][bracket];
     } else {
-        level = BOSS_LEVELS[test.zone];
+        level =
+            BOSS_LEVELS[test.zone];
     }
 
     const id =
         test.encounterId ||
         `${kind}-z${test.zone}`;
 
-    const foe = createFoe({
-        id: `${id}-${kind}`,
-        level,
-        role: kind
-    });
+    const foe =
+        createFoe({
+            id: `${id}-${kind}`,
+            level,
+            role: kind
+        });
+
+    const zoneBase =
+        ZONES[test.zone].base;
 
     const rawStat =
-        ZONES[test.zone].base +
-        (kind === 'elite' ? 1 : 5);
+        zoneBase +
+        (
+            kind === 'elite'
+                ? 1
+                : 5
+        );
+
+    const baseKillXp =
+        mobStats(level, kind).xpBase;
+
+    const encounterRewards = {
+        kind,
+        baseKillXp,
+        xpOnKillDependsOnCrewLevel: true,
+        guaranteedGear: {
+            rarity:
+                kind === 'elite'
+                    ? 'uncommon'
+                    : 'epic',
+            rawStat,
+            pawnSilver: 2 * rawStat,
+            slotPending: true
+        },
+        bossTrophy:
+            kind === 'boss',
+        resolved: false
+    };
 
     return {
         ok: true,
@@ -1928,9 +1995,11 @@ function spawnEncounter(test) {
             type: kind,
             enemyTier: enemyTier(level),
             foes: [foe],
-            passive: PASSIVES[test.passiveRoll],
+            passive:
+                PASSIVES[test.passiveRoll],
             passiveStacks: 0,
             nextTelegraph: null,
+            rewards: encounterRewards,
             used: {
                 stun: false,
                 icePatch: false
@@ -1939,20 +2008,7 @@ function spawnEncounter(test) {
             exposed: 0
         },
 
-        rewards: {
-            baseKillXp: mobStats(level, kind).xpBase,
-            xpOnKillDependsOnCrewLevel: true,
-            guaranteedGear: {
-                rarity:
-                    kind === 'elite'
-                        ? 'uncommon'
-                        : 'epic',
-                rawStat,
-                pawnSilver: 2 * rawStat,
-                slotPending: true
-            },
-            bossTrophy: kind === 'boss'
-        }
+        rewards: encounterRewards
     };
 }
 

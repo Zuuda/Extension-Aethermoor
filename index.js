@@ -1012,52 +1012,138 @@ function resolveTurn({
         let hits = [];
 
         if (actions.qtik === 'frost_stomp') {
-            for (const foe of [...live(s)]) {
+            const stompTargets = [...live(s)].sort((a, b) => {
+                const aIndex = s.encounter.foes.indexOf(a);
+                const bIndex = s.encounter.foes.indexOf(b);
+                return aIndex - bIndex;
+            });
+
+            let totalAttempted = 0;
+            let totalApplied = 0;
+
+            for (let targetIndex = 0;
+                 targetIndex < stompTargets.length;
+                 targetIndex++) {
+                const primaryTarget =
+                    stompTargets[targetIndex];
+
+                if (primaryTarget.hp <= 0) {
+                    continue;
+                }
+
                 const baseStomp = Math.max(
                     0,
                     Math.floor(
-                        (effectiveAttack - enemyDefense(foe)) / 2
+                        (
+                            effectiveAttack -
+                            enemyDefense(primaryTarget)
+                        ) / 2
                     )
                 );
 
-                let amount = p === 1
-                    ? Math.max(1, Math.floor(baseStomp / 2))
+                let attempted = p === 1
+                    ? Math.max(
+                        1,
+                        Math.floor(baseStomp / 2)
+                    )
                     : baseStomp + p;
 
-                if (foe.id === target.id && p !== 1) {
-                    amount += (
-                        isCritical ? crewStats.luk : vitalsBonus
+                /*
+                 * Vitals/LUK and Exposed apply only to the declared
+                 * primary target, never to spillover targets.
+                 */
+                if (
+                    primaryTarget.id === target.id &&
+                    p !== 1
+                ) {
+                    attempted += (
+                        isCritical
+                            ? crewStats.luk
+                            : vitalsBonus
                     ) + exposedBonus;
                 }
 
-                assert(
-                    Number.isFinite(amount),
-                    `Frost Stomp damage is invalid against ${foe.id}`
+                attempted = Math.max(
+                    1,
+                    Number(attempted)
                 );
 
-                const applied = Math.min(foe.hp, amount);
-                foe.hp -= applied;
+                assert(
+                    Number.isFinite(attempted),
+                    `Frost Stomp damage is invalid against ` +
+                    `${primaryTarget.id}`
+                );
 
-                hits.push({
-                    id: foe.id,
-                    damage: applied,
-                    hp: foe.hp,
-                    // AoE overflow is not transferred in this version.
-                    overkillAfterHit: amount - applied
-                });
+                totalAttempted += attempted;
 
-                if (foe.hp === 0) {
-                    kills.push({
-                        id: foe.id,
-                        level: foe.level,
-                        role: foe.role
+                let remaining = attempted;
+                let spillIndex = targetIndex;
+
+                /*
+                 * Any excess damage from a slain target moves into the
+                 * next living target in encounter order. This preserves
+                 * the original pack order and prevents the same foe from
+                 * being selected repeatedly by an HP sort.
+                 */
+                while (remaining > 0) {
+                    while (
+                        spillIndex < stompTargets.length &&
+                        stompTargets[spillIndex].hp <= 0
+                    ) {
+                        spillIndex++;
+                    }
+
+                    const spillTarget =
+                        stompTargets[spillIndex];
+
+                    if (!spillTarget) {
+                        break;
+                    }
+
+                    const applied = Math.min(
+                        spillTarget.hp,
+                        remaining
+                    );
+
+                    spillTarget.hp -= applied;
+                    remaining -= applied;
+                    totalApplied += applied;
+
+                    hits.push({
+                        id: spillTarget.id,
+                        damage: applied,
+                        hp: spillTarget.hp,
+                        overkillAfterHit: remaining,
+                        source: primaryTarget.id
                     });
+
+                    if (spillTarget.hp === 0) {
+                        kills.push({
+                            id: spillTarget.id,
+                            level: spillTarget.level,
+                            role: spillTarget.role
+                        });
+
+                        spillIndex++;
+                    } else {
+                        break;
+                    }
                 }
             }
 
-            damage = hits.reduce(
-                (sum, hit) => sum + hit.damage, 0
+            /*
+             * Preserve the resolver's existing damage field as total
+             * attempted AoE damage, while hit records show actual HP
+             * removed and spillover.
+             */
+            damage = totalAttempted;
+
+            assert(
+                Number.isFinite(totalApplied),
+                'Frost Stomp applied damage is not finite'
             );
+        } else {
+
         } else {
             /*
              * Drinking removes Fire/Ice bonuses, not ordinary

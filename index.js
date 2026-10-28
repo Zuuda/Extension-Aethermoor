@@ -5170,6 +5170,15 @@ function registerTools() {
                                 type: 'string'
                             },
 
+                            amount: {
+                                type: 'integer',
+                                minimum: 1
+                            },
+
+                            reason: {
+                                type: 'string'
+                            },
+
                             nextGateMode: {
                                 type: 'string',
                                 enum: [

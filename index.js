@@ -3989,6 +3989,63 @@ function resolveVendorAction(test) {
         state
     };
 }
+function resolveCurrencyAction(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'currency action requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.crew ||= {};
+    state.crew.purse =
+        Number(state.crew.purse || 0);
+
+    assert(
+        Number.isInteger(state.crew.purse) &&
+        state.crew.purse >= 0,
+        'Crew purse must be a non-negative integer'
+    );
+
+    assert(
+        ['spend', 'earn'].includes(test.action),
+        `Unsupported currency action: ${test.action}`
+    );
+
+    assert(
+        Number.isInteger(test.amount) &&
+        test.amount > 0,
+        'Currency amount must be a positive integer'
+    );
+
+    const before =
+        state.crew.purse;
+
+    if (test.action === 'spend') {
+        assert(
+            before >= test.amount,
+            `Insufficient silver: need ${test.amount}s, ` +
+            `have ${before}s`
+        );
+
+        state.crew.purse -=
+            test.amount;
+    } else {
+        state.crew.purse +=
+            test.amount;
+    }
+
+    return {
+        ok: true,
+        action: test.action,
+        amount: test.amount,
+        reason: test.reason || null,
+        purseBefore: before,
+        purseAfter: state.crew.purse,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4396,6 +4453,9 @@ function resolveBatch(args) {
                         test.state,
                         test.itemIndex
                     );
+                    break;
+                case 'currency':
+                    result = resolveCurrencyAction(test);
                     break;
 
                 case 'vendor':
@@ -4921,7 +4981,8 @@ function registerTools() {
                                     'quest',
                                     'gear',
                                     'trade',
-                                    'vendor'                                    
+                                    'vendor',
+                                    'currency'
                                 ]
                             },
 
@@ -5079,7 +5140,9 @@ function registerTools() {
                                     'list',
                                     'settle',
                                     'stock',
-                                    'buy'
+                                    'buy',
+                                    'spend',
+                                    'earn'
                                 ]
                             },
 

@@ -1754,13 +1754,9 @@ function registerTools() {
                         packLooted: {
                             type: 'boolean'
                         }
-
-                        },
-                        packLooted: {
-                            type: 'boolean'
-                        }
                     },
                     required: ['name', 'kind']
+
                 }
             }
         }

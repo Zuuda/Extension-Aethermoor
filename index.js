@@ -1935,24 +1935,18 @@ function resolveBatch(args) {
                 'curiosityRoll must be 1-10'
             );
 
-            result.applicable.curiosity =
-                newWildernessSite;
+            result.applicable.curiosity = newWildernessSite;
 
             if (!newWildernessSite) {
-                result.findings.curiosity =
-                    'not_applicable';
+                result.findings.curiosity = 'not_applicable';
             } else if (curiosityRoll <= 7) {
-                result.findings.curiosity =
-                    'nothing_hidden';
+                result.findings.curiosity = 'nothing_hidden';
             } else if (curiosityRoll === 8) {
-                result.findings.curiosity =
-                    'hidden_lore_or_shortcut';
+                result.findings.curiosity = 'hidden_lore_or_shortcut';
             } else if (curiosityRoll === 9) {
-                result.findings.curiosity =
-                    'trap_or_ambush_hazard';
+                result.findings.curiosity = 'trap_or_ambush_hazard';
             } else {
-                result.findings.curiosity =
-                    'hidden_loot_stash';
+                result.findings.curiosity = 'hidden_loot_stash';
             }
         }
 
@@ -1964,12 +1958,10 @@ function resolveBatch(args) {
                 'rumorRoll must be 1-5'
             );
 
-            result.applicable.rumor =
-                investigatedRumor;
+            result.applicable.rumor = investigatedRumor;
 
             if (!investigatedRumor) {
-                result.findings.rumor =
-                    'not_applicable';
+                result.findings.rumor = 'not_applicable';
             } else if (rumorRoll <= 3) {
                 result.findings.rumor =
                     'travelogue_flub_benign_oddity';
@@ -1990,18 +1982,14 @@ function resolveBatch(args) {
                 'packDropRoll must be 1-10'
             );
 
-            result.applicable.packDrop =
-                packLooted;
+            result.applicable.packDrop = packLooted;
 
             if (!packLooted) {
-                result.findings.packDrop =
-                    'not_applicable';
+                result.findings.packDrop = 'not_applicable';
             } else if (packDropRoll <= 8) {
-                result.findings.packDrop =
-                    'auto_salvage_only';
+                result.findings.packDrop = 'auto_salvage_only';
             } else if (packDropRoll === 9) {
-                result.findings.packDrop =
-                    'wild_equipment_drop';
+                result.findings.packDrop = 'wild_equipment_drop';
             } else {
                 result.findings.packDrop =
                     'diegetic_quest_breadcrumb';
@@ -2010,12 +1998,12 @@ function resolveBatch(args) {
 
         result.unlocks = {
             loot:
-                result.findings.curiosity ===
-                    'hidden_loot_stash' ||
-                result.findings.packDrop ===
-                    'wild_equipment_drop',
+                result.findings.curiosity === 'hidden_loot_stash' ||
+                result.findings.packDrop === 'wild_equipment_drop',
 
             quest:
+                result.findings.rumor ===
+                    'genuine_unclaimed_system_quest_or_dungeon_hook' ||
                 result.findings.rumor ===
                     'genuine_unclaimed_quest_or_dungeon_hook' ||
                 result.findings.packDrop ===
@@ -2023,6 +2011,138 @@ function resolveBatch(args) {
         };
 
         return result;
+    }
+
+    function getPath(root, path) {
+        const parts = path.split('.');
+        let value = root;
+
+        for (const part of parts) {
+            if (
+                value === null ||
+                value === undefined ||
+                !Object.prototype.hasOwnProperty.call(value, part)
+            ) {
+                return { exists: false, value: undefined };
+            }
+
+            value = value[part];
+        }
+
+        return { exists: true, value };
+    }
+
+    function deepEqual(a, b) {
+        if (Object.is(a, b)) return true;
+
+        if (
+            a === null ||
+            b === null ||
+            typeof a !== 'object' ||
+            typeof b !== 'object'
+        ) {
+            return false;
+        }
+
+        if (Array.isArray(a) !== Array.isArray(b)) {
+            return false;
+        }
+
+        if (Array.isArray(a)) {
+            return (
+                a.length === b.length &&
+                a.every((value, index) =>
+                    deepEqual(value, b[index])
+                )
+            );
+        }
+
+        const aKeys = Object.keys(a).sort();
+        const bKeys = Object.keys(b).sort();
+
+        return (
+            aKeys.length === bKeys.length &&
+            aKeys.every((key, index) =>
+                key === bKeys[index] &&
+                deepEqual(a[key], b[key])
+            )
+        );
+    }
+
+    function evaluateExpectations(result, expectations, name) {
+        assert(
+            Array.isArray(expectations),
+            `${name}: expect must be an array`
+        );
+
+        return expectations.map((check, index) => {
+            assert(
+                check &&
+                typeof check.path === 'string' &&
+                check.path.length > 0,
+                `${name}: expect[${index}] needs a path`
+            );
+
+            const actual = getPath(result, check.path);
+            const comparisons = [];
+
+            if (Object.prototype.hasOwnProperty.call(check, 'exists')) {
+                comparisons.push({
+                    description: `exists=${check.exists}`,
+                    passed: actual.exists === check.exists
+                });
+            }
+
+            if (Object.prototype.hasOwnProperty.call(check, 'equals')) {
+                comparisons.push({
+                    description: 'equals expected value',
+                    passed:
+                        actual.exists &&
+                        deepEqual(actual.value, check.equals)
+                });
+            }
+
+            if (Object.prototype.hasOwnProperty.call(check, 'notEquals')) {
+                comparisons.push({
+                    description: 'does not equal forbidden value',
+                    passed:
+                        actual.exists &&
+                        !deepEqual(actual.value, check.notEquals)
+                });
+            }
+
+            if (Object.prototype.hasOwnProperty.call(check, 'minimum')) {
+                comparisons.push({
+                    description: `>= ${check.minimum}`,
+                    passed:
+                        actual.exists &&
+                        typeof actual.value === 'number' &&
+                        actual.value >= check.minimum
+                });
+            }
+
+            if (Object.prototype.hasOwnProperty.call(check, 'maximum')) {
+                comparisons.push({
+                    description: `<= ${check.maximum}`,
+                    passed:
+                        actual.exists &&
+                        typeof actual.value === 'number' &&
+                        actual.value <= check.maximum
+                });
+            }
+
+            assert(
+                comparisons.length > 0,
+                `${name}: expect[${index}] needs exists, equals, notEquals, minimum, or maximum`
+            );
+
+            return {
+                path: check.path,
+                actual: actual.exists ? actual.value : '<missing>',
+                comparisons,
+                ok: comparisons.every(item => item.passed)
+            };
+        });
     }
 
     assert(
@@ -2033,20 +2153,13 @@ function resolveBatch(args) {
 
     const results = [];
 
-    for (
-        let index = 0;
-        index < args.cases.length;
-        index++
-    ) {
+    for (let index = 0; index < args.cases.length; index++) {
         const test = args.cases[index];
-        const name =
-            test.name ||
-            `case_${index + 1}`;
+        const name = test.name || `case_${index + 1}`;
 
         try {
             assert(
-                test &&
-                typeof test === 'object',
+                test && typeof test === 'object',
                 `${name}: case must be an object`
             );
 
@@ -2057,32 +2170,25 @@ function resolveBatch(args) {
                     result = spawnEncounter(test);
                     break;
 
-                case 'turn': {
+                case 'turn':
                     assert(
                         test.state &&
                         typeof test.state === 'object',
                         `${name}: turn case requires state`
                     );
-
                     assert(
                         test.actions &&
                         typeof test.actions === 'object',
-                        [
-                            `${name}: turn case requires actions`,
-                            'with qtik, tansy, and target fields'
-                        ].join(' ')
+                        `${name}: turn case requires actions`
                     );
-
                     assert(
                         typeof test.actions.qtik === 'string',
                         `${name}: actions.qtik is required`
                     );
-
                     assert(
                         typeof test.actions.tansy === 'string',
                         `${name}: actions.tansy is required`
                     );
-
                     assert(
                         typeof test.actions.target === 'string',
                         `${name}: actions.target is required`
@@ -2092,12 +2198,9 @@ function resolveBatch(args) {
                         state: test.state,
                         actions: test.actions,
                         rolls: test.rolls,
-                        rewardMode:
-                            test.rewardMode ||
-                            'deferred'
+                        rewardMode: test.rewardMode || 'deferred'
                     });
                     break;
-                }
 
                 case 'consume_belt':
                     result = consumeBelt({
@@ -2113,10 +2216,7 @@ function resolveBatch(args) {
                             ? vendorStock(test.zone)
                             : undefined,
                         mob: test.mob
-                            ? mobStats(
-                                test.mob.level,
-                                test.mob.role
-                            )
+                            ? mobStats(test.mob.level, test.mob.role)
                             : undefined,
                         crew: test.crew
                             ? derived(test.crew)
@@ -2128,30 +2228,73 @@ function resolveBatch(args) {
                     break;
 
                 case 'world_seeds':
-                    result =
-                        resolveWorldSeeds(test);
+                    result = resolveWorldSeeds(test);
                     break;
 
                 default:
                     throw new Error(
-                        `${name}: unknown batch case kind ` +
-                        `'${test.kind}'`
+                        `${name}: unknown batch case kind '${test.kind}'`
                     );
             }
 
+            if (test.expectError) {
+                results.push({
+                    name,
+                    ok: false,
+                    error:
+                        `Expected error containing '${test.expectError}', ` +
+                        'but the operation succeeded',
+                    result
+                });
+                continue;
+            }
+
+            const checks = Array.isArray(test.expect)
+                ? evaluateExpectations(result, test.expect, name)
+                : [];
+
+            const explicitlyChecksStatus =
+                checks.some(check => check.path === 'ok');
+
+            const resultStatusOk =
+                !result ||
+                typeof result !== 'object' ||
+                result.ok !== false ||
+                explicitlyChecksStatus;
+
+            const checksOk =
+                checks.every(check => check.ok);
+
             results.push({
                 name,
-                ok: result.ok !== false,
+                ok: resultStatusOk && checksOk,
+                checks,
                 result
             });
         } catch (error) {
-            results.push({
-                name,
-                ok: false,
-                error: error instanceof Error
-                    ? error.message
-                    : String(error)
-            });
+            const message = error instanceof Error
+                ? error.message
+                : String(error);
+
+            if (
+                typeof test.expectError === 'string' &&
+                message.toLowerCase().includes(
+                    test.expectError.toLowerCase()
+                )
+            ) {
+                results.push({
+                    name,
+                    ok: true,
+                    expectedError: test.expectError,
+                    actualError: message
+                });
+            } else {
+                results.push({
+                    name,
+                    ok: false,
+                    error: message
+                });
+            }
         }
     }
 
@@ -2253,92 +2396,98 @@ function registerTools() {
                 enum: ['immediate', 'deferred']
             },
 
-            cases: {
+cases: {
+    type: 'array',
+    description: 'Independent mechanics cases with optional assertions',
+    items: {
+        type: 'object',
+        properties: {
+            name: { type: 'string' },
+
+            kind: {
+                type: 'string',
+                enum: [
+                    'spawn',
+                    'turn',
+                    'consume_belt',
+                    'reference',
+                    'world_seeds'
+                ]
+            },
+
+            state: { type: 'object' },
+            actions: { type: 'object' },
+            rolls: { type: 'object' },
+            rewardMode: {
+                type: 'string',
+                enum: ['immediate', 'deferred']
+            },
+
+            belt: {
                 type: 'array',
-                description:
-                    'Independent cases for batch mode',
+                items: { type: 'string' }
+            },
+            items: {
+                type: 'array',
+                items: { type: 'string' }
+            },
+
+            zone: { type: 'integer' },
+            encounterType: {
+                type: 'string',
+                enum: ['normal_pack', 'elite', 'boss']
+            },
+            bracket: {
+                type: 'string',
+                enum: ['low', 'mid', 'high']
+            },
+            composition: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 6
+            },
+            encounterId: { type: 'string' },
+            passiveRoll: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 4
+            },
+
+            mob: { type: 'object' },
+            crew: { type: 'object' },
+
+            curiosityRoll: { type: 'integer' },
+            rumorRoll: { type: 'integer' },
+            packDropRoll: { type: 'integer' },
+            newWildernessSite: { type: 'boolean' },
+            investigatedRumor: { type: 'boolean' },
+            packLooted: { type: 'boolean' },
+
+            expectError: {
+                type: 'string',
+                description: 'Expected error substring for negative tests'
+            },
+            expect: {
+                type: 'array',
+                description: 'Assertions against returned result paths',
                 items: {
                     type: 'object',
                     properties: {
-                        name: { type: 'string' },
-
-                        kind: {
-                            type: 'string',
-                            enum: [
-                                'spawn',
-                                'turn',
-                                'consume_belt',
-                                'reference',
-                                'world_seeds'
-                            ]
-                        },
-
-                        state: { type: 'object' },
-                        actions: { type: 'object' },
-                        rolls: { type: 'object' },
-                        rewardMode: {
-                            type: 'string',
-                            enum: ['immediate', 'deferred']
-                        },
-
-                        belt: {
-                            type: 'array',
-                            items: { type: 'string' }
-                        },
-                        items: {
-                            type: 'array',
-                            items: { type: 'string' }
-                        },
-
-                                               zone: { type: 'integer' },
-
-                        encounterType: {
-                            type: 'string',
-                            enum: ['normal_pack', 'elite', 'boss']
-                        },
-
-                        bracket: {
-                            type: 'string',
-                            enum: ['low', 'mid', 'high']
-                        },
-
-                        composition: {
-                            type: 'integer',
-                            minimum: 1,
-                            maximum: 6
-                        },
-                        encounterId: {
-                            type: 'string'
-                        },
-
-                        passiveRoll: {
-                            type: 'integer',
-                            minimum: 1,
-                            maximum: 4
-                        },
-
-                        mob: { type: 'object' },
-                        crew: { type: 'object' },
-
-                        curiosityRoll: { type: 'integer' },
-                        rumorRoll: { type: 'integer' },
-                        packDropRoll: { type: 'integer' },
-                        newWildernessSite: {
-                            type: 'boolean'
-                        },
-                        investigatedRumor: {
-                            type: 'boolean'
-                        },
-                        packLooted: {
-                            type: 'boolean'
-                        }
+                        path: { type: 'string' },
+                        exists: { type: 'boolean' },
+                        equals: {},
+                        notEquals: {},
+                        minimum: { type: 'number' },
+                        maximum: { type: 'number' }
                     },
-                    required: ['name', 'kind']
-
+                    required: ['path']
                 }
             }
-        }
-    },
+        },
+        required: ['name', 'kind']
+    }
+},
+
     args => {
         if (Array.isArray(args.cases)) {
             return resolveBatch(args);

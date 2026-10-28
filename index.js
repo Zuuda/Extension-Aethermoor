@@ -470,9 +470,10 @@ function applyBeltItem(state, item, recipient) {
             item === 'mid_health_potion' ? 120 : 50;
 
         const character = crew[recipient];
+        const stats = derived(crew);
         const maxHp = recipient === 'qtik'
-            ? derived(crew).qtikMaxHp
-            : derived(crew).tansyMaxHp;
+            ? stats.qtikMaxHp
+            : stats.tansyMaxHp;
 
         const beforeHp = character.hp;
 
@@ -492,36 +493,60 @@ function applyBeltItem(state, item, recipient) {
         };
     }
 
-    const stackEntry = Object.entries(
+    // Cleanse one Hexer stack first, if present.
+    const hexEntry = Object.entries(
         encounter.hexStacks || {}
-    ).find(([, stacks]) => stacks > 0);
+    ).find(([, stacks]) => Number(stacks) > 0);
 
-    if (!stackEntry) {
+    if (hexEntry) {
+        const [hexerId, stacks] = hexEntry;
+
+        if (Number(stacks) === 1) {
+            delete encounter.hexStacks[hexerId];
+        } else {
+            encounter.hexStacks[hexerId] =
+                Number(stacks) - 1;
+        }
+
         return {
             item,
             recipient,
             effect: 'cleanse',
-            stacksRemoved: 0,
-            note: 'No active Hexer debuff to remove'
+            stacksRemoved: 1,
+            sourceType: 'hexer',
+            source: hexerId
         };
     }
 
-    const [hexerId, stacks] = stackEntry;
+    // If no Hexer stack exists, cleanse one Elite/Boss passive stack.
+    if (
+        (
+            encounter.type === 'elite' ||
+            encounter.type === 'boss'
+        ) &&
+        Number(encounter.passiveStacks || 0) > 0
+    ) {
+        encounter.passiveStacks -= 1;
 
-    if (stacks === 1) {
-        delete encounter.hexStacks[hexerId];
-    } else {
-        encounter.hexStacks[hexerId] = stacks - 1;
+        return {
+            item,
+            recipient,
+            effect: 'cleanse',
+            stacksRemoved: 1,
+            sourceType: 'elite_boss_passive',
+            source: encounter.passive
+        };
     }
 
     return {
         item,
         recipient,
         effect: 'cleanse',
-        stacksRemoved: 1,
-        source: hexerId
+        stacksRemoved: 0,
+        note: 'No active debuff stack to remove'
     };
 }
+
 const ELITE_BOSS_TELEGRAPHS = [
     'berserk_heavy_windup',
     'spiked_carapace',
@@ -952,9 +977,9 @@ function resolveTurn({
          * Fire uses current action/summon contribution before
          * ATK debuffs. Withering and Hexer penalties cannot reduce it.
          */
-        const fireDamage = actions.qtik === 'fire_melee'
-            ? Math.max(3, Math.floor(unpenalizedAttack / 5))
-            : 0;
+            const fireDamage = actions.qtik === 'fire_melee'
+                ? Math.max(3, Math.floor(crewStats.atk / 5))
+                : 0;
 
         const isCritical =
             p === 6 ||
@@ -1244,26 +1269,29 @@ function resolveTurn({
                     }
                 }
 
-                if (foe.role === 'hexer') {
-                    const blocked =
-                        actions.tansy === 'visor' &&
-                        e >= 2 && e <= 4;
+                        if (foe.role === 'hexer') {
+                            const blocked =
+                            actions.tansy === 'visor' &&
+                            e >= 2 &&
+                            e <= 4;
 
-                    if (!blocked) {
-                        const stacks = 1 +
-                            Number(
-                                activeTelegraph?.extraDebuffStacks || 0
+                            if (!blocked) {
+                                const stacks =
+                                (e === 6 ? 2 : 1) +
+                                Number(
+                                    activeTelegraph?.extraDebuffStacks || 0
                             );
 
-                        encounter.hexStacks[foe.id] =
-                            Number(encounter.hexStacks[foe.id] || 0) +
-                            stacks;
+                            encounter.hexStacks[foe.id] =
+                                Number(encounter.hexStacks[foe.id] || 0) +
+                                stacks;
 
-                        effects.push(
-                            `${foe.id} added ${stacks} hex stack(s)`
-                        );
-                    }
-                }
+                            effects.push(
+                                `${foe.id} added ${stacks} hex stack(s)`
+        );
+    }
+}
+
             }
 
             if (

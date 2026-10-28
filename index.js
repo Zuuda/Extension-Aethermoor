@@ -464,7 +464,8 @@ function resolveTurn({
             'vitals',
             'hamstring',
             'recall',
-            'surge'
+            'surge',
+            'drink'
         ].includes(actions.tansy),
         `Unsupported Tansy action: ${actions.tansy}`
     );
@@ -517,9 +518,7 @@ function resolveTurn({
         encounter.used.icePatch = true;
     }
 
-let itemUse = null;
-
-    const itemUse = {};
+const itemUse = {};
 
     if (actions.qtik === 'drink') {
         assert(

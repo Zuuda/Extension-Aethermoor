@@ -3075,7 +3075,8 @@ function resolveQuestAction(test) {
             'accept',
             'decline',
             'clear_gate',
-            'complete'
+            'complete',
+            'equip'
         ].includes(test.action),
         `Unsupported quest action: ${test.action}`
     );
@@ -3941,10 +3942,9 @@ function resolveBatch(args) {
                             : undefined
                     };
                     break;
-
-             case 'world_seeds':
-                 result = resolveWorldSeeds(test);
-                 break;
+                case 'world_seeds':
+                    result = resolveWorldSeeds(test);
+                    break;
                 case 'loot':
                     result = resolveLootSeed(test);
                     break;

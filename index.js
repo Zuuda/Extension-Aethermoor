@@ -3712,6 +3712,209 @@ function resolveTradeAction(test) {
 
     return result;
 }
+function resolveVendorAction(test) {
+    assert(
+        Number.isInteger(test.zone) && ZONES[test.zone],
+        `Unknown zone: ${test.zone}`
+    );
+
+    const zone = test.zone;
+    const zoneInfo = ZONES[zone];
+    const stat = zoneInfo.base;
+    const price = stat * 8;
+    const pawnValue = stat * 2;
+
+    const definitions = [
+        { owner: 'tansy', slot: 'weapon', variants: [null] },
+        { owner: 'tansy', slot: 'gloves', variants: [null] },
+        { owner: 'tansy', slot: 'chest', variants: [null] },
+        { owner: 'tansy', slot: 'trousers', variants: [null] },
+
+        { owner: 'tansy', slot: 'headgear', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'boots', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'neck', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'ring1', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'ring2', variants: ['vitality', 'luck'] },
+
+        { owner: 'qtik', slot: 'ring1', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'ring2', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'amulet', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'wristCuffs', variants: ['bulwark', 'vitality'] }
+    ];
+
+    const slotNames = {
+        weapon: 'Focus',
+        gloves: 'Bracers',
+        chest: 'Chest',
+        trousers: 'Trousers',
+        headgear: 'Headgear',
+        boots: 'Boots',
+        neck: 'Necklace',
+        ring1: 'Ring 1',
+        ring2: 'Ring 2',
+        amulet: 'Amulet',
+        wristCuffs: 'Wrist Cuffs'
+    };
+
+    const variantTitle = variant =>
+        variant
+            ? `${variant[0].toUpperCase()}${variant.slice(1)}`
+            : null;
+
+    if (test.action === 'stock') {
+        const state = test.state || {};
+        const gear = state.crew?.gear || {};
+
+        const catalog = definitions.map((definition, index) => {
+            const equipped =
+                gear[definition.owner]?.[definition.slot];
+
+            const equippedStat =
+                Number(equipped?.stat || 0);
+
+            return {
+                number: index + 1,
+                owner: definition.owner,
+                slot: definition.slot,
+                equippedStat,
+                upgradeable: equippedStat < stat,
+                price,
+                stat,
+                variants: definition.variants.map(variant => ({
+                    variant,
+                    label: variantTitle(variant),
+                    bonus: lootBonus(
+                        definition.owner,
+                        definition.slot,
+                        variant,
+                        stat
+                    )
+                }))
+            };
+        });
+
+        return {
+            ok: true,
+            action: 'stock',
+            zone,
+            zoneName: zoneInfo.name,
+            stat,
+            price,
+            pawnValue,
+            catalog
+        };
+    }
+
+    assert(
+        test.action === 'buy',
+        `Unsupported vendor action: ${test.action}`
+    );
+
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Vendor purchase requires state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        state.crew &&
+        state.crew.gear &&
+        state.inventory,
+        'Vendor purchase requires crew and inventory state'
+    );
+
+    state.inventory.bagReserves ||= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves),
+        'inventory.bagReserves must be an array'
+    );
+
+    assert(
+        Number.isInteger(state.crew.purse) &&
+        state.crew.purse >= price,
+        `Insufficient silver: purchase costs ${price}s`
+    );
+
+    assert(
+        ['tansy', 'qtik'].includes(test.owner),
+        'Purchase owner must be tansy or qtik'
+    );
+
+    const definition = definitions.find(
+        entry =>
+            entry.owner === test.owner &&
+            entry.slot === test.slot
+    );
+
+    assert(
+        definition,
+        `Invalid ${test.owner} vendor slot: ${test.slot}`
+    );
+
+    const variant =
+        test.variant === undefined ||
+        test.variant === null ||
+        test.variant === ''
+            ? null
+            : test.variant;
+
+    assert(
+        definition.variants.includes(variant),
+        `${test.owner} ${test.slot} requires one of: ` +
+        definition.variants
+            .map(value => value || 'no variant')
+            .join(', ')
+    );
+
+    const material =
+        ZONE_LOOT_MATERIALS[zone];
+
+    const nameParts = [
+        material,
+        variantTitle(variant),
+        slotNames[test.slot]
+    ].filter(Boolean);
+
+    const item = {
+        name: nameParts.join(' '),
+        owner: test.owner,
+        slot: test.slot,
+        variant,
+        rarity: 'Common',
+        rarityColor: LOOT_RARITY_INFO.common.color,
+        rawStat: stat,
+        cost: price,
+        sellValue: pawnValue,
+        bound: false,
+        classRestricted: false,
+        tradeStreamEligible: true,
+        bonus: lootBonus(
+            test.owner,
+            test.slot,
+            variant,
+            stat
+        ),
+        acquiredFrom: 'armory'
+    };
+
+    const purseBefore =
+        state.crew.purse;
+
+    state.crew.purse -= price;
+    state.inventory.bagReserves.push(item);
+
+    return {
+        ok: true,
+        action: 'buy',
+        item,
+        purseBefore,
+        purseAfter: state.crew.purse,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4115,6 +4318,9 @@ function resolveBatch(args) {
                         test.action === 'equip',
                         `${name}: unsupported gear action '${test.action}'`
                     );
+                case 'vendor':
+                    result = resolveVendorAction(test);
+                    break;
 
                     result = equipBagItem(
                         test.state,
@@ -4640,7 +4846,9 @@ function registerTools() {
                                     'loot',
                                     'quest',
                                     'gear',
-                                    'trade'
+                                    'trade',
+                                    'stock',
+                                    'buy'
                                 ]
                             },
 

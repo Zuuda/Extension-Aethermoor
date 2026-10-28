@@ -1219,7 +1219,7 @@ function resolveTurn({
                 }
             }
 
-            for (const foe of live(s)) {
+                       for (const foe of live(s)) {
                 const tier = enemyTier(foe.level);
 
                 if (foe.role === 'archer') {
@@ -1257,11 +1257,13 @@ function resolveTurn({
                             const amount = Math.min(
                                 10 * tier,
                                 mobStats(
-                                    wounded.level, wounded.role
+                                    wounded.level,
+                                    wounded.role
                                 ).maxHp - wounded.hp
                             );
 
                             wounded.hp += amount;
+
                             effects.push(
                                 `${foe.id} healed ${wounded.id} for ${amount}`
                             );
@@ -1269,29 +1271,28 @@ function resolveTurn({
                     }
                 }
 
-                        if (foe.role === 'hexer') {
-                            const blocked =
-                            actions.tansy === 'visor' &&
-                            e >= 2 &&
-                            e <= 4;
+                if (foe.role === 'hexer') {
+                    const blocked =
+                        actions.tansy === 'visor' &&
+                        e >= 2 &&
+                        e <= 4;
 
-                            if (!blocked) {
-                                const stacks =
-                                (e === 6 ? 2 : 1) +
-                                Number(
-                                    activeTelegraph?.extraDebuffStacks || 0
+                    if (!blocked) {
+                        const stacks =
+                            (e === 6 ? 2 : 1) +
+                            Number(
+                                activeTelegraph?.extraDebuffStacks || 0
                             );
 
-                            encounter.hexStacks[foe.id] =
-                                Number(encounter.hexStacks[foe.id] || 0) +
-                                stacks;
+                        encounter.hexStacks[foe.id] =
+                            Number(encounter.hexStacks[foe.id] || 0) +
+                            stacks;
 
-                            effects.push(
-                                `${foe.id} added ${stacks} hex stack(s)`
-        );
-    }
-}
-
+                        effects.push(
+                            `${foe.id} added ${stacks} hex stack(s)`
+                        );
+                    }
+                }
             }
 
             if (

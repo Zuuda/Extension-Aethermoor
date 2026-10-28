@@ -627,11 +627,6 @@ function resolveTurn({
 
     assert(live(s).length > 0, 'No living foes');
 
-    /*
-     * All derived combat values come from validate().
-     * Do not read duplicated values such as crew.luk or crew.atk,
-     * because those fields may be absent or stale in the locked state.
-     */
     const crewStats = {
         atk: Number(initial.atk),
         def: Number(initial.def),
@@ -654,14 +649,15 @@ function resolveTurn({
     };
 
     encounter.hexStacks ||= {};
-    encounter.exposed ||= 0;
-    encounter.turn = (encounter.turn || 0) + 1;
+    encounter.exposed = Number(encounter.exposed || 0);
+    encounter.turn = Number(encounter.turn || 0) + 1;
 
     if (actions.qtik === 'stun') {
         assert(
             !encounter.used.stun,
             'Stun has already been used this fight'
         );
+
         encounter.used.stun = true;
     }
 
@@ -670,17 +666,23 @@ function resolveTurn({
             !encounter.used.icePatch,
             'Ice Patch has already been used this fight'
         );
+
         encounter.used.icePatch = true;
     }
 
-const itemUse = {};
+    const itemUse = {};
 
     if (actions.qtik === 'drink') {
         assert(
             typeof actions.qtikItem === 'string',
             "Q'tik drink action requires actions.qtikItem"
         );
-        itemUse.qtik = applyBeltItem(s, actions.qtikItem, 'qtik');
+
+        itemUse.qtik = applyBeltItem(
+            s,
+            actions.qtikItem,
+            'qtik'
+        );
     }
 
     if (actions.tansy === 'drink') {
@@ -688,14 +690,20 @@ const itemUse = {};
             typeof actions.tansyItem === 'string',
             "Tansy drink action requires actions.tansyItem"
         );
-        itemUse.tansy = applyBeltItem(s, actions.tansyItem, 'tansy');
+
+        itemUse.tansy = applyBeltItem(
+            s,
+            actions.tansyItem,
+            'tansy'
+        );
     }
 
-if (actions.tansy === 'surge') {
-    c.weasels.active =
-        2 + 2 * Math.floor(c.level / 2);
-}
-
+    if (actions.tansy === 'surge') {
+        c.weasels.active = Math.min(
+            c.weasels.max,
+            2 + 2 * Math.floor(c.level / 2)
+        );
+    }
 
     const tape = checkTape(s, rolls);
     const logs = [];
@@ -713,44 +721,60 @@ if (actions.tansy === 'surge') {
         const p = tape.player[ex];
         const e = tape.enemy[ex];
 
-        const patchActive = actions.qtik === 'ice_patch';
-        const hamstringActive = actions.tansy === 'hamstring';
+        const patchActive =
+            actions.qtik === 'ice_patch';
 
-        /*
-         * Enemy miss ranges:
-         * Normal: E1
-         * Hamstring: E1-E2
-         * Ice Patch: E1-E3
-         * Ice Patch + Hamstring: E1-E4
-         */
+        const hamstringActive =
+            actions.tansy === 'hamstring';
+
         const missLimit = patchActive
             ? hamstringActive ? 4 : 3
             : hamstringActive ? 2 : 1;
 
         const enemyMiss =
             e <= missLimit ||
-            (actions.qtik === 'stun' && ex === 0);
+            (
+                actions.qtik === 'stun' &&
+                ex === 0
+            );
 
-        /*
-         * Recalculate active Hexer penalties from living Hexers only.
-         */
-        const hexPenalty = Object.entries(encounter.hexStacks)
-            .reduce((total, [id, stacks]) => {
-                const hexer = live(s).find(
-                    foe => foe.id === id && foe.role === 'hexer'
-                );
+        const hexPenalty = Object.entries(
+            encounter.hexStacks
+        ).reduce((total, [id, stacks]) => {
+            const hexer = live(s).find(
+                foe =>
+                    foe.id === id &&
+                    foe.role === 'hexer'
+            );
 
-                if (!hexer) return total;
+            if (!hexer) {
+                return total;
+            }
 
-                return total +
-                    2 *
-                    enemyTier(hexer.level) *
-                    Number(stacks);
-            }, 0);
+            return total +
+                2 *
+                enemyTier(hexer.level) *
+                Number(stacks);
+        }, 0);
 
         assert(
             Number.isFinite(hexPenalty),
             'Hex penalty is not finite'
+        );
+
+        const passiveAttackPenaltyValue =
+            passiveAttackPenalty(encounter);
+
+        const passiveDefensePenaltyValue =
+            passiveDefensePenalty(encounter);
+
+        const effectiveRegen =
+            crewStats.regen -
+            passiveRegenPenalty(encounter);
+
+        assert(
+            Number.isFinite(effectiveRegen),
+            'Effective regeneration is not finite'
         );
 
         const directed =
@@ -758,21 +782,22 @@ if (actions.tansy === 'surge') {
             actions.tansy === 'vitals' ||
             actions.tansy === 'hamstring';
 
-const weaselAttack =
-    actions.tansy === 'recall'
-        ? 0
-        : c.weasels.active *
-            (
-                directed && !patchActive
-                    ? 2
-                    : 1
-            );
-
         /*
-         * Crew ATK consists of base/gear ATK plus current summon ATK.
-         * Remove the old summon contribution from the derived value before
-         * adding the action-specific current summon contribution.
+         * Q'tik drinking does not affect the summons.
+         * Tansy drinking leaves summons undirected, so they still
+         * contribute +1 ATK each.
+         * Recall suppresses them completely.
          */
+        const weaselAttack =
+            actions.tansy === 'recall'
+                ? 0
+                : c.weasels.active *
+                    (
+                        directed && !patchActive
+                            ? 2
+                            : 1
+                    );
+
         const initialWeaselAttack =
             Number(state.crew.weasels.active);
 
@@ -789,13 +814,15 @@ const weaselAttack =
             0,
             baseAndGearAttack +
             weaselAttack -
-            hexPenalty
+            hexPenalty -
+            passiveAttackPenaltyValue
         );
 
         const effectiveDefense = Math.max(
             0,
             crewStats.def -
-            hexPenalty +
+            hexPenalty -
+            passiveDefensePenaltyValue +
             (
                 actions.qtik === 'ice_melee'
                     ? 2
@@ -816,10 +843,6 @@ const weaselAttack =
             `Target ${actions.target} is not alive`
         );
 
-        /*
-         * A living Brute guards single-target attacks against backliners
-         * unless Visor bypasses Guard or the attack is Frost Stomp.
-         */
         if (
             brute &&
             target.role !== 'brute' &&
@@ -830,13 +853,13 @@ const weaselAttack =
             target = brute;
         }
 
-const fireDamage =
-    actions.qtik === 'fire_melee'
-        ? Math.max(
-            3,
-            Math.floor(crewStats.atk / 5)
-        )
-        : 0;
+        const fireDamage =
+            actions.qtik === 'fire_melee'
+                ? Math.max(
+                    3,
+                    Math.floor(crewStats.atk / 5)
+                )
+                : 0;
 
         const isCritical =
             p === 6 ||
@@ -856,19 +879,8 @@ const fireDamage =
                 )
                 : 0;
 
-        /*
-         * Visor Ex1 exposes the target for the next Crew hit.
-         * A P:1 attack still deals its minimum 1 physical damage,
-         * then receives the exposed LUK bonus.
-         */
-        const exposedBonus = Number(
-            encounter.exposed || 0
-        );
-
-        if (p !== 1) {
-            encounter.exposed = 0;
-        }
-
+        const exposedBonus =
+            Number(encounter.exposed || 0);
 
         if (p !== 1) {
             encounter.exposed = 0;
@@ -876,12 +888,8 @@ const fireDamage =
 
         let damage = 0;
         let hits = [];
-        let playerEffects = [];
+        const playerEffects = [];
 
-        /*
-         * STUN strips four times enemy tier from the target's DEF
-         * for this turn.
-         */
         const strippedDefense =
             actions.qtik === 'stun'
                 ? 4 * enemyTier(target.level)
@@ -893,9 +901,6 @@ const fireDamage =
         );
 
         if (actions.qtik === 'frost_stomp') {
-            /*
-             * Frost Stomp hits every living foe.
-             */
             const liveTargets = [...live(s)];
 
             for (const foe of liveTargets) {
@@ -909,16 +914,13 @@ const fireDamage =
                     )
                 );
 
-                let stompDamage;
-
-                if (p === 1) {
-                    stompDamage = Math.max(
-                        1,
-                        Math.floor(baseStomp / 2)
-                    );
-                } else {
-                    stompDamage = baseStomp + p;
-                }
+                let stompDamage =
+                    p === 1
+                        ? Math.max(
+                            1,
+                            Math.floor(baseStomp / 2)
+                        )
+                        : baseStomp + p;
 
                 if (foe.id === target.id) {
                     stompDamage += isCritical
@@ -948,7 +950,8 @@ const fireDamage =
                 hits.push({
                     id: foe.id,
                     damage: applied,
-                    hp: foe.hp
+                    hp: foe.hp,
+                    overkillAfterHit: 0
                 });
 
                 if (foe.hp === 0) {
@@ -968,27 +971,23 @@ const fireDamage =
             let physicalDamage;
 
             if (actions.qtik === 'drink') {
-                /*
-                 * Drinking still performs the crew's basic physical attack
-                 * without Fire or Ice bonus.
-                 */
-                physicalDamage = p === 1
-                    ? 1
-                    : Math.max(
-                        1,
-                        effectiveAttack -
-                        effectiveTargetDefense +
-                        p +
-                        vitalsBonus
-                    );
+                physicalDamage =
+                    p === 1
+                        ? 1
+                        : Math.max(
+                            1,
+                            effectiveAttack -
+                            effectiveTargetDefense +
+                            p
+                        );
             } else if (actions.tansy === 'recall') {
-                physicalDamage = p === 1
-                    ? 1
-                    : Math.max(
-                        1,
-                        2 * c.level +
-                        p
-                    );
+                physicalDamage =
+                    p === 1
+                        ? 1
+                        : Math.max(
+                            1,
+                            2 * c.level + p
+                        );
             } else if (p === 1) {
                 physicalDamage = 1;
             } else if (isCritical) {
@@ -1035,12 +1034,6 @@ const fireDamage =
             );
         }
 
-        /*
-         * Critical correction:
-         * If player damage killed the final foe, the enemy does not retaliate
-         * and the turn ends immediately. This also prevents later exchanges
-         * from being processed against an already-cleared encounter.
-         */
         if (live(s).length === 0) {
             logs.push({
                 exchange: ex + 1,
@@ -1065,10 +1058,6 @@ const fireDamage =
             break;
         }
 
-        /*
-         * Only living frontline foes deal frontline damage.
-         * Elite and Boss passive effects are applied only on enemy hits.
-         */
         const activeFrontliners = live(s).filter(
             foe => [
                 'brute',
@@ -1082,7 +1071,7 @@ const fireDamage =
         let passiveHealing = 0;
         const effects = [...playerEffects];
 
-        if (!enemyMiss && live(s).length > 0) {
+        if (!enemyMiss) {
             if (activeFrontliners.length > 0) {
                 const lead = activeFrontliners[0];
 
@@ -1157,17 +1146,16 @@ const fireDamage =
                     e >= 2 &&
                     actions.tansy !== 'recall'
                 ) {
-                    const destroyed =
-                        Math.min(
-                            c.weasels.active,
-                            1
-                        );
+                    const destroyed = Math.min(
+                        c.weasels.active,
+                        1
+                    );
 
                     c.weasels.active -= destroyed;
 
                     if (destroyed > 0) {
                         effects.push(
-                            'Sweeping Cleave destroyed ' +
+                            `Sweeping Cleave destroyed ` +
                             `${destroyed} melee weasel`
                         );
                     }
@@ -1188,7 +1176,8 @@ const fireDamage =
             }
 
             for (const foe of live(s)) {
-                const foeTier = enemyTier(foe.level);
+                const foeTier =
+                    enemyTier(foe.level);
 
                 if (foe.role === 'archer') {
                     const amount =
@@ -1223,6 +1212,7 @@ const fireDamage =
                                 a.level,
                                 a.role
                             );
+
                             const bStats = mobStats(
                                 b.level,
                                 b.role
@@ -1323,23 +1313,20 @@ const fireDamage =
         }
 
         if (
-            encounter.type === 'elite' ||
-            encounter.type === 'boss'
+            (
+                encounter.type === 'elite' ||
+                encounter.type === 'boss'
+            ) &&
+            !enemyMiss &&
+            encounter.passive
         ) {
-            if (
-                !enemyMiss &&
-                encounter.passive
-            ) {
-                encounter.passiveStacks =
-                    Number(
-                        encounter.passiveStacks || 0
-                    ) + 1;
+            encounter.passiveStacks =
+                Number(encounter.passiveStacks || 0) + 1;
 
-                effects.push(
-                    `${encounter.passive} stack ` +
-                    `${encounter.passiveStacks}`
-                );
-            }
+            effects.push(
+                `${encounter.passive} stack ` +
+                `${encounter.passiveStacks}`
+            );
         }
 
         c.qtik.hp = Math.max(
@@ -1353,25 +1340,25 @@ const fireDamage =
         );
 
         if (c.qtik.hp > 0) {
-            c.qtik.hp = Math.min(
-                crewStats.qtikMaxHp,
-                c.qtik.hp + effectiveRegen
-            );
-        }
+            if (effectiveRegen > 0) {
+                c.qtik.hp = Math.min(
+                    crewStats.qtikMaxHp,
+                    c.qtik.hp + effectiveRegen
+                );
+            } else if (effectiveRegen < 0) {
+                const internalDamage =
+                    Math.abs(effectiveRegen);
 
-        if (
-            passiveState(encounter)?.name === 'grave_chill' &&
-            effectiveRegen === 0 &&
-            c.qtik.hp > 0
-        ) {
-            c.qtik.hp = Math.max(
-                0,
-                c.qtik.hp - 1
-            );
+                c.qtik.hp = Math.max(
+                    0,
+                    c.qtik.hp - internalDamage
+                );
 
-            effects.push(
-                'Grave-Chill dealt 1 internal damage'
-            );
+                effects.push(
+                    `Negative regeneration dealt ` +
+                    `${internalDamage} internal damage`
+                );
+            }
         }
 
         if (passiveHealing > 0) {
@@ -1390,22 +1377,19 @@ const fireDamage =
             }
         }
 
-
-        /*
-         * Visor Ex1 fumble exposes the enemy to the next crew hit.
-         */
         if (
             actions.tansy === 'visor' &&
             e === 1 &&
             live(s).length > 0
         ) {
             encounter.exposed = crewStats.luk;
+
             effects.push(
                 `Target exposed for +${crewStats.luk} damage`
             );
         }
 
-            logs.push({
+        logs.push({
             exchange: ex + 1,
             playerRoll: p,
             enemyRoll: e,
@@ -1449,9 +1433,6 @@ const fireDamage =
         c.purse += gainedSilver;
     }
 
-    /*
-     * Remove status entries belonging to slain Hexers.
-     */
     encounter.hexStacks = Object.fromEntries(
         Object.entries(encounter.hexStacks)
             .filter(([id]) =>
@@ -1484,12 +1465,20 @@ const fireDamage =
                 telegraphRoll
             );
     }
+
     const finalStats = derived(c);
 
-    c.qtik.maxHp = finalStats.qtikMaxHp;
-    c.qtik.def = finalStats.def;
-    c.qtik.regen = finalStats.regen;
-    c.tansy.maxHp = finalStats.tansyMaxHp;
+    c.qtik.maxHp =
+        finalStats.qtikMaxHp;
+
+    c.qtik.def =
+        finalStats.def;
+
+    c.qtik.regen =
+        finalStats.regen;
+
+    c.tansy.maxHp =
+        finalStats.tansyMaxHp;
 
     const result = {
         ok: true,
@@ -1509,35 +1498,51 @@ const fireDamage =
             live(s).length === 0,
         state: s,
         derived: finalStats
-
     };
-// Reject NaN and Infinity, but allow intentional null values.
-const assertNoNonFinite = (value, path = 'result') => {
-    if (typeof value === 'number') {
-        assert(
-            Number.isFinite(value),
-            `${path} contains a non-finite number`
-        );
-        return;
-    }
 
-    if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-            assertNoNonFinite(item, `${path}[${index}]`);
-        });
-        return;
-    }
+    const assertNoNonFinite = (
+        value,
+        path = 'result'
+    ) => {
+        if (typeof value === 'number') {
+            assert(
+                Number.isFinite(value),
+                `${path} contains a non-finite number`
+            );
 
-    if (value !== null && typeof value === 'object') {
-        for (const [key, child] of Object.entries(value)) {
-            assertNoNonFinite(child, `${path}.${key}`);
+            return;
         }
-    }
-};
 
-assertNoNonFinite(result);
-return result;
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => {
+                assertNoNonFinite(
+                    item,
+                    `${path}[${index}]`
+                );
+            });
 
+            return;
+        }
+
+        if (
+            value !== null &&
+            typeof value === 'object'
+        ) {
+            for (
+                const [key, child] of
+                Object.entries(value)
+            ) {
+                assertNoNonFinite(
+                    child,
+                    `${path}.${key}`
+                );
+            }
+        }
+    };
+
+    assertNoNonFinite(result);
+
+    return result;
 }
 
 function createFoe({ id, level, role }) {

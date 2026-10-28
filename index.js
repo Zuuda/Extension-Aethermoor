@@ -3636,8 +3636,25 @@ function registerTools() {
                                 }
                             },
 
-                            zone: {
+                                                        zone: {
                                 type: 'integer'
+                            },
+
+                            source: {
+                                type: 'string',
+                                enum: ['wild', 'elite', 'boss']
+                            },
+
+                            slotRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 16
+                            },
+
+                            rarityRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 6
                             },
 
                             encounterType: {

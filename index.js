@@ -257,28 +257,66 @@ function checkTape(state, rolls) {
 
 function dealDamage(state, target, amount, kills) {
     const hits = [];
-    let remaining = amount;
-    let foe = target;
+    let remaining = Number(amount);
+    let current = target;
 
-    while (foe && remaining > 0) {
-        const applied = Math.min(foe.hp, remaining);
-        foe.hp -= applied;
+    assert(
+        Number.isFinite(remaining) && remaining >= 0,
+        `Damage must be a finite non-negative number: ${amount}`
+    );
+
+    while (current && remaining > 0) {
+        const applied = Math.min(current.hp, remaining);
+
+        current.hp -= applied;
         remaining -= applied;
-        hits.push({ id: foe.id, damage: applied, hp: foe.hp });
 
-        if (foe.hp === 0) {
+        hits.push({
+            id: current.id,
+            damage: applied,
+            hp: current.hp,
+            overkillAfterHit: remaining
+        });
+
+        if (current.hp === 0) {
             kills.push({
-                id: foe.id,
-                xp: xpForKill(state.crew.level, foe),
-                silver: 2 * enemyTier(foe.level)
+                id: current.id,
+                xp: xpForKill(state.crew.level, current),
+                silver: 2 * enemyTier(current.level)
             });
-            foe = live(state)[0];
+        }
+
+        /*
+         * Excess damage always transfers to the living foe with the
+         * lowest current HP. Array order does not determine spillover.
+         * Ties are resolved by stable encounter-array order.
+         */
+        if (remaining > 0) {
+            const nextTargets = live(state)
+                .filter(foe => foe.id !== current.id)
+                .sort((a, b) => {
+                    if (a.hp !== b.hp) {
+                        return a.hp - b.hp;
+                    }
+
+                    const aIndex = state.encounter.foes
+                        .findIndex(foe => foe.id === a.id);
+
+                    const bIndex = state.encounter.foes
+                        .findIndex(foe => foe.id === b.id);
+
+                    return aIndex - bIndex;
+                });
+
+            current = nextTargets[0] ?? null;
         } else {
-            foe = null;
+            current = null;
         }
     }
+
     return hits;
 }
+
 
 function resolveTurn({
     state,

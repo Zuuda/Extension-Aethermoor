@@ -285,65 +285,144 @@ function checkTape(state, rolls) {
 }
 
 function dealDamage(state, target, amount, kills) {
-    const hits = [];
-    let remaining = Number(amount);
-    let current = target;
+function finalizeEncounterRewards(state, slainIds) {
+    const encounter = state.encounter;
+    const crew = state.crew;
 
     assert(
-        Number.isFinite(remaining) && remaining >= 0,
-        `Damage must be a finite non-negative number: ${amount}`
+        encounter &&
+        encounter.rewards,
+        'Encounter has no locked reward data'
     );
 
-    while (current && remaining > 0) {
-        const applied = Math.min(current.hp, remaining);
+    const slainIdSet = new Set(slainIds);
 
-        current.hp -= applied;
-        remaining -= applied;
+    const slainFoes = encounter.foes.filter(
+        foe => slainIdSet.has(foe.id)
+    );
 
-        hits.push({
-            id: current.id,
-            damage: applied,
-            hp: current.hp,
-            overkillAfterHit: remaining
-        });
+    const encounterCleared =
+        live(state).length === 0;
 
-        if (current.hp === 0) {
-            kills.push({
-                id: current.id,
-                xp: xpForKill(state.crew.level, current),
-                silver: 2 * enemyTier(current.level)
-            });
-        }
-
-        /*
-         * Excess damage always transfers to the living foe with the
-         * lowest current HP. Array order does not determine spillover.
-         * Ties are resolved by stable encounter-array order.
-         */
-        if (remaining > 0) {
-            const nextTargets = live(state)
-                .filter(foe => foe.id !== current.id)
-                .sort((a, b) => {
-                    if (a.hp !== b.hp) {
-                        return a.hp - b.hp;
-                    }
-
-                    const aIndex = state.encounter.foes
-                        .findIndex(foe => foe.id === a.id);
-
-                    const bIndex = state.encounter.foes
-                        .findIndex(foe => foe.id === b.id);
-
-                    return aIndex - bIndex;
-                });
-
-            current = nextTargets[0] ?? null;
-        } else {
-            current = null;
-        }
+    if (!encounterCleared) {
+        return {
+            xp: 0,
+            silver: 0,
+            applied: false,
+            resolved: false,
+            encounterCleared: false,
+            loot: [],
+            trophies: []
+        };
     }
 
-    return hits;
+    assert(
+        encounter.rewards.resolved !== true,
+        'Encounter rewards have already been resolved'
+    );
+
+    let xp = 0;
+    let silver = 0;
+    const loot = [];
+    const trophies = [];
+
+    if (encounter.type === 'normal_pack') {
+        /*
+         * Normal packs always use their locked aggregate reward.
+         * This is independent of the number of foes in the pack.
+         */
+        xp = Number(
+            encounter.rewards.listedPackXp
+        );
+
+        silver = Number(
+            encounter.rewards.autoSalvage
+        );
+
+        assert(
+            Number.isInteger(xp) && xp >= 0,
+            'Locked normal-pack XP is invalid'
+        );
+
+        assert(
+            Number.isInteger(silver) && silver >= 0,
+            'Locked normal-pack salvage is invalid'
+        );
+    } else if (
+        encounter.type === 'elite' ||
+        encounter.type === 'boss'
+    ) {
+        /*
+         * Elite and Boss encounters contain one foe.
+         * Their XP receives the crew-level gap modifier.
+         * They do not receive normal-pack auto-salvage silver.
+         */
+        for (const foe of slainFoes) {
+            xp += xpForKill(
+                crew.level,
+                foe
+            );
+        }
+
+        const guaranteedGear =
+            encounter.rewards.guaranteedGear;
+
+        assert(
+            guaranteedGear &&
+            Number.isInteger(guaranteedGear.rawStat),
+            'Elite/Boss guaranteed gear is missing'
+        );
+
+        loot.push({
+            kind: 'guaranteed_gear_pending_slot',
+            rarity: guaranteedGear.rarity,
+            rawStat: guaranteedGear.rawStat,
+            pawnSilver: guaranteedGear.pawnSilver,
+            bound: false,
+            slotPending: true
+        });
+
+        if (
+            encounter.type === 'boss' &&
+            encounter.rewards.bossTrophy === true
+        ) {
+            trophies.push({
+                kind: 'boss_trophy_pending_name',
+                encounterId: encounter.id,
+                bound: false
+            });
+        }
+    } else {
+        throw new Error(
+            `Unsupported encounter reward type: ${encounter.type}`
+        );
+    }
+
+    assert(
+        Number.isInteger(xp) && xp >= 0,
+        'Final XP reward is invalid'
+    );
+
+    assert(
+        Number.isInteger(silver) && silver >= 0,
+        'Final silver reward is invalid'
+    );
+
+    encounter.status = 'cleared';
+    encounter.rewards.resolved = true;
+
+    const applied =
+        state.rewardMode === 'immediate';
+
+    return {
+        xp,
+        silver,
+        applied,
+        resolved: true,
+        encounterCleared: true,
+        loot,
+        trophies
+    };
 }
 
 function applyBeltItem(state, item, recipient) {
@@ -1519,15 +1598,27 @@ function resolveTurn({
         });
     }
 
-    const gainedXp = kills.reduce(
-        (sum, kill) => sum + kill.xp,
-        0
+    const slainIds = kills.map(
+        kill => kill.id
     );
 
-    const gainedSilver = kills.reduce(
-        (sum, kill) => sum + kill.silver,
-        0
-    );
+    /*
+     * Resolve XP, silver, and guaranteed encounter rewards
+     * exactly once after the full encounter is cleared.
+     */
+    s.rewardMode = rewardMode;
+
+    const encounterRewards =
+        finalizeEncounterRewards(
+            s,
+            slainIds
+        );
+
+    const gainedXp =
+        encounterRewards.xp;
+
+    const gainedSilver =
+        encounterRewards.silver;
 
     let levelUps = [];
 
@@ -1607,7 +1698,14 @@ function resolveTurn({
             xp: gainedXp,
             silver: gainedSilver,
             applied:
-                rewardMode === 'immediate'
+                rewardMode === 'immediate' &&
+                encounterRewards.resolved,
+            resolved:
+                encounterRewards.resolved,
+            loot:
+                encounterRewards.loot,
+            trophies:
+                encounterRewards.trophies
         },
         levelUps,
         packCleared:

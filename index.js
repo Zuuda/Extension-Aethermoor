@@ -604,16 +604,15 @@ const itemUse = {};
             actions.tansy === 'vitals' ||
             actions.tansy === 'hamstring';
 
-        const weaselAttack =
-            actions.tansy === 'recall' || actions.tansy === 'drink'
-                ? 0
-                : c.weasels.active *
-                    (
-                        directed && !patchActive
-                            ? 2
-                            : 1
-                    );
-
+const weaselAttack =
+    actions.tansy === 'recall'
+        ? 0
+        : c.weasels.active *
+            (
+                directed && !patchActive
+                    ? 2
+                    : 1
+            );
 
         /*
          * Crew ATK consists of base/gear ATK plus current summon ATK.

@@ -220,7 +220,7 @@ function shadowMechanics(crew) {
         } else if (shadow.type === 'hexer') {
             result.attack += 1 + tier;
             result.hexStrip += 4 * tier;
-        } else if (shadow.type === 'brute') {
+        } else if (shadow.type === 'warder') {
             result.attack += 1 + tier;
             result.bruteReduction += Math.max(1, Math.floor(tier / 2));
         } else {
@@ -1268,33 +1268,33 @@ function resolveTurn({
     encounter.exposed = Number(encounter.exposed || 0);
     encounter.passiveStacks = Number(encounter.passiveStacks || 0);
     encounter.turn = Number(encounter.turn || 0) + 1;
-    encounter.shadowBruteSacrificeUsed ||= [];
+    encounter.shadowWarderSacrificeUsed ||= [];
 
     assert(
-        Array.isArray(encounter.shadowBruteSacrificeUsed),
-        'Shadow Brute sacrifice history must be an array'
+        Array.isArray(encounter.shadowWarderSacrificeUsed),
+        'Shadow-Warder sacrifice history must be an array'
     );
 
-    let pendingShadowBruteSacrificeId =
+    let pendingshadowWarderSacrificeId =
         actions.shadowSacrificeId || null;
 
-    if (pendingShadowBruteSacrificeId) {
+    if (pendingshadowWarderSacrificeId) {
         const shadow = c.shadows?.active?.find(
             entry =>
-                entry.id === pendingShadowBruteSacrificeId &&
+                entry.id === pendingshadowWarderSacrificeId &&
                 entry.type === 'brute'
         );
 
         assert(
             shadow,
-            'Shadow sacrifice requires an active Shadow Brute'
+            'Shadow sacrifice requires an active Shadow-Warder'
         );
 
         assert(
-            !encounter.shadowBruteSacrificeUsed.includes(
-                pendingShadowBruteSacrificeId
+            !encounter.shadowWarderSacrificeUsed.includes(
+                pendingshadowWarderSacrificeId
             ),
-            'This Shadow Brute has already sacrificed itself this fight'
+            'This Shadow-Warder has already sacrificed itself this fight'
         );
     }
 
@@ -2073,53 +2073,53 @@ let activeTelegraph = telegraphEffects(encounter);
         let frontlineDamage = 0;
         let backlineDamage = 0;
         let enemyHitCount = 0;
-        let shadowBruteAbsorbed = false;
+        let shadowWarderAbsorbed = false;
 
         /*
-         * A declared active Shadow Brute can sacrifice itself once
+         * A declared active Shadow-Warder can sacrifice itself once
          * per fight to absorb one successful telegraph hit or E:6
          * critical completely.
          */
         if (
-            pendingShadowBruteSacrificeId &&
+            pendingshadowWarderSacrificeId &&
             !enemyMiss &&
             (e === 6 || activeTelegraph)
         ) {
             const activeIndex =
                 c.shadows.active.findIndex(
                     entry =>
-                        entry.id === pendingShadowBruteSacrificeId &&
+                        entry.id === pendingshadowWarderSacrificeId &&
                         entry.type === 'brute'
                 );
 
             assert(
                 activeIndex >= 0,
-                'Declared Shadow Brute is no longer active'
+                'Declared Shadow-Warder is no longer active'
             );
 
             const [sacrificed] =
                 c.shadows.active.splice(activeIndex, 1);
 
-            encounter.shadowBruteSacrificeUsed.push(
-                pendingShadowBruteSacrificeId
+            encounter.shadowWarderSacrificeUsed.push(
+                pendingshadowWarderSacrificeId
             );
 
-            pendingShadowBruteSacrificeId = null;
-            shadowBruteAbsorbed = true;
+            pendingshadowWarderSacrificeId = null;
+            shadowWarderAbsorbed = true;
 
             const absorbed = e === 6
                 ? 'enemy critical'
                 : `telegraph ${activeTelegraph.name}`;
 
             const message =
-                `Shadow Brute ${sacrificed.id} sacrificed itself ` +
+                `Shadow-Warder ${sacrificed.id} sacrificed itself ` +
                 `to absorb ${absorbed}`;
 
             effects.push(message);
             turnEffects.push(message);
         }
 
-                if (!enemyMiss && !shadowBruteAbsorbed) {
+                if (!enemyMiss && !shadowWarderAbsorbed) {
 
             /*
              * A successful Buffer cast activates its non-stacking
@@ -2364,7 +2364,7 @@ let activeTelegraph = telegraphEffects(encounter);
                 );
             }
             if (menderHeal > 0) {
-                effects.push(`Shadow Mender healed ${menderHeal} HP`);
+                effects.push(`Shadow-Mender healed ${menderHeal} HP`);
             }
         }
 
@@ -2384,7 +2384,7 @@ let activeTelegraph = telegraphEffects(encounter);
             damage,
             hits,
             enemyMiss,
-            enemyAttackAbsorbed: shadowBruteAbsorbed,
+            enemyAttackAbsorbed: shadowWarderAbsorbed,
             frontlineDamage,
             backlineDamage,
             effectiveRegen,
@@ -2446,10 +2446,10 @@ let activeTelegraph = telegraphEffects(encounter);
             if (encounter.hexStacks[hex] === 0) {
                 delete encounter.hexStacks[hex];
             }
-            turnEffects.push('Shadow Mender cleansed one Hexer stack');
+            turnEffects.push('Shadow-Mender cleansed one Hexer stack');
         } else if (encounter.passiveStacks > 0) {
             encounter.passiveStacks -= 1;
-            turnEffects.push('Shadow Mender cleansed one passive stack');
+            turnEffects.push('Shadow-Mender cleansed one passive stack');
         }
     }
 
@@ -4841,7 +4841,7 @@ function resolveShadowDeckAction(test) {
         'archer',
         'mender',
         'hexer',
-        'brute'
+        'warder'
     ];
 
     const deck = state.crew.shadows.deck;

@@ -3470,7 +3470,6 @@ function equipBagItem(stateInput, itemIndex) {
         derivedAfter: newDerived,
         state
     };
-}
 function resolveTradeAction(test) {
     assert(
         test.state &&
@@ -3481,6 +3480,7 @@ function resolveTradeAction(test) {
     const state = clone(test.state);
 
     state.crew ||= {};
+    state.crew.purse = Number(state.crew.purse || 0);
     state.inventory ||= {};
     state.inventory.bagReserves ||= [];
     state.inventory.activeTradeListings ||= [];
@@ -3526,21 +3526,18 @@ function resolveTradeAction(test) {
             'Bag item has no pawnable rawStat'
         );
 
-        const value =
-            item.rawStat * 2;
+        const pawnValue = item.rawStat * 2;
 
         state.inventory.bagReserves.splice(
             test.itemIndex,
             1
         );
 
-        state.crew.purse =
-            Number(state.crew.purse || 0) +
-            value;
+        state.crew.purse += pawnValue;
 
-        result.silverGained = value;
+        result.silverGained = pawnValue;
+        result.pawnValue = pawnValue;
         result.item = item;
-        result.pawnValue = value;
 
         return result;
     }
@@ -3568,38 +3565,135 @@ function resolveTradeAction(test) {
             'Only unbound Trade-Stream-eligible gear may be listed'
         );
 
+        const tradeStat =
+            Number(item.tradeStat || item.rawStat);
+
         assert(
-            Number.isInteger(item.rawStat) &&
-            item.rawStat > 0,
-            'Listed item needs a positive rawStat'
+            Number.isInteger(tradeStat) &&
+            tradeStat > 0,
+            'Listed item needs a positive trade value'
         );
+
+        assert(
+            Number.isInteger(test.tradeRoll) &&
+            test.tradeRoll >= 1 &&
+            test.tradeRoll <= 6,
+            'Listing requires tradeRoll from 1 to 6'
+        );
+
+        assert(
+            Number.isInteger(test.buyerRoll) &&
+            test.buyerRoll >= 1 &&
+            test.buyerRoll <= 6,
+            'Listing requires buyerRoll from 1 to 6'
+        );
+
+        const rarity =
+            String(item.rarity || 'Common').toLowerCase();
+
+        let multiplier;
+        let saleStatus;
+        let marketResult;
+
+        if (test.tradeRoll === 1) {
+            saleStatus = 'unsold';
+            marketResult = 'lowball_trolls';
+            multiplier = 0;
+        } else {
+            saleStatus = 'sold';
+
+            if (test.tradeRoll === 2) {
+                marketResult = 'standard_market';
+                multiplier =
+                    rarity === 'common' ? 5 :
+                    rarity === 'uncommon' ? 8 :
+                    15;
+            } else if (test.tradeRoll === 3) {
+                marketResult = 'standard_market';
+                multiplier =
+                    rarity === 'common' ? 6 :
+                    rarity === 'uncommon' ? 9 :
+                    18;
+            } else if (test.tradeRoll === 4) {
+                marketResult = 'guild_bulk_buyer';
+                multiplier =
+                    rarity === 'common' ? 7 :
+                    rarity === 'uncommon' ? 11 :
+                    20;
+            } else if (test.tradeRoll === 5) {
+                marketResult = 'bidding_war';
+                multiplier =
+                    rarity === 'common' ? 9 :
+                    rarity === 'uncommon' ? 13 :
+                    25;
+            } else {
+                marketResult = 'whale_collector_buyout';
+                multiplier =
+                    rarity === 'common' ? 12 :
+                    rarity === 'uncommon' ? 16 :
+                    35;
+            }
+        }
+
+        const buyers = {
+            1: 'Sweaty Min-Maxer',
+            2: 'Roleplayer in Fancy Cloak',
+            3: 'Guild Logistics Mule',
+            4: 'Nervous Lowbie',
+            5: 'Over-Geared Alt',
+            6: 'Crafter Looking for Scrap'
+        };
+
+        const listingId =
+            test.listingId ||
+            `listing-${Date.now()}-${state.inventory.activeTradeListings.length + 1}`;
+
+        const lockedListing = {
+            ...item,
+            listingId,
+            listedAt: test.listedAt || null,
+
+            /*
+             * This result is locked at listing time. Settlement reveals
+             * it later and does not accept or generate a new trade roll.
+             */
+            lockedSale: {
+                status: saleStatus,
+                result: marketResult,
+                tradeRoll: test.tradeRoll,
+                buyer: buyers[test.buyerRoll],
+                buyerRoll: test.buyerRoll,
+                tradeStat,
+                multiplier,
+                proceeds:
+                    saleStatus === 'sold'
+                        ? tradeStat * multiplier
+                        : 0,
+                revealed: false
+            }
+        };
 
         state.inventory.bagReserves.splice(
             test.itemIndex,
             1
         );
 
-        state.inventory.activeTradeListings.push({
-            ...item,
-            listingId:
-                test.listingId ||
-                `listing-${state.inventory.activeTradeListings.length + 1}`,
-            listedAt: test.listedAt || null
-        });
+        state.inventory.activeTradeListings.push(
+            lockedListing
+        );
 
-        result.item =
-            state.inventory.activeTradeListings[
-                state.inventory.activeTradeListings.length - 1
-            ];
+        result.item = {
+            name: lockedListing.name,
+            listingId,
+            locked: true
+        };
+
+        result.status = 'listed';
 
         return result;
     }
 
-    assert(
-        Number.isInteger(test.listingIndex) &&
-        test.listingIndex >= 0,
-        'settle requires listingIndex'
-    );
+    int(test.listingIndex, 'listingIndex', 0);
 
     assert(
         test.listingIndex <
@@ -3607,17 +3701,8 @@ function resolveTradeAction(test) {
         `No active listing at index ${test.listingIndex}`
     );
 
-    assert(
-        Number.isInteger(test.tradeRoll) &&
-        test.tradeRoll >= 1 &&
-        test.tradeRoll <= 6,
-        'tradeRoll must be 1-6'
-    );
-
     const listing =
-        state.inventory.activeTradeListings[
-            test.listingIndex
-        ];
+        state.inventory.activeTradeListings[test.listingIndex];
 
     assert(
         listing &&
@@ -3625,93 +3710,61 @@ function resolveTradeAction(test) {
         'Bound gear cannot be settled through Trade-Stream'
     );
 
-    const rarity =
-        String(listing.rarity || 'Common')
-            .toLowerCase();
-
-    const stat =
-        listing.tradeStat ||
-        listing.rawStat;
-
     assert(
-        Number.isInteger(stat) &&
-        stat > 0,
-        'Trade listing needs a positive trade stat'
+        listing.lockedSale &&
+        ['sold', 'unsold'].includes(listing.lockedSale.status),
+        'Listing has no locked sale result'
     );
 
-    let multiplier;
+    const lockedSale =
+        listing.lockedSale;
 
-    if (test.tradeRoll === 1) {
-        state.inventory.activeTradeListings.splice(
-            test.listingIndex,
-            1
-        );
+    assert(
+        lockedSale.revealed !== true,
+        'Trade-Stream listing has already been settled'
+    );
 
-        state.inventory.bagReserves.push(listing);
-
-        result.status = 'unsold';
-        result.item = listing;
-        result.silverGained = 0;
-
-        return result;
-    }
-
-    if (test.tradeRoll === 2) {
-        multiplier =
-            rarity === 'common'
-                ? 5
-                : rarity === 'uncommon'
-                    ? 8
-                    : 15;
-    } else if (test.tradeRoll === 3) {
-        multiplier =
-            rarity === 'common'
-                ? 6
-                : rarity === 'uncommon'
-                    ? 9
-                    : 18;
-    } else if (test.tradeRoll === 4) {
-        multiplier =
-            rarity === 'common'
-                ? 7
-                : rarity === 'uncommon'
-                    ? 11
-                    : 20;
-    } else if (test.tradeRoll === 5) {
-        multiplier =
-            rarity === 'common'
-                ? 9
-                : rarity === 'uncommon'
-                    ? 13
-                    : 25;
-    } else {
-        multiplier =
-            rarity === 'common'
-                ? 12
-                : rarity === 'uncommon'
-                    ? 16
-                    : 35;
-    }
-
-    const proceeds =
-        stat * multiplier;
+    lockedSale.revealed = true;
+    result.item = listing;
 
     state.inventory.activeTradeListings.splice(
         test.listingIndex,
         1
     );
 
-    state.crew.purse =
-        Number(state.crew.purse || 0) +
-        proceeds;
+    if (lockedSale.status === 'unsold') {
+        delete listing.lockedSale;
+        delete listing.listingId;
+        delete listing.listedAt;
+
+        state.inventory.bagReserves.push(listing);
+
+        result.status = 'unsold';
+        result.silverGained = 0;
+        result.returnedToBag = true;
+
+        return result;
+    }
+
+    const proceeds =
+        Number(lockedSale.proceeds);
+
+    assert(
+        Number.isInteger(proceeds) && proceeds >= 0,
+        'Locked Trade-Stream proceeds are invalid'
+    );
 
     result.status = 'sold';
-    result.item = listing;
     result.silverGained = proceeds;
-    result.multiplier = multiplier;
+    result.multiplier = lockedSale.multiplier;
+    result.buyer = lockedSale.buyer;
+    result.marketResult = lockedSale.result;
+
+    state.crew.purse += proceeds;
 
     return result;
 }
+
 function resolveVendorAction(test) {
     assert(
         Number.isInteger(test.zone) &&
@@ -5621,6 +5674,12 @@ function registerTools() {
                             },
 
                             tradeRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 6
+                            },
+                            
+                            buyerRoll: {
                                 type: 'integer',
                                 minimum: 1,
                                 maximum: 6

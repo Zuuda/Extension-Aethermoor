@@ -4543,6 +4543,10 @@ function resolveShadowDeckAction(test) {
     const state = clone(test.state);
 
     state.crew ||= {};
+    state.crew.weasels ||= {
+        active: 0,
+        max: 2 + 2 * Math.floor((state.crew.level || 1) / 2)
+    };
     state.crew.shadows ||= {
         deck: [],
         active: []
@@ -4562,7 +4566,13 @@ function resolveShadowDeckAction(test) {
     );
 
     assert(
-        ['record', 'replace', 'remove'].includes(test.action),
+        [
+            'record',
+            'replace',
+            'remove',
+            'activate',
+            'deactivate'
+        ].includes(test.action),
         `Unsupported shadow deck action: ${test.action}`
     );
 
@@ -4572,6 +4582,42 @@ function resolveShadowDeckAction(test) {
         'hexer',
         'brute'
     ];
+
+    const deck = state.crew.shadows.deck;
+    const active = state.crew.shadows.active;
+
+    function validateShadow(shadow) {
+        assert(
+            shadow &&
+            typeof shadow.id === 'string' &&
+            shadow.id.length > 0,
+            'Shadow requires a non-empty ID'
+        );
+
+        assert(
+            allowedTypes.includes(shadow.type),
+            `Unsupported shadow type: ${shadow.type}`
+        );
+
+        int(
+            shadow.sourceMobLevel,
+            'shadow.sourceMobLevel',
+            1
+        );
+
+        return {
+            ...shadow,
+            shadowTier:
+                1 + Math.floor(shadow.sourceMobLevel / 10)
+        };
+    }
+
+    function activeSlotCount() {
+        return active.reduce(
+            (total, shadow) => total + 3 * shadow.count,
+            0
+        );
+    }
 
     if (test.action === 'record') {
         assert(
@@ -4585,25 +4631,25 @@ function resolveShadowDeckAction(test) {
             `Unsupported shadow type: ${test.shadowType}`
         );
 
-        int(test.sourceMobLevel, 'sourceMobLevel', 1);
+        int(
+            test.sourceMobLevel,
+            'sourceMobLevel',
+            1
+        );
 
         assert(
-            !state.crew.shadows.deck.some(
-                shadow => shadow.id === test.shadowId
-            ),
+            !deck.some(shadow => shadow.id === test.shadowId),
             `Shadow ${test.shadowId} is already in the deck`
         );
 
-        const shadow = {
+        const shadow = validateShadow({
             id: test.shadowId,
             type: test.shadowType,
             sourceMobLevel: test.sourceMobLevel,
-            shadowTier:
-                1 + Math.floor(test.sourceMobLevel / 10),
             capturedFrom: test.sourceMobName || null
-        };
+        });
 
-        state.crew.shadows.deck.push(shadow);
+        deck.push(shadow);
 
         return {
             ok: true,
@@ -4620,25 +4666,66 @@ function resolveShadowDeckAction(test) {
     );
 
     const shadowIndex =
-        state.crew.shadows.deck.findIndex(
-            shadow => shadow.id === test.shadowId
-        );
+        deck.findIndex(shadow => shadow.id === test.shadowId);
 
     assert(
         shadowIndex >= 0,
         `Shadow ${test.shadowId} is not in the deck`
     );
 
+    const shadow =
+        validateShadow(deck[shadowIndex]);
+
+    if (test.action === 'replace') {
+        assert(
+            allowedTypes.includes(test.shadowType),
+            `Unsupported replacement type: ${test.shadowType}`
+        );
+
+        int(
+            test.sourceMobLevel,
+            'sourceMobLevel',
+            1
+        );
+
+        const previous = deck[shadowIndex];
+
+        const replacement = validateShadow({
+            id: test.shadowId,
+            type: test.shadowType,
+            sourceMobLevel: test.sourceMobLevel,
+            capturedFrom: test.sourceMobName || null
+        });
+
+        deck[shadowIndex] = replacement;
+
+        const activeEntry =
+            active.find(entry => entry.id === test.shadowId);
+
+        if (activeEntry) {
+            activeEntry.type = replacement.type;
+            activeEntry.sourceMobLevel =
+                replacement.sourceMobLevel;
+            activeEntry.shadowTier =
+                replacement.shadowTier;
+        }
+
+        return {
+            ok: true,
+            action: 'replace',
+            previous,
+            shadow: replacement,
+            state
+        };
+    }
+
     if (test.action === 'remove') {
         assert(
-            !state.crew.shadows.active.some(
-                shadow => shadow.id === test.shadowId
-            ),
+            !active.some(entry => entry.id === test.shadowId),
             'Cannot remove an active shadow from the deck'
         );
 
-        const [removed] =
-            state.crew.shadows.deck.splice(shadowIndex, 1);
+        const [removed] = deck.splice(shadowIndex, 1);
 
         return {
             ok: true,
@@ -4648,33 +4735,93 @@ function resolveShadowDeckAction(test) {
         };
     }
 
+    if (test.action === 'deactivate') {
+        const activeIndex =
+            active.findIndex(entry => entry.id === test.shadowId);
+
+        assert(
+            activeIndex >= 0,
+            `Shadow ${test.shadowId} is not active`
+        );
+
+        const [deactivated] =
+            active.splice(activeIndex, 1);
+
+        return {
+            ok: true,
+            action: 'deactivate',
+            shadow: deactivated,
+            shadowSlotsReleased: 3 * deactivated.count,
+            state
+        };
+    }
+
+    const requestedCount =
+        test.count === undefined
+            ? 1
+            : int(test.count, 'count', 1);
+
+    if (shadow.type !== 'archer') {
+        assert(
+            requestedCount === 1,
+            'Only Shadow Archers may have multiple active copies'
+        );
+
+        assert(
+            !active.some(entry => entry.type === shadow.type),
+            `Only one active Shadow ${shadow.type[0].toUpperCase() + shadow.type.slice(1)} is allowed`
+        );
+    }
+
+    const currentCount =
+        active
+            .filter(entry => entry.id === shadow.id)
+            .reduce((total, entry) => total + entry.count, 0);
+
+    const additionalCount =
+        requestedCount - currentCount;
+
     assert(
-        allowedTypes.includes(test.shadowType),
-        `Unsupported replacement type: ${test.shadowType}`
+        additionalCount > 0,
+        `Shadow ${shadow.id} is already active at that count`
     );
 
-    int(test.sourceMobLevel, 'sourceMobLevel', 1);
+    const availableCapacity =
+        Number(state.crew.weasels.max) -
+        Number(state.crew.weasels.active) -
+        activeSlotCount();
 
-    const previous =
-        state.crew.shadows.deck[shadowIndex];
+    const slotsNeeded =
+        additionalCount * 3;
 
-    const replacement = {
-        id: test.shadowId,
-        type: test.shadowType,
-        sourceMobLevel: test.sourceMobLevel,
-        shadowTier:
-            1 + Math.floor(test.sourceMobLevel / 10),
-        capturedFrom: test.sourceMobName || null
-    };
+    assert(
+        availableCapacity >= slotsNeeded,
+        `Not enough summon slots: need ${slotsNeeded}, ` +
+        `have ${Math.max(0, availableCapacity)}`
+    );
 
-    state.crew.shadows.deck[shadowIndex] =
-        replacement;
+    const activeEntry =
+        active.find(entry => entry.id === shadow.id);
+
+    if (activeEntry) {
+        activeEntry.count += additionalCount;
+    } else {
+        active.push({
+            ...shadow,
+            count: requestedCount
+        });
+    }
 
     return {
         ok: true,
-        action: 'replace',
-        previous,
-        shadow: replacement,
+        action: 'activate',
+        shadow,
+        count: requestedCount,
+        shadowSlotsUsed: slotsNeeded,
+        activeShadowSlots: activeSlotCount(),
+        looseWeaselCapacity:
+            Number(state.crew.weasels.max) -
+            activeSlotCount(),
         state
     };
 }
@@ -5834,7 +5981,12 @@ function registerTools() {
                                     'list_food',
                                     'apply',
                                     'boss_check',
-                                    'flee'
+                                    'flee',
+                                    'record',
+                                    'replace',
+                                    'remove',
+                                    'activate',
+                                    'deactivate'
 
                                 ]
                             },
@@ -5887,13 +6039,16 @@ function registerTools() {
                             listedAt: {
                                 type: 'string'
                             },
+                            count: {
+                                type: 'integer',
+                                minimum: 1
+                            },
                             
                             fleeRoll: {
                                 type: 'integer',
                                 minimum: 1,
                                 maximum: 6
                             },
-
 
                             recipeId: {
                                 type: 'string'

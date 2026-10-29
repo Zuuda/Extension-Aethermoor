@@ -1269,8 +1269,12 @@ function resolveTurn({
     encounter.passiveStacks = Number(encounter.passiveStacks || 0);
     encounter.turn = Number(encounter.turn || 0) + 1;
 
-    const previousTelegraph = encounter.nextTelegraph;
-    let activeTelegraph = telegraphEffects(encounter);
+const turnEffects = [];
+const itemUse = {};
+
+const previousTelegraph = encounter.nextTelegraph;
+let activeTelegraph = telegraphEffects(encounter);
+
     
     if (actions.qtik === 'stun') {
         assert(
@@ -1296,9 +1300,6 @@ function resolveTurn({
         );
         encounter.used.icePatch = true;
     }
-
-    const turnEffects = [];
-    const itemUse = {};
 
     if (actions.qtik === 'drink') {
         assert(
@@ -5776,10 +5777,16 @@ function registerTools() {
                         target: {
                             type: 'string'
                         },
-                        shadowId: { type: 'string' },
-                            count: { type: 'integer', minimum: 1 }
+                        shadowId: {
+                            type: 'string'
+                        },
 
-                        qtikItem: {
+                        count: {
+                            type: 'integer',
+                            minimum: 1
+                        },
+
+                            qtikItem: {
                             type: 'string'
                         },
                         tansyItem: {

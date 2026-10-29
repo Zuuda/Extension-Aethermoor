@@ -1268,6 +1268,35 @@ function resolveTurn({
     encounter.exposed = Number(encounter.exposed || 0);
     encounter.passiveStacks = Number(encounter.passiveStacks || 0);
     encounter.turn = Number(encounter.turn || 0) + 1;
+    encounter.shadowBruteSacrificeUsed ||= [];
+
+    assert(
+        Array.isArray(encounter.shadowBruteSacrificeUsed),
+        'Shadow Brute sacrifice history must be an array'
+    );
+
+    let pendingShadowBruteSacrificeId =
+        actions.shadowSacrificeId || null;
+
+    if (pendingShadowBruteSacrificeId) {
+        const shadow = c.shadows?.active?.find(
+            entry =>
+                entry.id === pendingShadowBruteSacrificeId &&
+                entry.type === 'brute'
+        );
+
+        assert(
+            shadow,
+            'Shadow sacrifice requires an active Shadow Brute'
+        );
+
+        assert(
+            !encounter.shadowBruteSacrificeUsed.includes(
+                pendingShadowBruteSacrificeId
+            ),
+            'This Shadow Brute has already sacrificed itself this fight'
+        );
+    }
 
 const turnEffects = [];
 const itemUse = {};
@@ -1986,8 +2015,54 @@ let activeTelegraph = telegraphEffects(encounter);
         let frontlineDamage = 0;
         let backlineDamage = 0;
         let enemyHitCount = 0;
+        let shadowBruteAbsorbed = false;
 
-        if (!enemyMiss) {
+        /*
+         * A declared active Shadow Brute can sacrifice itself once
+         * per fight to absorb one successful telegraph hit or E:6
+         * critical completely.
+         */
+        if (
+            pendingShadowBruteSacrificeId &&
+            !enemyMiss &&
+            (e === 6 || activeTelegraph)
+        ) {
+            const activeIndex =
+                c.shadows.active.findIndex(
+                    entry =>
+                        entry.id === pendingShadowBruteSacrificeId &&
+                        entry.type === 'brute'
+                );
+
+            assert(
+                activeIndex >= 0,
+                'Declared Shadow Brute is no longer active'
+            );
+
+            const [sacrificed] =
+                c.shadows.active.splice(activeIndex, 1);
+
+            encounter.shadowBruteSacrificeUsed.push(
+                pendingShadowBruteSacrificeId
+            );
+
+            pendingShadowBruteSacrificeId = null;
+            shadowBruteAbsorbed = true;
+
+            const absorbed = e === 6
+                ? 'enemy critical'
+                : `telegraph ${activeTelegraph.name}`;
+
+            const message =
+                `Shadow Brute ${sacrificed.id} sacrificed itself ` +
+                `to absorb ${absorbed}`;
+
+            effects.push(message);
+            turnEffects.push(message);
+        }
+
+                if (!enemyMiss && !shadowBruteAbsorbed) {
+
             /*
              * A successful Buffer cast activates its non-stacking
              * aura. DEF matters on subsequent player exchanges.
@@ -5843,6 +5918,10 @@ function registerTools() {
                             type: 'string'
                         },
                         shadowId: {
+                            type: 'string'
+                        },
+                        
+                        shadowSacrificeId: {
                             type: 'string'
                         },
 

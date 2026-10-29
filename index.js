@@ -5205,7 +5205,7 @@ function registerTools() {
                                     'trade',
                                     'vendor',
                                     'currency',
-                                    'consumable
+                                    'consumable'
                                 ]
                             },
 
@@ -5365,7 +5365,9 @@ function registerTools() {
                                     'stock',
                                     'buy',
                                     'spend',
-                                    'earn'
+                                    'earn',
+                                    'sell',
+                                    'restock'
                                 ]
                             },
 

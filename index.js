@@ -4417,6 +4417,44 @@ function resolveFleeRoll(test) {
         state
     };
 }
+function resolveDeathPenalty(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'death penalty requires state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        state.crew && typeof state.crew === 'object',
+        'death penalty requires state.crew'
+    );
+
+    const level = int(state.crew.level, 'crew.level', 1);
+    const xpBefore = int(state.crew.xp, 'crew.xp');
+    const threshold = nextXp(level);
+
+    assert(
+        xpBefore < threshold,
+        'crew.xp must be below the next-level threshold'
+    );
+
+    const requestedPenalty = Math.floor(threshold / 10);
+    const xpLost = Math.min(xpBefore, requestedPenalty);
+
+    state.crew.xp = xpBefore - xpLost;
+
+    return {
+        ok: true,
+        level,
+        nextXp: threshold,
+        xpBefore,
+        requestedPenalty,
+        xpLost,
+        xpAfter: state.crew.xp,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4825,6 +4863,9 @@ function resolveBatch(args) {
                         test.itemIndex
                     );
                     
+                    break;
+                case 'death':
+                    result = resolveDeathPenalty(test);
                     break;
                 case 'currency':
                     result = resolveCurrencyAction(test);
@@ -5374,7 +5415,8 @@ function registerTools() {
                                     'vendor',
                                     'currency',
                                     'consumable',
-                                    'food'
+                                    'food',
+                                    'death'
                                 ]
                             },
 

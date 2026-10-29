@@ -1365,70 +1365,106 @@ let activeTelegraph = telegraphEffects(encounter);
         live(s).every(foe => foe.role === 'brute');
 
     if (isPureFodder) {
-        const directed =
-            actions.tansy === 'visor' ||
-            actions.tansy === 'vitals' ||
-            actions.tansy === 'hamstring';
+        const shadows = shadowMechanics(c);
 
-        const blitzWeaselAttack =
+        const directed = [
+            'visor',
+            'vitals',
+            'hamstring'
+        ].includes(actions.tansy);
+
+        const looseWeaselAttack =
             actions.tansy === 'recall'
                 ? 0
                 : c.weasels.active *
-                    (directed ? 2 : 1);
+                    (
+                        directed &&
+                        actions.qtik !== 'ice_patch'
+                            ? 2
+                            : 1
+                    );
 
-        const blitzAttack =
-            (
-                actions.tansy === 'recall'
-                    ? 2 * c.level
-                    : baseAndGearAttack + blitzWeaselAttack
-            ) -
+        /*
+         * crewStats.atk includes the pre-turn weasel and Shadow ATK.
+         * Remove those contributions to isolate base and gear ATK,
+         * then add this turn's action-specific summons.
+         */
+        const baseAndGearAttackForBlitz =
+            crewStats.atk -
+            2 * Number(state.crew.weasels.active) -
+            initialShadows.attack;
+
+        const activeShadowAttack =
+            actions.tansy === 'recall'
+                ? shadows.archerAttack
+                : shadows.attack;
+
+        const effectiveAttack =
+            baseAndGearAttackForBlitz +
+            looseWeaselAttack +
+            activeShadowAttack -
             currentHexPenaltyForState(s) -
             passiveAttackPenalty(encounter);
 
-        const blitzTarget =
+        const leadBrute =
             live(s).find(foe => foe.role === 'brute');
 
-        const blitzDefense =
-            blitzTarget?.def ?? 0;
+        const targetDefense =
+            leadBrute ? leadBrute.def : 0;
 
-        const qDef =
-            crewStats.def +
-            (
-                actions.qtik === 'ice_melee'
-                    ? 2
-                    : 0
+        const qDefense =
+            Math.max(
+                0,
+                crewStats.def -
+                currentHexPenaltyForState(s) -
+                passiveDefensePenalty(encounter) +
+                (
+                    actions.qtik === 'ice_melee'
+                        ? 2
+                        : 0
+                )
             );
+
+        const tier =
+            leadBrute
+                ? enemyTier(leadBrute.level)
+                : encounter.enemyTier;
 
         const liveBruteCount =
             live(s).filter(
                 foe => foe.role === 'brute'
             ).length;
 
-        const lead =
-            live(s).find(
-                foe => foe.role === 'brute'
-            );
-
-        const tier =
-            lead
-                ? enemyTier(lead.level)
-                : 1;
-
-        let singleBaseBleed = lead
+        let singleBaseBleed = leadBrute
             ? Math.max(
                 1,
                 Math.round(
-                    (lead.atk - qDef) / 10
+                    (leadBrute.atk - qDefense) / 10
                 )
             )
             : 0;
 
         if (actions.qtik === 'ice_melee') {
+            singleBaseBleed =
+                Math.max(1, singleBaseBleed - 1);
+        }
+
+        const activeSummonSlots =
+            c.weasels.active + shadows.slots;
+
+        if (actions.tansy === 'hamstring') {
             singleBaseBleed = Math.max(
                 1,
-                singleBaseBleed - 1
+                singleBaseBleed -
+                Math.floor(activeSummonSlots / 6)
             );
         }
+
+        singleBaseBleed = Math.max(
+            1,
+            singleBaseBleed -
+            shadows.bruteReduction
+        );
 
         const packBaseBleed =
             singleBaseBleed +
@@ -1437,44 +1473,75 @@ let activeTelegraph = telegraphEffects(encounter);
                 liveBruteCount - 1
             );
 
-        const enemyDamage =
-            tape.enemy.reduce(
-                (total, enemyRoll) => {
-                    if (enemyRoll === 1) {
-                        return total;
-                    }
+        /*
+         * Simulate the three exchanges to account for actual incoming
+         * hits, Q'tik's regeneration, and an active Shadow Mender.
+         */
+        const hpBeforeBlitz =
+            c.qtik.hp;
 
-                    const rollDamage =
-                        enemyRoll === 6
-                            ? 4
-                            : enemyRoll === 5
-                                ? 2
-                                : enemyRoll >= 3
-                                    ? 1
-                                    : 0;
+        let simulatedHp =
+            hpBeforeBlitz;
 
-                    return total +
-                        packBaseBleed +
-                        rollDamage;
-                },
-                0
-            );
+        const regenPerExchange =
+            crewStats.regen -
+            passiveRegenPenalty(encounter);
 
-        const blitzRegen =
-            crewStats.regen * 3;
+        let incomingDamage = 0;
+        let menderHealing = 0;
+
+        for (const enemyRoll of tape.enemy) {
+            if (enemyRoll !== 1) {
+                const rollDamage =
+                    enemyRoll === 6
+                        ? 4
+                        : enemyRoll === 5
+                            ? 2
+                            : enemyRoll >= 3
+                                ? 1
+                                : 0;
+
+                const exchangeDamage =
+                    packBaseBleed +
+                    rollDamage +
+                    passiveBleedBonus(encounter);
+
+                incomingDamage += exchangeDamage;
+
+                simulatedHp = Math.max(
+                    0,
+                    simulatedHp - exchangeDamage
+                );
+            }
+
+            if (simulatedHp > 0) {
+                const healingThisExchange =
+                    regenPerExchange +
+                    shadows.menderHeal;
+
+                menderHealing +=
+                    Math.max(0, healingThisExchange);
+
+                simulatedHp = Math.max(
+                    0,
+                    Math.min(
+                        crewStats.qtikMaxHp,
+                        simulatedHp + healingThisExchange
+                    )
+                );
+            }
+        }
 
         const netDamage =
-            Math.max(
-                0,
-                enemyDamage - blitzRegen
-            );
+            Math.max(0, hpBeforeBlitz - simulatedHp);
 
         const damageThreshold =
             crewStats.qtikMaxHp * 0.15;
 
         const eligible =
-            Number.isFinite(blitzAttack) &&
-            blitzAttack > blitzDefense &&
+            liveBruteCount === encounter.foes.length &&
+            Number.isFinite(effectiveAttack) &&
+            effectiveAttack > targetDefense &&
             netDamage < damageThreshold;
 
         if (eligible) {
@@ -1490,21 +1557,19 @@ let activeTelegraph = telegraphEffects(encounter);
             }
 
             kills.push(...blitzKills);
-
-            c.qtik.hp = Math.min(
-                crewStats.qtikMaxHp,
-                Math.max(
-                    0,
-                    c.qtik.hp - netDamage
-                )
-            );
+            c.qtik.hp = simulatedHp;
 
             fodderBlitz = {
                 active: true,
-                effectiveAttack: blitzAttack,
-                targetDefense: blitzDefense,
-                enemyDamage,
-                regeneration: blitzRegen,
+                effectiveAttack,
+                targetDefense,
+                packBaseBleed,
+                incomingDamage,
+                regeneration:
+                    regenPerExchange * tape.enemy.filter(
+                        value => value !== 1
+                    ).length,
+                menderHealing,
                 netDamage,
                 threshold: damageThreshold,
                 foeCount: blitzKills.length
@@ -1515,19 +1580,19 @@ let activeTelegraph = telegraphEffects(encounter);
                 fastForwarded: true,
                 playerRolls: tape.player,
                 enemyRolls: tape.enemy,
-                target: blitzTarget.id,
+                target: leadBrute.id,
                 crit: false,
                 damage: null,
-                hits: blitzKills.map(kill => ({
-                    id: kill.id,
+                hits: blitzKills.map(foe => ({
+                    id: foe.id,
                     damage: 'full_clear',
                     hp: 0,
                     overkillAfterHit: 0
                 })),
                 enemyMiss: null,
-                frontlineDamage: enemyDamage,
+                frontlineDamage: incomingDamage,
                 backlineDamage: 0,
-                effectiveRegen: crewStats.regen,
+                effectiveRegen: regenPerExchange,
                 effects: [
                     'Pure Fodder Blitz',
                     `${blitzKills.length} Brutes cleared`,

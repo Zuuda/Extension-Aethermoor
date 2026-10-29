@@ -577,12 +577,6 @@ function validate(state) {
             `${encounter.type} guaranteed gear pawn value ` +
             'does not match raw stat'
         );
-
-        if (encounter.type === 'boss') {
-            assert(
-                encounter.rewards.bossTrophy === true,
-                'Boss encounter must carry a trophy reward'
-            );
         }
     }
 
@@ -841,17 +835,7 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
         state.inventory.bagReserves.push(item);
         loot.push(item);
 
-        if (
-            encounter.type === 'boss' &&
-            encounter.rewards.bossTrophy === true
-        ) {
-            trophies.push({
-                kind: 'boss_trophy_pending_name',
-                encounterId: encounter.id,
-                bound: false
-            });
-        }
-    } else {
+           } else {
         throw new Error(
             `Unsupported encounter reward type: ${encounter.type}`
         );
@@ -2897,8 +2881,6 @@ function spawnEncounter(test) {
             pawnSilver: 2 * rawStat,
             slotPending: true
         },
-        bossTrophy:
-            kind === 'boss',
         resolved: false
     };
 

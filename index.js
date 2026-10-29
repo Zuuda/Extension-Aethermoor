@@ -5470,7 +5470,9 @@ function registerTools() {
                                     'currency',
                                     'consumable',
                                     'food',
-                                    'death'
+                                    'death',
+                                    'boss_check',
+                                    'flee'
                                 ]
                             },
 

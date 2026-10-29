@@ -6491,5 +6491,20 @@ function registerTools() {
     );
 }
 
-// Same startup approach as the working VrCombat prototype.
-jQuery(registerTools);
+function registerAethermoorTools() {
+    try {
+        registerTools();
+        console.log(
+            'Aethermoor Engine function tools registered successfully'
+        );
+    } catch (error) {
+        console.error(
+            'Aethermoor Engine: Error registering function tools',
+            error
+        );
+    }
+}
+
+jQuery(function () {
+    registerAethermoorTools();
+});

@@ -4345,6 +4345,78 @@ function resolveFoodAction(test) {
         state
     };
 }
+function resolveBossGearCheck(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'boss_check requires state'
+    );
+
+    const state = clone(test.state);
+    const encounter = state.encounter;
+
+    assert(
+        encounter &&
+        encounter.type === 'boss',
+        'boss_check requires an active Boss encounter'
+    );
+
+    const boss = live(state)[0];
+
+    assert(
+        boss && boss.role === 'boss',
+        'Boss encounter has no living Boss'
+    );
+
+    const crewStats = derived(state.crew);
+    const effectiveCrewAtk = crewStats.atk;
+
+    return {
+        ok: true,
+        encounterId: encounter.id,
+        boss: {
+            id: boss.id,
+            level: boss.level,
+            hp: boss.hp,
+            def: boss.def
+        },
+        effectiveCrewAtk,
+        gearCheckFailed: effectiveCrewAtk <= boss.def,
+        combatAllowed: effectiveCrewAtk > boss.def,
+        state
+    };
+}
+
+function resolveFleeRoll(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'flee requires state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        Number.isInteger(test.fleeRoll) &&
+        test.fleeRoll >= 1 &&
+        test.fleeRoll <= 6,
+        'fleeRoll must be 1-6'
+    );
+
+    const crewStats = derived(state.crew);
+    const lukBonus =
+        Math.floor(crewStats.luk / 5);
+
+    return {
+        ok: true,
+        roll: test.fleeRoll,
+        lukBonus,
+        total: test.fleeRoll + lukBonus,
+        success: null,
+        note: 'The original rules specify the modified roll but no success threshold.',
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4752,6 +4824,7 @@ function resolveBatch(args) {
                         test.state,
                         test.itemIndex
                     );
+                    
                     break;
                 case 'currency':
                     result = resolveCurrencyAction(test);
@@ -4769,6 +4842,14 @@ function resolveBatch(args) {
                     break;
                 case 'vendor':
                     result = resolveVendorAction(test);
+                    break;
+                
+                case 'boss_check':
+                    result = resolveBossGearCheck(test);
+                    break;
+
+                case 'flee':
+                    result = resolveFleeRoll(test);
                     break;
 
                 case 'trade':
@@ -5457,7 +5538,10 @@ function registerTools() {
                                     'sell',
                                     'restock',
                                     'list_food',
-                                    'apply'
+                                    'apply',
+                                    'boss_check',
+                                    'flee'
+
                                 ]
                             },
 
@@ -5503,14 +5587,16 @@ function registerTools() {
                             listedAt: {
                                 type: 'string'
                             },
+                            
+                            fleeRoll: {
+                                type: 'integer',
+                                minimum: 1,
+                                maximum: 6
+                            },
+
 
                             recipeId: {
                                 type: 'string'
-                            },
-
-                            amount: {
-                                type: 'integer',
-                                minimum: 1
                             },
 
                             amount: {

@@ -4786,19 +4786,31 @@ function resolveShadowDeckAction(test) {
         `Shadow ${shadow.id} is already active at that count`
     );
 
-    const availableCapacity =
-        Number(state.crew.weasels.max) -
-        Number(state.crew.weasels.active) -
+    const totalSlots =
+        2 + 2 * Math.floor(state.crew.level / 2);
+
+    const occupiedBefore =
+        Number(state.crew.weasels.active) +
         activeSlotCount();
 
-    const slotsNeeded =
-        additionalCount * 3;
+    assert(
+        occupiedBefore <= totalSlots,
+        'Active summons exceed total summon slots'
+    );
+
+    const slotsNeeded = additionalCount * 3;
+    const freeSlots = totalSlots - occupiedBefore;
+    const weaselsToFuse = Math.max(0, slotsNeeded - freeSlots);
 
     assert(
-        availableCapacity >= slotsNeeded,
+        state.crew.weasels.active >= weaselsToFuse,
         `Not enough summon slots: need ${slotsNeeded}, ` +
-        `have ${Math.max(0, availableCapacity)}`
+        `have ${freeSlots} free and ` +
+        `${state.crew.weasels.active} weasels available to fuse`
     );
+
+    state.crew.weasels.active -= weaselsToFuse;
+    state.crew.weasels.max = totalSlots;
 
     const activeEntry =
         active.find(entry => entry.id === shadow.id);
@@ -4818,10 +4830,9 @@ function resolveShadowDeckAction(test) {
         shadow,
         count: requestedCount,
         shadowSlotsUsed: slotsNeeded,
+        weaselsFused: weaselsToFuse,
         activeShadowSlots: activeSlotCount(),
-        looseWeaselCapacity:
-            Number(state.crew.weasels.max) -
-            activeSlotCount(),
+        looseWeaselCapacity: totalSlots - activeSlotCount(),
         state
     };
 }

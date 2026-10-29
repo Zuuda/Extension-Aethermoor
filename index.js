@@ -577,8 +577,7 @@ function validate(state) {
             `${encounter.type} guaranteed gear pawn value ` +
             'does not match raw stat'
         );
-        }
-    }
+     }
 
     return d;
 }

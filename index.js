@@ -1151,7 +1151,8 @@ function telegraphEffects(encounter) {
         spiked_carapace: {
             name: 'spiked_carapace',
             defenseBonus: 6 * encounter.enemyTier,
-            reflectsMeleeWeasel: true
+            reflectsMeleeWeasel: true,
+            reflectsQtikDamage: true
         },
 
         sweeping_cleave: {
@@ -1162,8 +1163,7 @@ function telegraphEffects(encounter) {
 
         aether_drain: {
             name: 'aether_drain',
-            healPerHit: 10 * encounter.enemyTier,
-            targetsRaisedShadow: true
+            healPerHit: 10 * encounter.enemyTier
         }
     }[encounter.nextTelegraph] || null;
 }
@@ -1782,7 +1782,34 @@ let activeTelegraph = telegraphEffects(encounter);
 
         const targetDefense = enemyDefense(target);
 
+        /*
+         * Q'tik's personal damage is kept separate from Tansy's
+         * summons. Thorns reflects only this amount back to Q'tik.
+         */
+        const qtikPhysicalDamage =
+            p === 1
+                ? 1
+                : Math.max(
+                    1,
+                    2 * c.level -
+                    targetDefense +
+                    p
+                );
+
+        const qtikFireDamage =
+            actions.qtik === 'fire_melee'
+                ? Math.max(
+                    3,
+                    Math.floor(derived(c).atk / 5)
+                )
+                : 0;
+
+        const qtikPersonalDamage =
+            qtikPhysicalDamage +
+            qtikFireDamage;
+
         const vitalsBonus =
+
             actions.tansy === 'vitals' && p >= 2 && p <= 4
                 ? Math.min(
                     targetDefense,
@@ -1969,17 +1996,47 @@ let activeTelegraph = telegraphEffects(encounter);
         }
 
         /*
-         * Thorns reflects on melee participation each exchange,
-         * including an enemy miss. Fire Melee and Recall avoid it.
+         * Spiked Carapace is reactive damage, not a shield.
+         *
+         * The enemy still receives the complete Crew attack.
+         * Only Q'tik's personal damage is reflected to Q'tik.
+         * Tansy's loose weasels and Shadows are not reflected.
+         *
+         * Fire Melee is intentionally dangerous here: its Fire
+         * contribution is part of Q'tik's personal damage.
+         * Ice Patch and Hamstring do not prevent Thorns.
+         * Recall prevents loose-weasel participation but does not
+         * prevent Q'tik's own damage from reflecting.
          */
         if (
-            activeTelegraph?.reflectsMeleeWeasel &&
-            actions.qtik !== 'fire_melee' &&
-            actions.tansy !== 'recall' &&
+            activeTelegraph?.reflectsQtikDamage &&
+            actions.qtik !== 'frost_stomp' &&
             live(s).length > 0
         ) {
-            destroyWeasel(effects, 'Spiked Carapace');
+            const reflected =
+                Math.min(
+                    c.qtik.hp,
+                    qtikPersonalDamage
+                );
+
+            c.qtik.hp -= reflected;
+
+            effects.push(
+                `Spiked Carapace reflected ` +
+                `${reflected} pure damage to Q'tik`
+            );
+
+            if (
+                c.weasels.active > 0 &&
+                actions.tansy !== 'recall'
+            ) {
+                destroyWeasel(
+                    effects,
+                    'Spiked Carapace'
+                );
+            }
         }
+
 
         if (live(s).length === 0) {
             logs.push({

@@ -4148,6 +4148,35 @@ function normalizeConsumableInventory(inventory) {
 }
 
 function resolveConsumableAction(test) {
+    const allowedActions = [
+        'stock',
+        'buy',
+        'sell',
+        'restock'
+    ];
+
+    assert(
+        allowedActions.includes(test.action),
+        `Unsupported consumable action: ${test.action}`
+    );
+
+    if (test.action === 'stock') {
+        return {
+            ok: true,
+            action: 'stock',
+            catalog: Object.entries(CONSUMABLE_CATALOG).map(
+                ([id, item]) => ({
+                    id,
+                    name: item.name,
+                    type: item.type,
+                    heal: item.heal || 0,
+                    buyPrice: item.buyPrice,
+                    sellPrice: item.sellPrice
+                })
+            )
+        };
+    }
+
     assert(
         test.state &&
         typeof test.state === 'object',
@@ -4162,11 +4191,6 @@ function resolveConsumableAction(test) {
     state.inventory.activeTradeListings ||= [];
 
     normalizeConsumableInventory(state.inventory);
-
-    assert(
-        ['buy', 'sell', 'restock'].includes(test.action),
-        `Unsupported consumable action: ${test.action}`
-    );
 
     assert(
         CONSUMABLE_CATALOG[test.item],
@@ -4319,6 +4343,7 @@ function resolveConsumableAction(test) {
 
     return result;
 }
+
 /*
  * Food is intentionally modular and starts empty.
  * Ordinary meals, lodging, bribes, and travel costs use the generic

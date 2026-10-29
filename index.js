@@ -6209,7 +6209,7 @@ function registerTools() {
                                     'archer',
                                     'mender',
                                     'hexer',
-                                    'brute'
+                                    'warder'
                                 ]
                             },
 

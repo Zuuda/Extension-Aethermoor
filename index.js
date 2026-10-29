@@ -4759,18 +4759,13 @@ function resolveBatch(args) {
                 case 'consumable':
                     result = resolveConsumableAction(test);
                     break;
-                 case 'food':
+                case 'food':
                     result = resolveFoodAction({
                         ...test,
-                        action:
-                            test.action === 'list_food'
-                                ? 'list'
-                                : test.action
+                        action: test.action === 'list_food'
+                            ? 'list'
+                            : test.action
                     });
-                    break;
-
-                case 'food':
-                    result = resolveFoodAction(test);
                     break;
                 case 'vendor':
                     result = resolveVendorAction(test);
@@ -5461,7 +5456,8 @@ function registerTools() {
                                     'earn',
                                     'sell',
                                     'restock',
-                                    'list_food'
+                                    'list_food',
+                                    'apply'
                                 ]
                             },
 
@@ -5506,6 +5502,15 @@ function registerTools() {
 
                             listedAt: {
                                 type: 'string'
+                            },
+
+                            recipeId: {
+                                type: 'string'
+                            },
+
+                            amount: {
+                                type: 'integer',
+                                minimum: 1
                             },
 
                             amount: {

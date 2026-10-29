@@ -1991,6 +1991,7 @@ let activeTelegraph = telegraphEffects(encounter);
                 damage,
                 hits,
                 enemyMiss: null,
+                enemyAttackAbsorbed: false,
                 frontlineDamage: 0,
                 backlineDamage: 0,
                 effects: [
@@ -2326,6 +2327,7 @@ let activeTelegraph = telegraphEffects(encounter);
             damage,
             hits,
             enemyMiss,
+            enemyAttackAbsorbed: shadowBruteAbsorbed,
             frontlineDamage,
             backlineDamage,
             effectiveRegen,

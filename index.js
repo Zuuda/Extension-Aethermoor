@@ -4265,6 +4265,86 @@ function resolveConsumableAction(test) {
 
     return result;
 }
+/*
+ * Food is intentionally modular and starts empty.
+ * Ordinary meals, lodging, bribes, and travel costs use the generic
+ * currency operation and do not require food records.
+ */
+const FOOD_BUFF_RECIPES = {};
+
+function resolveFoodAction(test) {
+    assert(
+        ['list', 'apply'].includes(test.action),
+        `Unsupported food action: ${test.action}`
+    );
+
+    if (test.action === 'list') {
+        return {
+            ok: true,
+            action: 'list',
+            recipes: Object.values(FOOD_BUFF_RECIPES)
+        };
+    }
+
+    assert(
+        typeof test.recipeId === 'string',
+        'Food apply requires recipeId'
+    );
+
+    const recipe =
+        FOOD_BUFF_RECIPES[test.recipeId];
+
+    assert(
+        recipe,
+        `Unknown food recipe: ${test.recipeId}`
+    );
+
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Food apply requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.foodBuffs ||= [];
+
+    assert(
+        Array.isArray(state.foodBuffs),
+        'state.foodBuffs must be an array'
+    );
+
+    const existing =
+        state.foodBuffs.find(
+            buff => buff.recipeId === recipe.id
+        );
+
+    if (existing) {
+        assert(
+            recipe.stackable === true,
+            `Food recipe ${recipe.id} is not stackable`
+        );
+
+        existing.stacks =
+            Number(existing.stacks || 1) + 1;
+    } else {
+        state.foodBuffs.push({
+            recipeId: recipe.id,
+            name: recipe.name,
+            zone: recipe.zone,
+            duration: recipe.duration,
+            stacks: 1,
+            effects: clone(recipe.effects)
+        });
+    }
+
+    return {
+        ok: true,
+        action: 'apply',
+        recipe: clone(recipe),
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4679,7 +4759,19 @@ function resolveBatch(args) {
                 case 'consumable':
                     result = resolveConsumableAction(test);
                     break;
+                 case 'food':
+                    result = resolveFoodAction({
+                        ...test,
+                        action:
+                            test.action === 'list_food'
+                                ? 'list'
+                                : test.action
+                    });
+                    break;
 
+                case 'food':
+                    result = resolveFoodAction(test);
+                    break;
                 case 'vendor':
                     result = resolveVendorAction(test);
                     break;
@@ -5205,7 +5297,8 @@ function registerTools() {
                                     'trade',
                                     'vendor',
                                     'currency',
-                                    'consumable'
+                                    'consumable',
+                                    'food'
                                 ]
                             },
 
@@ -5367,7 +5460,8 @@ function registerTools() {
                                     'spend',
                                     'earn',
                                     'sell',
-                                    'restock'
+                                    'restock',
+                                    'list_food'
                                 ]
                             },
 

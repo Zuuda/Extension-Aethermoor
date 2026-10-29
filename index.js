@@ -175,45 +175,74 @@ function gearBonus(owner, slot, item) {
     return result;
 }
 
+function shadowMechanics(crew) {
+    const active = crew.shadows?.active || [];
+    const deck = crew.shadows?.deck || [];
+    assert(Array.isArray(active) && Array.isArray(deck),
+        'Shadow deck and active shadows must be arrays');
+
+    const result = {
+        slots: 0, attack: 0, archerAttack: 0,
+        menderHeal: 0, hexStrip: 0, bruteReduction: 0
+    };
+    const ids = new Set();
+    const uniqueRoles = new Set();
+
+    for (const shadow of active) {
+        assert(shadow && typeof shadow.id === 'string' && !ids.has(shadow.id),
+            'Active shadows need unique deck IDs');
+        ids.add(shadow.id);
+
+        const entry = deck.find(item => item.id === shadow.id);
+        assert(entry && entry.type === shadow.type &&
+            entry.sourceMobLevel === shadow.sourceMobLevel,
+            `Active shadow ${shadow.id} must match its deck entry`);
+
+        const count = int(shadow.count, `${shadow.id}.count`, 1);
+        const tier = 1 + Math.floor(
+            int(shadow.sourceMobLevel, `${shadow.id}.sourceMobLevel`, 1) / 10
+        );
+        assert(shadow.shadowTier === tier,
+            `${shadow.id} has an incorrect Shadow Tier`);
+
+        if (shadow.type !== 'archer') {
+            assert(count === 1 && !uniqueRoles.has(shadow.type),
+                `Only one active Shadow ${shadow.type} is allowed`);
+            uniqueRoles.add(shadow.type);
+        }
+
+        result.slots += 3 * count;
+        if (shadow.type === 'archer') {
+            result.archerAttack += count * (1 + tier);
+            result.attack += count * (1 + tier);
+        } else if (shadow.type === 'mender') {
+            result.menderHeal += 2 * tier;
+        } else if (shadow.type === 'hexer') {
+            result.attack += 1 + tier;
+            result.hexStrip += 4 * tier;
+        } else if (shadow.type === 'brute') {
+            result.attack += 1 + tier;
+            result.bruteReduction += Math.max(1, Math.floor(tier / 2));
+        } else {
+            throw new Error(`Unsupported active shadow type: ${shadow.type}`);
+        }
+    }
+    return result;
+}
+
 function derived(crew) {
-    assert(
-        crew && typeof crew === 'object',
-        'Crew state is required'
-    );
+    assert(crew && typeof crew === 'object', 'Crew state is required');
+    const level = int(crew.level, 'crew.level', 1);
+    assert(crew.weasels, 'Crew weasel state is required');
 
-    const level = int(
-        crew.level,
-        'crew.level',
-        1
-    );
-
-    assert(
-        crew.weasels &&
-        typeof crew.weasels === 'object',
-        'Crew weasel state is required'
-    );
-
-    const weasels = int(
-        crew.weasels.active,
-        'weasels.active'
-    );
-
-    const maxWeasels =
-        2 + 2 * Math.floor(level / 2);
-
-    assert(
-        weasels <= maxWeasels,
-        `Active weasels ${weasels} exceed level cap ${maxWeasels}`
-    );
-
-    const tansyGear =
-        crew.gear?.tansy || {};
-
-    const qtikGear =
-        crew.gear?.qtik || {};
+    const weasels = int(crew.weasels.active, 'weasels.active');
+    const totalSlots = 2 + 2 * Math.floor(level / 2);
+    const shadows = shadowMechanics(crew);
+    assert(weasels + shadows.slots <= totalSlots,
+        `Active summons exceed ${totalSlots} total summon slots`);
 
     const totals = {
-        atk: 2 * level + 2 * weasels,
+        atk: 2 * level + 2 * weasels + shadows.attack,
         def: level,
         luk: Math.floor(level / 2),
         qtikMaxHp: 125 + 25 * level,
@@ -221,33 +250,21 @@ function derived(crew) {
     };
 
     for (const slot of TANSY_SLOTS) {
-        const bonus = gearBonus(
-            'tansy',
-            slot,
-            tansyGear[slot]
-        );
-
+        const bonus = gearBonus('tansy', slot, crew.gear?.tansy?.[slot]);
         totals.atk += bonus.atk;
         totals.luk += bonus.luk;
         totals.tansyMaxHp += bonus.hp;
     }
-
     for (const slot of QTIK_SLOTS) {
-        const bonus = gearBonus(
-            'qtik',
-            slot,
-            qtikGear[slot]
-        );
-
+        const bonus = gearBonus('qtik', slot, crew.gear?.qtik?.[slot]);
         totals.def += bonus.def;
         totals.qtikMaxHp += bonus.hp;
     }
 
-    totals.regen =
-        Math.round(totals.qtikMaxHp / 100);
-
+    totals.regen = Math.round(totals.qtikMaxHp / 100);
     return totals;
 }
+
 function validate(state) {
     assert(
         state &&
@@ -1206,10 +1223,11 @@ function resolveTurn({
     assert(
         [
             'visor', 'vitals', 'hamstring',
-            'recall', 'surge', 'drink'
+            'recall', 'surge', 'drink', 'raise_shadow'
         ].includes(actions.tansy),
         `Unsupported Tansy action: ${actions.tansy}`
     );
+
     assert(
         typeof actions.target === 'string',
         'A combat target is required'
@@ -1239,8 +1257,11 @@ function resolveTurn({
     const maxWeasels = 2 + 2 * Math.floor(c.level / 2);
     c.weasels.max = maxWeasels;
 
+    const initialShadows = shadowMechanics(c);
     const baseAndGearAttack =
-        crewStats.atk - 2 * state.crew.weasels.active;
+        crewStats.atk -
+        2 * state.crew.weasels.active -
+        initialShadows.attack;
 
     encounter.used ||= { stun: false, icePatch: false };
     encounter.hexStacks ||= {};
@@ -1250,8 +1271,7 @@ function resolveTurn({
 
     const previousTelegraph = encounter.nextTelegraph;
     let activeTelegraph = telegraphEffects(encounter);
-    const turnEffects = [];
-
+    
     if (actions.qtik === 'stun') {
         assert(
             !encounter.used.stun,
@@ -1277,6 +1297,7 @@ function resolveTurn({
         encounter.used.icePatch = true;
     }
 
+    const turnEffects = [];
     const itemUse = {};
 
     if (actions.qtik === 'drink') {
@@ -1299,8 +1320,28 @@ function resolveTurn({
         );
     }
 
+    if (actions.tansy === 'raise_shadow') {
+        assert(
+            typeof actions.shadowId === 'string',
+            'Raise Shadow requires actions.shadowId'
+        );
+        const activation = resolveShadowDeckAction({
+            action: 'activate',
+            shadowId: actions.shadowId,
+            count: actions.count,
+            state: s
+        });
+        c.weasels = activation.state.crew.weasels;
+        c.shadows = activation.state.crew.shadows;
+        turnEffects.push(
+            `Summoned ${actions.shadowId}; fused ` +
+            `${activation.weaselsFused} loose weasel(s)`
+        );
+    }
+
     if (actions.tansy === 'surge') {
-        c.weasels.active = maxWeasels;
+        c.weasels.active =
+            maxWeasels - shadowMechanics(c).slots;
     }
 
     const tape = checkTape(s, rolls);
@@ -1525,23 +1566,18 @@ function resolveTurn({
         );
     }
 
-    function enemyDefense(foe) {
+        function enemyDefense(foe) {
         const buffer = currentBuffer();
-        const bufferBonus = buffer
-            ? 3 * enemyTier(buffer.level)
-            : 0;
-
-        const telegraphBonus = activeTelegraph
-            ? Number(activeTelegraph.defenseBonus || 0)
-            : 0;
-
+        const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
+        const telegraphBonus =
+            Number(activeTelegraph?.defenseBonus || 0);
         const stunReduction = actions.qtik === 'stun'
-            ? 4 * enemyTier(foe.level)
-            : 0;
+            ? 4 * enemyTier(foe.level) : 0;
 
         return Math.max(
             0,
-            foe.def + bufferBonus + telegraphBonus - stunReduction
+            foe.def + bufferBonus + telegraphBonus -
+            stunReduction - shadowMechanics(c).hexStrip
         );
     }
 
@@ -1588,14 +1624,14 @@ function resolveTurn({
          * Tansy's action controls summons.
          * Q'tik drinking has no effect on their contribution.
          */
+        const raised = shadowMechanics(c);
         const weaselAttack = actions.tansy === 'recall'
             ? 0
-            : c.weasels.active *
-                (directed && !patchActive ? 2 : 1);
+            : c.weasels.active * (directed && !patchActive ? 2 : 1);
 
         const unpenalizedAttack = actions.tansy === 'recall'
-            ? 2 * c.level
-            : baseAndGearAttack + weaselAttack;
+            ? 2 * c.level + raised.archerAttack
+            : baseAndGearAttack + weaselAttack + raised.attack;
 
         const effectiveAttack = Math.max(
             0,
@@ -1641,9 +1677,9 @@ function resolveTurn({
          * Fire uses current action/summon contribution before
          * ATK debuffs. Withering and Hexer penalties cannot reduce it.
          */
-            const fireDamage = actions.qtik === 'fire_melee'
-                ? Math.max(3, Math.floor(crewStats.atk / 5))
-                : 0;
+        const fireDamage = actions.qtik === 'fire_melee'
+            ? Math.max(3, Math.floor(derived(c).atk / 5))
+            : 0;
 
         const isCritical =
             p === 6 ||
@@ -1652,11 +1688,10 @@ function resolveTurn({
         const targetDefense = enemyDefense(target);
 
         const vitalsBonus =
-            actions.tansy === 'vitals' &&
-            p >= 2 && p <= 4
+            actions.tansy === 'vitals' && p >= 2 && p <= 4
                 ? Math.min(
                     targetDefense,
-                    Math.floor(c.weasels.active / 2)
+                    Math.floor((c.weasels.active + raised.slots) / 2)
                 )
                 : 0;
 
@@ -1920,9 +1955,16 @@ function resolveTurn({
                     baseBleed = Math.max(
                         1,
                         baseBleed -
-                        Math.floor(c.weasels.active / 6)
+                        Math.floor(
+                            (c.weasels.active + raised.slots) / 6
+                        )
                     );
                 }
+
+                baseBleed = Math.max(
+                    1,
+                    baseBleed - raised.bruteReduction
+                );
 
                 baseBleed += enemyTier(lead.level) *
                     Math.max(0, frontliners.length - 1);
@@ -2106,21 +2148,24 @@ function resolveTurn({
          */
         const effectiveRegen =
             crewStats.regen - passiveRegenPenalty(encounter);
+        const menderHeal = shadowMechanics(c).menderHeal;
 
         if (c.qtik.hp > 0) {
             c.qtik.hp = Math.max(
                 0,
                 Math.min(
                     crewStats.qtikMaxHp,
-                    c.qtik.hp + effectiveRegen
+                    c.qtik.hp + effectiveRegen + menderHeal
                 )
             );
-
             if (effectiveRegen < 0) {
                 effects.push(
                     `Negative regeneration dealt ` +
                     `${-effectiveRegen} internal damage`
                 );
+            }
+            if (menderHeal > 0) {
+                effects.push(`Shadow Mender healed ${menderHeal} HP`);
             }
         }
 
@@ -2171,7 +2216,8 @@ function resolveTurn({
         const restored = Math.min(
             weaselsDestroyed,
             quota,
-            maxWeasels - activeBefore
+            maxWeasels - shadowMechanics(c).slots - activeBefore
+
         );
 
         c.weasels.active += restored;
@@ -2189,6 +2235,21 @@ function resolveTurn({
             turnEffects.push(
                 `Swarm Momentum reformed ${restored} weasel(s)`
             );
+        }
+    }
+    if (shadowMechanics(c).menderHeal > 0) {
+        const hex = Object.keys(encounter.hexStacks || {})
+            .find(id => encounter.hexStacks[id] > 0);
+
+        if (hex) {
+            encounter.hexStacks[hex] -= 1;
+            if (encounter.hexStacks[hex] === 0) {
+                delete encounter.hexStacks[hex];
+            }
+            turnEffects.push('Shadow Mender cleansed one Hexer stack');
+        } else if (encounter.passiveStacks > 0) {
+            encounter.passiveStacks -= 1;
+            turnEffects.push('Shadow Mender cleansed one passive stack');
         }
     }
 
@@ -5708,12 +5769,16 @@ function registerTools() {
                                 'hamstring',
                                 'recall',
                                 'surge',
-                                'drink'
+                                'drink',
+                                'raise_shadow'
                             ]
                         },
                         target: {
                             type: 'string'
                         },
+                        shadowId: { type: 'string' },
+                            count: { type: 'integer', minimum: 1 }
+
                         qtikItem: {
                             type: 'string'
                         },

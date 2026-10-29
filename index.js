@@ -4046,6 +4046,225 @@ function resolveCurrencyAction(test) {
         state
     };
 }
+const CONSUMABLE_CATALOG = {
+    basic_health_potion: {
+        name: 'Basic Health Potion',
+        type: 'potion',
+        heal: 50,
+        buyPrice: 10,
+        sellPrice: 2
+    },
+    mid_health_potion: {
+        name: 'Mid-Tier Health Potion',
+        type: 'potion',
+        heal: 120,
+        buyPrice: 20,
+        sellPrice: 5
+    },
+    cleansing_tonic: {
+        name: 'Cleansing Tonic',
+        type: 'tonic',
+        buyPrice: 14,
+        sellPrice: 3
+    }
+};
+
+function normalizeConsumableInventory(inventory) {
+    inventory.consumables ||= [];
+
+    assert(
+        Array.isArray(inventory.consumables),
+        'inventory.consumables must be an array'
+    );
+
+    for (const entry of inventory.consumables) {
+        assert(
+            entry &&
+            typeof entry.id === 'string' &&
+            CONSUMABLE_CATALOG[entry.id],
+            'Consumable inventory entry has an unknown item ID'
+        );
+
+        int(
+            entry.quantity,
+            `${entry.id}.quantity`,
+            1
+        );
+    }
+}
+
+function resolveConsumableAction(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Consumable action requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.crew ||= {};
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+    state.inventory.activeTradeListings ||= [];
+
+    normalizeConsumableInventory(state.inventory);
+
+    assert(
+        ['buy', 'sell', 'restock'].includes(test.action),
+        `Unsupported consumable action: ${test.action}`
+    );
+
+    assert(
+        CONSUMABLE_CATALOG[test.item],
+        `Unknown consumable item: ${test.item}`
+    );
+
+    const definition =
+        CONSUMABLE_CATALOG[test.item];
+
+    const result = {
+        ok: true,
+        action: test.action,
+        item: test.item,
+        quantity: 0,
+        silverChanged: 0,
+        state
+    };
+
+    if (test.action === 'buy') {
+        const quantity =
+            test.quantity === undefined
+                ? 1
+                : int(test.quantity, 'quantity', 1);
+
+        const total =
+            definition.buyPrice * quantity;
+
+        state.crew.purse =
+            Number(state.crew.purse || 0);
+
+        assert(
+            Number.isInteger(state.crew.purse) &&
+            state.crew.purse >= total,
+            `Insufficient silver: purchase costs ${total}s`
+        );
+
+        let entry =
+            state.inventory.consumables.find(
+                item => item.id === test.item
+            );
+
+        if (!entry) {
+            entry = {
+                id: test.item,
+                name: definition.name,
+                type: definition.type,
+                quantity: 0,
+                recipient: null
+            };
+
+            state.inventory.consumables.push(entry);
+        }
+
+        entry.quantity += quantity;
+        state.crew.purse -= total;
+
+        result.quantity = quantity;
+        result.silverChanged = -total;
+        result.totalCost = total;
+        result.itemName = definition.name;
+
+        return result;
+    }
+
+    if (test.action === 'sell') {
+        const quantity =
+            test.quantity === undefined
+                ? 1
+                : int(test.quantity, 'quantity', 1);
+
+        const entry =
+            state.inventory.consumables.find(
+                item => item.id === test.item
+            );
+
+        assert(
+            entry && entry.quantity >= quantity,
+            `Not enough ${test.item} in consumables inventory`
+        );
+
+        entry.quantity -= quantity;
+
+        if (entry.quantity === 0) {
+            state.inventory.consumables =
+                state.inventory.consumables.filter(
+                    item => item.id !== test.item
+                );
+        }
+
+        const proceeds =
+            definition.sellPrice * quantity;
+
+        state.crew.purse =
+            Number(state.crew.purse || 0) +
+            proceeds;
+
+        result.quantity = quantity;
+        result.silverChanged = proceeds;
+        result.proceeds = proceeds;
+        result.itemName = definition.name;
+
+        return result;
+    }
+
+    assert(
+        test.recipient === 'qtik' ||
+        test.recipient === 'tansy',
+        'Restock recipient must be qtik or tansy'
+    );
+
+    assert(
+        state.crew[test.recipient] &&
+        Array.isArray(state.crew[test.recipient].belt),
+        `${test.recipient} needs a belt array`
+    );
+
+    const recipientBelt =
+        state.crew[test.recipient].belt;
+
+    assert(
+        recipientBelt.length < 4,
+        `${test.recipient}'s belt is full`
+    );
+
+    const entry =
+        state.inventory.consumables.find(
+            item => item.id === test.item
+        );
+
+    assert(
+        entry && entry.quantity > 0,
+        `${test.item} is not available in consumables inventory`
+    );
+
+    entry.quantity -= 1;
+
+    if (entry.quantity === 0) {
+        state.inventory.consumables =
+            state.inventory.consumables.filter(
+                item => item.id !== test.item
+            );
+    }
+
+    recipientBelt.push(test.item);
+
+    result.quantity = 1;
+    result.recipient = test.recipient;
+    result.belt = [...recipientBelt];
+    result.itemName = definition.name;
+
+    return result;
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4456,6 +4675,9 @@ function resolveBatch(args) {
                     break;
                 case 'currency':
                     result = resolveCurrencyAction(test);
+                    break;
+                case 'consumable':
+                    result = resolveConsumableAction(test);
                     break;
 
                 case 'vendor':
@@ -4982,7 +5204,8 @@ function registerTools() {
                                     'gear',
                                     'trade',
                                     'vendor',
-                                    'currency'
+                                    'currency',
+                                    'consumable
                                 ]
                             },
 
@@ -5149,6 +5372,25 @@ function registerTools() {
                             itemIndex: {
                                 type: 'integer',
                                 minimum: 0
+                            },
+                            
+                            item: {
+                                type: 'string',
+                                enum: [
+                                    'basic_health_potion',
+                                    'mid_health_potion',
+                                    'cleansing_tonic'
+                                ]
+                            },
+
+                            quantity: {
+                                type: 'integer',
+                                minimum: 1
+                            },
+
+                            recipient: {
+                                type: 'string',
+                                enum: ['qtik', 'tansy']
                             },
 
                             listingId: {

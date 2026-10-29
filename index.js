@@ -4534,6 +4534,150 @@ function resolveDeathPenalty(test) {
         state
     };
 }
+function resolveShadowDeckAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Shadow deck action requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.crew ||= {};
+    state.crew.shadows ||= {
+        deck: [],
+        active: []
+    };
+
+    state.crew.shadows.deck ||= [];
+    state.crew.shadows.active ||= [];
+
+    assert(
+        Array.isArray(state.crew.shadows.deck),
+        'Shadow deck must be an array'
+    );
+
+    assert(
+        Array.isArray(state.crew.shadows.active),
+        'Active shadows must be an array'
+    );
+
+    assert(
+        ['record', 'replace', 'remove'].includes(test.action),
+        `Unsupported shadow deck action: ${test.action}`
+    );
+
+    const allowedTypes = [
+        'archer',
+        'mender',
+        'hexer',
+        'brute'
+    ];
+
+    if (test.action === 'record') {
+        assert(
+            typeof test.shadowId === 'string' &&
+            test.shadowId.length > 0,
+            'Recording a shadow requires shadowId'
+        );
+
+        assert(
+            allowedTypes.includes(test.shadowType),
+            `Unsupported shadow type: ${test.shadowType}`
+        );
+
+        int(test.sourceMobLevel, 'sourceMobLevel', 1);
+
+        assert(
+            !state.crew.shadows.deck.some(
+                shadow => shadow.id === test.shadowId
+            ),
+            `Shadow ${test.shadowId} is already in the deck`
+        );
+
+        const shadow = {
+            id: test.shadowId,
+            type: test.shadowType,
+            sourceMobLevel: test.sourceMobLevel,
+            shadowTier:
+                1 + Math.floor(test.sourceMobLevel / 10),
+            capturedFrom: test.sourceMobName || null
+        };
+
+        state.crew.shadows.deck.push(shadow);
+
+        return {
+            ok: true,
+            action: 'record',
+            shadow,
+            state
+        };
+    }
+
+    assert(
+        typeof test.shadowId === 'string' &&
+        test.shadowId.length > 0,
+        `${test.action} requires shadowId`
+    );
+
+    const shadowIndex =
+        state.crew.shadows.deck.findIndex(
+            shadow => shadow.id === test.shadowId
+        );
+
+    assert(
+        shadowIndex >= 0,
+        `Shadow ${test.shadowId} is not in the deck`
+    );
+
+    if (test.action === 'remove') {
+        assert(
+            !state.crew.shadows.active.some(
+                shadow => shadow.id === test.shadowId
+            ),
+            'Cannot remove an active shadow from the deck'
+        );
+
+        const [removed] =
+            state.crew.shadows.deck.splice(shadowIndex, 1);
+
+        return {
+            ok: true,
+            action: 'remove',
+            shadow: removed,
+            state
+        };
+    }
+
+    assert(
+        allowedTypes.includes(test.shadowType),
+        `Unsupported replacement type: ${test.shadowType}`
+    );
+
+    int(test.sourceMobLevel, 'sourceMobLevel', 1);
+
+    const previous =
+        state.crew.shadows.deck[shadowIndex];
+
+    const replacement = {
+        id: test.shadowId,
+        type: test.shadowType,
+        sourceMobLevel: test.sourceMobLevel,
+        shadowTier:
+            1 + Math.floor(test.sourceMobLevel / 10),
+        capturedFrom: test.sourceMobName || null
+    };
+
+    state.crew.shadows.deck[shadowIndex] =
+        replacement;
+
+    return {
+        ok: true,
+        action: 'replace',
+        previous,
+        shadow: replacement,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -4962,6 +5106,10 @@ function resolveBatch(args) {
                     break;
                 case 'vendor':
                     result = resolveVendorAction(test);
+                    break;
+                    
+                case 'shadows':
+                    result = resolveShadowDeckAction(test);
                     break;
                 
                 case 'boss_check':
@@ -5497,7 +5645,8 @@ function registerTools() {
                                     'food',
                                     'death',
                                     'boss_check',
-                                    'flee'
+                                    'flee',
+                                    'shadows'
                                 ]
                             },
 
@@ -5626,6 +5775,28 @@ function registerTools() {
                                     'Well Respected',
                                     'Renowned'
                                 ]
+                            },
+                            shadowId: {
+                                type: 'string'
+                            },
+                            
+                            shadowType: {
+                                type: 'string',
+                                enum: [
+                                    'archer',
+                                    'mender',
+                                    'hexer',
+                                    'brute'
+                                ]
+                            },
+
+                            sourceMobLevel: {
+                                type: 'integer',
+                                minimum: 1
+                            },
+
+                            sourceMobName: {
+                                type: 'string'
                             },
 
                             questRoll: {

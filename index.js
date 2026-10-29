@@ -1282,7 +1282,7 @@ function resolveTurn({
         const shadow = c.shadows?.active?.find(
             entry =>
                 entry.id === pendingshadowWarderSacrificeId &&
-                entry.type === 'brute'
+                entry.type === 'warder'
         );
 
         assert(
@@ -2089,7 +2089,7 @@ let activeTelegraph = telegraphEffects(encounter);
                 c.shadows.active.findIndex(
                     entry =>
                         entry.id === pendingshadowWarderSacrificeId &&
-                        entry.type === 'brute'
+                        entry.type === 'warder'
                 );
 
             assert(

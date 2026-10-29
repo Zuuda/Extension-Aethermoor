@@ -4678,15 +4678,16 @@ function resolveShadowDeckAction(test) {
 
     if (test.action === 'replace') {
         assert(
+            !active.some(entry => entry.id === test.shadowId),
+            'Cannot replace an active shadow; deactivate it first'
+        );
+
+        assert(
             allowedTypes.includes(test.shadowType),
             `Unsupported replacement type: ${test.shadowType}`
         );
 
-        int(
-            test.sourceMobLevel,
-            'sourceMobLevel',
-            1
-        );
+        int(test.sourceMobLevel, 'sourceMobLevel', 1);
 
         const previous = deck[shadowIndex];
 
@@ -4698,17 +4699,6 @@ function resolveShadowDeckAction(test) {
         });
 
         deck[shadowIndex] = replacement;
-
-        const activeEntry =
-            active.find(entry => entry.id === test.shadowId);
-
-        if (activeEntry) {
-            activeEntry.type = replacement.type;
-            activeEntry.sourceMobLevel =
-                replacement.sourceMobLevel;
-            activeEntry.shadowTier =
-                replacement.shadowTier;
-        }
 
         return {
             ok: true,

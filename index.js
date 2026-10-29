@@ -3470,6 +3470,7 @@ function equipBagItem(stateInput, itemIndex) {
         derivedAfter: newDerived,
         state
     };
+}
 function resolveTradeAction(test) {
     assert(
         test.state &&

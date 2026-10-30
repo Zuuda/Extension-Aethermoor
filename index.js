@@ -817,11 +817,10 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
             'Elite/Boss guaranteed gear is missing'
         );
 
-        const generated = resolveLootSeed({
-            zone: encounter.zone,
-            source: encounter.type,
-            slotRoll: lootRolls.slotRoll
-        });
+        const generated = rollLootFromState(
+            state,
+            encounter.type
+        );
 
         const item = {
             ...generated.item,
@@ -844,39 +843,6 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
         );
     }
 
-    /*
-     * Normal-pack Wild or Curiosity loot is resolved only if its seed
-     * was already locked when the scene event happened.
-     */
-    if (
-        encounter.type === 'normal_pack' &&
-        encounter.lootSeed
-    ) {
-        const seed = encounter.lootSeed;
-
-        assert(
-            seed.result === 'wild_equipment_drop' ||
-            seed.result === 'hidden_loot_stash',
-            `Unsupported locked loot seed: ${seed.result}`
-        );
-
-        const generated = resolveLootSeed({
-            zone: encounter.zone,
-            source: 'wild',
-            slotRoll: lootRolls.slotRoll,
-            rarityRoll: lootRolls.rarityRoll
-        });
-
-        const item = {
-            ...generated.item,
-            acquiredFrom: seed.source,
-            acquiredAtEncounter: encounter.id,
-            bound: false
-        };
-
-        state.inventory.bagReserves.push(item);
-        loot.push(item);
-    }
 
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
@@ -2439,13 +2405,8 @@ let activeTelegraph = telegraphEffects(encounter);
 
     const encounterRewards = finalizeEncounterRewards(
         s,
-        kills.map(kill => kill.id),
-        {
-            slotRoll: rolls?.lootSlotRoll,
-            rarityRoll: rolls?.lootRarityRoll
-        }
-);
-
+        kills.map(kill => kill.id)
+    );
 
     let levelUps = [];
 
@@ -5636,7 +5597,7 @@ function resolveBatch(args) {
                     result = resolveWorldSeeds(test);
                     break;
                 case 'loot':
-                    result = resolveLootSeed(test);
+                    result = claimLockedLoot(test);
                     break;
 
                 case 'quest':
@@ -5888,6 +5849,84 @@ function lootItemName(material, loot, stat) {
     return `${ownerName} ${material}${variantName} ` +
         `${slotNames[loot.slot]} (Stat ${stat})`;
 }
+function rollLootFromState(state, source) {
+    const zone = state.encounter?.zone ?? state.zone;
+    assert(ZONES[zone], `Unknown loot zone: ${zone}`);
+
+    const slots = source === 'boss'
+        ? BOSS_LOOT_SLOTS
+        : WILD_ELITE_LOOT_SLOTS;
+
+    const slotRoll = roll(state, slots.length);
+    const rarityRoll = source === 'wild'
+        ? roll(state, 6)
+        : undefined;
+
+    return {
+        ...resolveLootSeed({
+            zone,
+            source,
+            slotRoll,
+            rarityRoll
+        }),
+        rolls: { slotRoll, rarityRoll }
+    };
+}
+
+function claimLockedLoot(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Loot claim requires state'
+    );
+
+    const state = clone(test.state);
+    const encounter = state.encounter;
+    const seed = encounter?.lootSeed;
+
+    assert(seed, 'Loot claim requires a locked loot seed');
+    assert(seed.claimed !== true, 'This loot seed was already claimed');
+
+    const packDrop = seed.result === 'wild_equipment_drop';
+    const stash = seed.result === 'hidden_loot_stash';
+
+    assert(
+        packDrop || stash,
+        `Unsupported locked loot seed: ${seed.result}`
+    );
+
+    if (packDrop) {
+        assert(
+            encounter.status === 'cleared',
+            'Pack-drop loot requires a cleared encounter'
+        );
+    }
+
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves),
+        'inventory.bagReserves must be an array'
+    );
+
+    const generated = rollLootFromState(state, 'wild');
+    const item = {
+        ...generated.item,
+        acquiredFrom: seed.source,
+        acquiredAtEncounter: encounter.id,
+        bound: false
+    };
+
+    state.inventory.bagReserves.push(item);
+    seed.claimed = true;
+
+    return {
+        ok: true,
+        item,
+        rolls: generated.rolls,
+        state
+    };
+}
 
 function resolveLootSeed(test) {
     assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
@@ -6057,16 +6096,6 @@ function registerTools() {
                             minimum: 1,
                             maximum: 4
                         },
-                        lootSlotRoll: {
-                            type: 'integer',
-                            minimum: 1,
-                            maximum: 17
-                        },
-                        lootRarityRoll: {
-                            type: 'integer',
-                            minimum: 1,
-                            maximum: 6
-                        }
                     }
                 },
 
@@ -6167,18 +6196,6 @@ function registerTools() {
 
                                 type: 'string',
                                 enum: ['wild', 'elite', 'boss']
-                            },
-
-                            slotRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 17
-                            },
-
-                            rarityRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 6
                             },
 
                             encounterType: {

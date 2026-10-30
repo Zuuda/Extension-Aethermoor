@@ -344,15 +344,14 @@ function validate(state) {
     );
 
     assert(
-        Array.isArray(c.qtik.belt) &&
-        c.qtik.belt.length <= 4,
-        "Q'tik's belt must contain at most four item IDs"
-    );
+    state.inventory ||= {};
+    normalizeConsumableInventory(state.inventory);
 
+    encounter.potionsUsed ||= 0;
+    int(encounter.potionsUsed, 'encounter.potionsUsed');
     assert(
-        Array.isArray(c.tansy.belt) &&
-        c.tansy.belt.length <= 4,
-        "Tansy's belt must contain at most four item IDs"
+        encounter.potionsUsed <= 4,
+        'At most four potions may be used per encounter'
     );
 
     assert(
@@ -653,21 +652,6 @@ function applyXp(crew, xp) {
     return changes;
 }
 
-function consumeBelt({ belt, items }) {
-    assert(Array.isArray(belt) && belt.length <= 4,
-        'Supply a four-slot belt array');
-    assert(Array.isArray(items) && items.length > 0,
-        'Supply item IDs to consume');
-
-    const remaining = [...belt];
-    for (const item of items) {
-        const index = remaining.indexOf(item);
-        assert(index >= 0, `Belt does not contain ${item}`);
-        remaining.splice(index, 1);
-    }
-    return { consumed: items, remainingBelt: remaining };
-}
-
 function checkTape(state, rolls) {
     const tape = rolls || {
         player: [roll(state, 6), roll(state, 6), roll(state, 6)],
@@ -887,7 +871,7 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
     };
 }
 
-function applyBeltItem(state, item, recipient) {
+function applyConsumableItem(state, item, recipient) {
     const crew = state.crew;
     const encounter = state.encounter;
 
@@ -895,40 +879,49 @@ function applyBeltItem(state, item, recipient) {
         recipient === 'qtik' || recipient === 'tansy',
         `Invalid potion recipient: ${recipient}`
     );
-
     assert(
-        [
-            'basic_health_potion',
-            'mid_health_potion',
-            'cleansing_tonic'
-        ].includes(item),
-        `Unsupported belt item: ${item}`
+        CONSUMABLE_CATALOG[item],
+        `Unsupported consumable: ${item}`
     );
 
-    crew[recipient].belt = consumeBelt({
-        belt: crew[recipient].belt,
-        items: [item]
-    }).remainingBelt;
+    normalizeConsumableInventory(state.inventory);
+
+    encounter.potionsUsed ||= 0;
+    assert(
+        encounter.potionsUsed < 4,
+        'Four potions have already been used this encounter'
+    );
+
+    const entry = state.inventory.consumables.find(
+        entry => entry.id === item
+    );
+    assert(
+        entry && entry.quantity > 0,
+        `No ${item} remains in shared stock`
+    );
+
+    entry.quantity -= 1;
+    if (entry.quantity === 0) {
+        state.inventory.consumables =
+            state.inventory.consumables.filter(
+                entry => entry.id !== item
+            );
+    }
+    encounter.potionsUsed += 1;
 
     if (
         item === 'basic_health_potion' ||
         item === 'mid_health_potion'
     ) {
-        const amount =
-            item === 'mid_health_potion' ? 120 : 50;
-
+        const amount = item === 'mid_health_potion' ? 120 : 50;
         const character = crew[recipient];
         const stats = derived(crew);
         const maxHp = recipient === 'qtik'
             ? stats.qtikMaxHp
             : stats.tansyMaxHp;
-
         const beforeHp = character.hp;
 
-        character.hp = Math.min(
-            maxHp,
-            character.hp + amount
-        );
+        character.hp = Math.min(maxHp, character.hp + amount);
 
         return {
             item,
@@ -937,54 +930,49 @@ function applyBeltItem(state, item, recipient) {
             requested: amount,
             healed: character.hp - beforeHp,
             hp: character.hp,
-            maxHp
+            maxHp,
+            potionsUsed: encounter.potionsUsed
         };
     }
 
-    // Cleanse one Hexer stack first, if present.
-    const hexEntry = Object.entries(
-        encounter.hexStacks || {}
-    ).find(([, stacks]) => Number(stacks) > 0);
+    const hexEntry = Object.entries(encounter.hexStacks || {})
+        .find(([, stacks]) => Number(stacks) > 0);
 
     if (hexEntry) {
         const [hexerId, stacks] = hexEntry;
-
         if (Number(stacks) === 1) {
             delete encounter.hexStacks[hexerId];
         } else {
-            encounter.hexStacks[hexerId] =
-                Number(stacks) - 1;
+            encounter.hexStacks[hexerId] = Number(stacks) - 1;
         }
-
         return {
-            item,
-            recipient,
-            effect: 'cleanse',
-            stacksRemoved: 1,
-            sourceType: 'hexer',
-            source: hexerId
+            item, recipient, effect: 'cleanse',
+            stacksRemoved: 1, sourceType: 'hexer',
+            source: hexerId, potionsUsed: encounter.potionsUsed
         };
     }
 
-    // If no Hexer stack exists, cleanse one Elite/Boss passive stack.
     if (
-        (
-            encounter.type === 'elite' ||
-            encounter.type === 'boss'
-        ) &&
+        ['elite', 'boss'].includes(encounter.type) &&
         Number(encounter.passiveStacks || 0) > 0
     ) {
         encounter.passiveStacks -= 1;
-
         return {
-            item,
-            recipient,
-            effect: 'cleanse',
+            item, recipient, effect: 'cleanse',
             stacksRemoved: 1,
             sourceType: 'elite_boss_passive',
-            source: encounter.passive
+            source: encounter.passive,
+            potionsUsed: encounter.potionsUsed
         };
     }
+
+    return {
+        item, recipient, effect: 'cleanse',
+        stacksRemoved: 0,
+        note: 'No active debuff stack to remove',
+        potionsUsed: encounter.potionsUsed
+    };
+}
 
     return {
         item,
@@ -4391,10 +4379,7 @@ function normalizeConsumableInventory(inventory) {
 
 function resolveConsumableAction(test) {
     const allowedActions = [
-        'stock',
-        'buy',
-        'sell',
-        'restock'
+        'stock', 'buy', 'sell', 'grant', 'remove'
     ];
 
     assert(
@@ -4537,54 +4522,62 @@ function resolveConsumableAction(test) {
         return result;
     }
 
-    assert(
-        test.recipient === 'qtik' ||
-        test.recipient === 'tansy',
-        'Restock recipient must be qtik or tansy'
-    );
+     const quantity = test.quantity === undefined
+        ? 1
+        : int(test.quantity, 'quantity', 1);
 
-    assert(
-        state.crew[test.recipient] &&
-        Array.isArray(state.crew[test.recipient].belt),
-        `${test.recipient} needs a belt array`
-    );
-
-    const recipientBelt =
-        state.crew[test.recipient].belt;
-
-    assert(
-        recipientBelt.length < 4,
-        `${test.recipient}'s belt is full`
-    );
-
-    const entry =
-        state.inventory.consumables.find(
-            item => item.id === test.item
+    if (test.action === 'grant') {
+        assert(
+            typeof test.reason === 'string' && test.reason.trim(),
+            'Grant requires a reason'
         );
 
-    assert(
-        entry && entry.quantity > 0,
-        `${test.item} is not available in consumables inventory`
-    );
+        let entry = state.inventory.consumables.find(
+            entry => entry.id === test.item
+        );
 
-    entry.quantity -= 1;
+        if (!entry) {
+            entry = {
+                id: test.item,
+                name: definition.name,
+                type: definition.type,
+                quantity: 0
+            };
+            state.inventory.consumables.push(entry);
+        }
 
-    if (entry.quantity === 0) {
-        state.inventory.consumables =
-            state.inventory.consumables.filter(
-                item => item.id !== test.item
-            );
+        entry.quantity += quantity;
+    } else {
+        assert(
+            typeof test.reason === 'string' && test.reason.trim(),
+            'Removal requires a reason'
+        );
+
+        const entry = state.inventory.consumables.find(
+            entry => entry.id === test.item
+        );
+        assert(
+            entry && entry.quantity >= quantity,
+            `Not enough ${test.item} in shared stock`
+        );
+
+        entry.quantity -= quantity;
+        if (entry.quantity === 0) {
+            state.inventory.consumables =
+                state.inventory.consumables.filter(
+                    other => other.id !== test.item
+                );
+        }
     }
 
-    recipientBelt.push(test.item);
-
-    result.quantity = 1;
-    result.recipient = test.recipient;
-    result.belt = [...recipientBelt];
+    result.quantity = quantity;
+    result.reason = test.reason;
     result.itemName = definition.name;
+    result.stockAfter = state.inventory.consumables.find(
+        entry => entry.id === test.item
+    )?.quantity || 0;
 
     return result;
-}
 
 /*
  * Food is intentionally modular and starts empty.
@@ -5550,13 +5543,6 @@ function resolveBatch(args) {
                     });
                     break;
 
-                case 'consume_belt':
-                    result = consumeBelt({
-                        belt: test.belt,
-                        items: test.items
-                    });
-                    break;
-
                 case 'reference':
                     result = {
                         ok: true,
@@ -6036,7 +6022,6 @@ function registerTools() {
                                 enum: [
                                     'spawn',
                                     'turn',
-                                    'consume_belt',
                                     'reference',
                                     'world_seeds',
                                     'loot',
@@ -6234,7 +6219,8 @@ function registerTools() {
                                     'spend',
                                     'earn',
                                     'sell',
-                                    'restock',
+                                    'grant',
+                                    'remove',
                                     'list_food',
                                     'apply',
                                     'boss_check',
@@ -6414,36 +6400,6 @@ function registerTools() {
         }
     );
 
-    register(
-        'aethermoorConsumeBeltV2',
-        'Aethermoor: Consume Belt',
-        [
-            'Deduct explicitly named item IDs.',
-            'Does not decide why or who receives them.'
-        ].join(' '),
-        {
-            type: 'object',
-            properties: {
-                belt: {
-                    type: 'array',
-                    items: {
-                        type: 'string'
-                    }
-                },
-                items: {
-                    type: 'array',
-                    items: {
-                        type: 'string'
-                    }
-                }
-            },
-            required: [
-                'belt',
-                'items'
-            ]
-        },
-        consumeBelt
-    );
 
     register(
         'aethermoorReferenceV2',

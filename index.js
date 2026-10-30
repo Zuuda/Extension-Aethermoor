@@ -343,7 +343,6 @@ function validate(state) {
         'Tansy HP exceeds derived maximum'
     );
 
-    assert(
     state.inventory ||= {};
     normalizeConsumableInventory(state.inventory);
 
@@ -974,15 +973,6 @@ function applyConsumableItem(state, item, recipient) {
     };
 }
 
-    return {
-        item,
-        recipient,
-        effect: 'cleanse',
-        stacksRemoved: 0,
-        note: 'No active debuff stack to remove'
-    };
-}
-
 const ELITE_BOSS_TELEGRAPHS = [
     'berserk_heavy_windup',
     'spiked_carapace',
@@ -1306,7 +1296,8 @@ let activeTelegraph = telegraphEffects(encounter);
             typeof actions.qtikItem === 'string',
             "Q'tik drink action requires actions.qtikItem"
         );
-        itemUse.qtik = applyBeltItem(
+        itemUse.qtik = applyConsumableItem(
+
             s, actions.qtikItem, 'qtik'
         );
     }
@@ -1316,7 +1307,8 @@ let activeTelegraph = telegraphEffects(encounter);
             typeof actions.tansyItem === 'string',
             'Tansy drink action requires actions.tansyItem'
         );
-        itemUse.tansy = applyBeltItem(
+        itemUse.tansy = applyConsumableItem(
+
             s, actions.tansyItem, 'tansy'
         );
     }
@@ -4379,7 +4371,7 @@ function normalizeConsumableInventory(inventory) {
 
 function resolveConsumableAction(test) {
     const allowedActions = [
-        'stock', 'buy', 'sell', 'grant', 'remove'
+        'stock', 'buy', 'sell', 'grant', 'remove', 'use'
     ];
 
     assert(
@@ -4521,6 +4513,80 @@ function resolveConsumableAction(test) {
 
         return result;
     }
+    if (test.action === 'use') {
+        assert(
+            state.encounter?.status !== 'active',
+            'Outside-combat use is unavailable during an active fight; use a combat drink action'
+        );
+
+        const quantity = test.quantity === undefined
+            ? 1
+            : int(test.quantity, 'quantity', 1);
+
+        const entry = state.inventory.consumables.find(
+            entry => entry.id === test.item
+        );
+
+        assert(
+            entry && entry.quantity >= quantity,
+            `Not enough ${test.item} in shared stock`
+        );
+
+        const recipient = test.recipient || null;
+
+        assert(
+            recipient === null ||
+            recipient === 'qtik' ||
+            recipient === 'tansy',
+            'Recipient must be qtik, tansy, or omitted for someone outside the crew'
+        );
+
+        let healing = 0;
+
+        if (recipient) {
+            assert(
+                state.crew[recipient] &&
+                Number.isInteger(state.crew[recipient].hp),
+                `Missing ${recipient} HP`
+            );
+
+            if (definition.heal) {
+                const stats = derived(state.crew);
+                const maxHp = recipient === 'qtik'
+                    ? stats.qtikMaxHp
+                    : stats.tansyMaxHp;
+                const beforeHp = state.crew[recipient].hp;
+
+                state.crew[recipient].hp = Math.min(
+                    maxHp,
+                    beforeHp + definition.heal * quantity
+                );
+
+                healing = state.crew[recipient].hp - beforeHp;
+            }
+        }
+
+        entry.quantity -= quantity;
+
+        if (entry.quantity === 0) {
+            state.inventory.consumables =
+                state.inventory.consumables.filter(
+                    other => other.id !== test.item
+                );
+        }
+
+        result.quantity = quantity;
+        result.itemName = definition.name;
+        result.recipient = recipient;
+        result.healing = healing;
+        result.reason = test.reason || null;
+        result.stockAfter =
+            state.inventory.consumables.find(
+                other => other.id === test.item
+            )?.quantity || 0;
+
+        return result;
+    }
 
      const quantity = test.quantity === undefined
         ? 1
@@ -4578,6 +4644,7 @@ function resolveConsumableAction(test) {
     )?.quantity || 0;
 
     return result;
+}
 
 /*
  * Food is intentionally modular and starts empty.
@@ -5539,7 +5606,7 @@ function resolveBatch(args) {
                         state: test.state,
                         actions: test.actions,
                         rolls: test.rolls,
-                        rewardMode: test.rewardMode || 'deferred'
+                        rewardMode: test.rewardMode || 'immediate'
                     });
                     break;
 
@@ -6221,6 +6288,7 @@ function registerTools() {
                                     'sell',
                                     'grant',
                                     'remove',
+                                    'use',
                                     'list_food',
                                     'apply',
                                     'boss_check',

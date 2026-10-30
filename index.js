@@ -5327,7 +5327,12 @@ function resolveBatch(args) {
             }
         }
 
-        if (test.packLooted === true) {
+             if (test.packLooted === true) {
+            assert(
+                encounter.status === 'cleared',
+                'Cannot loot a pack before it is cleared'
+            );
+
             result.applicable.packDrop = true;
 
             const packDropRoll =

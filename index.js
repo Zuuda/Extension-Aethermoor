@@ -3171,7 +3171,7 @@ function resolveQuestSeed(test) {
 
     if (
         existing &&
-        existing.status !== 'complete'
+       !['complete', 'declined'].includes(existing.status)
     ) {
         const existingSeed = existing.seed || {};
 
@@ -4255,6 +4255,64 @@ function resolveVendorAction(test) {
         state
     };
 }
+function resolveXpAction(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object' &&
+        test.state.crew,
+        'XP action requires state.crew'
+    );
+
+    assert(
+        ['grant', 'remove'].includes(test.action),
+        `Unsupported XP action: ${test.action}`
+    );
+
+    int(test.amount, 'XP amount', 1);
+
+    assert(
+        typeof test.reason === 'string' &&
+        test.reason.trim(),
+        'XP adjustment requires a reason'
+    );
+
+    const state = clone(test.state);
+    const crew = state.crew;
+    const levelBefore = int(crew.level, 'crew.level', 1);
+    const xpBefore = int(crew.xp, 'crew.xp');
+
+    assert(
+        xpBefore < nextXp(levelBefore),
+        'Current XP must be below the next-level threshold'
+    );
+
+    let levelUps = [];
+
+    if (test.action === 'grant') {
+        levelUps = applyXp(crew, test.amount);
+    } else {
+        assert(
+            test.amount <= crew.xp,
+            'Cannot remove more XP than remains in the current level; level-down correction is not implemented'
+        );
+
+        crew.xp -= test.amount;
+    }
+
+    return {
+        ok: true,
+        action: test.action,
+        amount: test.amount,
+        reason: test.reason,
+        levelBefore,
+        levelAfter: crew.level,
+        xpBefore,
+        xpAfter: crew.xp,
+        levelUps,
+        state
+    };
+}
+
 function resolveCurrencyAction(test) {
     assert(
         test.state &&
@@ -5530,6 +5588,9 @@ function resolveBatch(args) {
                 case 'death':
                     result = resolveDeathPenalty(test);
                     break;
+                case 'xp':
+                    result = resolveXpAction(test);
+                    break;
                 case 'currency':
                     result = resolveCurrencyAction(test);
                     break;
@@ -6090,6 +6151,7 @@ function registerTools() {
                                     'consumable',
                                     'food',
                                     'death',
+                                    'xp',
                                     'boss_check',
                                     'flee',
                                     'shadows'
@@ -6114,13 +6176,6 @@ function registerTools() {
                                     'immediate',
                                     'deferred'
                                 ]
-                            },
-
-                            items: {
-                                type: 'array',
-                                items: {
-                                    type: 'string'
-                                }
                             },
 
                              zone: {

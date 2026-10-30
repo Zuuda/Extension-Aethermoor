@@ -3101,19 +3101,6 @@ function resolveQuestSeed(test) {
     const rep =
         normalizeQuestRepTier(test.repTier);
 
-    int(test.questRoll, 'questRoll', 1);
-    int(test.salvageSlotRoll, 'salvageSlotRoll', 1);
-
-    assert(
-        test.questRoll <= 3,
-        'questRoll must be 1-3'
-    );
-
-    assert(
-        test.salvageSlotRoll <= QUEST_SALVAGE_SLOTS.length,
-        `salvageSlotRoll must be 1-${QUEST_SALVAGE_SLOTS.length}`
-    );
-
     const sourceSeed =
         state.encounter.questSeed;
 
@@ -3128,39 +3115,17 @@ function resolveQuestSeed(test) {
         'Quest offer requires a locked quest-trigger seed'
     );
 
-    const seed = {
-        zone,
-        repTier: rep.label,
-        questRoll: test.questRoll,
-        salvageSlotRoll: test.salvageSlotRoll,
-        source: sourceSeed.source,
-        sourceRoll: sourceSeed.roll,
-        sourceResult: sourceSeed.result
-    };
-
     const existing =
         state.activeQuest;
 
+    /*
+     * An offered or in-progress quest is already locked. Return it
+     * without consuming RNG or generating a new rank/salvage result.
+     */
     if (
         existing &&
-       !['complete', 'declined'].includes(existing.status)
+        ['offered', 'in_progress'].includes(existing.status)
     ) {
-        const existingSeed = existing.seed || {};
-
-        const matches =
-            existingSeed.zone === seed.zone &&
-            existingSeed.repTier === seed.repTier &&
-            existingSeed.questRoll === seed.questRoll &&
-            existingSeed.salvageSlotRoll === seed.salvageSlotRoll &&
-            existingSeed.source === seed.source &&
-            existingSeed.sourceRoll === seed.sourceRoll &&
-            existingSeed.sourceResult === seed.sourceResult;
-
-        assert(
-            matches,
-            'An active quest is already locked with a different seed'
-        );
-
         return {
             ok: true,
             created: false,
@@ -3169,11 +3134,40 @@ function resolveQuestSeed(test) {
         };
     }
 
+    /*
+     * A declined or completed quest trigger is spent. A new quest
+     * requires a new encounter and a new locked quest seed.
+     */
+    assert(
+        state.encounter.questSeedConsumed !== true &&
+        !(
+            existing &&
+            ['declined', 'complete'].includes(existing.status)
+        ),
+        'This quest trigger was already consumed'
+    );
+
+    const questRoll =
+        roll(state, 3);
+
+    const salvageSlotRoll =
+        roll(state, QUEST_SALVAGE_SLOTS.length);
+
+    const seed = {
+        zone,
+        repTier: rep.label,
+        questRoll,
+        salvageSlotRoll,
+        source: sourceSeed.source,
+        sourceRoll: sourceSeed.roll,
+        sourceResult: sourceSeed.result
+    };
+
     const table =
         QUEST_REWARD_TABLES[zone][rep.band];
 
     const row =
-        table[test.questRoll - 1];
+        table[questRoll - 1];
 
     assert(
         row,
@@ -3182,7 +3176,7 @@ function resolveQuestSeed(test) {
 
     const salvage = makeQuestSalvage(
         zone,
-        test.salvageSlotRoll,
+        salvageSlotRoll,
         row
     );
 
@@ -3192,7 +3186,7 @@ function resolveQuestSeed(test) {
     const quest = {
         id:
             `quest-${state.encounter.id}-` +
-            `${row.rank}-${test.questRoll}`,
+            `${row.rank}-${questRoll}`,
         title:
             `Rank ${row.rank} ${QUEST_RANK_LABELS[row.rank]}`,
         rank: row.rank,
@@ -3309,6 +3303,10 @@ function resolveQuestAction(test) {
 
         quest.status = 'declined';
 
+        if (state.encounter) {
+            state.encounter.questSeedConsumed = true;
+        }
+
         return result;
     }
 
@@ -3409,6 +3407,10 @@ function resolveQuestAction(test) {
     );
 
     quest.status = 'complete';
+
+    if (state.encounter) {
+        state.encounter.questSeedConsumed = true;
+    }
 
     result.rewards.xp =
         payout.xp;
@@ -6262,18 +6264,6 @@ function registerTools() {
 
                             sourceMobName: {
                                 type: 'string'
-                            },
-
-                            questRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 3
-                            },
-
-                            salvageSlotRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 15
                             },
 
                             town: {

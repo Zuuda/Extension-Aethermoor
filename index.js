@@ -5206,8 +5206,8 @@ function resolveBatch(args) {
         );
 
         /*
-         * Older saved encounters may not have these fields. Normalize them
-         * without changing any existing locked result.
+         * Normalize older saves without changing any roll or seed
+         * that has already been locked.
          */
         for (const field of [
             'packDropRoll',
@@ -5221,22 +5221,6 @@ function resolveBatch(args) {
             }
         }
 
-        function lockField(field, value) {
-            const existing = encounter[field];
-
-            if (existing !== null && existing !== undefined) {
-                assert(
-                    deepEqual(existing, value),
-                    `${field} is already locked with a different result`
-                );
-
-                return false;
-            }
-
-            encounter[field] = clone(value);
-            return true;
-        }
-
         const result = {
             ok: true,
             applicable: {},
@@ -5245,188 +5229,142 @@ function resolveBatch(args) {
             state
         };
 
-        const {
-            curiosityRoll,
-            rumorRoll,
-            packDropRoll,
-            newWildernessSite = false,
-            investigatedRumor = false,
-            packLooted = false
-        } = test;
+        /*
+         * Reuse a result already locked on this encounter.
+         * Otherwise generate it using the extension's saved RNG.
+         */
+        function lockedOrRolled(field, sides) {
+            const existing = encounter[field];
 
-        if (curiosityRoll !== undefined) {
-            assert(
-                Number.isInteger(curiosityRoll) &&
-                curiosityRoll >= 1 &&
-                curiosityRoll <= 10,
-                'curiosityRoll must be 1-10'
-            );
+            if (existing !== null && existing !== undefined) {
+                assert(
+                    Number.isInteger(existing) &&
+                    existing >= 1 &&
+                    existing <= sides,
+                    `${field} must be 1-${sides}`
+                );
 
-            result.applicable.curiosity =
-                newWildernessSite;
+                result.locked[field] = false;
+                return existing;
+            }
 
-            if (!newWildernessSite) {
-                result.findings.curiosity =
-                    'not_applicable';
-            } else {
-                const curiosityResult =
-                    curiosityRoll <= 7
-                        ? 'nothing_hidden'
-                        : curiosityRoll === 8
-                            ? 'hidden_lore_or_shortcut'
-                            : curiosityRoll === 9
-                                ? 'trap_or_ambush_hazard'
-                                : 'hidden_loot_stash';
+            const value = roll(state, sides);
+            encounter[field] = value;
+            result.locked[field] = true;
+            return value;
+        }
 
-                result.findings.curiosity =
-                    curiosityResult;
+        /*
+         * Each encounter stores at most one loot seed and one quest
+         * seed. If another eligible result hits, keep the first seed;
+         * never overwrite an outcome that was already locked.
+         */
+        function lockSeed(field, value) {
+            const existing = encounter[field];
 
-                result.locked.curiosityRoll =
-                    lockField(
-                        'curiosityRoll',
-                        curiosityRoll
-                    );
+            if (existing !== null && existing !== undefined) {
+                result.locked[field] = false;
+                return existing;
+            }
 
-                if (
-                    curiosityResult ===
-                    'hidden_loot_stash'
-                ) {
-                    result.locked.lootSeed =
-                        lockField(
-                            'lootSeed',
-                            {
-                                source: 'curiosity',
-                                roll: curiosityRoll,
-                                result: curiosityResult
-                            }
-                        );
-                }
+            encounter[field] = clone(value);
+            result.locked[field] = true;
+            return encounter[field];
+        }
+
+        if (test.newWildernessSite === true) {
+            result.applicable.curiosity = true;
+
+            const curiosityRoll =
+                lockedOrRolled('curiosityRoll', 10);
+
+            const curiosityResult =
+                curiosityRoll <= 7
+                    ? 'nothing_hidden'
+                    : curiosityRoll === 8
+                        ? 'hidden_lore_or_shortcut'
+                        : curiosityRoll === 9
+                            ? 'trap_or_ambush_hazard'
+                            : 'hidden_loot_stash';
+
+            result.findings.curiosity =
+                curiosityResult;
+
+            if (curiosityResult === 'hidden_loot_stash') {
+                lockSeed('lootSeed', {
+                    source: 'curiosity',
+                    roll: curiosityRoll,
+                    result: curiosityResult
+                });
             }
         }
 
-        if (rumorRoll !== undefined) {
-            assert(
-                Number.isInteger(rumorRoll) &&
-                rumorRoll >= 1 &&
-                rumorRoll <= 5,
-                'rumorRoll must be 1-5'
-            );
+        if (test.investigatedRumor === true) {
+            result.applicable.rumor = true;
 
-            result.applicable.rumor =
-                investigatedRumor;
+            const rumorRoll =
+                lockedOrRolled('rumorRoll', 5);
 
-            if (!investigatedRumor) {
-                result.findings.rumor =
-                    'not_applicable';
-            } else {
-                const rumorResult =
-                    rumorRoll <= 3
-                        ? 'travelogue_flub_benign_oddity'
-                        : rumorRoll === 4
-                            ? 'already_cleared_by_other_immortals'
-                            : 'genuine_unclaimed_quest_or_dungeon_hook';
+            const rumorResult =
+                rumorRoll <= 3
+                    ? 'travelogue_flub_benign_oddity'
+                    : rumorRoll === 4
+                        ? 'already_cleared_by_other_immortals'
+                        : 'genuine_unclaimed_quest_or_dungeon_hook';
 
-                result.findings.rumor =
-                    rumorResult;
+            result.findings.rumor =
+                rumorResult;
 
-                result.locked.rumorRoll =
-                    lockField(
-                        'rumorRoll',
-                        rumorRoll
-                    );
-
-                if (
-                    rumorResult ===
-                    'genuine_unclaimed_quest_or_dungeon_hook'
-                ) {
-                    result.locked.questSeed =
-                        lockField(
-                            'questSeed',
-                            {
-                                source: 'rumor',
-                                roll: rumorRoll,
-                                result: rumorResult
-                            }
-                        );
-                }
+            if (
+                rumorResult ===
+                'genuine_unclaimed_quest_or_dungeon_hook'
+            ) {
+                lockSeed('questSeed', {
+                    source: 'rumor',
+                    roll: rumorRoll,
+                    result: rumorResult
+                });
             }
         }
 
-        if (packDropRoll !== undefined) {
-            assert(
-                Number.isInteger(packDropRoll) &&
-                packDropRoll >= 1 &&
-                packDropRoll <= 10,
-                'packDropRoll must be 1-10'
-            );
+        if (test.packLooted === true) {
+            result.applicable.packDrop = true;
 
-            result.applicable.packDrop =
-                packLooted;
+            const packDropRoll =
+                lockedOrRolled('packDropRoll', 10);
 
-            if (!packLooted) {
-                result.findings.packDrop =
-                    'not_applicable';
-            } else {
-                const packResult =
-                    packDropRoll <= 8
-                        ? 'auto_salvage_only'
-                        : packDropRoll === 9
-                            ? 'wild_equipment_drop'
-                            : 'diegetic_quest_breadcrumb';
+            const packResult =
+                packDropRoll <= 8
+                    ? 'auto_salvage_only'
+                    : packDropRoll === 9
+                        ? 'wild_equipment_drop'
+                        : 'diegetic_quest_breadcrumb';
 
-                result.findings.packDrop =
-                    packResult;
+            result.findings.packDrop =
+                packResult;
 
-                result.locked.packDropRoll =
-                    lockField(
-                        'packDropRoll',
-                        packDropRoll
-                    );
+            if (packResult === 'wild_equipment_drop') {
+                lockSeed('lootSeed', {
+                    source: 'pack_drop',
+                    roll: packDropRoll,
+                    result: packResult
+                });
+            }
 
-                if (
-                    packResult ===
-                    'wild_equipment_drop'
-                ) {
-                    result.locked.lootSeed =
-                        lockField(
-                            'lootSeed',
-                            {
-                                source: 'pack_drop',
-                                roll: packDropRoll,
-                                result: packResult
-                            }
-                        );
-                }
-
-                if (
-                    packResult ===
-                    'diegetic_quest_breadcrumb'
-                ) {
-                    result.locked.questSeed =
-                        lockField(
-                            'questSeed',
-                            {
-                                source: 'pack_drop',
-                                roll: packDropRoll,
-                                result: packResult
-                            }
-                        );
-                }
+            if (packResult === 'diegetic_quest_breadcrumb') {
+                lockSeed('questSeed', {
+                    source: 'pack_drop',
+                    roll: packDropRoll,
+                    result: packResult
+                });
             }
         }
 
         result.unlocks = {
-            loot:
-                result.findings.curiosity ===
-                    'hidden_loot_stash' ||
-                result.findings.packDrop ===
-                    'wild_equipment_drop',
-
+            loot: encounter.lootSeed !== null,
             quest:
-                result.findings.rumor ===
-                    'genuine_unclaimed_quest_or_dungeon_hook' ||
-                result.findings.packDrop ===
-                    'diegetic_quest_breadcrumb'
+                encounter.questSeed !== null &&
+                encounter.questSeedConsumed !== true
         };
 
         return result;
@@ -6435,17 +6373,6 @@ function registerTools() {
                                 type: 'string'
                             },
 
-                            curiosityRoll: {
-                                type: 'integer'
-                            },
-
-                            rumorRoll: {
-                                type: 'integer'
-                            },
-
-                            packDropRoll: {
-                                type: 'integer'
-                            },
 
                             newWildernessSite: {
                                 type: 'boolean'

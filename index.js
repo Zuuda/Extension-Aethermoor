@@ -6492,22 +6492,19 @@ function registerTools() {
 }
 
 function registerAethermoorTools() {
-    const context = getContext();
-    if (!context?.registerFunctionTool) return;
-
-    // Check ST's internal capability flags
-    if (context.isToolCallingSupported && !context.isToolCallingSupported()) {
-        console.warn('Aethermoor: Function calling is disabled in SillyTavern settings!');
+    try {
+        registerTools();
+        console.log(
+            'Aethermoor Engine function tools registered successfully'
+        );
+    } catch (error) {
+        console.error(
+            'Aethermoor Engine: Error registering function tools',
+            error
+        );
     }
-
-    // Explicitly add shouldRegister
-    context.registerFunctionTool({
-        name: 'aethermoorResolveTurnV2',
-        displayName: 'Aethermoor: Resolve Turn or Batch',
-        description: '...',
-        parameters: { ... },
-        action: async (args) => { ... },
-        shouldRegister: () => true, // Force registration on every request
-        stealth: true // Avoid UI chat-state corruption during swipes
-    });
 }
+
+jQuery(function () {
+    registerAethermoorTools();
+});

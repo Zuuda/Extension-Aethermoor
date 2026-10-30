@@ -585,15 +585,34 @@ function live(state) {
 }
 
 function roll(state, sides) {
-    // Persist rngState in the bottom ledger. Repeating an input state
-    // produces the same result, including after a swipe.
-    let x = int(state.rngState, 'rngState', 1) >>> 0;
+    int(sides, 'roll sides', 1);
+
+    /*
+     * The RNG seed belongs to the saved extension state. Initialize it
+     * once if this is an older save that does not have a seed yet.
+     */
+    if (!Number.isInteger(state.rngState) || state.rngState < 1) {
+        const seed = new Uint32Array(1);
+
+        if (globalThis.crypto?.getRandomValues) {
+            globalThis.crypto.getRandomValues(seed);
+            state.rngState = seed[0] || 1;
+        } else {
+            state.rngState =
+                (Math.floor(Math.random() * 0xffffffff) >>> 0) || 1;
+        }
+    }
+
+    let x = state.rngState >>> 0;
     x ^= x << 13;
     x ^= x >>> 17;
     x ^= x << 5;
+
     state.rngState = (x >>> 0) || 1;
+
     return 1 + (state.rngState % sides);
 }
+
 
 function xpForKill(crewLevel, foe) {
     const base = mobStats(foe.level, foe.role).xpBase;
@@ -651,17 +670,19 @@ function applyXp(crew, xp) {
     return changes;
 }
 
-function checkTape(state, rolls) {
-    const tape = rolls || {
-        player: [roll(state, 6), roll(state, 6), roll(state, 6)],
-        enemy: [roll(state, 6), roll(state, 6), roll(state, 6)]
+function checkTape(state) {
+    return {
+        player: [
+            roll(state, 6),
+            roll(state, 6),
+            roll(state, 6)
+        ],
+        enemy: [
+            roll(state, 6),
+            roll(state, 6),
+            roll(state, 6)
+        ]
     };
-    for (const side of ['player', 'enemy']) {
-        assert(Array.isArray(tape[side]) && tape[side].length === 3 &&
-            tape[side].every(n => Number.isInteger(n) && n >= 1 && n <= 6),
-        `${side} needs three d6 results`);
-    }
-    return tape;
 }
 
 function dealDamage(state, target, amount, kills) {
@@ -1337,7 +1358,7 @@ let activeTelegraph = telegraphEffects(encounter);
             maxWeasels - shadowMechanics(c).slots;
     }
 
-    const tape = checkTape(s, rolls);
+    const tape = checkTape(s);
     const logs = [];
     const kills = [];
     const startingCount = live(s).length;
@@ -2455,17 +2476,7 @@ let activeTelegraph = telegraphEffects(encounter);
         c.qtik.hp > 0 &&
         c.tansy.hp > 0
     ) {
-        const telegraphRoll =
-            rolls?.telegraph !== undefined
-                ? rolls.telegraph
-                : roll(s, 4);
-
-        assert(
-            Number.isInteger(telegraphRoll) &&
-            telegraphRoll >= 1 &&
-            telegraphRoll <= 4,
-            'Telegraph roll must be 1-4'
-        );
+        const telegraphRoll = roll(s, 4);
 
         /*
          * Preserve the previous selection for the no-repeat check,

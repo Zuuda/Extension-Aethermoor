@@ -3396,22 +3396,17 @@ function resolveQuestAction(test) {
 
         result.rewards.silver =
             milestone.silver;
+        const levelUps =
+            applyXp(
+                state.crew,
+                milestone.xp
+            );
 
-        if (test.rewardMode === 'immediate') {
-            const levelUps =
-                applyXp(
-                    state.crew,
-                    milestone.xp
-                );
+        state.crew.purse +=
+            milestone.silver;
 
-            state.crew.purse +=
-                milestone.silver;
-
-            result.levelUps =
-                levelUps;
-        } else {
-            result.levelUps = [];
-        }
+        result.levelUps =
+            levelUps;
 
         return result;
     }
@@ -3503,19 +3498,14 @@ function resolveQuestAction(test) {
                 )
             ];
     }
+    result.levelUps =
+        applyXp(
+            state.crew,
+            payout.xp
+        );
 
-    if (test.rewardMode === 'immediate') {
-        result.levelUps =
-            applyXp(
-                state.crew,
-                payout.xp
-            );
-
-        state.crew.purse +=
-            payout.silver;
-    } else {
-        result.levelUps = [];
-    }
+    state.crew.purse +=
+        payout.silver;
 
     return result;
 }
@@ -6126,13 +6116,6 @@ function registerTools() {
                                 ]
                             },
 
-                            belt: {
-                                type: 'array',
-                                items: {
-                                    type: 'string'
-                                }
-                            },
-
                             items: {
                                 type: 'array',
                                 items: {
@@ -6287,7 +6270,6 @@ function registerTools() {
                                     'earn',
                                     'sell',
                                     'grant',
-                                    'remove',
                                     'use',
                                     'list_food',
                                     'apply',

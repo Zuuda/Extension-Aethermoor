@@ -533,6 +533,79 @@ function validate(state) {
             );
         }
     }
+    if (encounter.type === 'declared') {
+        const declaredRoles = [
+            'brute',
+            'archer',
+            'mender',
+            'hexer',
+            'buffer',
+            'elite',
+            'boss'
+        ];
+
+        assert(
+            encounter.foes.every(foe =>
+                declaredRoles.includes(foe.role)
+            ),
+            'Declared encounter contains an unsupported role'
+        );
+
+        assert(
+            encounter.rewards?.kind === 'declared',
+            'Declared encounter reward metadata is required'
+        );
+
+        const expectedGear =
+            encounter.foes.filter(
+                foe =>
+                    foe.role === 'elite' ||
+                    foe.role === 'boss'
+            );
+
+        assert(
+            Array.isArray(
+                encounter.rewards.guaranteedGear
+            ),
+            'Declared guaranteedGear must be an array'
+        );
+
+        assert(
+            encounter.rewards.guaranteedGear.length ===
+            expectedGear.length,
+            'Declared guaranteedGear does not match elite/boss roster'
+        );
+
+        for (const foe of expectedGear) {
+            const gear =
+                encounter.rewards.guaranteedGear.find(
+                    entry => entry.foeId === foe.id
+                );
+
+            assert(
+                gear,
+                `Missing guaranteed gear for ${foe.id}`
+            );
+
+            const expectedRawStat =
+                ZONES[encounter.zone].base +
+                (
+                    foe.role === 'elite'
+                        ? 1
+                        : 5
+                );
+
+            assert(
+                gear.rawStat === expectedRawStat,
+                `${foe.id} guaranteed gear stat is invalid`
+            );
+
+            assert(
+                gear.pawnSilver === 2 * gear.rawStat,
+                `${foe.id} guaranteed gear pawn value is invalid`
+            );
+        }
+    }
 
     if (encounter.type === 'normal_pack') {
         assert(
@@ -1448,18 +1521,7 @@ function resolveTurn({
     }
     const turnEffects = [];
     const itemUse = {};
-
-    if (reinforcements.length > 0) {
-        turnEffects.push(
-            `Boss reinforcements arrived: ` +
-            reinforcements
-                .map(foe => foe.id)
-                .join(', ')
-        );
-    }
-
     const tape = checkTape(s);
-
     const declaredStunTarget =
         actions.qtik === 'stun'
             ? live(s).find(foe => foe.id === actions.target)

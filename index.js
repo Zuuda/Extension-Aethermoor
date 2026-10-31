@@ -2839,7 +2839,7 @@ function spawnEncounter(test) {
         });
 
         spawned.encounter.composition =
-        compositionRoll;
+            compositionRoll;
         spawned.encounter.spawnRolls = {
             bracketRoll,
             compositionRoll

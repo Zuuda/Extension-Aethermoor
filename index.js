@@ -362,6 +362,7 @@ function validate(state) {
     assert(
         [
             'normal_pack',
+            'declared',
             'elite',
             'boss'
         ].includes(encounter.type),
@@ -455,6 +456,20 @@ function validate(state) {
         assert(
             foe.hp <= foe.maxHp,
             `${foe.id} HP exceeds maximum`
+        );
+    }
+
+        if (encounter.type === 'declared') {
+        assert(
+            encounter.foes.every(foe =>
+                ['brute', 'archer', 'mender', 'hexer', 'buffer']
+                    .includes(foe.role)
+            ),
+            'Declared encounter contains an unsupported role'
+        );
+        assert(
+            encounter.rewards?.kind === 'declared',
+            'Declared encounter reward metadata is required'
         );
     }
 
@@ -735,7 +750,7 @@ function dealDamage(state, target, amount, kills) {
     return hits;
 }
 
-function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
+function finalizeEncounterRewards(state, slainIds) {
     const encounter = state.encounter;
     const crew = state.crew;
 
@@ -749,23 +764,15 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
     state.inventory.activeTradeListings ||= [];
 
     assert(
-        Array.isArray(state.inventory.bagReserves),
-        'inventory.bagReserves must be an array'
-    );
-
-    assert(
+        Array.isArray(state.inventory.bagReserves) &&
         Array.isArray(state.inventory.activeTradeListings),
-        'inventory.activeTradeListings must be an array'
+        'Encounter reward inventory must contain arrays'
     );
 
     if (live(state).length > 0) {
         return {
-            xp: 0,
-            silver: 0,
-            resolved: false,
-            encounterCleared: false,
-            loot: [],
-            trophies: []
+            xp: 0, silver: 0, resolved: false,
+            encounterCleared: false, loot: [], trophies: []
         };
     }
 
@@ -774,39 +781,40 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
         'Encounter rewards have already been resolved'
     );
 
-    const slain = new Set(slainIds);
-    const slainFoes = encounter.foes.filter(
-        foe => slain.has(foe.id)
-    );
-
     let xp = 0;
     let silver = 0;
     const loot = [];
-    const trophies = [];
 
     if (encounter.type === 'normal_pack') {
-        xp = encounter.rewards.listedPackXp;
-        silver = encounter.rewards.autoSalvage;
-
-        assert(
-            Number.isInteger(xp) && xp >= 0,
-            'Locked normal-pack XP is invalid'
+        xp = int(
+            encounter.rewards.listedPackXp,
+            'normal pack listedPackXp'
         );
-
-        assert(
-            Number.isInteger(silver) && silver >= 0,
-            'Locked normal-pack salvage is invalid'
+        silver = int(
+            encounter.rewards.autoSalvage,
+            'normal pack autoSalvage'
         );
+    } else if (encounter.type === 'declared') {
+        // All declared foes must be dead before this function pays out.
+        xp = encounter.foes.reduce(
+            (total, foe) => total + xpForKill(crew.level, foe),
+            0
+        );
+        silver =
+            encounter.foes.length * 2 * ZONES[encounter.zone].tier;
     } else if (
         encounter.type === 'elite' ||
         encounter.type === 'boss'
     ) {
+        const slain = new Set(slainIds);
+        const foe = encounter.foes[0];
+
         assert(
-            slainFoes.length === 1,
+            slain.has(foe.id),
             'Elite/Boss clear requires its slain foe'
         );
 
-        xp = xpForKill(crew.level, slainFoes[0]);
+        xp = xpForKill(crew.level, foe);
 
         const guaranteedGear =
             encounter.rewards.guaranteedGear;
@@ -821,7 +829,6 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
             state,
             encounter.type
         );
-
         const item = {
             ...generated.item,
             acquiredFrom: encounter.type,
@@ -836,13 +843,11 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
 
         state.inventory.bagReserves.push(item);
         loot.push(item);
-
-           } else {
+    } else {
         throw new Error(
             `Unsupported encounter reward type: ${encounter.type}`
         );
     }
-
 
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
@@ -853,7 +858,7 @@ function finalizeEncounterRewards(state, slainIds, lootRolls = {}) {
         resolved: true,
         encounterCleared: true,
         loot,
-        trophies
+        trophies: []
     };
 }
 
@@ -2757,7 +2762,64 @@ function spawnEncounter(test) {
 
     let spawned;
 
-    if (kind === 'normal_pack') {
+    if (kind === 'declared') {
+        assert(
+            Number.isInteger(test.zone) && ZONES[test.zone],
+            `Unknown zone: ${test.zone}`
+        );
+        assert(
+            Array.isArray(test.foes) && test.foes.length > 0,
+            'Declared encounter needs at least one foe'
+        );
+
+        const allowed = new Set([
+            'brute', 'archer', 'mender', 'hexer', 'buffer'
+        ]);
+        const id = test.encounterId || `declared-z${test.zone}`;
+
+        const foes = test.foes.map((entry, index) => {
+            assert(
+                entry && allowed.has(entry.role),
+                `Unsupported declared foe role at index ${index}`
+            );
+            int(entry.level, `foes[${index}].level`, 1);
+
+            return createFoe({
+                id: `${id}-${entry.role}-${index + 1}`,
+                level: entry.level,
+                role: entry.role
+            });
+        });
+
+        const rewards = {
+            kind: 'declared',
+            resolved: false
+        };
+
+        spawned = {
+            ok: true,
+            encounter: {
+                id,
+                status: 'active',
+                turn: 0,
+                zone: test.zone,
+                type: 'declared',
+                enemyTier: ZONES[test.zone].tier,
+                foes,
+                packDropRoll: null,
+                curiosityRoll: null,
+                rumorRoll: null,
+                lootSeed: null,
+                questSeed: null,
+                rewards,
+                used: { stun: false, icePatch: false },
+                hexStacks: {},
+                exposed: 0
+            },
+            rewards
+        };
+    } else if (kind === 'normal_pack') {
+
         const bracketRoll =
             roll(state, bracketNames.length);
 
@@ -6218,7 +6280,7 @@ function registerTools() {
 
                             encounterType: {
                                 type: 'string',
-                                enum: ['normal_pack', 'elite', 'boss']
+                                enum: ['normal_pack', 'declared', 'elite', 'boss']
                             },
 
                             encounterId: {

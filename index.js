@@ -1367,6 +1367,26 @@ function resolveTurn({
 
 const turnEffects = [];
 const itemUse = {};
+    const tape = checkTape(s);
+
+    const declaredStunTarget =
+        actions.qtik === 'stun'
+            ? live(s).find(foe => foe.id === actions.target)
+            : null;
+
+    const guardingBrute = live(s).find(
+        foe => foe.role === 'brute'
+    );
+
+    const stunTargetId =
+        declaredStunTarget &&
+        declaredStunTarget.role !== 'brute' &&
+        guardingBrute &&
+        tape.enemy[0] >
+            (actions.tansy === 'hamstring' ? 2 : 1) &&
+        actions.tansy !== 'visor'
+            ? guardingBrute.id
+            : declaredStunTarget?.id || null;
 
     const activeTelegraphs =
         eliteBossFoes.map(foe => ({
@@ -1387,16 +1407,10 @@ const itemUse = {};
         );
         encounter.used.stun = true;
 
-        const stunTarget =
-            live(s).find(
-                foe => foe.id === actions.target
-            );
-
         const stunnedEliteBoss =
-            stunTarget &&
-            ['elite', 'boss'].includes(stunTarget.role)
-                ? stunTarget
-                : null;
+            eliteBossFoes.find(
+                foe => foe.id === stunTargetId
+            );
 
         if (stunnedEliteBoss?.nextTelegraph) {
             turnEffects.push(
@@ -1517,7 +1531,6 @@ const itemUse = {};
             maxWeasels - shadowMechanics(c).slots;
     }
 
-    const tape = checkTape(s);
     const logs = [];
     const kills = [];
     const startingCount = live(s).length;
@@ -1815,7 +1828,8 @@ const itemUse = {};
 
         const stunReduction =
             actions.qtik === 'stun' &&
-            foe.id === actions.target
+             foe.id === stunTargetId
+
                 ? 4 * enemyTier(foe.level)
                 : 0;
 
@@ -1858,9 +1872,7 @@ const itemUse = {};
         const enemyMiss = e <= missLimit;
 
         const stunnedFoeId =
-            actions.qtik === 'stun' && ex === 0
-                ? actions.target
-                : null;
+            ex === 0 ? stunTargetId : null;
 
         const hexPenalty = currentHexPenalty();
 
@@ -1905,6 +1917,12 @@ const itemUse = {};
             target = lowestHpFoe();
             effects.push(`Retargeted to ${target.id}`);
         }
+        if (stunnedFoeId && target.id !== stunnedFoeId) {
+            target = live(s).find(
+                foe => foe.id === stunnedFoeId
+            );
+            effects.push(`${target.id} intercepted Stun with Guard`);
+        }
 
         const brute = live(s).find(
             foe =>
@@ -1915,6 +1933,7 @@ const itemUse = {};
         if (
             brute &&
             target.role !== 'brute' &&
+            !(actions.qtik === 'stun' && ex === 0) &&
             !enemyMiss &&
             brute.id !== stunnedFoeId &&
             actions.tansy !== 'visor' &&
@@ -2300,6 +2319,7 @@ const itemUse = {};
                     foe.role === 'buffer' &&
                     foe.id !== stunnedFoeId
             );
+
 
             if (castingBuffer) {
                 encounter.bufferId = castingBuffer.id;

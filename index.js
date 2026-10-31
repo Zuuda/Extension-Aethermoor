@@ -1089,52 +1089,71 @@ const ELITE_BOSS_TELEGRAPHS = [
     'aether_drain'
 ];
 
-function passiveState(encounter) {
-    const foe = encounter.foes.find(
-        entry =>
-            entry.hp > 0 &&
-            ['elite', 'boss'].includes(entry.role)
-    );
+function passiveStates(encounter) {
+    return encounter.foes
+        .filter(foe =>
+            foe.hp > 0 &&
+            ['elite', 'boss'].includes(foe.role) &&
+            foe.passive
+        )
+        .map(foe => {
+            foe.passiveStacks =
+                Number(foe.passiveStacks || 0);
 
-    if (!foe || !foe.passive) {
-        return null;
-    }
-
-    foe.passiveStacks = Number(foe.passiveStacks || 0);
-
-    return {
-        foe,
-        name: foe.passive,
-        stacks: foe.passiveStacks
-    };
+            return {
+                foe,
+                name: foe.passive,
+                stacks: foe.passiveStacks
+            };
+        });
 }
 
 function passiveAttackPenalty(encounter) {
-    const passive = passiveState(encounter);
-    return passive?.name === 'withering_lethargy'
-        ? 2 * passive.stacks
-        : 0;
+    return passiveStates(encounter)
+        .filter(passive =>
+            passive.name === 'withering_lethargy'
+        )
+        .reduce(
+            (total, passive) =>
+                total + 2 * passive.stacks,
+            0
+        );
 }
 
 function passiveDefensePenalty(encounter) {
-    const passive = passiveState(encounter);
-    return passive?.name === 'armor_sunder'
-        ? 2 * passive.stacks
-        : 0;
+    return passiveStates(encounter)
+        .filter(passive =>
+            passive.name === 'armor_sunder'
+        )
+        .reduce(
+            (total, passive) =>
+                total + 2 * passive.stacks,
+            0
+        );
 }
 
 function passiveRegenPenalty(encounter) {
-    const passive = passiveState(encounter);
-    return passive?.name === 'grave_chill'
-        ? 2 * passive.stacks
-        : 0;
+    return passiveStates(encounter)
+        .filter(passive =>
+            passive.name === 'grave_chill'
+        )
+        .reduce(
+            (total, passive) =>
+                total + 2 * passive.stacks,
+            0
+        );
 }
 
 function passiveBleedBonus(encounter) {
-    const passive = passiveState(encounter);
-    return passive?.name === 'serrated_bleed'
-        ? passive.stacks
-        : 0;
+    return passiveStates(encounter)
+        .filter(passive =>
+            passive.name === 'serrated_bleed'
+        )
+        .reduce(
+            (total, passive) =>
+                total + passive.stacks,
+            0
+        );
 }
 
 function chooseNextTelegraph(foe, rollValue) {
@@ -1311,9 +1330,10 @@ function resolveTurn({
     encounter.used ||= { stun: false, icePatch: false };
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
-        const eliteBossFoe = live(s).find(
+    const eliteBossFoes = live(s).filter(
         foe => ['elite', 'boss'].includes(foe.role)
     );
+
     encounter.turn = Number(encounter.turn || 0) + 1;
     encounter.shadowWarderSacrificeUsed ||= [];
 
@@ -1348,13 +1368,68 @@ function resolveTurn({
 const turnEffects = [];
 const itemUse = {};
 
-const previousTelegraph =
-    eliteBossFoe?.nextTelegraph || null;
+    const activeTelegraphs =
+        eliteBossFoes.map(foe => ({
+            foe,
+            effect: telegraphEffects(foe)
+        }));
 
-let activeTelegraph =
-    telegraphEffects(eliteBossFoe);
+    const activeTelegraphEffects =
+        activeTelegraphs
+            .map(entry => entry.effect)
+            .filter(Boolean);
 
+    const activeTelegraphFor =
+        foe =>
+            activeTelegraphs.find(
+                entry => entry.foe.id === foe.id
+            )?.effect || null;
 
+    const telegraphDefenseBonus =
+        activeTelegraphEffects.reduce(
+            (total, effect) =>
+                total + Number(effect.defenseBonus || 0),
+            0
+        );
+
+    const telegraphBleedMultiplier =
+        activeTelegraphEffects.reduce(
+            (total, effect) =>
+                total * Number(effect.bleedMultiplier || 1),
+            1
+        );
+
+    const telegraphExtraDebuffStacks =
+        activeTelegraphEffects.reduce(
+            (total, effect) =>
+                total + Number(
+                    effect.extraDebuffStacks || 0
+                ),
+            0
+        );
+
+    const telegraphDestroysMeleeWeasel =
+        activeTelegraphEffects.some(
+            effect => effect.destroysMeleeWeasel
+        );
+
+    const telegraphTansySplashPercent =
+        activeTelegraphEffects.reduce(
+            (total, effect) =>
+                total + Number(
+                    effect.tansySplashPercent || 0
+                ),
+            0
+        );
+
+    const telegraphHealPerHit =
+        activeTelegraphEffects.reduce(
+            (total, effect) =>
+                total + Number(
+                    effect.healPerHit || 0
+                ),
+            0
+        );
     
     if (actions.qtik === 'stun') {
         assert(
@@ -1363,17 +1438,27 @@ let activeTelegraph =
         );
         encounter.used.stun = true;
 
-        if (activeTelegraph) {
-            turnEffects.push(
-                `Stun cancelled ${telegraphLabel(previousTelegraph)}`
+        const stunTarget =
+            live(s).find(
+                foe => foe.id === actions.target
             );
-        }
 
-       if (eliteBossFoe) {
-            eliteBossFoe.nextTelegraph = null;
-        }
+        const stunnedEliteBoss =
+            stunTarget &&
+            ['elite', 'boss'].includes(stunTarget.role)
+                ? stunTarget
+                : eliteBossFoes[0];
 
-        activeTelegraph = null;
+        if (stunnedEliteBoss?.nextTelegraph) {
+            turnEffects.push(
+                `Stun cancelled ` +
+                `${telegraphLabel(
+                    stunnedEliteBoss.nextTelegraph
+                )}`
+            );
+
+            stunnedEliteBoss.nextTelegraph = null;
+        }
     }
 
     if (actions.qtik === 'ice_patch') {
@@ -1721,7 +1806,7 @@ let activeTelegraph =
         const buffer = currentBuffer();
         const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
         const telegraphBonus =
-            Number(activeTelegraph?.defenseBonus || 0);
+            telegraphDefenseBonus;
         const stunReduction = actions.qtik === 'stun'
             ? 4 * enemyTier(foe.level) : 0;
 
@@ -2065,7 +2150,10 @@ let activeTelegraph =
          * prevent Q'tik's own damage from reflecting.
          */
         if (
-            activeTelegraph?.reflectsQtikDamage &&
+            activeTelegraphEffects.some(
+                effect => effect.reflectsQtikDamage
+            ) &&
+
             actions.qtik !== 'frost_stomp' &&
             live(s).length > 0
         ) {
@@ -2229,9 +2317,11 @@ let activeTelegraph =
                     baseBleed += enemyTier(buffer.level);
                 }
 
-                if (activeTelegraph?.bleedMultiplier) {
-                    baseBleed *= activeTelegraph.bleedMultiplier;
-                    effects.push('Telegraph doubled Base Bleed');
+                if (telegraphBleedMultiplier > 1) {
+                    baseBleed *= telegraphBleedMultiplier;
+                    effects.push(
+                        'Telegraphs multiplied Base Bleed'
+                    );
                 }
 
                 const rollDamage = e === 6
@@ -2248,14 +2338,15 @@ let activeTelegraph =
                 enemyHitCount++;
 
                 if (
-                    activeTelegraph?.destroysMeleeWeasel &&
+                    telegraphDestroysMeleeWeasel &&
                     actions.tansy !== 'recall'
                 ) {
                     destroyWeasel(effects, 'Sweeping Cleave');
 
                     const splash = Math.ceil(
                         crewStats.tansyMaxHp *
-                        activeTelegraph.tansySplashPercent / 100
+                        telegraphTansySplashPercent / 100
+
                     );
 
                     backlineDamage += splash;
@@ -2327,7 +2418,7 @@ let activeTelegraph =
                         const stacks =
                             (e === 6 ? 2 : 1) +
                             Number(
-                                activeTelegraph?.extraDebuffStacks || 0
+                        telegraphExtraDebuffStacks
                             );
 
                         encounter.hexStacks[foe.id] =
@@ -2341,41 +2432,46 @@ let activeTelegraph =
                 }
             }
 
-            if (
-                eliteBossFoe &&
-                eliteBossFoe.hp > 0 &&
-                eliteBossFoe.passive &&
-                frontliners.length > 0
-            ) {
+            if (frontliners.length > 0) {
                 const blocked =
                     actions.tansy === 'visor' &&
-                    e >= 2 && e <= 4;
+                    e >= 2 &&
+                    e <= 4;
 
                 if (!blocked) {
                     const stacks =
                         (e === 6 ? 2 : 1) +
-                        Number(
-                            activeTelegraph?.extraDebuffStacks || 0
+                        telegraphExtraDebuffStacks;
+
+                    for (const foe of eliteBossFoes) {
+                        if (
+                            foe.hp <= 0 ||
+                            !foe.passive
+                        ) {
+                            continue;
+                        }
+
+                        foe.passiveStacks =
+                            Number(foe.passiveStacks || 0) +
+                            stacks;
+
+                        effects.push(
+                            `${foe.id} ${foe.passive} stack ` +
+                            `${foe.passiveStacks}`
                         );
-
-                    eliteBossFoe.passiveStacks =
-                        Number(eliteBossFoe.passiveStacks || 0) +
-                        stacks;
-
-                    effects.push(
-                        `${eliteBossFoe.passive} stack ` +
-                        `${eliteBossFoe.passiveStacks}`
-                    );
-
+                    }
                 } else {
-                    effects.push('Visor blocked passive debuff');
+                    effects.push(
+                        'Visor blocked elite/boss passive debuffs'
+                    );
                 }
             }
 
             if (
-                activeTelegraph?.healPerHit &&
+                telegraphHealPerHit > 0 &&
                 enemyHitCount > 0
             ) {
+
                 const drainTarget =
                     live(s).find(foe =>
                         ['elite', 'boss'].includes(foe.role)
@@ -2386,7 +2482,8 @@ let activeTelegraph =
                 ).maxHp;
 
                 const requested =
-                    activeTelegraph.healPerHit * enemyHitCount;
+                    telegraphHealPerHit * enemyHitCount
+
 
                 const healed = Math.min(
                     requested, maxHp - drainTarget.hp
@@ -2508,12 +2605,20 @@ let activeTelegraph =
                 delete encounter.hexStacks[hex];
             }
             turnEffects.push('Shadow-Mender cleansed one Hexer stack');
-        } else if (
-            eliteBossFoe &&
-            Number(eliteBossFoe.passiveStacks || 0) > 0
-        ) {
-            eliteBossFoe.passiveStacks -= 1;
-            turnEffects.push('Shadow-Mender cleansed one passive stack');
+        } else {
+            const passiveFoe =
+                eliteBossFoes.find(
+                    foe =>
+                        Number(foe.passiveStacks || 0) > 0
+                );
+
+            if (passiveFoe) {
+                passiveFoe.passiveStacks -= 1;
+                turnEffects.push(
+                    `Shadow-Mender cleansed one ` +
+                    `${passiveFoe.id} passive stack`
+                );
+            }
         }
     }
 
@@ -2549,23 +2654,20 @@ let activeTelegraph =
             eliteBossFoe.nextTelegraph = null;
         }
 
-    } else if (
-        ['elite', 'boss'].includes(encounter.type) &&
+        } else if (
+        eliteBossFoes.length > 0 &&
         c.qtik.hp > 0 &&
         c.tansy.hp > 0
     ) {
-      const telegraphRoll = roll(s, 4);
+        for (const foe of eliteBossFoes) {
+            const telegraphRoll = roll(s, 4);
 
-        /*
-         * Preserve the previous selection for the no-repeat check,
-         * including when Stun cancelled its effects this turn.
-         */
-        eliteBossFoe.nextTelegraph = previousTelegraph;
-        eliteBossFoe.nextTelegraph = chooseNextTelegraph(
-            eliteBossFoe,
-            telegraphRoll
-        );
-
+            foe.nextTelegraph =
+                chooseNextTelegraph(
+                    foe,
+                    telegraphRoll
+                );
+        }
     }
 
     c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
@@ -5002,15 +5104,17 @@ function resolveBossGearCheck(test) {
 
     assert(
         encounter &&
-        encounter.type === 'boss',
-        'boss_check requires an active Boss encounter'
+        ['active', 'cleared'].includes(encounter.status),
+        'boss_check requires an active encounter'
     );
 
-    const boss = live(state)[0];
+    const boss = live(state).find(
+        foe => foe.role === 'boss'
+    );
 
     assert(
-        boss && boss.role === 'boss',
-        'Boss encounter has no living Boss'
+        boss,
+        'Encounter has no living Boss'
     );
 
     const crewStats = derived(state.crew);

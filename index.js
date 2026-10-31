@@ -459,18 +459,79 @@ function validate(state) {
         );
     }
 
-        if (encounter.type === 'declared') {
+    if (encounter.type === 'declared') {
+        const declaredRoles = [
+            'brute',
+            'archer',
+            'mender',
+            'hexer',
+            'buffer',
+            'elite',
+            'boss'
+        ];
+
         assert(
             encounter.foes.every(foe =>
-                ['brute', 'archer', 'mender', 'hexer', 'buffer']
-                    .includes(foe.role)
+                declaredRoles.includes(foe.role)
             ),
             'Declared encounter contains an unsupported role'
         );
+
         assert(
             encounter.rewards?.kind === 'declared',
             'Declared encounter reward metadata is required'
         );
+
+        const expectedGear =
+            encounter.foes
+                .filter(foe =>
+                    foe.role === 'elite' ||
+                    foe.role === 'boss'
+                );
+
+        assert(
+            Array.isArray(
+                encounter.rewards.guaranteedGear
+            ),
+            'Declared guaranteedGear must be an array'
+        );
+
+        assert(
+            encounter.rewards.guaranteedGear.length ===
+            expectedGear.length,
+            'Declared guaranteedGear does not match elite/boss roster'
+        );
+
+        for (const foe of expectedGear) {
+            const gear =
+                encounter.rewards.guaranteedGear.find(
+                    entry => entry.foeId === foe.id
+                );
+
+            assert(
+                gear,
+                `Missing guaranteed gear for ${foe.id}`
+            );
+
+            const expectedRawStat =
+                ZONES[state.zone].base +
+                (
+                    foe.role === 'elite'
+                        ? 1
+                        : 5
+                );
+
+            assert(
+                gear.rawStat === expectedRawStat,
+                `${foe.id} guaranteed gear stat is invalid`
+            );
+
+            assert(
+                gear.pawnSilver ===
+                2 * gear.rawStat,
+                `${foe.id} guaranteed gear pawn value is invalid`
+            );
+        }
     }
 
     if (encounter.type === 'normal_pack') {
@@ -795,13 +856,65 @@ function finalizeEncounterRewards(state, slainIds) {
             'normal pack autoSalvage'
         );
     } else if (encounter.type === 'declared') {
-        // All declared foes must be dead before this function pays out.
+        /*
+         * A declared roster pays ordinary kill XP and zone-tier
+         * salvage silver for every slain foe. Elite/boss members also
+         * receive their normal guaranteed gear drop.
+         */
         xp = encounter.foes.reduce(
-            (total, foe) => total + xpForKill(crew.level, foe),
+            (total, foe) =>
+                total + xpForKill(crew.level, foe),
             0
         );
+
         silver =
-            encounter.foes.length * 2 * ZONES[encounter.zone].tier;
+            encounter.foes.length *
+            2 *
+            ZONES[encounter.zone].tier;
+
+        for (const foe of encounter.foes) {
+            if (
+                foe.role !== 'elite' &&
+                foe.role !== 'boss'
+            ) {
+                continue;
+            }
+
+            const guaranteedGear =
+                encounter.rewards.guaranteedGear.find(
+                    entry => entry.foeId === foe.id
+                );
+
+            assert(
+                guaranteedGear,
+                `Missing guaranteed gear for ${foe.id}`
+            );
+
+            const generated =
+                rollLootFromState(
+                    state,
+                    foe.role
+                );
+
+            assert(
+                generated.item.rawStat ===
+                guaranteedGear.rawStat,
+                `${foe.id} generated gear stat does not ` +
+                'match locked reward'
+            );
+
+            const item = {
+                ...generated.item,
+                acquiredFrom: foe.role,
+                acquiredAtEncounter: encounter.id,
+                acquiredFromFoe: foe.id,
+                bound: false
+            };
+
+            state.inventory.bagReserves.push(item);
+            loot.push(item);
+        }
+
     } else if (
         encounter.type === 'elite' ||
         encounter.type === 'boss'
@@ -2774,8 +2887,15 @@ function spawnEncounter(test) {
         );
 
         const allowed = new Set([
-            'brute', 'archer', 'mender', 'hexer', 'buffer'
+            'brute',
+            'archer',
+            'mender',
+            'hexer',
+            'buffer',
+            'elite',
+            'boss'
         ]);
+
         const id = test.encounterId || `declared-z${test.zone}`;
 
         const foes = test.foes.map((entry, index) => {
@@ -2783,18 +2903,62 @@ function spawnEncounter(test) {
                 entry && allowed.has(entry.role),
                 `Unsupported declared foe role at index ${index}`
             );
-            int(entry.level, `foes[${index}].level`, 1);
 
-            return createFoe({
+            int(
+                entry.level,
+                `foes[${index}].level`,
+                1
+            );
+
+            const foe = createFoe({
                 id: `${id}-${entry.role}-${index + 1}`,
                 level: entry.level,
                 role: entry.role
             });
+
+            if (
+                entry.role === 'elite' ||
+                entry.role === 'boss'
+            ) {
+                const passiveRoll = roll(state, 4);
+
+                foe.passive = PASSIVES[passiveRoll];
+                foe.passiveRoll = passiveRoll;
+                foe.passiveStacks = 0;
+                foe.nextTelegraph = null;
+            }
+
+            return foe;
         });
 
         const rewards = {
             kind: 'declared',
-            resolved: false
+            resolved: false,
+            guaranteedGear: foes
+                .filter(foe =>
+                    foe.role === 'elite' ||
+                    foe.role === 'boss'
+                )
+                .map(foe => ({
+                    foeId: foe.id,
+                    source: foe.role,
+                    rawStat:
+                        ZONES[test.zone].base +
+                        (
+                            foe.role === 'elite'
+                                ? 1
+                                : 5
+                        ),
+                    pawnSilver:
+                        2 * (
+                            ZONES[test.zone].base +
+                            (
+                                foe.role === 'elite'
+                                    ? 1
+                                    : 5
+                            )
+                        )
+                }))
         };
 
         spawned = {
@@ -6304,7 +6468,9 @@ function registerTools() {
                                                 'archer',
                                                 'mender',
                                                 'hexer',
-                                                'buffer'
+                                                'buffer',
+                                                'elite',
+                                                'boss'
                                             ]
                                         },
                                         level: {
@@ -6317,10 +6483,6 @@ function registerTools() {
                                         'level'
                                     ]
                                 }
-                            },
-
-                            encounterId: {
-                                type: 'string'
                             },
 
                             encounterId: {

@@ -1164,31 +1164,25 @@ function passiveBleedBonus(encounter) {
 
 function chooseNextTelegraph(foe, rollValue) {
     assert(
-        foe &&
-        ['elite', 'boss'].includes(foe.role),
+        foe && ['elite', 'boss'].includes(foe.role),
         'Only elite and boss foes can have telegraphs'
     );
 
     const pool =
-        foe.role === 'boss'
+        foe.role === 'boss' &&
+        foe.reinforcementsCalled !== true
             ? BOSS_TELEGRAPHS
             : ELITE_TELEGRAPHS;
 
     const rollIndex =
-        ((Number(rollValue) - 1) %
-            pool.length +
-            pool.length) %
+        ((Number(rollValue) - 1) % pool.length + pool.length) %
         pool.length;
 
     const previous = foe.nextTelegraph;
     let selected = pool[rollIndex];
 
     if (selected === previous) {
-        selected =
-            pool[
-                (rollIndex + 1) %
-                pool.length
-            ];
+        selected = pool[(rollIndex + 1) % pool.length];
     }
 
     return selected;
@@ -2840,9 +2834,10 @@ function resolveTurn({
     ) {
         for (const foe of eliteBossFoes) {
             const telegraphSides =
-                foe.role === 'boss'
-                    ? BOSS_TELEGRAPHS.length
-                    : ELITE_TELEGRAPHS.length;
+                foe.role === 'boss' &&
+                foe.reinforcementsCalled !== true
+                ? BOSS_TELEGRAPHS.length
+                : ELITE_TELEGRAPHS.length;
 
             const telegraphRoll =
                 roll(s, telegraphSides);

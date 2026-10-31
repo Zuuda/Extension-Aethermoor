@@ -1398,11 +1398,72 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
+    let fleeRoll = null;
+    let fleeBonus = null;
+    let fleeTotal = null;
+
+    if (fleeing) {
+        const stats = derived(s.crew);
+
+        fleeRoll = roll(s, 6);
+        fleeBonus = Math.min(
+            3,
+            Math.floor(stats.luk / 5)
+        );
+        fleeTotal = fleeRoll + fleeBonus;
+
+        encounter.fleeAttempts =
+            Number(encounter.fleeAttempts || 0) + 1;
+
+        if (fleeTotal >= 6) {
+            encounter.status = 'fled';
+            encounter.fledOnAttempt =
+                encounter.fleeAttempts;
+
+            return {
+                ok: true,
+                turn: encounter.turn,
+                action: 'flee',
+                flee: {
+                    roll: fleeRoll,
+                    lukBonus: fleeBonus,
+                    total: fleeTotal,
+                    threshold: 6,
+                    success: true
+                },
+                exchanges: [],
+                turnEffects: [
+                    'Flee succeeded'
+                ],
+                rewards: {
+                    xp: 0,
+                    silver: 0,
+                    loot: [],
+                    applied: false,
+                    resolved: false
+                },
+                state: s,
+                derived: stats
+            };
+        }
+    }
 
     assert(
         actions && typeof actions === 'object',
         'Turn actions are required'
     );
+        const fleeing =
+        actions.flee === true;
+
+    if (fleeing) {
+        assert(
+            actions.qtik === undefined &&
+            actions.tansy === undefined &&
+            actions.target === undefined,
+            'Flee cannot be combined with combat actions'
+        );
+    }
+
     assert(
         [
             'fire_melee', 'ice_melee', 'stun',
@@ -1493,6 +1554,22 @@ function resolveTurn({
     const turnEffects = [];
     const itemUse = {};
     const tape = checkTape(s);
+
+    if (fleeing) {
+        /*
+         * The flee roll was already consumed above. The combat tape
+         * now supplies the enemy response, while the player-action
+         * section below is skipped.
+         */
+        tape.flee = {
+            roll: fleeRoll,
+            lukBonus: fleeBonus,
+            total: fleeTotal,
+            threshold: 6,
+            success: false
+        };
+    }
+
     const declaredStunTarget =
         actions.qtik === 'stun'
             ? live(s).find(foe => foe.id === actions.target)
@@ -1668,6 +1745,22 @@ function resolveTurn({
     if (isPureFodder) {
         const shadows = shadowMechanics(c);
 
+                let target =
+            live(s)[0] || null;
+
+        const enemyMiss =
+            e <= 1;
+
+        const stunnedFoeId =
+            null;
+
+        const specialistInterrupted =
+            false;
+
+        let damage = 0;
+        let hits = [];
+
+    if (!fleeing) {
         const directed = [
             'visor',
             'vitals',
@@ -2302,7 +2395,7 @@ function resolveTurn({
 
             hits = dealDamage(s, target, damage, kills);
         }
-
+    }
         /*
          * Spiked Carapace is reactive damage, not a shield.
          *
@@ -2913,6 +3006,10 @@ function resolveTurn({
         ok: true,
         turn: encounter.turn,
         rolls: tape,
+        flee: fleeing
+            ? tape.flee
+            : null,
+
         itemUse,
         exchanges: logs,
         turnEffects,
@@ -5617,9 +5714,8 @@ function resolveFleeRoll(test) {
         success,
         enemyResponseResolved: false,
         note: success
-            ? 'Encounter fled successfully'
-            : 'Flee failed; combat turn resolution is required',
-        rewards: {
+            ? 'Encounter fled successfully',
+            rewards: {
             xp: 0,
             silver: 0,
             loot: []
@@ -6486,8 +6582,15 @@ function resolveBatch(args) {
                     break;
 
                 case 'flee':
-                    result = resolveFleeRoll(test);
+                    result = resolveTurn({
+                        state: test.state,
+                        actions: {
+                            flee: true
+                        },
+                        rolls: test.rolls
+                    });
                     break;
+
 
                 case 'trade':
                     result = resolveTradeAction(test);

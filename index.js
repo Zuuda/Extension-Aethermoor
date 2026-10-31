@@ -2776,6 +2776,8 @@ function spawnEncounter(test) {
                 `normal-pack-z${test.zone}`
         });
 
+        spawned.encounter.composition =
+        compositionRoll;
         spawned.encounter.spawnRolls = {
             bracketRoll,
             compositionRoll
@@ -2871,7 +2873,6 @@ function spawnEncounter(test) {
                 enemyTier: enemyTier(level),
                 foes: [foe],
                 passive,
-                passiveRoll,
                 passiveStacks: 0,
                 nextTelegraph: null,
 

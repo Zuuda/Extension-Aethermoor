@@ -3654,6 +3654,10 @@ function resolveQuestSeed(test) {
     const rep =
         normalizeQuestRepTier(test.repTier);
 
+    const inquiryRecord = test.inquiryId === undefined
+        ? null
+        : state.inquiries?.[`rumor:${test.inquiryId}`];
+
     if (inquiryRecord) {
         assert(
             zone === inquiryRecord.zone,
@@ -3667,6 +3671,7 @@ function resolveQuestSeed(test) {
     );
 
     const trigger = inquiryRecord || state.encounter;
+
     const sourceSeed = trigger.questSeed;
 
     assert(

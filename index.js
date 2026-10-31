@@ -846,14 +846,22 @@ function finalizeEncounterRewards(state, slainIds) {
     const loot = [];
 
     if (encounter.type === 'normal_pack') {
-        xp = int(
-            encounter.rewards.listedPackXp,
-            'normal pack listedPackXp'
+        /*
+         * Normal-pack XP follows the same level-gap rules as every
+         * other foe. The old listedPackXp remains locked metadata
+         * for reference, but is no longer the payout authority.
+         */
+        xp = encounter.foes.reduce(
+            (total, foe) =>
+                total + xpForKill(crew.level, foe),
+            0
         );
+
         silver = int(
             encounter.rewards.autoSalvage,
             'normal pack autoSalvage'
         );
+
     } else if (encounter.type === 'declared') {
         /*
          * A declared roster pays ordinary kill XP and zone-tier
@@ -1950,6 +1958,14 @@ function resolveTurn({
         const p = tape.player[ex];
         const e = tape.enemy[ex];
         const effects = [];
+        if (
+            actions.qtik === 'frost_stomp' &&
+            ex === 0
+        ) {
+            effects.push(
+                'Frost Stomp interrupted ordinary specialists for Ex1'
+            );
+        }
 
         const patchActive = actions.qtik === 'ice_patch';
         const hamstringActive = actions.tansy === 'hamstring';
@@ -1962,6 +1978,10 @@ function resolveTurn({
 
         const stunnedFoeId =
             ex === 0 ? stunTargetId : null;
+
+        const specialistInterrupted =
+            actions.qtik === 'frost_stomp' &&
+            ex === 0;
 
         const hexPenalty = currentHexPenalty();
 
@@ -2439,8 +2459,10 @@ function resolveTurn({
             const castingBuffer = live(s).find(
                 foe =>
                     foe.role === 'buffer' &&
-                    foe.id !== stunnedFoeId
+                    foe.id !== stunnedFoeId &&
+                    !specialistInterrupted
             );
+
 
 
             if (castingBuffer) {
@@ -2525,10 +2547,28 @@ function resolveTurn({
                 }
             }
 
-                       for (const foe of live(s)) {
+             for (const foe of live(s)) {
                 const tier = enemyTier(foe.level);
-                 if (foe.id === stunnedFoeId) {
-                    effects.push(`${foe.id} lost its Ex1 response to Stun`);
+
+                if (foe.id === stunnedFoeId) {
+                    effects.push(
+                        `${foe.id} lost its Ex1 response to Stun`
+                    );
+                    continue;
+                }
+
+                if (
+                    specialistInterrupted &&
+                    [
+                        'archer',
+                        'mender',
+                        'hexer',
+                        'buffer'
+                    ].includes(foe.role)
+                ) {
+                    effects.push(
+                        `${foe.id} was interrupted by Frost Stomp`
+                    );
                     continue;
                 }
 

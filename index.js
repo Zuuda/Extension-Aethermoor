@@ -3135,15 +3135,12 @@ function resolveQuestSeed(test) {
     }
 
     /*
-     * A declined or completed quest trigger is spent. A new quest
-     * requires a new encounter and a new locked quest seed.
+     * The current encounter's trigger can produce only one offer.
+     * A later encounter may provide a fresh trigger after this
+     * quest is declined or completed.
      */
     assert(
-        state.encounter.questSeedConsumed !== true &&
-        !(
-            existing &&
-            ['declined', 'complete'].includes(existing.status)
-        ),
+        state.encounter.questSeedConsumed !== true,
         'This quest trigger was already consumed'
     );
 
@@ -3234,6 +3231,8 @@ function resolveQuestSeed(test) {
 
     state.activeQuest =
         quest;
+         state.encounter.questSeedConsumed = true;
+
 
     return {
         ok: true,
@@ -3302,10 +3301,6 @@ function resolveQuestAction(test) {
         );
 
         quest.status = 'declined';
-
-        if (state.encounter) {
-            state.encounter.questSeedConsumed = true;
-        }
 
         return result;
     }
@@ -3407,10 +3402,6 @@ function resolveQuestAction(test) {
     );
 
     quest.status = 'complete';
-
-    if (state.encounter) {
-        state.encounter.questSeedConsumed = true;
-    }
 
     result.rewards.xp =
         payout.xp;

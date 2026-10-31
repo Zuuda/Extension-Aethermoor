@@ -2830,9 +2830,16 @@ function resolveTurn({
 
     if (live(s).length === 0) {
         encounter.status = 'cleared';
-    } else if (
+    for (const foe of eliteBossFoes) {
+        if (foe.hp === 0) {
+            foe.nextTelegraph = null;
+        }
+    }
 
-        eliteBossFoes.length > 0 &&
+    if (live(s).length === 0) {
+        encounter.status = 'cleared';
+    } else if (
+        eliteBossFoes.some(foe => foe.hp > 0) &&
         c.qtik.hp > 0 &&
         c.tansy.hp > 0
     ) {
@@ -2840,19 +2847,17 @@ function resolveTurn({
             const telegraphSides =
                 foe.role === 'boss' &&
                 foe.reinforcementsCalled !== true
-                ? BOSS_TELEGRAPHS.length
-                : ELITE_TELEGRAPHS.length;
+                    ? BOSS_TELEGRAPHS.length
+                    : ELITE_TELEGRAPHS.length;
 
-            const telegraphRoll =
-                roll(s, telegraphSides);
-
-            foe.nextTelegraph =
-                chooseNextTelegraph(
-                    foe,
-                    telegraphRoll
-                );
+            const telegraphRoll = roll(s, telegraphSides);
+            foe.nextTelegraph = chooseNextTelegraph(
+                foe,
+                telegraphRoll
+            );
         }
     }
+
     c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
 
     const finalStats = derived(c);

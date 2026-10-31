@@ -1083,12 +1083,18 @@ function applyConsumableItem(state, item, recipient) {
     };
 }
 
-const ELITE_BOSS_TELEGRAPHS = [
+const ELITE_TELEGRAPHS = [
     'berserk_heavy_windup',
     'spiked_carapace',
     'sweeping_cleave',
     'aether_drain'
 ];
+
+const BOSS_TELEGRAPHS = [
+    ...ELITE_TELEGRAPHS,
+    'call_reinforcements'
+];
+
 
 function passiveStates(encounter) {
     return encounter.foes
@@ -1164,20 +1170,25 @@ function chooseNextTelegraph(foe, rollValue) {
         'Only elite and boss foes can have telegraphs'
     );
 
+    const pool =
+        foe.role === 'boss'
+            ? BOSS_TELEGRAPHS
+            : ELITE_TELEGRAPHS;
+
     const rollIndex =
         ((Number(rollValue) - 1) %
-            ELITE_BOSS_TELEGRAPHS.length +
-            ELITE_BOSS_TELEGRAPHS.length) %
-        ELITE_BOSS_TELEGRAPHS.length;
+            pool.length +
+            pool.length) %
+        pool.length;
 
     const previous = foe.nextTelegraph;
-    let selected = ELITE_BOSS_TELEGRAPHS[rollIndex];
+    let selected = pool[rollIndex];
 
     if (selected === previous) {
         selected =
-            ELITE_BOSS_TELEGRAPHS[
+            pool[
                 (rollIndex + 1) %
-                ELITE_BOSS_TELEGRAPHS.length
+                pool.length
             ];
     }
 
@@ -1193,7 +1204,11 @@ function telegraphLabel(telegraph) {
         sweeping_cleave:
             'Sweeping Cleave / Shockwave',
         aether_drain:
-            'Aether-Drain / Life-Siphon'
+            'Aether-Drain / Life-Siphon',
+        call_reinforcements:
+            'Call Reinforcements'
+        }
+
     };
 
     return labels[telegraph] || telegraph;
@@ -1229,7 +1244,11 @@ function telegraphEffects(foe) {
         aether_drain: {
             name: 'aether_drain',
             healPerHit: 10 * tier
+        },
+        call_reinforcements: {
+            name: 'call_reinforcements'
         }
+
     }[foe.nextTelegraph] || null;
 }
 
@@ -1255,6 +1274,75 @@ function currentHexPenaltyForState(state) {
             Number(stacks);
     }, 0);
 }
+function materializeBossReinforcements(state) {
+    const encounter = state.encounter;
+
+    const bosses = encounter.foes.filter(
+        foe =>
+            foe.hp > 0 &&
+            foe.role === 'boss' &&
+            foe.nextTelegraph === 'call_reinforcements' &&
+            foe.reinforcementsCalled !== true
+    );
+
+    if (bosses.length === 0) {
+        return [];
+    }
+
+    const added = [];
+    const ordinaryRoles = [
+        'brute',
+        'archer',
+        'mender',
+        'hexer',
+        'buffer'
+    ];
+
+    const zoneLevels =
+        ZONES[encounter.zone].levels;
+
+    for (const boss of bosses) {
+        const count = roll(state, 3);
+        const bossAdded = [];
+
+        for (let index = 0; index < count; index++) {
+            const role =
+                ordinaryRoles[
+                    roll(state, ordinaryRoles.length) - 1
+                ];
+
+            const level =
+                zoneLevels[
+                    roll(state, zoneLevels.length) - 1
+                ];
+
+            const id =
+                `${encounter.id}-${boss.id}-reinforcement-` +
+                `${index + 1}`;
+
+            const foe = createFoe({
+                id,
+                level,
+                role
+            });
+
+            encounter.foes.push(foe);
+            added.push(foe);
+            bossAdded.push(foe.id);
+        }
+
+        boss.reinforcementsCalled = true;
+        boss.nextTelegraph = null;
+
+        encounter.reinforcementLog ||= [];
+        encounter.reinforcementLog.push({
+            bossId: boss.id,
+            foeIds: bossAdded
+        });
+    }
+
+    return added;
+}
 
 function resolveTurn({
     state,
@@ -1269,6 +1357,19 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
+    const turnEffects = [];
+
+    if (reinforcements.length > 0) {
+        turnEffects.push(
+            `Boss reinforcements arrived: ` +
+            reinforcements
+                .map(foe => foe.id)
+                .join(', ')
+        );
+    }
+
+    const reinforcements =
+        materializeBossReinforcements(s);
 
     assert(
         ['immediate', 'deferred'].includes(rewardMode),
@@ -1365,9 +1466,18 @@ function resolveTurn({
             'This Shadow-Warder has already sacrificed itself this fight'
         );
     }
+    const turnEffects = [];
+    const itemUse = {};
 
-const turnEffects = [];
-const itemUse = {};
+    if (reinforcements.length > 0) {
+        turnEffects.push(
+            `Boss reinforcements arrived: ` +
+            reinforcements
+                .map(foe => foe.id)
+                .join(', ')
+        );
+    }
+
     const tape = checkTape(s);
 
     const declaredStunTarget =
@@ -2205,7 +2315,12 @@ const itemUse = {};
             break;
         }
         const responseTelegraphs = activeTelegraphs
-            .filter(entry => entry.foe.hp > 0 && entry.effect);
+            .filter(
+                entry =>
+                    entry.foe.hp > 0 &&
+                    entry.effect &&
+                    entry.effect.name !== 'call_reinforcements'
+            );
 
         const responseEffects = responseTelegraphs
             .map(entry => entry.effect);
@@ -2697,7 +2812,13 @@ const itemUse = {};
         c.tansy.hp > 0
     ) {
         for (const foe of eliteBossFoes) {
-            const telegraphRoll = roll(s, 4);
+            const telegraphSides =
+                foe.role === 'boss'
+                    ? BOSS_TELEGRAPHS.length
+                    : ELITE_TELEGRAPHS.length;
+
+            const telegraphRoll =
+                roll(s, telegraphSides);
 
             foe.nextTelegraph =
                 chooseNextTelegraph(
@@ -2705,7 +2826,6 @@ const itemUse = {};
                     telegraphRoll
                 );
         }
-    }
 
     c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
 
@@ -3065,7 +3185,11 @@ function spawnEncounter(test) {
                 foe.passiveRoll = passiveRoll;
                 foe.passiveStacks = 0;
                 foe.nextTelegraph = null;
-            }
+
+                if (entry.role === 'boss') {
+                    foe.reinforcementsCalled = false;
+                }
+
 
             return foe;
         });
@@ -3198,7 +3322,11 @@ function spawnEncounter(test) {
             }),
             passive,
             passiveStacks: 0,
-            nextTelegraph: null
+            nextTelegraph: null,
+            reinforcementsCalled:
+                kind === 'boss'
+                    ? false
+                    : undefined
         };
 
         const zoneBase =

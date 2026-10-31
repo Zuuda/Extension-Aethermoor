@@ -1398,20 +1398,64 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
+
+    assert(
+        actions && typeof actions === 'object',
+        'Turn actions are required'
+    );
+
+    const fleeing =
+        actions.flee === true;
+
+    if (fleeing) {
+        assert(
+            actions.qtik === undefined &&
+            actions.tansy === undefined &&
+            actions.target === undefined,
+            'Flee cannot be combined with combat actions'
+        );
+    } else {
+        assert(
+            [
+                'fire_melee', 'ice_melee', 'stun',
+                'ice_patch', 'frost_stomp', 'drink'
+            ].includes(actions.qtik),
+            `Unsupported Q'tik action: ${actions.qtik}`
+        );
+
+        assert(
+            [
+                'visor', 'vitals', 'hamstring',
+                'recall', 'surge', 'drink', 'raise_shadow'
+            ].includes(actions.tansy),
+            `Unsupported Tansy action: ${actions.tansy}`
+        );
+
+        assert(
+            typeof actions.target === 'string',
+            'A combat target is required'
+        );
+
+        assert(
+            live(s).some(foe => foe.id === actions.target),
+            `Target ${actions.target} is not alive`
+        );
+    }
+
+    assert(
+        live(s).length > 0,
+        'No living foes'
+    );
+
     let fleeRoll = null;
     let fleeBonus = null;
     let fleeTotal = null;
 
     if (fleeing) {
-        const stats = derived(s.crew);
-
+        const stats = derived(c);
         fleeRoll = roll(s, 6);
-        fleeBonus = Math.min(
-            3,
-            Math.floor(stats.luk / 5)
-        );
+        fleeBonus = Math.min(3, Math.floor(stats.luk / 5));
         fleeTotal = fleeRoll + fleeBonus;
-
         encounter.fleeAttempts =
             Number(encounter.fleeAttempts || 0) + 1;
 
@@ -1432,9 +1476,7 @@ function resolveTurn({
                     success: true
                 },
                 exchanges: [],
-                turnEffects: [
-                    'Flee succeeded'
-                ],
+                turnEffects: ['Flee succeeded'],
                 rewards: {
                     xp: 0,
                     silver: 0,
@@ -1447,47 +1489,6 @@ function resolveTurn({
             };
         }
     }
-
-    assert(
-        actions && typeof actions === 'object',
-        'Turn actions are required'
-    );
-        const fleeing =
-        actions.flee === true;
-
-    if (fleeing) {
-        assert(
-            actions.qtik === undefined &&
-            actions.tansy === undefined &&
-            actions.target === undefined,
-            'Flee cannot be combined with combat actions'
-        );
-    }
-
-    assert(
-        [
-            'fire_melee', 'ice_melee', 'stun',
-            'ice_patch', 'frost_stomp', 'drink'
-        ].includes(actions.qtik),
-        `Unsupported Q'tik action: ${actions.qtik}`
-    );
-    assert(
-        [
-            'visor', 'vitals', 'hamstring',
-            'recall', 'surge', 'drink', 'raise_shadow'
-        ].includes(actions.tansy),
-        `Unsupported Tansy action: ${actions.tansy}`
-    );
-
-    assert(
-        typeof actions.target === 'string',
-        'A combat target is required'
-    );
-    assert(live(s).length > 0, 'No living foes');
-    assert(
-        live(s).some(foe => foe.id === actions.target),
-        `Target ${actions.target} is not alive`
-    );
 
     const crewStats = {
         atk: Number(initial.atk),
@@ -1744,24 +1745,8 @@ function resolveTurn({
 
     if (isPureFodder) {
         const shadows = shadowMechanics(c);
-
-                let target =
-            live(s)[0] || null;
-
-        const enemyMiss =
-            e <= 1;
-
-        const stunnedFoeId =
-            null;
-
-        const specialistInterrupted =
-            false;
-
-        let damage = 0;
-        let hits = [];
-
-    if (!fleeing) {
-        const directed = [
+         
+         const directed = [
             'visor',
             'vitals',
             'hamstring'
@@ -1996,7 +1981,6 @@ function resolveTurn({
                 tansyHp: c.tansy.hp,
                 livingFoes: []
             });
-        }
     }
 
     function lowestHpFoe() {
@@ -5714,8 +5698,9 @@ function resolveFleeRoll(test) {
         success,
         enemyResponseResolved: false,
         note: success
-            ? 'Encounter fled successfully',
-            rewards: {
+            ? 'Encounter fled successfully'
+            : 'Flee failed',
+        rewards: {
             xp: 0,
             silver: 0,
             loot: []

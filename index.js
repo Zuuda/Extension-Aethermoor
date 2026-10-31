@@ -1813,8 +1813,11 @@ const itemUse = {};
             )?.effect?.defenseBonus || 0
         );
 
-        const stunReduction = actions.qtik === 'stun'
-            ? 4 * enemyTier(foe.level) : 0;
+        const stunReduction =
+            actions.qtik === 'stun' &&
+            foe.id === actions.target
+                ? 4 * enemyTier(foe.level)
+                : 0;
 
         return Math.max(
             0,
@@ -1852,9 +1855,12 @@ const itemUse = {};
             ? (hamstringActive ? 4 : 3)
             : (hamstringActive ? 2 : 1);
 
-        const enemyMiss =
-            e <= missLimit ||
-            (actions.qtik === 'stun' && ex === 0);
+        const enemyMiss = e <= missLimit;
+
+        const stunnedFoeId =
+            actions.qtik === 'stun' && ex === 0
+                ? actions.target
+                : null;
 
         const hexPenalty = currentHexPenalty();
 
@@ -1901,13 +1907,16 @@ const itemUse = {};
         }
 
         const brute = live(s).find(
-            foe => foe.role === 'brute'
+            foe =>
+                foe.role === 'brute' &&
+                foe.id !== stunnedFoeId
         );
 
         if (
             brute &&
             target.role !== 'brute' &&
             !enemyMiss &&
+            brute.id !== stunnedFoeId &&
             actions.tansy !== 'visor' &&
             actions.qtik !== 'frost_stomp'
         ) {
@@ -2216,7 +2225,9 @@ const itemUse = {};
         }
 
         const frontliners = live(s).filter(
-            foe => ['brute', 'elite', 'boss'].includes(foe.role)
+            foe =>
+                foe.id !== stunnedFoeId &&
+                ['brute', 'elite', 'boss'].includes(foe.role)
         );
 
         const bruteAlive = live(s).some(
@@ -2372,6 +2383,10 @@ const itemUse = {};
 
                        for (const foe of live(s)) {
                 const tier = enemyTier(foe.level);
+                 if (foe.id === stunnedFoeId) {
+                    effects.push(`${foe.id} lost its Ex1 response to Stun`);
+                    continue;
+                }
 
                 if (foe.role === 'archer') {
                     const amount = 4 * tier * (e === 6 ? 2 : 1);
@@ -2460,8 +2475,10 @@ const itemUse = {};
                     for (const foe of eliteBossFoes) {
                         if (
                             foe.hp <= 0 ||
+                            foe.id === stunnedFoeId ||
                             !foe.passive
                         ) {
+
                             continue;
                         }
 

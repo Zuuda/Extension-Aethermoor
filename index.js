@@ -3752,20 +3752,8 @@ function resolveTradeAction(test) {
             'Listed item needs a positive trade value'
         );
 
-        assert(
-            Number.isInteger(test.tradeRoll) &&
-            test.tradeRoll >= 1 &&
-            test.tradeRoll <= 6,
-            'Listing requires tradeRoll from 1 to 6'
-        );
-
-        assert(
-            Number.isInteger(test.buyerRoll) &&
-            test.buyerRoll >= 1 &&
-            test.buyerRoll <= 6,
-            'Listing requires buyerRoll from 1 to 6'
-        );
-
+        const tradeRoll = roll(state, 6);
+        const buyerRoll = roll(state, 6);
         const rarity =
             String(item.rarity || 'Common').toLowerCase();
 
@@ -3773,32 +3761,32 @@ function resolveTradeAction(test) {
         let saleStatus;
         let marketResult;
 
-        if (test.tradeRoll === 1) {
+        if (tradeRoll === 1) {
             saleStatus = 'unsold';
             marketResult = 'lowball_trolls';
             multiplier = 0;
         } else {
             saleStatus = 'sold';
 
-            if (test.tradeRoll === 2) {
+            if (tradeRoll === 2) {
                 marketResult = 'standard_market';
                 multiplier =
                     rarity === 'common' ? 5 :
                     rarity === 'uncommon' ? 8 :
                     15;
-            } else if (test.tradeRoll === 3) {
+            } else if (tradeRoll === 3) {
                 marketResult = 'standard_market';
                 multiplier =
                     rarity === 'common' ? 6 :
                     rarity === 'uncommon' ? 9 :
                     18;
-            } else if (test.tradeRoll === 4) {
+            } else if (tradeRoll === 4) {
                 marketResult = 'guild_bulk_buyer';
                 multiplier =
                     rarity === 'common' ? 7 :
                     rarity === 'uncommon' ? 11 :
                     20;
-            } else if (test.tradeRoll === 5) {
+            } else if (tradeRoll === 5) {
                 marketResult = 'bidding_war';
                 multiplier =
                     rarity === 'common' ? 9 :
@@ -3838,9 +3826,9 @@ function resolveTradeAction(test) {
             lockedSale: {
                 status: saleStatus,
                 result: marketResult,
-                tradeRoll: test.tradeRoll,
-                buyer: buyers[test.buyerRoll],
-                buyerRoll: test.buyerRoll,
+                tradeRoll: tradeRoll,
+                buyer: buyers[buyerRoll],
+                buyerRoll: buyerRoll,
                 tradeStat,
                 multiplier,
                 proceeds:
@@ -6322,18 +6310,6 @@ function registerTools() {
                             listingIndex: {
                                 type: 'integer',
                                 minimum: 0
-                            },
-
-                            tradeRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 6
-                            },
-                            
-                            buyerRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 6
                             },
 
                             listedAt: {

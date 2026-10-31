@@ -2296,7 +2296,9 @@ const itemUse = {};
              * Base Bleed matters on this enemy response.
              */
             const castingBuffer = live(s).find(
-                foe => foe.role === 'buffer'
+                foe =>
+                    foe.role === 'buffer' &&
+                    foe.id !== stunnedFoeId
             );
 
             if (castingBuffer) {

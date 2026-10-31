@@ -6280,17 +6280,49 @@ function registerTools() {
 
                             encounterType: {
                                 type: 'string',
-                                enum: ['normal_pack', 'declared', 'elite', 'boss']
+                                enum: [
+                                    'normal_pack',
+                                    'declared',
+                                    'elite',
+                                    'boss'
+                                ]
+                            },
+
+                            foes: {
+                                type: 'array',
+                                description:
+                                    'Declared roster of ordinary foes. Required when encounterType is declared.',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        role: {
+                                            type: 'string',
+                                            enum: [
+                                                'brute',
+                                                'archer',
+                                                'mender',
+                                                'hexer',
+                                                'buffer'
+                                            ]
+                                        },
+                                        level: {
+                                            type: 'integer',
+                                            minimum: 1
+                                        }
+                                    },
+                                    required: [
+                                        'role',
+                                        'level'
+                                    ]
+                                }
                             },
 
                             encounterId: {
                                 type: 'string'
                             },
 
-                            passiveRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 4
+                            encounterId: {
+                                type: 'string'
                             },
 
                             mob: {

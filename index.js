@@ -1438,45 +1438,6 @@ const itemUse = {};
         }
     }
 
-    const telegraphBleedMultiplier =
-        activeTelegraphEffects.reduce(
-            (total, effect) =>
-                total * Number(effect.bleedMultiplier || 1),
-            1
-        );
-
-    const telegraphExtraDebuffStacks =
-        activeTelegraphEffects.reduce(
-            (total, effect) =>
-                total + Number(
-                    effect.extraDebuffStacks || 0
-                ),
-            0
-        );
-
-    const telegraphDestroysMeleeWeasel =
-        activeTelegraphEffects.some(
-            effect => effect.destroysMeleeWeasel
-        );
-
-    const telegraphTansySplashPercent =
-        activeTelegraphEffects.reduce(
-            (total, effect) =>
-                total + Number(
-                    effect.tansySplashPercent || 0
-                ),
-            0
-        );
-
-    const telegraphHealPerHit =
-        activeTelegraphEffects.reduce(
-            (total, effect) =>
-                total + Number(
-                    effect.healPerHit || 0
-                ),
-            0
-        );
-    
     if (actions.qtik === 'ice_patch') {
         assert(
             !encounter.used.icePatch,
@@ -2242,6 +2203,33 @@ const itemUse = {};
             });
             break;
         }
+        const responseTelegraphs = activeTelegraphs
+            .filter(entry => entry.foe.hp > 0 && entry.effect);
+
+        const responseEffects = responseTelegraphs
+            .map(entry => entry.effect);
+
+        const telegraphBleedMultiplier = responseEffects.reduce(
+            (total, effect) =>
+                total * Number(effect.bleedMultiplier || 1),
+            1
+        );
+
+        const telegraphExtraDebuffStacks = responseEffects.reduce(
+            (total, effect) =>
+                total + Number(effect.extraDebuffStacks || 0),
+            0
+        );
+
+        const telegraphDestroysMeleeWeasel = responseEffects.some(
+            effect => effect.destroysMeleeWeasel
+        );
+
+        const telegraphTansySplashPercent = responseEffects.reduce(
+            (total, effect) =>
+                total + Number(effect.tansySplashPercent || 0),
+            0
+        );
 
         const frontliners = live(s).filter(
             foe =>
@@ -2268,7 +2256,8 @@ const itemUse = {};
             !enemyMiss &&
             (
                 e === 6 ||
-                activeTelegraphEffects.length > 0
+            responseEffects.length > 0
+
             )
         ) {
 
@@ -2520,34 +2509,26 @@ const itemUse = {};
                 }
             }
 
-            if (
-                telegraphHealPerHit > 0 &&
-                enemyHitCount > 0
-            ) {
+            if (enemyHitCount > 0) {
+                for (const { foe, effect } of responseTelegraphs) {
+                    if (!effect.healPerHit || foe.hp <= 0) {
+                        continue;
+                    }
 
-                const drainTarget =
-                    live(s).find(foe =>
-                        ['elite', 'boss'].includes(foe.role)
-                    ) || live(s)[0];
+                    const requested =
+                        effect.healPerHit * enemyHitCount;
+                    const healed = Math.min(
+                        requested,
+                        foe.maxHp - foe.hp
+                    );
 
-                const maxHp = mobStats(
-                    drainTarget.level, drainTarget.role
-                ).maxHp;
-
-                const requested =
-                    telegraphHealPerHit * enemyHitCount
-
-
-                const healed = Math.min(
-                    requested, maxHp - drainTarget.hp
-                );
-
-                drainTarget.hp += healed;
-                effects.push(
-                    `Aether-Drain restored ${healed} enemy HP`
-                );
+                    foe.hp += healed;
+                    effects.push(
+                        `${foe.id} Aether-Drain restored ` +
+                        `${healed} HP`
+                    );
+                }
             }
-        }
 
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
         c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);

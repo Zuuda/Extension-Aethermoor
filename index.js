@@ -2893,8 +2893,10 @@ function spawnEncounter(test) {
                 level,
                 role: kind
             }),
+            passive,
+            passiveStacks: 0,
+            nextTelegraph: null
         };
-
 
         const zoneBase =
             ZONES[test.zone].base;
@@ -2937,9 +2939,6 @@ function spawnEncounter(test) {
                 bracket,
                 enemyTier: enemyTier(level),
                 foes: [foe],
-                passive,
-                passiveStacks: 0,
-                nextTelegraph: null,
 
                 packDropRoll: null,
                 curiosityRoll: null,

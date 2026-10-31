@@ -1091,6 +1091,7 @@ const ELITE_TELEGRAPHS = [
 
 const BOSS_TELEGRAPHS = [
     ...ELITE_TELEGRAPHS,
+    'call_reinforcements'
   ];
 
 
@@ -1280,6 +1281,27 @@ function materializeBossReinforcements(state) {
         return [];
     }
 
+    /*
+     * A standalone boss encounter becomes a declared roster once
+     * reinforcements arrive. Preserve its already-locked boss gear.
+     */
+    if (encounter.type === 'boss') {
+        const oldGear =
+            encounter.rewards.guaranteedGear;
+
+        encounter.type = 'declared';
+        encounter.rewards = {
+            kind: 'declared',
+            resolved: false,
+            guaranteedGear: [{
+                foeId: encounter.foes[0].id,
+                source: 'boss',
+                rawStat: oldGear.rawStat,
+                pawnSilver: oldGear.pawnSilver
+            }]
+        };
+    }
+
     const added = [];
     const ordinaryRoles = [
         'brute',
@@ -1288,7 +1310,6 @@ function materializeBossReinforcements(state) {
         'hexer',
         'buffer'
     ];
-
     const zoneLevels =
         ZONES[encounter.zone].levels;
 
@@ -1310,6 +1331,13 @@ function materializeBossReinforcements(state) {
             const id =
                 `${encounter.id}-${boss.id}-reinforcement-` +
                 `${index + 1}`;
+
+            assert(
+                !encounter.foes.some(
+                    foe => foe.id === id
+                ),
+                `Reinforcement ID already exists: ${id}`
+            );
 
             const foe = createFoe({
                 id,
@@ -1411,7 +1439,7 @@ function resolveTurn({
     encounter.used ||= { stun: false, icePatch: false };
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
-    const eliteBossFoes = live(s).filter(
+    let eliteBossFoes = live(s).filter(
         foe => ['elite', 'boss'].includes(foe.role)
     );
 
@@ -1467,7 +1495,7 @@ function resolveTurn({
             ? guardingBrute.id
             : declaredStunTarget?.id || null;
 
-    const activeTelegraphs =
+    let activeTelegraphs =
         eliteBossFoes.map(foe => ({
             foe,
             effect: telegraphEffects(foe)
@@ -1513,11 +1541,42 @@ function resolveTurn({
                 activeTelegraphs
                     .map(entry => entry.effect)
                     .filter(Boolean);
-
         }
     }
 
+    /*
+     * A successful boss Call Reinforcements telegraph resolves only
+     * after the players have had their chance to Stun the boss.
+     */
+    const reinforcements =
+        materializeBossReinforcements(s);
+
+    if (reinforcements.length > 0) {
+        turnEffects.push(
+            `Boss reinforcements arrived: ` +
+            reinforcements
+                .map(foe => foe.id)
+                .join(', ')
+        );
+
+        eliteBossFoes = live(s).filter(
+            foe => ['elite', 'boss'].includes(foe.role)
+        );
+
+        activeTelegraphs =
+            eliteBossFoes.map(foe => ({
+                foe,
+                effect: telegraphEffects(foe)
+            }));
+
+        activeTelegraphEffects =
+            activeTelegraphs
+                .map(entry => entry.effect)
+                .filter(Boolean);
+    }
+
     if (actions.qtik === 'ice_patch') {
+
         assert(
             !encounter.used.icePatch,
             'Ice Patch has already been used this fight'
@@ -6564,23 +6623,7 @@ function registerTools() {
                 rolls: {
                     type: 'object',
                     properties: {
-                        player: {
-                            type: 'array',
-                            items: {
-                                type: 'integer'
-                            }
-                        },
-                        enemy: {
-                            type: 'array',
-                            items: {
-                                type: 'integer'
-                            }
-                        },
-                        telegraph: {
-                            type: 'integer',
-                            minimum: 1,
-                            maximum: 4
-                        },
+
                     }
                 },
 
@@ -6696,7 +6739,7 @@ function registerTools() {
                             foes: {
                                 type: 'array',
                                 description:
-                                    'Declared roster of ordinary foes. Required when encounterType is declared.',
+                                 'Declared roster. Required when encounterType is declared.',
                                 items: {
                                     type: 'object',
                                     properties: {

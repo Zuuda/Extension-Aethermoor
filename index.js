@@ -969,11 +969,30 @@ function finalizeEncounterRewards(state, slainIds) {
             `Unsupported encounter reward type: ${encounter.type}`
         );
     }
-
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
 
+    if (encounter.questTerminal) {
+        const activeQuest =
+            state.activeQuest;
+
+        assert(
+            activeQuest &&
+            activeQuest.id ===
+                encounter.questTerminal.questId,
+            'Quest-terminal encounter is linked to the wrong quest'
+        );
+
+        assert(
+            activeQuest.terminalThreat,
+            'Linked quest has no terminal threat record'
+        );
+
+        activeQuest.terminalThreat.resolved = true;
+    }
+
     return {
+
         xp,
         silver,
         resolved: true,
@@ -3172,11 +3191,6 @@ const PASSIVES = {
 function spawnEncounter(test) {
     const state = clone(test.state || {});
 
-    /*
-     * Spawn results consume the same persistent RNG stream as combat,
-     * loot, quests, and world seeds. The returned state is the state
-     * that should be carried into the first combat turn.
-     */
     const requestedKind =
         test.encounterType ||
         'normal_pack';
@@ -3186,6 +3200,72 @@ function spawnEncounter(test) {
 
     let encounterTypeRoll =
         null;
+
+    let questTerminal =
+        null;
+
+    if (requestedKind === 'quest_terminal') {
+        const activeQuest =
+            state.activeQuest;
+
+        assert(
+            activeQuest &&
+            activeQuest.status === 'in_progress',
+            'Quest-terminal spawn requires an in-progress quest'
+        );
+
+        const lockedThreat =
+            activeQuest.seed?.terminalThreat;
+
+        assert(
+            lockedThreat &&
+            ['normal_pack', 'elite'].includes(
+                lockedThreat.kind
+            ),
+            'Quest has no supported locked terminal threat'
+        );
+
+        assert(
+            Number.isInteger(lockedThreat.zone) &&
+            ZONES[lockedThreat.zone],
+            'Quest terminal threat has an invalid zone'
+        );
+
+        assert(
+            activeQuest.terminalThreat &&
+            activeQuest.terminalThreat.revealed !== true &&
+            activeQuest.terminalThreat.resolved !== true,
+            'Quest terminal threat has already been revealed or resolved'
+        );
+
+        assert(
+            test.zone === undefined ||
+            test.zone === lockedThreat.zone,
+            'Quest-terminal spawn zone does not match locked threat zone'
+        );
+
+        kind =
+            lockedThreat.kind;
+
+        /*
+         * The quest seed, not the caller, supplies the zone and
+         * encounter identity. A caller may provide a more specific
+         * encounter ID, but cannot change the threat type or zone.
+         */
+        test = {
+            ...test,
+            zone: lockedThreat.zone,
+            encounterId:
+                test.encounterId ||
+                `quest-terminal-${activeQuest.id}`
+        };
+
+        questTerminal = {
+            questId: activeQuest.id,
+            kind: lockedThreat.kind,
+            zone: lockedThreat.zone
+        };
+    }
 
     if (requestedKind === 'wild') {
         encounterTypeRoll =
@@ -3199,6 +3279,7 @@ function spawnEncounter(test) {
                 ? 'elite'
                 : 'normal_pack';
     }
+
 
     const bracketNames = [
 
@@ -3474,11 +3555,34 @@ function spawnEncounter(test) {
         };
     }
 
+    if (questTerminal) {
+        const activeQuest =
+            state.activeQuest;
+
+        const encounterId =
+            spawned.encounter.id;
+
+        activeQuest.terminalThreat.revealed = true;
+        activeQuest.terminalThreat.resolved = false;
+        activeQuest.terminalThreat.encounterId =
+            encounterId;
+
+        activeQuest.seed.terminalThreat.encounterId =
+            encounterId;
+
+        spawned.encounter.questTerminal = {
+            questId: questTerminal.questId,
+            kind: questTerminal.kind,
+            zone: questTerminal.zone
+        };
+    }
+
     state.zone = test.zone;
     state.encounter =
         spawned.encounter;
 
     return {
+
         ...spawned,
         rngState: state.rngState,
         state
@@ -4087,6 +4191,10 @@ function resolveQuestAction(test) {
     );
 
     quest.status = 'complete';
+
+    if (quest.terminalThreat) {
+        quest.terminalThreat.resolved = true;
+    }
 
     result.rewards.xp =
         payout.xp;
@@ -6945,12 +7053,14 @@ function registerTools() {
                                 type: 'string',
                                 enum: [
                                     'wild',
+                                    'quest_terminal',
                                     'normal_pack',
                                     'declared',
                                     'elite',
                                     'boss'
                                 ]
                             },
+
 
                             foes: {
                                 type: 'array',

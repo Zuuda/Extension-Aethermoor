@@ -2529,7 +2529,7 @@ const itemUse = {};
                     );
                 }
             }
-
+        }
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
         c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
 

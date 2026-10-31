@@ -2738,143 +2738,177 @@ const PASSIVES = {
 };
 
 function spawnEncounter(test) {
+    const state = clone(test.state || {});
+
+    /*
+     * Spawn results consume the same persistent RNG stream as combat,
+     * loot, quests, and world seeds. The returned state is the state
+     * that should be carried into the first combat turn.
+     */
     const kind =
         test.encounterType ||
         'normal_pack';
 
+    const bracketNames = [
+        'low',
+        'mid',
+        'high'
+    ];
+
+    let spawned;
+
     if (kind === 'normal_pack') {
-        return spawnNormalPack({
+        const bracketRoll =
+            roll(state, bracketNames.length);
+
+        const compositionRoll =
+            roll(state, 6);
+
+        const bracket =
+            bracketNames[bracketRoll - 1];
+
+        spawned = spawnNormalPack({
             zone: test.zone,
-            bracket:
-                test.bracket ||
-                'mid',
-            composition:
-                test.composition ||
-                2,
+            bracket,
+            composition: compositionRoll,
             encounterId:
                 test.encounterId ||
                 `normal-pack-z${test.zone}`
         });
-    }
 
-    assert(
-        ZONES[test.zone],
-        `Unknown zone: ${test.zone}`
-    );
-
-    assert(
-        kind === 'elite' ||
-        kind === 'boss',
-        `Unsupported encounter type: ${kind}`
-    );
-
-    assert(
-        Number.isInteger(test.passiveRoll) &&
-        PASSIVES[test.passiveRoll],
-        'Elite/boss spawn requires passiveRoll from 1 to 4'
-    );
-
-    let level;
-
-    if (kind === 'elite') {
-        const bracket =
-            test.bracket ||
-            'mid';
+        spawned.encounter.spawnRolls = {
+            bracketRoll,
+            compositionRoll
+        };
+    } else {
+        assert(
+            ZONES[test.zone],
+            `Unknown zone: ${test.zone}`
+        );
 
         assert(
-            bracket === 'mid' ||
-            bracket === 'high',
-            'Elite bracket must be mid or high'
+            kind === 'elite' ||
+            kind === 'boss',
+            `Unsupported encounter type: ${kind}`
         );
 
-        level =
-            ELITE_LEVELS[test.zone][bracket];
-    } else {
-        level =
-            BOSS_LEVELS[test.zone];
+        const passiveRoll =
+            roll(state, 4);
+
+        const passive =
+            PASSIVES[passiveRoll];
+
+        let level;
+        let bracket = null;
+        let bracketRoll = null;
+
+        if (kind === 'elite') {
+            bracketRoll =
+                roll(state, 2);
+
+            bracket =
+                bracketRoll === 1
+                    ? 'mid'
+                    : 'high';
+
+            level =
+                ELITE_LEVELS[test.zone][bracket];
+        } else {
+            level =
+                BOSS_LEVELS[test.zone];
+        }
+
+        const id =
+            test.encounterId ||
+            `${kind}-z${test.zone}`;
+
+        const foe =
+            createFoe({
+                id: `${id}-${kind}`,
+                level,
+                role: kind
+            });
+
+        const zoneBase =
+            ZONES[test.zone].base;
+
+        const rawStat =
+            zoneBase +
+            (
+                kind === 'elite'
+                    ? 1
+                    : 5
+            );
+
+        const baseKillXp =
+            mobStats(level, kind).xpBase;
+
+        const encounterRewards = {
+            kind,
+            baseKillXp,
+            xpOnKillDependsOnCrewLevel: true,
+            guaranteedGear: {
+                rarity:
+                    kind === 'elite'
+                        ? 'uncommon'
+                        : 'epic',
+                rawStat,
+                pawnSilver: 2 * rawStat,
+                slotPending: true
+            },
+            resolved: false
+        };
+
+        spawned = {
+            ok: true,
+            encounter: {
+                id,
+                status: 'active',
+                turn: 0,
+                zone: test.zone,
+                type: kind,
+                bracket,
+                enemyTier: enemyTier(level),
+                foes: [foe],
+                passive,
+                passiveRoll,
+                passiveStacks: 0,
+                nextTelegraph: null,
+
+                packDropRoll: null,
+                curiosityRoll: null,
+                rumorRoll: null,
+                lootSeed: null,
+                questSeed: null,
+
+                rewards: encounterRewards,
+
+                used: {
+                    stun: false,
+                    icePatch: false
+                },
+                hexStacks: {},
+                exposed: 0,
+
+                spawnRolls: {
+                    passiveRoll,
+                    bracketRoll
+                }
+            },
+            rewards: encounterRewards
+        };
     }
 
-    const id =
-        test.encounterId ||
-        `${kind}-z${test.zone}`;
-
-    const foe =
-        createFoe({
-            id: `${id}-${kind}`,
-            level,
-            role: kind
-        });
-
-    const zoneBase =
-        ZONES[test.zone].base;
-
-    const rawStat =
-        zoneBase +
-        (
-            kind === 'elite'
-                ? 1
-                : 5
-        );
-
-    const baseKillXp =
-        mobStats(level, kind).xpBase;
-
-    const encounterRewards = {
-        kind,
-        baseKillXp,
-        xpOnKillDependsOnCrewLevel: true,
-        guaranteedGear: {
-            rarity:
-                kind === 'elite'
-                    ? 'uncommon'
-                    : 'epic',
-            rawStat,
-            pawnSilver: 2 * rawStat,
-            slotPending: true
-        },
-        resolved: false
-    };
+    state.encounter =
+        spawned.encounter;
 
     return {
-        ok: true,
-
-        encounter: {
-            id,
-            status: 'active',
-            turn: 0,
-            zone: test.zone,
-            type: kind,
-            enemyTier: enemyTier(level),
-            foes: [foe],
-            passive:
-                PASSIVES[test.passiveRoll],
-            passiveStacks: 0,
-            nextTelegraph: null,
-
-            /*
-             * These fields are deliberately null at spawn.
-             * Elite/Boss loot and trophies are selected only when
-             * the encounter is cleared.
-             */
-            packDropRoll: null,
-            curiosityRoll: null,
-            rumorRoll: null,
-            lootSeed: null,
-            questSeed: null,
-
-            rewards: encounterRewards,
-
-            used: {
-                stun: false,
-                icePatch: false
-            },
-            hexStacks: {},
-            exposed: 0
-        },
-
-        rewards: encounterRewards
+        ...spawned,
+        rngState: state.rngState,
+        state
     };
 }
+
 const QUEST_REWARD_TABLES = {
     1: {
         low: [
@@ -6182,17 +6216,6 @@ function registerTools() {
                             encounterType: {
                                 type: 'string',
                                 enum: ['normal_pack', 'elite', 'boss']
-                            },
-
-                            bracket: {
-                                type: 'string',
-                                enum: ['low', 'mid', 'high']
-                            },
-
-                            composition: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 6
                             },
 
                             encounterId: {

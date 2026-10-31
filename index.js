@@ -5577,63 +5577,158 @@ function resolveFleeRoll(test) {
     assert(
         encounter &&
         encounter.status === 'active',
-        'flee requires an active encounter'
+        'flee requires state.encounter to be active'
     );
 
-    const crewStats = derived(state.crew);
-    const rollValue = roll(state, 6);
+    const crewStats =
+        derived(state.crew);
+
+    const rollValue =
+        roll(state, 6);
+
     const lukBonus =
-        Math.floor(crewStats.luk / 5);
+        Math.min(
+            3,
+            Math.floor(crewStats.luk / 5)
+        );
+
+    const total =
+        rollValue + lukBonus;
+
+    const threshold = 6;
+    const success = total >= threshold;
+
+    encounter.fleeAttempts =
+        Number(encounter.fleeAttempts || 0) + 1;
+
+    if (success) {
+        encounter.status = 'fled';
+        encounter.fledOnAttempt =
+            encounter.fleeAttempts;
+    }
 
     return {
         ok: true,
+        action: 'flee',
         roll: rollValue,
         lukBonus,
-        total: rollValue + lukBonus,
-        success: null,
-        note: 'The original rules specify the modified roll but no success threshold.',
+        total,
+        threshold,
+        success,
+        enemyResponseResolved: false,
+        note: success
+            ? 'Encounter fled successfully'
+            : 'Flee failed; combat turn resolution is required',
+        rewards: {
+            xp: 0,
+            silver: 0,
+            loot: []
+        },
         state
     };
 }
 
 function resolveDeathPenalty(test) {
     assert(
-        test.state && typeof test.state === 'object',
+        test.state &&
+        typeof test.state === 'object',
         'death penalty requires state'
     );
 
     const state = clone(test.state);
 
     assert(
-        state.crew && typeof state.crew === 'object',
+        state.crew &&
+        typeof state.crew === 'object',
         'death penalty requires state.crew'
     );
 
-    const level = int(state.crew.level, 'crew.level', 1);
-    const xpBefore = int(state.crew.xp, 'crew.xp');
-    const threshold = nextXp(level);
+    assert(
+        state.crew.qtik &&
+        state.crew.tansy,
+        'Death resolution requires both protagonists'
+    );
+
+    const level =
+        int(state.crew.level, 'crew.level', 1);
+
+    const xpBefore =
+        int(state.crew.xp, 'crew.xp');
+
+    const threshold =
+        nextXp(level);
 
     assert(
         xpBefore < threshold,
         'crew.xp must be below the next-level threshold'
     );
 
-    const requestedPenalty = Math.floor(threshold / 10);
-    const xpLost = Math.min(xpBefore, requestedPenalty);
+    const requestedPenalty =
+        Math.floor(threshold / 10);
 
-    state.crew.xp = xpBefore - xpLost;
+    const xpLost =
+        Math.min(xpBefore, requestedPenalty);
+
+    state.crew.xp =
+        xpBefore - xpLost;
+
+    const stats =
+        derived(state.crew);
+
+    state.crew.qtik.hp =
+        stats.qtikMaxHp;
+
+    state.crew.tansy.hp =
+        stats.tansyMaxHp;
+
+    state.crew.qtik.maxHp =
+        stats.qtikMaxHp;
+
+    state.crew.qtik.def =
+        stats.def;
+
+    state.crew.qtik.regen =
+        stats.regen;
+
+    state.crew.tansy.maxHp =
+        stats.tansyMaxHp;
+
+    const encounter =
+        state.encounter || null;
+
+    if (encounter) {
+        encounter.status = 'dead';
+        encounter.deathResolved = true;
+        encounter.rewards ||= {
+            xp: 0,
+            silver: 0,
+            loot: []
+        };
+        encounter.rewards.resolved = true;
+    }
 
     return {
         ok: true,
+        action: 'death',
         level,
         nextXp: threshold,
         xpBefore,
         requestedPenalty,
         xpLost,
         xpAfter: state.crew.xp,
+        respawned: true,
+        respawnStone:
+            state.respawnStone || null,
+        encounterAbandoned: Boolean(encounter),
+        rewards: {
+            xp: 0,
+            silver: 0,
+            loot: []
+        },
         state
     };
 }
+
 function resolveShadowDeckAction(test) {
     assert(
         test.state && typeof test.state === 'object',

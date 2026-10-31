@@ -1374,7 +1374,7 @@ const itemUse = {};
             effect: telegraphEffects(foe)
         }));
 
-    const activeTelegraphEffects =
+    let activeTelegraphEffects =
         activeTelegraphs
             .map(entry => entry.effect)
             .filter(Boolean);
@@ -1458,6 +1458,20 @@ const itemUse = {};
             );
 
             stunnedEliteBoss.nextTelegraph = null;
+                        activeTelegraphs
+                .filter(
+                    entry =>
+                        entry.foe.id === stunnedEliteBoss.id
+                )
+                .forEach(entry => {
+                    entry.effect = null;
+                });
+
+            activeTelegraphEffects =
+                activeTelegraphs
+                    .map(entry => entry.effect)
+                    .filter(Boolean);
+
         }
     }
 
@@ -2650,9 +2664,11 @@ const itemUse = {};
 
     if (live(s).length === 0) {
         encounter.status = 'cleared';
-                if (eliteBossFoe) {
-            eliteBossFoe.nextTelegraph = null;
+
+        for (const foe of eliteBossFoes) {
+            foe.nextTelegraph = null;
         }
+
 
         } else if (
         eliteBossFoes.length > 0 &&

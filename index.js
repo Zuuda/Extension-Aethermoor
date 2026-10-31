@@ -3654,9 +3654,12 @@ function resolveQuestSeed(test) {
     const rep =
         normalizeQuestRepTier(test.repTier);
 
-    const inquiryRecord = test.inquiryId === undefined
-        ? null
-        : state.inquiries?.[`rumor:${test.inquiryId}`];
+    if (inquiryRecord) {
+        assert(
+            zone === inquiryRecord.zone,
+            'Quest zone does not match locked rumor inquiry'
+        );
+    }
 
     assert(
         test.inquiryId === undefined || inquiryRecord,
@@ -5832,9 +5835,6 @@ function resolveBatch(args) {
                 state.inquiries[key] = record;
             }
 
-            result.locked[type === 'site'
-                ? 'curiosityRoll'
-                : 'rumorRoll'] = !record.wasPreviouslyRead;
             return record;
         }
 
@@ -6479,6 +6479,8 @@ function lootItemName(material, loot, stat) {
 
     return `${ownerName} ${material}${variantName} ` +
         `${slotNames[loot.slot]} (Stat ${stat})`;
+}
+
 function rollLootFromState(
     state,
     source,

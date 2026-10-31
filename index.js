@@ -3144,11 +3144,31 @@ function spawnEncounter(test) {
      * loot, quests, and world seeds. The returned state is the state
      * that should be carried into the first combat turn.
      */
-    const kind =
+    const requestedKind =
         test.encounterType ||
         'normal_pack';
 
+    let kind =
+        requestedKind;
+
+    let encounterTypeRoll =
+        null;
+
+    if (requestedKind === 'wild') {
+        encounterTypeRoll =
+            roll(state, 100);
+
+        const eliteChance =
+            2 + test.zone;
+
+        kind =
+            encounterTypeRoll <= eliteChance
+                ? 'elite'
+                : 'normal_pack';
+    }
+
     const bracketNames = [
+
         'low',
         'mid',
         'high'
@@ -3291,9 +3311,11 @@ function spawnEncounter(test) {
         spawned.encounter.composition =
             compositionRoll;
         spawned.encounter.spawnRolls = {
+            encounterTypeRoll,
             bracketRoll,
             compositionRoll
         };
+
     } else {
         assert(
             ZONES[test.zone],
@@ -3409,9 +3431,11 @@ function spawnEncounter(test) {
                 exposed: 0,
 
                 spawnRolls: {
+                    encounterTypeRoll,
                     passiveRoll,
                     bracketRoll
                 }
+
             },
             rewards: encounterRewards
         };
@@ -6844,6 +6868,7 @@ function registerTools() {
                             encounterType: {
                                 type: 'string',
                                 enum: [
+                                    'wild',
                                     'normal_pack',
                                     'declared',
                                     'elite',

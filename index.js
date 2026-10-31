@@ -5831,6 +5831,18 @@ function resolveBatch(args) {
                 encounter.status === 'cleared',
                 'Cannot loot a pack before it is cleared'
             );
+            assert(
+                encounter.type === 'normal_pack' ||
+                (
+                    encounter.type === 'declared' &&
+                    encounter.foes.every(foe =>
+                        ['brute', 'archer', 'mender', 'hexer', 'buffer']
+                            .includes(foe.role)
+                    ) &&
+                    !encounter.reinforcementLog?.length
+                ),
+                'Only an ordinary cleared pack can roll a pack drop'
+            );
 
             result.applicable.packDrop = true;
 

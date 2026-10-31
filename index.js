@@ -2864,12 +2864,12 @@ function resolveTurn({
         rewards: {
             xp: encounterRewards.xp,
             silver: encounterRewards.silver,
-            applied:
             applied: encounterRewards.resolved,
             resolved: encounterRewards.resolved,
             loot: encounterRewards.loot,
             trophies: encounterRewards.trophies
         },
+
         levelUps,
         packCleared:
             startingCount > 0 && live(s).length === 0,
@@ -3820,7 +3820,7 @@ function resolveQuestSeed(test) {
 
     state.activeQuest =
         quest;
-             trigger.questSeedConsumed = true;
+        trigger.questSeedConsumed = true;
 
     return {
         ok: true,

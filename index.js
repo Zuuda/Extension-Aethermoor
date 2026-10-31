@@ -514,7 +514,7 @@ function validate(state) {
             );
 
             const expectedRawStat =
-                ZONES[state.zone].base +
+                ZONES[encounter.zone].base +
                 (
                     foe.role === 'elite'
                         ? 1
@@ -633,7 +633,7 @@ function validate(state) {
         );
 
         const expectedRawStat =
-            ZONES[state.zone].base +
+            ZONES[encounter.zone].base +
             (
                 encounter.type === 'elite'
                     ? 1

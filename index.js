@@ -2822,12 +2822,16 @@ function resolveTurn({
     if (live(s).length === 0) {
         encounter.status = 'cleared';
 
-        for (const foe of eliteBossFoes) {
-            if (foe.hp === 0) foe.nextTelegraph = null;
+    for (const foe of eliteBossFoes) {
+        if (foe.hp === 0) {
+            foe.nextTelegraph = null;
         }
+    }
 
+    if (live(s).length === 0) {
+        encounter.status = 'cleared';
+    } else if (
 
-        } else if (
         eliteBossFoes.length > 0 &&
         c.qtik.hp > 0 &&
         c.tansy.hp > 0

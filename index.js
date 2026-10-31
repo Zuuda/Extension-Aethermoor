@@ -867,10 +867,11 @@ function finalizeEncounterRewards(state, slainIds) {
             0
         );
 
-        silver =
-            encounter.foes.length *
-            2 *
-            ZONES[encounter.zone].tier;
+        silver = encounter.foes.reduce(
+            (total, foe) =>
+                total + 2 * enemyTier(foe.level),
+            0
+        );
 
         for (const foe of encounter.foes) {
             if (
@@ -3266,6 +3267,7 @@ function spawnEncounter(test) {
         };
     }
 
+    state.zone = test.zone;
     state.encounter =
         spawned.encounter;
 

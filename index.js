@@ -3684,6 +3684,38 @@ function makeQuestSalvage(zone, slotRoll, row) {
         )
     };
 }
+function rollQuestTerminalThreat(state, rank, zone) {
+    assert(
+        ZONES[zone],
+        `Unknown quest threat zone: ${zone}`
+    );
+
+    let terminalThreatRoll = null;
+    let kind;
+
+    if (rank === 'F' || rank === 'E') {
+        kind = 'normal_pack';
+    } else if (rank === 'D' || rank === 'C') {
+        terminalThreatRoll = roll(state, 2);
+
+        kind =
+            terminalThreatRoll === 1
+                ? 'normal_pack'
+                : 'elite';
+    } else if (rank === 'B') {
+        kind = 'elite';
+    } else {
+        throw new Error(
+            `Unsupported quest terminal-threat rank: ${rank}`
+        );
+    }
+
+    return {
+        kind,
+        zone,
+        roll: terminalThreatRoll
+    };
+}
 
 function resolveQuestSeed(test) {
     assert(
@@ -3784,8 +3816,14 @@ function resolveQuestSeed(test) {
         salvageSlotRoll,
         source: sourceSeed.source,
         sourceRoll: sourceSeed.roll,
-        sourceResult: sourceSeed.result
+        sourceResult: sourceSeed.result,
+        terminalThreat: {
+            kind: terminalThreat.kind,
+            zone: terminalThreat.zone,
+            roll: terminalThreat.roll
+        }
     };
+
 
     const table =
         QUEST_REWARD_TABLES[zone][rep.band];
@@ -3797,6 +3835,16 @@ function resolveQuestSeed(test) {
         row,
         'No quest table entry exists for these inputs'
     );
+
+    const terminalThreat =
+        rollQuestTerminalThreat(
+            state,
+            row.rank,
+            zone
+        );
+
+    const salvage = makeQuestSalvage(
+
 
     const salvage = makeQuestSalvage(
         zone,
@@ -3848,11 +3896,23 @@ function resolveQuestSeed(test) {
                 row.gates > 1
         },
 
-        salvage,
+               salvage,
+
+        /*
+         * This is locked now but may remain hidden in the diegetic
+         * contract presentation until the crew reaches the objective.
+         */
+        terminalThreat: {
+            kind: terminalThreat.kind,
+            zone: terminalThreat.zone,
+            revealed: false,
+            resolved: false
+        },
 
         town:
             test.town ||
             null,
+
 
         repTierAtOffer:
             rep.label

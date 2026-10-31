@@ -2823,7 +2823,7 @@ function resolveTurn({
         encounter.status = 'cleared';
 
         for (const foe of eliteBossFoes) {
-            foe.nextTelegraph = null;
+            if (foe.hp === 0) foe.nextTelegraph = null;
         }
 
 
@@ -2832,7 +2832,7 @@ function resolveTurn({
         c.qtik.hp > 0 &&
         c.tansy.hp > 0
     ) {
-        for (const foe of eliteBossFoes) {
+        for (const foe of eliteBossFoes.filter(foe => foe.hp > 0)) {
             const telegraphSides =
                 foe.role === 'boss' &&
                 foe.reinforcementsCalled !== true

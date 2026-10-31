@@ -3809,22 +3809,6 @@ function resolveQuestSeed(test) {
     const salvageSlotRoll =
         roll(state, QUEST_SALVAGE_SLOTS.length);
 
-    const seed = {
-        zone,
-        repTier: rep.label,
-        questRoll,
-        salvageSlotRoll,
-        source: sourceSeed.source,
-        sourceRoll: sourceSeed.roll,
-        sourceResult: sourceSeed.result,
-        terminalThreat: {
-            kind: terminalThreat.kind,
-            zone: terminalThreat.zone,
-            roll: terminalThreat.roll
-        }
-    };
-
-
     const table =
         QUEST_REWARD_TABLES[zone][rep.band];
 
@@ -3843,14 +3827,27 @@ function resolveQuestSeed(test) {
             zone
         );
 
-    const salvage = makeQuestSalvage(
+    const salvage =
+        makeQuestSalvage(
+            zone,
+            salvageSlotRoll,
+            row
+        );
 
-
-    const salvage = makeQuestSalvage(
+    const seed = {
         zone,
+        repTier: rep.label,
+        questRoll,
         salvageSlotRoll,
-        row
-    );
+        source: sourceSeed.source,
+        sourceRoll: sourceSeed.roll,
+        sourceResult: sourceSeed.result,
+        terminalThreat: {
+            kind: terminalThreat.kind,
+            zone: terminalThreat.zone,
+            roll: terminalThreat.roll
+        }
+    };
 
     const tier =
         ZONES[zone].tier;

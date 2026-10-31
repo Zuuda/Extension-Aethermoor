@@ -1360,9 +1360,9 @@ function materializeBossReinforcements(state) {
 function resolveTurn({
     state,
     actions,
-    rolls,
-    rewardMode = 'immediate'
+    rolls
 }) {
+
     const s = clone(state);
     s.inventory ||= {};
     s.inventory.bagReserves ||= [];
@@ -1372,10 +1372,6 @@ function resolveTurn({
     const c = s.crew;
     const encounter = s.encounter;
 
-    assert(
-        ['immediate', 'deferred'].includes(rewardMode),
-        'rewardMode must be immediate or deferred'
-    );
     assert(
         actions && typeof actions === 'object',
         'Turn actions are required'
@@ -2800,13 +2796,11 @@ function resolveTurn({
 
     let levelUps = [];
 
-    if (
-        rewardMode === 'immediate' &&
-        encounterRewards.resolved
-    ) {
+    if (encounterRewards.resolved) {
         levelUps = applyXp(c, encounterRewards.xp);
         c.purse += encounterRewards.silver;
     }
+
 
     encounter.hexStacks = Object.fromEntries(
         Object.entries(encounter.hexStacks)
@@ -2871,8 +2865,7 @@ function resolveTurn({
             xp: encounterRewards.xp,
             silver: encounterRewards.silver,
             applied:
-                rewardMode === 'immediate' &&
-                encounterRewards.resolved,
+            applied: encounterRewards.resolved,
             resolved: encounterRewards.resolved,
             loot: encounterRewards.loot,
             trophies: encounterRewards.trophies
@@ -6231,9 +6224,9 @@ function resolveBatch(args) {
                     result = resolveTurn({
                         state: test.state,
                         actions: test.actions,
-                        rolls: test.rolls,
-                        rewardMode: test.rewardMode || 'immediate'
+                        rolls: test.rolls
                     });
+
                     break;
 
                 case 'reference':
@@ -6766,13 +6759,6 @@ function registerTools() {
                     }
                 },
 
-                rewardMode: {
-                    type: 'string',
-                    enum: [
-                        'immediate',
-                        'deferred'
-                    ]
-                },
 
                 cases: {
                     type: 'array',
@@ -6820,13 +6806,6 @@ function registerTools() {
                                 type: 'object'
                             },
 
-                            rewardMode: {
-                                type: 'string',
-                                enum: [
-                                    'immediate',
-                                    'deferred'
-                                ]
-                            },
 
                              zone: {
                                 type: 'integer'
@@ -7120,10 +7099,9 @@ function registerTools() {
             return resolveTurn({
                 state: args.state,
                 actions: args.actions,
-                rolls: args.rolls,
-                rewardMode:
-                    args.rewardMode || 'immediate'
+                rolls: args.rolls
             });
+
         }
     );
 

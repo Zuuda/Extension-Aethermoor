@@ -1396,7 +1396,7 @@ const itemUse = {};
             stunTarget &&
             ['elite', 'boss'].includes(stunTarget.role)
                 ? stunTarget
-                : eliteBossFoes[0];
+                : null;
 
         if (stunnedEliteBoss?.nextTelegraph) {
             turnEffects.push(
@@ -1423,12 +1423,6 @@ const itemUse = {};
 
         }
     }
-    const telegraphDefenseBonus =
-        activeTelegraphEffects.reduce(
-            (total, effect) =>
-                total + Number(effect.defenseBonus || 0),
-            0
-        );
 
     const telegraphBleedMultiplier =
         activeTelegraphEffects.reduce(
@@ -1813,8 +1807,12 @@ const itemUse = {};
         function enemyDefense(foe) {
         const buffer = currentBuffer();
         const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
-        const telegraphBonus =
-            telegraphDefenseBonus;
+        const telegraphBonus = Number(
+            activeTelegraphs.find(
+                entry => entry.foe.id === foe.id
+            )?.effect?.defenseBonus || 0
+        );
+
         const stunReduction = actions.qtik === 'stun'
             ? 4 * enemyTier(foe.level) : 0;
 
@@ -1980,6 +1978,11 @@ const itemUse = {};
 
         let damage = 0;
         let hits = [];
+        
+        const targetedCarapace =
+            activeTelegraphs.find(
+                entry => entry.foe.id === target.id
+            )?.effect?.reflectsQtikDamage === true;
 
         if (actions.qtik === 'frost_stomp') {
             const stompTargets = [...live(s)].sort((a, b) => {
@@ -2158,13 +2161,11 @@ const itemUse = {};
          * prevent Q'tik's own damage from reflecting.
          */
         if (
-            activeTelegraphEffects.some(
-                effect => effect.reflectsQtikDamage
-            ) &&
-
+            targetedCarapace &&
             actions.qtik !== 'frost_stomp' &&
-            live(s).length > 0
+            hits.some(hit => hit.id === target.id)
         ) {
+
             const reflected =
                 Math.min(
                     c.qtik.hp,

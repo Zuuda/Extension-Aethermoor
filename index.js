@@ -1379,12 +1379,6 @@ const itemUse = {};
             .map(entry => entry.effect)
             .filter(Boolean);
 
-    const activeTelegraphFor =
-        foe =>
-            activeTelegraphs.find(
-                entry => entry.foe.id === foe.id
-            )?.effect || null;
-
     const telegraphDefenseBonus =
         activeTelegraphEffects.reduce(
             (total, effect) =>
@@ -2238,11 +2232,15 @@ const itemUse = {};
          * per fight to absorb one successful telegraph hit or E:6
          * critical completely.
          */
-        if (
+          if (
             pendingshadowWarderSacrificeId &&
             !enemyMiss &&
-            (e === 6 || activeTelegraph)
+            (
+                e === 6 ||
+                activeTelegraphEffects.length > 0
+            )
         ) {
+
             const activeIndex =
                 c.shadows.active.findIndex(
                     entry =>
@@ -2267,7 +2265,8 @@ const itemUse = {};
 
             const absorbed = e === 6
                 ? 'enemy critical'
-                : `telegraph ${activeTelegraph.name}`;
+                : `active elite/boss telegraph`;
+
 
             const message =
                 `Shadow-Warder ${sacrificed.id} sacrificed itself ` +

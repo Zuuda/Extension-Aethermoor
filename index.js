@@ -1092,8 +1092,7 @@ const ELITE_TELEGRAPHS = [
 
 const BOSS_TELEGRAPHS = [
     ...ELITE_TELEGRAPHS,
-    'call_reinforcements'
-];
+  ];
 
 
 function passiveStates(encounter) {
@@ -1197,18 +1196,11 @@ function chooseNextTelegraph(foe, rollValue) {
 
 function telegraphLabel(telegraph) {
     const labels = {
-        berserk_heavy_windup:
-            'Berserk / Heavy Wind-Up',
-        spiked_carapace:
-            'Spiked Carapace / Thorns Guard',
-        sweeping_cleave:
-            'Sweeping Cleave / Shockwave',
-        aether_drain:
-            'Aether-Drain / Life-Siphon',
-        call_reinforcements:
-            'Call Reinforcements'
-        }
-
+        berserk_heavy_windup: 'Berserk / Heavy Wind-Up',
+        spiked_carapace: 'Spiked Carapace / Thorns Guard',
+        sweeping_cleave: 'Sweeping Cleave / Shockwave',
+        aether_drain: 'Aether-Drain / Life-Siphon',
+        call_reinforcements: 'Call Reinforcements'
     };
 
     return labels[telegraph] || telegraph;
@@ -1350,26 +1342,14 @@ function resolveTurn({
     rolls,
     rewardMode = 'immediate'
 }) {
-   const s = clone(state);
+    const s = clone(state);
     s.inventory ||= {};
     s.inventory.bagReserves ||= [];
     s.inventory.activeTradeListings ||= [];
+
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
-    const turnEffects = [];
-
-    if (reinforcements.length > 0) {
-        turnEffects.push(
-            `Boss reinforcements arrived: ` +
-            reinforcements
-                .map(foe => foe.id)
-                .join(', ')
-        );
-    }
-
-    const reinforcements =
-        materializeBossReinforcements(s);
 
     assert(
         ['immediate', 'deferred'].includes(rewardMode),
@@ -2826,7 +2806,7 @@ function resolveTurn({
                     telegraphRoll
                 );
         }
-
+    }
     c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
 
     const finalStats = derived(c);
@@ -3189,9 +3169,10 @@ function spawnEncounter(test) {
                 if (entry.role === 'boss') {
                     foe.reinforcementsCalled = false;
                 }
-
+            }
 
             return foe;
+
         });
 
         const rewards = {

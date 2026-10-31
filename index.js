@@ -4812,28 +4812,30 @@ function resolveFleeRoll(test) {
     );
 
     const state = clone(test.state);
+    const encounter = state.encounter;
 
     assert(
-        Number.isInteger(test.fleeRoll) &&
-        test.fleeRoll >= 1 &&
-        test.fleeRoll <= 6,
-        'fleeRoll must be 1-6'
+        encounter &&
+        encounter.status === 'active',
+        'flee requires an active encounter'
     );
 
     const crewStats = derived(state.crew);
+    const rollValue = roll(state, 6);
     const lukBonus =
         Math.floor(crewStats.luk / 5);
 
     return {
         ok: true,
-        roll: test.fleeRoll,
+        roll: rollValue,
         lukBonus,
-        total: test.fleeRoll + lukBonus,
+        total: rollValue + lukBonus,
         success: null,
         note: 'The original rules specify the modified roll but no success threshold.',
         state
     };
 }
+
 function resolveDeathPenalty(test) {
     assert(
         test.state && typeof test.state === 'object',
@@ -6344,12 +6346,6 @@ function registerTools() {
                                 minimum: 1
                             },
                             
-                            fleeRoll: {
-                                type: 'integer',
-                                minimum: 1,
-                                maximum: 6
-                            },
-
                             recipeId: {
                                 type: 'string'
                             },

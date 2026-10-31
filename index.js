@@ -3654,8 +3654,17 @@ function resolveQuestSeed(test) {
     const rep =
         normalizeQuestRepTier(test.repTier);
 
-    const sourceSeed =
-        state.encounter.questSeed;
+    const inquiryRecord = test.inquiryId === undefined
+        ? null
+        : state.inquiries?.[`rumor:${test.inquiryId}`];
+
+    assert(
+        test.inquiryId === undefined || inquiryRecord,
+        'Unknown locked rumor inquiry'
+    );
+
+    const trigger = inquiryRecord || state.encounter;
+    const sourceSeed = trigger.questSeed;
 
     assert(
         sourceSeed &&
@@ -3693,7 +3702,7 @@ function resolveQuestSeed(test) {
      * quest is declined or completed.
      */
     assert(
-        state.encounter.questSeedConsumed !== true,
+    trigger.questSeedConsumed !== true,
         'This quest trigger was already consumed'
     );
 
@@ -3735,7 +3744,9 @@ function resolveQuestSeed(test) {
 
     const quest = {
         id:
-            `quest-${state.encounter.id}-` +
+            `quest-${inquiryRecord
+                ? `rumor-${inquiryRecord.id}`
+                : state.encounter.id}-` +
             `${row.rank}-${questRoll}`,
         title:
             `Rank ${row.rank} ${QUEST_RANK_LABELS[row.rank]}`,
@@ -3784,8 +3795,7 @@ function resolveQuestSeed(test) {
 
     state.activeQuest =
         quest;
-         state.encounter.questSeedConsumed = true;
-
+             trigger.questSeedConsumed = true;
 
     return {
         ok: true,
@@ -5694,29 +5704,52 @@ function resolveBatch(args) {
             typeof test.state === 'object',
             'world_seeds requires state to lock results'
         );
-
         const state = clone(test.state);
         const encounter = state.encounter;
 
+        state.inquiries ||= {};
+
         assert(
-            encounter &&
-            typeof encounter === 'object',
-            'world_seeds requires state.encounter'
+            state.inquiries &&
+            typeof state.inquiries === 'object' &&
+            !Array.isArray(state.inquiries),
+            'state.inquiries must be an object'
         );
 
-        /*
-         * Normalize older saves without changing any roll or seed
-         * that has already been locked.
-         */
-        for (const field of [
-            'packDropRoll',
-            'curiosityRoll',
-            'rumorRoll',
-            'lootSeed',
-            'questSeed'
-        ]) {
-            if (!Object.prototype.hasOwnProperty.call(encounter, field)) {
-                encounter[field] = null;
+        if (test.packLooted === true) {
+            assert(
+                encounter &&
+                typeof encounter === 'object',
+                'packLooted requires state.encounter'
+            );
+        }
+
+        if (
+            test.newWildernessSite === true ||
+            test.investigatedRumor === true
+        ) {
+            assert(
+                typeof test.inquiryId === 'string' &&
+                test.inquiryId.trim().length > 0,
+                'Site and rumor checks require inquiryId'
+            );
+            assert(
+                ZONES[state.zone],
+                'Site and rumor checks require a valid state.zone'
+            );
+        }
+
+         if (encounter) {
+            for (const field of [
+                'packDropRoll',
+                'curiosityRoll',
+                'rumorRoll',
+                'lootSeed',
+                'questSeed'
+            ]) {
+                if (!Object.prototype.hasOwnProperty.call(encounter, field)) {
+                    encounter[field] = null;
+                }
             }
         }
 
@@ -5771,58 +5804,91 @@ function resolveBatch(args) {
             return encounter[field];
         }
 
+        function inquiry(type, sides, outcome) {
+            const key = `${type}:${test.inquiryId}`;
+            let record = state.inquiries[key];
+
+            if (record) {
+                assert(
+                    record.type === type &&
+                    record.zone === state.zone &&
+                    Number.isInteger(record.roll) &&
+                    record.roll >= 1 &&
+                    record.roll <= sides,
+                    `Invalid locked inquiry: ${key}`
+                );
+            } else {
+                const value = roll(state, sides);
+                record = {
+                    id: test.inquiryId,
+                    type,
+                    zone: state.zone,
+                    roll: value,
+                    result: outcome(value),
+                    lootSeed: null,
+                    questSeed: null,
+                    questSeedConsumed: false
+                };
+                state.inquiries[key] = record;
+            }
+
+            result.locked[type === 'site'
+                ? 'curiosityRoll'
+                : 'rumorRoll'] = !record.wasPreviouslyRead;
+            return record;
+        }
+
         if (test.newWildernessSite === true) {
+            const key = `site:${test.inquiryId}`;
+            const existed = Object.prototype.hasOwnProperty.call(
+                state.inquiries, key
+            );
+            const site = inquiry('site', 10, value =>
+                value <= 7 ? 'nothing_hidden' :
+                value === 8 ? 'hidden_lore_or_shortcut' :
+                value === 9 ? 'trap_or_ambush_hazard' :
+                'hidden_loot_stash'
+            );
+
+            result.locked.curiosityRoll = !existed;
             result.applicable.curiosity = true;
+            result.findings.curiosity = site.result;
 
-            const curiosityRoll =
-                lockedOrRolled('curiosityRoll', 10);
-
-            const curiosityResult =
-                curiosityRoll <= 7
-                    ? 'nothing_hidden'
-                    : curiosityRoll === 8
-                        ? 'hidden_lore_or_shortcut'
-                        : curiosityRoll === 9
-                            ? 'trap_or_ambush_hazard'
-                            : 'hidden_loot_stash';
-
-            result.findings.curiosity =
-                curiosityResult;
-
-            if (curiosityResult === 'hidden_loot_stash') {
-                lockSeed('lootSeed', {
+            if (site.result === 'hidden_loot_stash' && !site.lootSeed) {
+                site.lootSeed = {
                     source: 'curiosity',
-                    roll: curiosityRoll,
-                    result: curiosityResult
-                });
+                    roll: site.roll,
+                    result: site.result,
+                    claimed: false
+                };
             }
         }
 
         if (test.investigatedRumor === true) {
+            const key = `rumor:${test.inquiryId}`;
+            const existed = Object.prototype.hasOwnProperty.call(
+                state.inquiries, key
+            );
+            const rumor = inquiry('rumor', 5, value =>
+                value <= 3 ? 'travelogue_flub_benign_oddity' :
+                value === 4 ? 'already_cleared_by_other_immortals' :
+                'genuine_unclaimed_quest_or_dungeon_hook'
+            );
+
+            result.locked.rumorRoll = !existed;
             result.applicable.rumor = true;
-
-            const rumorRoll =
-                lockedOrRolled('rumorRoll', 5);
-
-            const rumorResult =
-                rumorRoll <= 3
-                    ? 'travelogue_flub_benign_oddity'
-                    : rumorRoll === 4
-                        ? 'already_cleared_by_other_immortals'
-                        : 'genuine_unclaimed_quest_or_dungeon_hook';
-
-            result.findings.rumor =
-                rumorResult;
+            result.findings.rumor = rumor.result;
 
             if (
-                rumorResult ===
-                'genuine_unclaimed_quest_or_dungeon_hook'
+                rumor.result ===
+                'genuine_unclaimed_quest_or_dungeon_hook' &&
+                !rumor.questSeed
             ) {
-                lockSeed('questSeed', {
+                rumor.questSeed = {
                     source: 'rumor',
-                    roll: rumorRoll,
-                    result: rumorResult
-                });
+                    roll: rumor.roll,
+                    result: rumor.result
+                };
             }
         }
 
@@ -5876,12 +5942,27 @@ function resolveBatch(args) {
             }
         }
 
+        const site = test.newWildernessSite
+            ? state.inquiries[`site:${test.inquiryId}`]
+            : null;
+        const rumor = test.investigatedRumor
+            ? state.inquiries[`rumor:${test.inquiryId}`]
+            : null;
+
         result.unlocks = {
-            loot: encounter.lootSeed !== null,
-            quest:
-                encounter.questSeed !== null &&
-                encounter.questSeedConsumed !== true
+            loot: Boolean(
+                (site?.lootSeed && site.lootSeed.claimed !== true) ||
+                (encounter?.lootSeed &&
+                    encounter.lootSeed.claimed !== true)
+            ),
+            quest: Boolean(
+                (rumor?.questSeed &&
+                    rumor.questSeedConsumed !== true) ||
+                (encounter?.questSeed &&
+                    encounter.questSeedConsumed !== true)
+            )
         };
+
 
         return result;
     }
@@ -6398,9 +6479,11 @@ function lootItemName(material, loot, stat) {
 
     return `${ownerName} ${material}${variantName} ` +
         `${slotNames[loot.slot]} (Stat ${stat})`;
-}
-function rollLootFromState(state, source) {
-    const zone = state.encounter?.zone ?? state.zone;
+function rollLootFromState(
+    state,
+    source,
+    zone = state.encounter?.zone ?? state.zone
+) {
     assert(ZONES[zone], `Unknown loot zone: ${zone}`);
 
     const slots = source === 'boss'
@@ -6431,7 +6514,18 @@ function claimLockedLoot(test) {
 
     const state = clone(test.state);
     const encounter = state.encounter;
-    const seed = encounter?.lootSeed;
+    const inquiryRecord = test.inquiryId === undefined
+        ? null
+        : state.inquiries?.[`site:${test.inquiryId}`];
+
+    assert(
+        test.inquiryId === undefined || inquiryRecord,
+        'Unknown locked site inquiry'
+    );
+
+    const seed = inquiryRecord
+        ? inquiryRecord.lootSeed
+        : encounter?.lootSeed;
 
     assert(seed, 'Loot claim requires a locked loot seed');
     assert(seed.claimed !== true, 'This loot seed was already claimed');
@@ -6459,11 +6553,19 @@ function claimLockedLoot(test) {
         'inventory.bagReserves must be an array'
     );
 
-    const generated = rollLootFromState(state, 'wild');
+        const generated = rollLootFromState(
+        state,
+        'wild',
+        inquiryRecord?.zone
+    );
+
     const item = {
         ...generated.item,
         acquiredFrom: seed.source,
-        acquiredAtEncounter: encounter.id,
+        ...(inquiryRecord
+            ? { acquiredAtInquiry: inquiryRecord.id }
+            : { acquiredAtEncounter: encounter.id }),
+
         bound: false
     };
 
@@ -6918,6 +7020,11 @@ function registerTools() {
                                 type: 'string'
                             },
 
+                            inquiryId: {
+                                type: 'string',
+                                description:
+                                    'Stable ID for one site or rumor inquiry; choose before rolling'
+                            },
 
                             newWildernessSite: {
                                 type: 'boolean'

@@ -1379,6 +1379,50 @@ const itemUse = {};
             .map(entry => entry.effect)
             .filter(Boolean);
 
+   
+    if (actions.qtik === 'stun') {
+        assert(
+            !encounter.used.stun,
+            'Stun has already been used this fight'
+        );
+        encounter.used.stun = true;
+
+        const stunTarget =
+            live(s).find(
+                foe => foe.id === actions.target
+            );
+
+        const stunnedEliteBoss =
+            stunTarget &&
+            ['elite', 'boss'].includes(stunTarget.role)
+                ? stunTarget
+                : eliteBossFoes[0];
+
+        if (stunnedEliteBoss?.nextTelegraph) {
+            turnEffects.push(
+                `Stun cancelled ` +
+                `${telegraphLabel(
+                    stunnedEliteBoss.nextTelegraph
+                )}`
+            );
+
+            stunnedEliteBoss.nextTelegraph = null;
+                        activeTelegraphs
+                .filter(
+                    entry =>
+                        entry.foe.id === stunnedEliteBoss.id
+                )
+                .forEach(entry => {
+                    entry.effect = null;
+                });
+
+            activeTelegraphEffects =
+                activeTelegraphs
+                    .map(entry => entry.effect)
+                    .filter(Boolean);
+
+        }
+    }
     const telegraphDefenseBonus =
         activeTelegraphEffects.reduce(
             (total, effect) =>
@@ -1425,50 +1469,6 @@ const itemUse = {};
             0
         );
     
-    if (actions.qtik === 'stun') {
-        assert(
-            !encounter.used.stun,
-            'Stun has already been used this fight'
-        );
-        encounter.used.stun = true;
-
-        const stunTarget =
-            live(s).find(
-                foe => foe.id === actions.target
-            );
-
-        const stunnedEliteBoss =
-            stunTarget &&
-            ['elite', 'boss'].includes(stunTarget.role)
-                ? stunTarget
-                : eliteBossFoes[0];
-
-        if (stunnedEliteBoss?.nextTelegraph) {
-            turnEffects.push(
-                `Stun cancelled ` +
-                `${telegraphLabel(
-                    stunnedEliteBoss.nextTelegraph
-                )}`
-            );
-
-            stunnedEliteBoss.nextTelegraph = null;
-                        activeTelegraphs
-                .filter(
-                    entry =>
-                        entry.foe.id === stunnedEliteBoss.id
-                )
-                .forEach(entry => {
-                    entry.effect = null;
-                });
-
-            activeTelegraphEffects =
-                activeTelegraphs
-                    .map(entry => entry.effect)
-                    .filter(Boolean);
-
-        }
-    }
-
     if (actions.qtik === 'ice_patch') {
         assert(
             !encounter.used.icePatch,

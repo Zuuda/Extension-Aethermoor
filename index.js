@@ -1983,7 +1983,7 @@ function resolveTurn({
                 livingFoes: []
             });
     }
-
+    }
     function lowestHpFoe() {
         // Stable sorting preserves encounter order for ties.
         return [...live(s)].sort((a, b) => a.hp - b.hp)[0];

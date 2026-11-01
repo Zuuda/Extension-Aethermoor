@@ -3916,6 +3916,7 @@ function resolveQuestSeed(test) {
         'quest requires state'
     );
 
+        const state = clone(test.state);
     assert(
         state.encounter &&
         typeof state.encounter === 'object',
@@ -4984,17 +4985,6 @@ function resolveVendorAction(test) {
     );
 
     const state = clone(test.state);
-        assert(
-        state.encounter?.status === 'active' &&
-        state.encounter.deathResolved !== true,
-        'Death requires an active, unresolved encounter'
-    );
-
-    assert(
-        state.crew?.qtik?.hp === 0 ||
-        state.crew?.tansy?.hp === 0,
-        'Death requires a protagonist at 0 HP'
-    );
 
     assert(
         state.crew &&
@@ -5171,6 +5161,17 @@ function resolveCurrencyAction(test) {
     );
 
     const state = clone(test.state);
+        assert(
+        state.encounter?.status === 'active' &&
+        state.encounter.deathResolved !== true,
+        'Death requires an active, unresolved encounter'
+    );
+
+    assert(
+        state.crew?.qtik?.hp === 0 ||
+        state.crew?.tansy?.hp === 0,
+        'Death requires a protagonist at 0 HP'
+    );
 
     state.crew ||= {};
     state.crew.purse =

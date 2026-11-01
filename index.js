@@ -4361,6 +4361,215 @@ function resolveQuestAction(test) {
 
     return result;
 }
+function resolveGearGrant(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Gear grant requires state'
+    );
+
+    const state = clone(test.state);
+
+    state.inventory ||= {};
+    state.inventory.bagReserves ||= [];
+    state.inventory.activeTradeListings ||= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves) &&
+        Array.isArray(state.inventory.activeTradeListings),
+        'Gear grant inventory is invalid'
+    );
+
+    assert(
+        typeof test.grantId === 'string' &&
+        test.grantId.trim().length > 0,
+        'Gear grant requires grantId'
+    );
+
+    assert(
+        [
+            'npc_gift',
+            'exploration',
+            'migration',
+            'manual_correction'
+        ].includes(test.grantSource),
+        `Unsupported gear grant source: ${test.grantSource}`
+    );
+
+    assert(
+        test.grantSource === 'migration' ||
+        (
+            typeof test.sourceName === 'string' &&
+            test.sourceName.trim().length > 0
+        ),
+        'Non-migration gear grants require sourceName'
+    );
+
+    assert(
+        typeof test.reason === 'string' &&
+        test.reason.trim().length > 0,
+        'Gear grants require a reason'
+    );
+
+    const grantId = test.grantId.trim();
+
+    const alreadyGranted =
+        state.inventory.bagReserves.some(
+            item => item.acquiredByGrantId === grantId
+        ) ||
+        state.inventory.activeTradeListings.some(
+            item => item.acquiredByGrantId === grantId
+        ) ||
+        state.crew?.gear &&
+        Object.values(state.crew.gear)
+            .some(ownerGear =>
+                Object.values(ownerGear || {})
+                    .some(item =>
+                        item?.acquiredByGrantId === grantId
+                    )
+            );
+
+    assert(
+        !alreadyGranted,
+        `Gear grant ${grantId} has already been applied`
+    );
+
+    const item =
+        test.gearItem;
+
+    assert(
+        item &&
+        typeof item === 'object' &&
+        !Array.isArray(item),
+        'Gear grant requires gearItem'
+    );
+
+    assert(
+        typeof item.name === 'string' &&
+        item.name.trim().length > 0,
+        'Gear grant item requires a name'
+    );
+
+    assert(
+        Number.isInteger(item.rawStat) &&
+        item.rawStat > 0,
+        'Gear grant item requires a positive rawStat'
+    );
+
+    assert(
+        item.bound !== true,
+        'Gear grants enter Bag Reserves unbound; equip the item to bind it'
+    );
+
+    const usableOwners = ['tansy', 'qtik'];
+
+    if (item.classRestricted === true) {
+        assert(
+            item.owner === null ||
+            item.owner === undefined,
+            'Class-restricted gear cannot have a crew owner'
+        );
+
+        assert(
+            item.tradeStreamEligible !== true,
+            'Class-restricted gear cannot be Trade-Stream eligible'
+        );
+    } else {
+        assert(
+            usableOwners.includes(item.owner),
+            'Usable gear grant requires owner tansy or qtik'
+        );
+    }
+
+    if (item.owner === 'tansy') {
+        assert(
+            TANSY_SLOTS.includes(item.slot),
+            `Invalid Tansy gear slot: ${item.slot}`
+        );
+
+        if (MODULAR_TANSY.has(item.slot)) {
+            assert(
+                ['vitality', 'luck'].includes(item.variant),
+                `Tansy ${item.slot} requires vitality or luck variant`
+            );
+        } else {
+            assert(
+                item.variant === null ||
+                item.variant === undefined,
+                `Tansy ${item.slot} does not use a tuning variant`
+            );
+        }
+    }
+
+    if (item.owner === 'qtik') {
+        assert(
+            QTIK_SLOTS.includes(item.slot),
+            `Invalid Q'tik gear slot: ${item.slot}`
+        );
+
+        assert(
+            ['vitality', 'bulwark'].includes(item.variant),
+            `Q'tik ${item.slot} requires vitality or bulwark variant`
+        );
+    }
+
+    assert(
+        LOOT_RARITY_INFO[
+            String(item.rarity || '').toLowerCase()
+        ],
+        `Unsupported gear rarity: ${item.rarity}`
+    );
+
+    const normalizedRarity =
+        LOOT_RARITY_INFO[
+            String(item.rarity).toLowerCase()
+        ];
+
+    const classRestricted =
+        item.classRestricted === true;
+
+    const stored = {
+        name: item.name,
+        owner: classRestricted
+            ? null
+            : item.owner,
+        slot: item.slot || null,
+        variant: item.variant ?? null,
+        rarity: normalizedRarity.label,
+        rarityColor: normalizedRarity.color,
+        rawStat: item.rawStat,
+        bound: false,
+        classRestricted,
+        tradeStreamEligible:
+            classRestricted
+                ? false
+                : item.tradeStreamEligible !== false,
+        sellValue: item.rawStat * 2,
+        bonus: lootBonus(
+            classRestricted ? null : item.owner,
+            classRestricted ? null : item.slot,
+            classRestricted ? null : item.variant,
+            item.rawStat
+        ),
+        acquiredFrom: test.grantSource,
+        acquiredFromName:
+            test.sourceName || null,
+        acquiredByGrantId: grantId,
+        grantReason: test.reason
+    };
+
+    state.inventory.bagReserves.push(stored);
+
+    return {
+        ok: true,
+        action: 'grant',
+        grantId,
+        grantSource: test.grantSource,
+        item: stored,
+        state
+    };
+}
+
 function equipBagItem(stateInput, itemIndex) {
     assert(
         stateInput &&
@@ -6631,16 +6840,20 @@ function resolveBatch(args) {
 
             switch (test.kind) {
                 case 'gear':
-                    assert(
-                        test.action === 'equip',
-                        `${name}: unsupported gear action '${test.action}'`
-                    );
-                    result = equipBagItem(
-                        test.state,
-                        test.itemIndex
-                    );
-                    
+                    if (test.action === 'equip') {
+                        result = equipBagItem(
+                            test.state,
+                            test.itemIndex
+                        );
+                    } else if (test.action === 'grant') {
+                        result = resolveGearGrant(test);
+                    } else {
+                        throw new Error(
+                            `${name}: unsupported gear action '${test.action}'`
+                        );
+                    }
                     break;
+
                 case 'death':
                     result = resolveDeathPenalty(test);
                     break;
@@ -7452,6 +7665,7 @@ function registerTools() {
                                     'clear_gate',
                                     'complete',
                                     'equip',
+                                    'grant',
                                     'pawn',
                                     'list',
                                     'settle',
@@ -7492,6 +7706,31 @@ function registerTools() {
                             quantity: {
                                 type: 'integer',
                                 minimum: 1
+                            },
+                                                        grantId: {
+                                type: 'string',
+                                description:
+                                    'Stable idempotency ID for one explicit gear acquisition'
+                            },
+
+                            grantSource: {
+                                type: 'string',
+                                enum: [
+                                    'npc_gift',
+                                    'exploration',
+                                    'migration',
+                                    'manual_correction'
+                                ]
+                            },
+
+                            sourceName: {
+                                type: 'string'
+                            },
+
+                            gearItem: {
+                                type: 'object',
+                                description:
+                                    'Fully specified gear item to place unbound in Bag Reserves'
                             },
 
                             recipient: {

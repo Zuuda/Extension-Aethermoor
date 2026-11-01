@@ -6124,6 +6124,91 @@ function resolveShadowDeckAction(test) {
         state
     };
 }
+function resolveSocialSeed(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'social seed requires state'
+    );
+
+    assert(
+        typeof test.socialId === 'string' &&
+        test.socialId.trim().length > 0,
+        'social seed requires socialId'
+    );
+
+    const state = clone(test.state);
+    state.socialSeeds ||= {};
+
+    assert(
+        state.socialSeeds &&
+        typeof state.socialSeeds === 'object' &&
+        !Array.isArray(state.socialSeeds),
+        'state.socialSeeds must be an object'
+    );
+
+    const id = test.socialId.trim();
+    const existing = state.socialSeeds[id];
+
+    if (existing) {
+        assert(
+            Number.isInteger(existing.sincerityRoll) &&
+            existing.sincerityRoll >= 1 &&
+            existing.sincerityRoll <= 10 &&
+            Number.isInteger(existing.demeanorRoll) &&
+            existing.demeanorRoll >= 1 &&
+            existing.demeanorRoll <= 10,
+            `Invalid locked social seed: ${id}`
+        );
+
+        return {
+            ok: true,
+            created: false,
+            socialId: id,
+            seed: existing,
+            state
+        };
+    }
+
+    const sincerityRoll = roll(state, 10);
+    const demeanorRoll = roll(state, 10);
+
+    const sincerity =
+        sincerityRoll <= 8
+            ? 'genuine'
+            : sincerityRoll === 9
+                ? 'self_interested_exaggeration'
+                : 'deceptive';
+
+    const demeanor =
+        demeanorRoll <= 2
+            ? 'warm'
+            : demeanorRoll <= 5
+                ? 'businesslike'
+                : demeanorRoll <= 7
+                    ? 'guarded'
+                    : demeanorRoll <= 9
+                        ? 'indifferent'
+                        : 'abrasive';
+
+    const seed = {
+        socialId: id,
+        sincerityRoll,
+        sincerity,
+        demeanorRoll,
+        demeanor
+    };
+
+    state.socialSeeds[id] = seed;
+
+    return {
+        ok: true,
+        created: true,
+        socialId: id,
+        seed,
+        state
+    };
+}
 
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
@@ -6665,6 +6750,10 @@ function resolveBatch(args) {
                 case 'world_seeds':
                     result = resolveWorldSeeds(test);
                     break;
+                case 'social':
+                    result = resolveSocialSeed(test);
+                    break;
+
                 case 'loot':
                     result = claimLockedLoot(test);
                     break;
@@ -7198,6 +7287,7 @@ function registerTools() {
                                     'turn',
                                     'reference',
                                     'world_seeds',
+                                    'social',
                                     'loot',
                                     'quest',
                                     'gear',
@@ -7225,7 +7315,6 @@ function registerTools() {
                             rolls: {
                                 type: 'object'
                             },
-
 
                              zone: {
                                 type: 'integer'
@@ -7452,6 +7541,12 @@ function registerTools() {
                             nextGateObjective: {
                                 type: 'string'
                             },
+                           socialId: {
+                                type: 'string',
+                                description:
+                                    'Stable NPC or consequential-deal ID; choose before rolling'
+                            },
+
 
                             inquiryId: {
                                 type: 'string',

@@ -5159,7 +5159,7 @@ function resolveCurrencyAction(test) {
         typeof test.state === 'object',
         'currency action requires state'
     );
-
+    const state = clone(test.state);
     state.crew ||= {};
     state.crew.purse =
         Number(state.crew.purse || 0);

@@ -5160,19 +5160,6 @@ function resolveCurrencyAction(test) {
         'currency action requires state'
     );
 
-    const state = clone(test.state);
-        assert(
-        state.encounter?.status === 'active' &&
-        state.encounter.deathResolved !== true,
-        'Death requires an active, unresolved encounter'
-    );
-
-    assert(
-        state.crew?.qtik?.hp === 0 ||
-        state.crew?.tansy?.hp === 0,
-        'Death requires a protagonist at 0 HP'
-    );
-
     state.crew ||= {};
     state.crew.purse =
         Number(state.crew.purse || 0);
@@ -5741,6 +5728,17 @@ function resolveDeathPenalty(test) {
     );
 
     const state = clone(test.state);
+        assert(
+        state.encounter?.status === 'active' &&
+        state.encounter.deathResolved !== true,
+        'Death requires an active, unresolved encounter'
+    );
+
+    assert(
+        state.crew?.qtik?.hp === 0 ||
+        state.crew?.tansy?.hp === 0,
+        'Death requires a protagonist at 0 HP'
+    );
 
     assert(
         state.crew &&

@@ -2381,7 +2381,7 @@ function resolveTurn({
 
             hits = dealDamage(s, target, damage, kills);
         }
-    }
+    
         /*
          * Spiked Carapace is reactive damage, not a shield.
          *

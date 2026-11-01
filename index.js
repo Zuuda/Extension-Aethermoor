@@ -6598,7 +6598,6 @@ function resolveBatch(args) {
                         typeof test.actions === 'object',
                         `${name}: turn case requires actions`
                     );
-                    assert(
                     if (test.actions.flee !== true) {
                         assert(
                             typeof test.actions.qtik === 'string',
@@ -6613,6 +6612,7 @@ function resolveBatch(args) {
                             `${name}: actions.target is required`
                         );
                     }
+
 
                     result = resolveTurn({
                         state: test.state,

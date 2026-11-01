@@ -1398,6 +1398,10 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
+        assert(
+        encounter.status === 'active',
+        `Cannot resolve a turn from encounter status ${encounter.status}`
+    );
 
     assert(
         actions && typeof actions === 'object',
@@ -2202,11 +2206,12 @@ function resolveTurn({
          * A miss does not consume Exposed.
          * The bonus is spent on the next successful physical hit.
          */
-        const exposedBonus = p === 1
-            ? 0
-            : encounter.exposed;
+        const exposedBonus =
+            fleeing || p === 1
+                ? 0
+                : encounter.exposed;
 
-        if (p !== 1) {
+        if (!fleeing && p !== 1) {
             encounter.exposed = 0;
         }
 
@@ -3912,6 +3917,18 @@ function resolveQuestSeed(test) {
     );
 
     const state = clone(test.state);
+        assert(
+        state.encounter?.status === 'active' &&
+        state.encounter.deathResolved !== true,
+        'Death requires an active, unresolved encounter'
+    );
+
+    assert(
+        state.crew?.qtik?.hp === 0 ||
+        state.crew?.tansy?.hp === 0,
+        'Death requires a protagonist at 0 HP'
+    );
+
 
     assert(
         state.encounter &&
@@ -4325,19 +4342,29 @@ function resolveQuestAction(test) {
             'Renowned'
         ];
 
-        const rep =
-            state.reputation[town];
+        const rep = state.reputation[town];
+        let rung = tierOrder.indexOf(rep.tier);
 
-        const rung =
-            Math.floor(rep.steps / 2);
+        assert(
+            rung >= 0,
+            `Unknown reputation tier: ${rep.tier}`
+        );
+        int(rep.steps, `${town} reputation steps`);
+        assert(
+            rep.steps < 2 || rung === tierOrder.length - 1,
+            `${town} reputation steps must be 0 or 1`
+        );
 
-        rep.tier =
-            tierOrder[
-                Math.min(
-                    rung,
-                    tierOrder.length - 1
-                )
-            ];
+        let steps = rep.steps + payout.repSteps;
+
+        while (steps >= 2 && rung < tierOrder.length - 1) {
+            steps -= 2;
+            rung++;
+        }
+
+        rep.tier = tierOrder[rung];
+        rep.steps =
+            rung === tierOrder.length - 1 ? 0 : steps;
     }
     result.levelUps =
         applyXp(

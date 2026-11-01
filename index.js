@@ -6599,17 +6599,20 @@ function resolveBatch(args) {
                         `${name}: turn case requires actions`
                     );
                     assert(
-                        typeof test.actions.qtik === 'string',
-                        `${name}: actions.qtik is required`
-                    );
-                    assert(
-                        typeof test.actions.tansy === 'string',
-                        `${name}: actions.tansy is required`
-                    );
-                    assert(
-                        typeof test.actions.target === 'string',
-                        `${name}: actions.target is required`
-                    );
+                    if (test.actions.flee !== true) {
+                        assert(
+                            typeof test.actions.qtik === 'string',
+                            `${name}: actions.qtik is required`
+                        );
+                        assert(
+                            typeof test.actions.tansy === 'string',
+                            `${name}: actions.tansy is required`
+                        );
+                        assert(
+                            typeof test.actions.target === 'string',
+                            `${name}: actions.target is required`
+                        );
+                    }
 
                     result = resolveTurn({
                         state: test.state,
@@ -7094,6 +7097,10 @@ function registerTools() {
                 actions: {
                     type: 'object',
                     properties: {
+                        flee: {
+                            type: 'boolean'
+                        },
+
                         qtik: {
                             type: 'string',
                             enum: [

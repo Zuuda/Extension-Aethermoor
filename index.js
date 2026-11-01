@@ -1738,6 +1738,7 @@ function resolveTurn({
     let fodderBlitz = null;
 
     const isPureFodder =
+        !fleeing &&
         encounter.type === 'normal_pack' &&
         encounter.composition === 1 &&
         live(s).length > 0 &&
@@ -2348,7 +2349,8 @@ function resolveTurn({
                 Number.isFinite(totalApplied),
                 'Frost Stomp applied damage is not finite'
             );
-        } else {
+                } else if (!fleeing) {
+
 
             /*
              * Drinking removes Fire/Ice bonuses, not ordinary

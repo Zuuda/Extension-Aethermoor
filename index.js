@@ -1519,22 +1519,16 @@ function resolveTurn({
         crewStats.atk -
         2 * state.crew.weasels.active -
         initialShadows.attack;
-        /*
-     * Tansy's offensive commands empower damage-dealing summons:
-     * loose Shadow-Weasels and Shadow-Archers.
-     *
-     * They do not multiply specialist utility:
-     * Shadow-Menders, Shadow-Hexers, or Shadow-Warders.
-     *
-     * Ice Patch suppresses the directed-summon multiplier, preserving
-     * the existing interaction for loose weasels and extending it
-     * consistently to Archers.
-     */
-    const directedDamageCommand = [
-        'visor',
-        'vitals',
-        'hamstring'
-    ].includes(actions.tansy);
+/*
+ * Only Vitals empowers loose Shadow-Weasels and Shadow-Archers.
+ * Visor and Hamstring are utility commands.
+ * Ice Patch still suppresses the Vitals summon multiplier.
+ */
+const summonDamageMultiplier =
+    actions.tansy === 'vitals' &&
+    actions.qtik !== 'ice_patch'
+        ? 2
+        : 1;
 
 const summonDamageMultiplier =
     actions.tansy === 'vitals' &&
@@ -1814,12 +1808,6 @@ if (actions.tansy === 'surge') {
     if (isPureFodder) {
         const shadows = shadowMechanics(c);
          
-         const directed = [
-            'visor',
-            'vitals',
-            'hamstring'
-        ].includes(actions.tansy);
-
         const blitzLooseWeaselAttack =
             looseWeaselAttack();
 
@@ -2151,10 +2139,6 @@ function visorDisrupts(foe, enemyRoll) {
             ex === 0;
 
         const hexPenalty = currentHexPenalty();
-
-        const directed = [
-            'visor', 'vitals', 'hamstring'
-        ].includes(actions.tansy);
 
         /*
          * Tansy's action controls summons.

@@ -1536,11 +1536,11 @@ function resolveTurn({
         'hamstring'
     ].includes(actions.tansy);
 
-    const summonDamageMultiplier =
-        directedDamageCommand &&
-        actions.qtik !== 'ice_patch'
-            ? 2
-            : 1;
+const summonDamageMultiplier =
+    actions.tansy === 'vitals' &&
+    actions.qtik !== 'ice_patch'
+        ? 2
+        : 1;
 
     function activeDamageShadowAttack(shadows) {
         /*

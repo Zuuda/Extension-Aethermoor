@@ -1510,7 +1510,8 @@ function resolveTurn({
         );
     }
 
-    const maxWeasels = 3 + Math.floor(level / 2);
+    const maxWeasels = 3 + Math.floor(c.level / 2);
+
     c.weasels.max = maxWeasels;
 
     const initialShadows = shadowMechanics(c);
@@ -3039,7 +3040,7 @@ function resolveTurn({
     }
 
 
-    c.weasels.max = 2 + 2 * Math.floor(c.level / 2);
+    c.weasels.max = 3 + Math.floor(c.level / 2);
 
     const finalStats = derived(c);
     c.qtik.maxHp = finalStats.qtikMaxHp;
@@ -6106,7 +6107,7 @@ function resolveShadowDeckAction(test) {
     state.crew ||= {};
     state.crew.weasels ||= {
         active: 0,
-        max: 2 + 2 * Math.floor((state.crew.level || 1) / 2)
+        max: 3 + Math.floor((state.crew.level || 1) / 2)
     };
     state.crew.shadows ||= {
         deck: [],
@@ -6338,7 +6339,7 @@ function resolveShadowDeckAction(test) {
     );
 
     const totalSlots =
-        2 + 2 * Math.floor(state.crew.level / 2);
+        3 + Math.floor(state.crew.level / 2);
 
     const occupiedBefore =
         Number(state.crew.weasels.active) +

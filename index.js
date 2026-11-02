@@ -3734,6 +3734,20 @@ function spawnEncounter(test) {
             zone: questTerminal.zone
         };
     }
+    assert(
+    state.crew?.qtik &&
+    state.crew?.tansy &&
+    state.crew?.weasels &&
+    state.crew?.gear?.tansy &&
+    state.crew?.gear?.qtik &&
+    state.inventory &&
+    typeof state.inventory === 'object',
+    'Spawn requires complete crew and inventory state'
+);
+
+state.zone = test.zone;
+state.encounter = spawned.encounter;
+validate(state);
 
     state.zone = test.zone;
     state.encounter =

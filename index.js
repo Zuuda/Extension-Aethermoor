@@ -2795,25 +2795,26 @@ if (actions.tansy === 'surge') {
                     }
                 }
 
-if (!visorBlocksDebuff(foe, e)) {
-    const stacks =
-        (e === 6 ? 2 : 1) +
-        Number(
-            telegraphExtraDebuffStacks
+if (foe.role === 'hexer') {
+    if (!visorBlocksDebuff(foe, e)) {
+        const stacks =
+            (e === 6 ? 2 : 1) +
+            telegraphExtraDebuffStacks;
+
+        encounter.hexStacks[foe.id] =
+            Number(encounter.hexStacks[foe.id] || 0) +
+            stacks;
+
+        effects.push(
+            `${foe.id} added ${stacks} hex stack(s)`
         );
-
-    encounter.hexStacks[foe.id] =
-        Number(encounter.hexStacks[foe.id] || 0) +
-        stacks;
-
-    effects.push(
-        `${foe.id} added ${stacks} hex stack(s)`
-    );
-} else {
-    effects.push(
-        `Visor disrupted ${foe.id}'s Hex`
-    );
+    } else {
+        effects.push(
+            `Visor disrupted ${foe.id}'s Hex`
+        );
+    }
 }
+
 
                 }
             }

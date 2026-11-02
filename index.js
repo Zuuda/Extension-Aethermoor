@@ -1575,7 +1575,8 @@ function resolveTurn({
     }
 
 
-    encounter.used ||= { stun: false, icePatch: false };
+    encounter.used ||= { stun: false, icePatch: false, surge: false };
+    encounter.used.surge ??= false;
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
     let eliteBossFoes = live(s).filter(
@@ -1780,10 +1781,16 @@ function resolveTurn({
         );
     }
 
-    if (actions.tansy === 'surge') {
-        c.weasels.active =
-            maxWeasels - shadowMechanics(c).slots;
-    }
+if (actions.tansy === 'surge') {
+    assert(
+        !encounter.used.surge,
+        'Surge has already been used this fight'
+    );
+    encounter.used.surge = true;
+
+    c.weasels.active =
+        maxWeasels - shadowMechanics(c).slots;
+}
 
     const logs = [];
     const kills = [];
@@ -3298,7 +3305,8 @@ function spawnNormalPack({
 
             used: {
                 stun: false,
-                icePatch: false
+                icePatch: false,
+                surge: false
             },
             hexStacks: {},
             exposed: 0
@@ -3539,7 +3547,7 @@ function spawnEncounter(test) {
                 lootSeed: null,
                 questSeed: null,
                 rewards,
-                used: { stun: false, icePatch: false },
+                used: { stun: false, icePatch: false, surge: false },
                 hexStacks: {},
                 exposed: 0
             },
@@ -3682,7 +3690,8 @@ function spawnEncounter(test) {
 
                 used: {
                     stun: false,
-                    icePatch: false
+                    icePatch: false,
+                    surge: false
                 },
                 hexStacks: {},
                 exposed: 0,

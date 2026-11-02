@@ -2045,13 +2045,14 @@ if (actions.tansy === 'surge') {
             }, 0);
     }
 
-    function currentBuffer() {
-        return live(s).find(
-            foe =>
-                foe.id === encounter.bufferId &&
-                foe.role === 'buffer'
-        );
-    }
+function currentBuffer() {
+    return live(s).find(
+        foe =>
+            foe.id === encounter.bufferId &&
+            foe.role === 'buffer'
+    );
+}
+
 function visorDisrupts(foe, enemyRoll) {
     return (
         actions.tansy === 'visor' &&
@@ -2061,7 +2062,6 @@ function visorDisrupts(foe, enemyRoll) {
         enemyRoll <= 4
     );
 }
-
 
         function enemyDefense(foe) {
         const buffer = currentBuffer();

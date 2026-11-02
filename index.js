@@ -2070,15 +2070,16 @@ if (actions.tansy === 'surge') {
                 foe.role === 'buffer'
         );
     }
-    function visorBlocksDebuff(foe, enemyRoll) {
-        return (
-            actions.tansy === 'visor' &&
-            foe &&
-            foe.id === actions.target &&
-            enemyRoll >= 2 &&
-            enemyRoll <= 4
-        );
-    }
+function visorDisrupts(foe, enemyRoll) {
+    return (
+        actions.tansy === 'visor' &&
+        foe &&
+        foe.id === actions.target &&
+        enemyRoll >= 2 &&
+        enemyRoll <= 4
+    );
+}
+
 
         function enemyDefense(foe) {
         const buffer = currentBuffer();
@@ -2630,14 +2631,13 @@ if (actions.tansy === 'surge') {
              * aura. DEF matters on subsequent player exchanges.
              * Base Bleed matters on this enemy response.
              */
-            const castingBuffer = live(s).find(
-                foe =>
-                    foe.role === 'buffer' &&
-                    foe.id !== stunnedFoeId &&
-                    !specialistInterrupted
-            );
-
-
+const castingBuffer = live(s).find(
+    foe =>
+        foe.role === 'buffer' &&
+        foe.id !== stunnedFoeId &&
+        !specialistInterrupted &&
+        !visorDisrupts(foe, e)
+);
 
             if (castingBuffer) {
                 encounter.bufferId = castingBuffer.id;
@@ -2745,6 +2745,15 @@ if (actions.tansy === 'surge') {
                     );
                     continue;
                 }
+    if (
+        ['archer', 'mender', 'hexer', 'buffer'].includes(foe.role) &&
+        visorBlocksDebuff(foe, e)
+    ) {
+        effects.push(
+            `Visor disrupted ${foe.id}'s ${foe.role} action`
+        );
+        continue;
+    }
 
                 if (foe.role === 'archer') {
                     const amount = 4 * tier * (e === 6 ? 2 : 1);
@@ -2796,19 +2805,19 @@ if (actions.tansy === 'surge') {
                 }
 
 if (foe.role === 'hexer') {
-    if (!visorBlocksDebuff(foe, e)) {
-        const stacks =
-            (e === 6 ? 2 : 1) +
-            telegraphExtraDebuffStacks;
+    const stacks =
+        (e === 6 ? 2 : 1) +
+        telegraphExtraDebuffStacks;
 
-        encounter.hexStacks[foe.id] =
-            Number(encounter.hexStacks[foe.id] || 0) +
-            stacks;
+    encounter.hexStacks[foe.id] =
+        Number(encounter.hexStacks[foe.id] || 0) +
+        stacks;
 
-        effects.push(
-            `${foe.id} added ${stacks} hex stack(s)`
-        );
-    } else {
+    effects.push(
+        `${foe.id} added ${stacks} hex stack(s)`
+    );
+}
+ else {
         effects.push(
             `Visor disrupted ${foe.id}'s Hex`
         );
@@ -2833,7 +2842,7 @@ if (frontliners.length > 0) {
             continue;
         }
 
-        if (visorBlocksDebuff(foe, e)) {
+        if (visorDisrupts(foe, e)) {
             effects.push(
                 `Visor disrupted ${foe.id}'s passive`
             );

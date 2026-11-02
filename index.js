@@ -2070,6 +2070,15 @@ if (actions.tansy === 'surge') {
                 foe.role === 'buffer'
         );
     }
+    function visorBlocksDebuff(foe, enemyRoll) {
+        return (
+            actions.tansy === 'visor' &&
+            foe &&
+            foe.id === actions.target &&
+            enemyRoll >= 2 &&
+            enemyRoll <= 4
+        );
+    }
 
         function enemyDefense(foe) {
         const buffer = currentBuffer();
@@ -2786,66 +2795,61 @@ if (actions.tansy === 'surge') {
                     }
                 }
 
-                if (foe.role === 'hexer') {
-                    const blocked =
-                        actions.tansy === 'visor' &&
-                        e >= 2 &&
-                        e <= 4;
+if (!visorBlocksDebuff(foe, e)) {
+    const stacks =
+        (e === 6 ? 2 : 1) +
+        Number(
+            telegraphExtraDebuffStacks
+        );
 
-                    if (!blocked) {
-                        const stacks =
-                            (e === 6 ? 2 : 1) +
-                            Number(
-                        telegraphExtraDebuffStacks
-                            );
+    encounter.hexStacks[foe.id] =
+        Number(encounter.hexStacks[foe.id] || 0) +
+        stacks;
 
-                        encounter.hexStacks[foe.id] =
-                            Number(encounter.hexStacks[foe.id] || 0) +
-                            stacks;
+    effects.push(
+        `${foe.id} added ${stacks} hex stack(s)`
+    );
+} else {
+    effects.push(
+        `Visor disrupted ${foe.id}'s Hex`
+    );
+}
 
-                        effects.push(
-                            `${foe.id} added ${stacks} hex stack(s)`
-                        );
-                    }
                 }
             }
 
-            if (frontliners.length > 0) {
-                const blocked =
-                    actions.tansy === 'visor' &&
-                    e >= 2 &&
-                    e <= 4;
+if (frontliners.length > 0) {
+    const stacks =
+        (e === 6 ? 2 : 1) +
+        telegraphExtraDebuffStacks;
 
-                if (!blocked) {
-                    const stacks =
-                        (e === 6 ? 2 : 1) +
-                        telegraphExtraDebuffStacks;
+    for (const foe of eliteBossFoes) {
+        if (
+            foe.hp <= 0 ||
+            foe.id === stunnedFoeId ||
+            !foe.passive
+        ) {
+            continue;
+        }
 
-                    for (const foe of eliteBossFoes) {
-                        if (
-                            foe.hp <= 0 ||
-                            foe.id === stunnedFoeId ||
-                            !foe.passive
-                        ) {
+        if (visorBlocksDebuff(foe, e)) {
+            effects.push(
+                `Visor disrupted ${foe.id}'s passive`
+            );
+            continue;
+        }
 
-                            continue;
-                        }
+        foe.passiveStacks =
+            Number(foe.passiveStacks || 0) +
+            stacks;
 
-                        foe.passiveStacks =
-                            Number(foe.passiveStacks || 0) +
-                            stacks;
+        effects.push(
+            `${foe.id} ${foe.passive} stack ` +
+            `${foe.passiveStacks}`
+        );
+    }
+}
 
-                        effects.push(
-                            `${foe.id} ${foe.passive} stack ` +
-                            `${foe.passiveStacks}`
-                        );
-                    }
-                } else {
-                    effects.push(
-                        'Visor blocked elite/boss passive debuffs'
-                    );
-                }
-            }
 
             if (enemyHitCount > 0) {
                 for (const { foe, effect } of responseTelegraphs) {

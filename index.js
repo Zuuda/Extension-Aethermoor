@@ -2747,7 +2747,7 @@ const castingBuffer = live(s).find(
                 }
     if (
         ['archer', 'mender', 'hexer', 'buffer'].includes(foe.role) &&
-        visorBlocksDebuff(foe, e)
+        visorDisrupts(foe, e)
     ) {
         effects.push(
             `Visor disrupted ${foe.id}'s ${foe.role} action`
@@ -2804,29 +2804,20 @@ const castingBuffer = live(s).find(
                     }
                 }
 
-if (foe.role === 'hexer') {
-    const stacks =
-        (e === 6 ? 2 : 1) +
-        telegraphExtraDebuffStacks;
-
-    encounter.hexStacks[foe.id] =
-        Number(encounter.hexStacks[foe.id] || 0) +
-        stacks;
-
-    effects.push(
-        `${foe.id} added ${stacks} hex stack(s)`
-    );
-}
- else {
-        effects.push(
-            `Visor disrupted ${foe.id}'s Hex`
-        );
+        if (foe.role === 'hexer') {
+            const stacks =
+                (e === 6 ? 2 : 1) +
+                telegraphExtraDebuffStacks;
+            encounter.hexStacks[foe.id] =
+                Number(encounter.hexStacks[foe.id] || 0) +
+                stacks;
+            effects.push(
+                `${foe.id} added ${stacks} hex stack(s)`
+            );
+        }
     }
+ }
 }
-
-
-                }
-            }
 
 if (frontliners.length > 0) {
     const stacks =

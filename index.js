@@ -1530,12 +1530,6 @@ const summonDamageMultiplier =
         ? 2
         : 1;
 
-const summonDamageMultiplier =
-    actions.tansy === 'vitals' &&
-    actions.qtik !== 'ice_patch'
-        ? 2
-        : 1;
-
     function activeDamageShadowAttack(shadows) {
         /*
          * Recall removes loose-weasel participation but preserves
@@ -2801,7 +2795,6 @@ const castingBuffer = live(s).find(
         }
     }
  }
-}
 
 if (frontliners.length > 0) {
     const stacks =

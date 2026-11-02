@@ -2699,7 +2699,7 @@ const castingBuffer = live(s).find(
                 }
             }
 
-             for (const foe of live(s)) {
+                        for (const foe of live(s)) {
                 const tier = enemyTier(foe.level);
 
                 if (foe.id === stunnedFoeId) {
@@ -2723,23 +2723,33 @@ const castingBuffer = live(s).find(
                     );
                     continue;
                 }
-    if (
-        ['archer', 'mender', 'hexer', 'buffer'].includes(foe.role) &&
-        visorDisrupts(foe, e)
-    ) {
-        effects.push(
-            `Visor disrupted ${foe.id}'s ${foe.role} action`
-        );
-        continue;
-    }
+
+                if (
+                    [
+                        'archer',
+                        'mender',
+                        'hexer',
+                        'buffer'
+                    ].includes(foe.role) &&
+                    visorDisrupts(foe, e)
+                ) {
+                    effects.push(
+                        `Visor disrupted ` +
+                        `${foe.id}'s ${foe.role} action`
+                    );
+                    continue;
+                }
 
                 if (foe.role === 'archer') {
-                    const amount = 4 * tier * (e === 6 ? 2 : 1);
+                    const amount =
+                        4 * tier * (e === 6 ? 2 : 1);
+
                     backlineDamage += amount;
                     enemyHitCount++;
 
                     effects.push(
-                        `${foe.id} dealt ${amount} damage to Tansy`
+                        `${foe.id} dealt ` +
+                        `${amount} damage to Tansy`
                     );
                 }
 
@@ -2749,19 +2759,29 @@ const castingBuffer = live(s).find(
                         enemyHitCount++;
 
                         effects.push(
-                            `${foe.id} dealt 1 panicked melee bleed`
+                            `${foe.id} dealt ` +
+                            `1 panicked melee bleed`
                         );
                     } else {
                         const wounded = [...live(s)]
                             .filter(ally =>
                                 ally.hp <
-                                mobStats(ally.level, ally.role).maxHp
+                                mobStats(
+                                    ally.level,
+                                    ally.role
+                                ).maxHp
                             )
                             .sort((a, b) =>
                                 a.hp /
-                                    mobStats(a.level, a.role).maxHp -
+                                    mobStats(
+                                        a.level,
+                                        a.role
+                                    ).maxHp -
                                 b.hp /
-                                    mobStats(b.level, b.role).maxHp
+                                    mobStats(
+                                        b.level,
+                                        b.role
+                                    ).maxHp
                             )[0];
 
                         if (wounded) {
@@ -2776,25 +2796,29 @@ const castingBuffer = live(s).find(
                             wounded.hp += amount;
 
                             effects.push(
-                                `${foe.id} healed ${wounded.id} for ${amount}`
+                                `${foe.id} healed ` +
+                                `${wounded.id} for ${amount}`
                             );
                         }
                     }
                 }
 
-        if (foe.role === 'hexer') {
-            const stacks =
-                (e === 6 ? 2 : 1) +
-                telegraphExtraDebuffStacks;
-            encounter.hexStacks[foe.id] =
-                Number(encounter.hexStacks[foe.id] || 0) +
-                stacks;
-            effects.push(
-                `${foe.id} added ${stacks} hex stack(s)`
-            );
-        }
-    }
- }
+                if (foe.role === 'hexer') {
+                    const stacks =
+                        (e === 6 ? 2 : 1) +
+                        telegraphExtraDebuffStacks;
+
+                    encounter.hexStacks[foe.id] =
+                        Number(
+                            encounter.hexStacks[foe.id] || 0
+                        ) + stacks;
+
+                    effects.push(
+                        `${foe.id} added ` +
+                        `${stacks} hex stack(s)`
+                    );
+                }
+            }
 
 if (frontliners.length > 0) {
     const stacks =

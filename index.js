@@ -1518,6 +1518,61 @@ function resolveTurn({
         crewStats.atk -
         2 * state.crew.weasels.active -
         initialShadows.attack;
+        /*
+     * Tansy's offensive commands empower damage-dealing summons:
+     * loose Shadow-Weasels and Shadow-Archers.
+     *
+     * They do not multiply specialist utility:
+     * Shadow-Menders, Shadow-Hexers, or Shadow-Warders.
+     *
+     * Ice Patch suppresses the directed-summon multiplier, preserving
+     * the existing interaction for loose weasels and extending it
+     * consistently to Archers.
+     */
+    const directedDamageCommand = [
+        'visor',
+        'vitals',
+        'hamstring'
+    ].includes(actions.tansy);
+
+    const summonDamageMultiplier =
+        directedDamageCommand &&
+        actions.qtik !== 'ice_patch'
+            ? 2
+            : 1;
+
+    function activeDamageShadowAttack(shadows) {
+        /*
+         * Recall removes loose-weasel participation but preserves
+         * Shadow-Archer damage.
+         */
+        if (actions.tansy === 'recall') {
+            return shadows.archerAttack;
+        }
+
+        /*
+         * Only Archer attack is command-amplified.
+         * Hexer/Warder attack remains at its normal value.
+         */
+        const specialistAttack =
+            shadows.attack - shadows.archerAttack;
+
+        const archerAttack =
+            shadows.archerAttack *
+            summonDamageMultiplier;
+
+        return specialistAttack + archerAttack;
+    }
+
+    function looseWeaselAttack() {
+        if (actions.tansy === 'recall') {
+            return 0;
+        }
+
+        return c.weasels.active *
+            summonDamageMultiplier;
+    }
+
 
     encounter.used ||= { stun: false, icePatch: false };
     encounter.hexStacks ||= {};
@@ -1757,16 +1812,10 @@ function resolveTurn({
             'hamstring'
         ].includes(actions.tansy);
 
-        const looseWeaselAttack =
-            actions.tansy === 'recall'
-                ? 0
-                : c.weasels.active *
-                    (
-                        directed &&
-                        actions.qtik !== 'ice_patch'
-                            ? 2
-                            : 1
-                    );
+        const blitzLooseWeaselAttack =
+            looseWeaselAttack();
+
+
 
         /*
          * crewStats.atk includes the pre-turn weasel and Shadow ATK.
@@ -1779,13 +1828,12 @@ function resolveTurn({
             initialShadows.attack;
 
         const activeShadowAttack =
-            actions.tansy === 'recall'
-                ? shadows.archerAttack
-                : shadows.attack;
+            activeDamageShadowAttack(shadows);
+
 
         const effectiveAttack =
             baseAndGearAttackForBlitz +
-            looseWeaselAttack +
+            blitzLooseWeaselAttack +
             activeShadowAttack -
             currentHexPenaltyForState(s) -
             passiveAttackPenalty(encounter);
@@ -2095,13 +2143,19 @@ function resolveTurn({
          * Q'tik drinking has no effect on their contribution.
          */
         const raised = shadowMechanics(c);
-        const weaselAttack = actions.tansy === 'recall'
-            ? 0
-            : c.weasels.active * (directed && !patchActive ? 2 : 1);
 
-        const unpenalizedAttack = actions.tansy === 'recall'
-            ? 2 * c.level + raised.archerAttack
-            : baseAndGearAttack + weaselAttack + raised.attack;
+        const exchangeWeaselAttack =
+            looseWeaselAttack();
+
+        const activeShadowAttack =
+            activeDamageShadowAttack(raised);
+
+        const unpenalizedAttack =
+            actions.tansy === 'recall'
+                ? 2 * c.level + activeShadowAttack
+                : baseAndGearAttack +
+                    exchangeWeaselAttack +
+                    activeShadowAttack;
 
         const effectiveAttack = Math.max(
             0,

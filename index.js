@@ -236,7 +236,7 @@ function derived(crew) {
     assert(crew.weasels, 'Crew weasel state is required');
 
     const weasels = int(crew.weasels.active, 'weasels.active');
-    const totalSlots = 2 + 2 * Math.floor(level / 2);
+    const totalSlots = 3 + Math.floor(level / 2);
     const shadows = shadowMechanics(crew);
     assert(weasels + shadows.slots <= totalSlots,
         `Active summons exceed ${totalSlots} total summon slots`);
@@ -1510,7 +1510,7 @@ function resolveTurn({
         );
     }
 
-    const maxWeasels = 2 + 2 * Math.floor(c.level / 2);
+    const maxWeasels = 3 + Math.floor(level / 2);
     c.weasels.max = maxWeasels;
 
     const initialShadows = shadowMechanics(c);

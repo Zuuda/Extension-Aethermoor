@@ -888,8 +888,6 @@ function finalizeEncounterRewards(state, slainIds) {
             0
         );
 
-
-
         for (const foe of encounter.foes) {
             if (
                 foe.role !== 'elite' &&
@@ -3759,10 +3757,6 @@ state.zone = test.zone;
 state.encounter = spawned.encounter;
 validate(state);
 
-    state.zone = test.zone;
-    state.encounter =
-        spawned.encounter;
-
     return {
 
         ...spawned,
@@ -4010,8 +4004,12 @@ function resolveQuestSeed(test) {
         'quest requires state'
     );
 
+    const state = clone(test.state);
+    state.inquiries ||= {};
+
     const zone =
         test.zone ?? state.zone;
+
 
     assert(
         Number.isInteger(zone) && ZONES[zone],

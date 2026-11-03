@@ -4004,9 +4004,9 @@ function resolveQuestSeed(test) {
         coreTruth: null,
         currentGate: {
             step: 1,
-            total: row.gates,
+            total: gates,
             mode:
-                row.gates === 1
+                gates === 1
                     ? 'arrival_warmup'
                     : 'traversal_discovery',
             objective: null
@@ -4019,13 +4019,6 @@ function resolveQuestSeed(test) {
             xpBasis: nextLevelXp,
             baseXpFraction: progression.xpFraction,
             extraGateXpFraction: extraGateFraction
-        },
-
-        intermediateGateBonus: {
-            xp: 100 * tier,
-            silver: 10 * tier,
-            applies:
-                row.gates > 1
         },
 
                salvage,

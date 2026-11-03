@@ -3197,6 +3197,10 @@ assert(
             activeQuest.status === 'in_progress',
             'Quest-terminal spawn requires an in-progress quest'
         );
+        assert(
+            !activeQuest.objectiveResolution,
+            'Quest objective is already secured'
+        );
 
         const lockedThreat =
             activeQuest.seed?.terminalThreat;
@@ -4017,6 +4021,7 @@ function resolveQuestSeed(test) {
                     : 'traversal_discovery',
             objective: null
         },
+        objectiveResolution: null,
 
         payout: {
             xp: questXp,
@@ -4081,6 +4086,7 @@ function resolveQuestAction(test) {
             'accept',
             'decline',
             'clear_gate',
+            'resolve_objective',
             'complete'            
         ].includes(test.action),
         `Unsupported quest action: ${test.action}`
@@ -4170,14 +4176,52 @@ function resolveQuestAction(test) {
         return result;
     }
 
+    if (test.action === 'resolve_objective') {
         assert(
-        test.action !== 'complete' ||
-        test.objectiveCompleted === true,
-        'Quest completion requires objectiveCompleted: true'
-    );
+            quest.currentGate?.step === quest.gates,
+            'Reach the final quest gate before resolving its objective'
+        );
+        assert(
+            !quest.objectiveResolution,
+            'Quest objective has already been resolved'
+        );
+        assert(
+            test.objectiveCompleted === true,
+            'Objective resolution requires objectiveCompleted: true'
+        );
+        assert(
+            typeof test.completionEvidence === 'string' &&
+            test.completionEvidence.trim().length > 0,
+            'Objective resolution requires completionEvidence'
+        );
+        assert(
+            ['combat', 'heist', 'negotiation', 'other']
+                .includes(test.objectiveRoute),
+            'Objective resolution requires a supported objectiveRoute'
+        );
+        assert(
+            state.encounter?.status !== 'active',
+            'Resolve or flee the active encounter first'
+        );
+
+        if (test.objectiveRoute === 'combat') {
+            assert(
+                quest.terminalThreat?.resolved === true,
+                'Combat route requires the linked threat to be defeated'
+            );
+        }
+
+        quest.objectiveResolution = {
+            route: test.objectiveRoute,
+            evidence: test.completionEvidence.trim()
+        };
+        result.objectiveResolution = quest.objectiveResolution;
+        return result;
+    }
 
     assert(
         test.action !== 'complete' ||
+
         (
             typeof test.completionEvidence === 'string' &&
             test.completionEvidence.trim().length > 0
@@ -4185,12 +4229,11 @@ function resolveQuestAction(test) {
         'Quest completion requires completionEvidence'
     );
 
-    if (test.action === 'complete' && quest.terminalThreat) {
-        assert(
-            quest.terminalThreat.resolved === true,
-            'Quest terminal threat must be resolved before completion'
-        );
-    }
+    assert(
+        quest.objectiveResolution &&
+        typeof quest.objectiveResolution.evidence === 'string',
+        'Secure the quest objective before turning it in'
+    );
 
     assert(
         quest.currentGate.step === quest.gates,
@@ -4218,10 +4261,7 @@ function resolveQuestAction(test) {
     );
 
     quest.status = 'complete';
-
-    if (quest.terminalThreat) {
-        quest.terminalThreat.resolved = true;
-    }
+    quest.turnInEvidence = test.completionEvidence.trim();
 
     result.rewards.xp =
         payout.xp;
@@ -7627,6 +7667,7 @@ function registerTools() {
                                     'accept',
                                     'decline',
                                     'clear_gate',
+                                    'resolve_objective',
                                     'complete',
                                     'equip',
                                     'grant',
@@ -7740,11 +7781,19 @@ function registerTools() {
                                     'combat_twist_showdown'
                                 ]
                             },
-
                             nextGateObjective: {
                                 type: 'string'
                             },
-                           socialId: {
+                            objectiveRoute: {
+                                type: 'string',
+                                enum: [
+                                    'combat',
+                                    'heist',
+                                    'negotiation',
+                                    'other'
+                                ]
+                            },
+                            socialId: {
                                 type: 'string',
                                 description:
                                     'Stable NPC or consequential-deal ID; choose before rolling'

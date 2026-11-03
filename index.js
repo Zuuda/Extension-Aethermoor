@@ -702,7 +702,8 @@ function xpForKill(crewLevel, foe) {
 }
 
 function silverForKill(foe) {
-    const base = Math.floor(foe.level / 3);
+    return Math.max(1, Math.floor(foe.level / 3));
+}
 
     if (foe.role === 'elite') return base * 3;
     if (foe.role === 'boss') return base * 6;
@@ -871,9 +872,9 @@ function finalizeEncounterRewards(state, slainIds) {
             0
         );
 
-        silver = int(
-            encounter.rewards.autoSalvage,
-            'normal pack autoSalvage'
+        silver = encounter.foes.reduce(
+                (total, foe) => total + silverForKill(foe),
+            0
         );
 
     } else if (encounter.type === 'declared') {

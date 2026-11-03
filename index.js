@@ -4238,6 +4238,10 @@ function resolveQuestAction(test) {
         test.completionEvidence.trim().length > 0,
         'Quest completion requires completionEvidence'
     );
+    assert(
+        state.encounter?.status !== 'active',
+        'Cannot complete a quest during an active encounter'
+    );
 
     assert(
         quest.objectiveResolution &&

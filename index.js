@@ -3624,14 +3624,14 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
 
         return {
             low: [
-                reward('F', 0.1, 1, 'common', base),
-                reward('E', 0.15, 1, 'common', base),
-                reward('D', 0.3, 2, 'uncommon', base + 1)
+                reward('F', 1, 1, 'common', base),
+                reward('E', 1.5, 1, 'common', base),
+                reward('D', 3, 2, 'uncommon', base + 1)
             ],
             high: [
-                reward('D', 0.3, 2, 'uncommon', base + 1),
-                reward('C', 0.5, 2, 'uncommon', base + 1),
-                reward('B', 0.9, 2, 'rare', base + 3)
+                reward('D', 3, 2, 'uncommon', base + 1),
+                reward('C', 5, 2, 'uncommon', base + 1),
+                reward('B', 9, 2, 'rare', base + 3)
             ]
         };
     }
@@ -7533,6 +7533,15 @@ function registerTools() {
                                 ]
                             },
 
+                            siteAffinity: {
+                                type: 'string',
+                                enum: [
+                                    'ordinary',
+                                    'ruin',
+                                    'barrow',
+                                    'lair'
+                                ]
+                            },
 
                             foes: {
                                 type: 'array',

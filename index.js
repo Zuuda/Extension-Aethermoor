@@ -1974,10 +1974,189 @@ if (actions.tansy === 'surge') {
         const damageThreshold =
             crewStats.qtikMaxHp * 0.15;
 
+        /*
+         * Simulate player damage against a copy of the current Brutes.
+         * Blitz may skip the normal exchange logs only if these three
+         * player rolls would actually kill the entire pack.
+         */
+        const projectedFoes = live(s).map(foe => ({
+            id: foe.id,
+            hp: foe.hp,
+            def: foe.def,
+            level: foe.level
+        }));
+
+        let projectedExposed = encounter.exposed;
+
+        function projectedLowestHpFoe() {
+            return [...projectedFoes]
+                .filter(foe => foe.hp > 0)
+                .sort((a, b) =>
+                    a.hp - b.hp ||
+                    encounter.foes.findIndex(
+                        original => original.id === a.id
+                    ) -
+                    encounter.foes.findIndex(
+                        original => original.id === b.id
+                    )
+                )[0] || null;
+        }
+
+        function applyProjectedDamage(target, amount) {
+            let remaining = Math.max(0, Math.floor(amount));
+            let current = target;
+
+            while (current && remaining > 0) {
+                const applied = Math.min(current.hp, remaining);
+                current.hp -= applied;
+                remaining -= applied;
+
+                if (remaining > 0) {
+                    current = projectedLowestHpFoe();
+                }
+            }
+        }
+
+        for (let ex = 0; ex < 3; ex++) {
+            const playerRoll = tape.player[ex];
+            const target = projectedLowestHpFoe();
+
+            if (!target) break;
+
+            const critical =
+                playerRoll === 6 ||
+                (
+                    actions.tansy === 'vitals' &&
+                    playerRoll === 5
+                );
+
+            const fireDamage =
+                actions.qtik === 'fire_melee'
+                    ? Math.max(
+                        3,
+                        Math.floor(derived(c).atk / 5)
+                    )
+                    : 0;
+
+            const vitalsBonus =
+                actions.tansy === 'vitals' &&
+                playerRoll >= 2 &&
+                playerRoll <= 4
+                    ? Math.min(
+                        target.def,
+                        Math.floor(
+                            (
+                                c.weasels.active +
+                                shadowMechanics(c).slots
+                            ) / 2
+                        )
+                    )
+                    : 0;
+
+            const exposedBonus =
+                playerRoll === 1
+                    ? 0
+                    : projectedExposed;
+
+            if (playerRoll !== 1) {
+                projectedExposed = 0;
+            }
+
+            if (actions.qtik === 'frost_stomp') {
+                const stompTargets = [...projectedFoes]
+                    .filter(foe => foe.hp > 0)
+                    .sort((a, b) =>
+                        encounter.foes.findIndex(
+                            original => original.id === a.id
+                        ) -
+                        encounter.foes.findIndex(
+                            original => original.id === b.id
+                        )
+                    );
+
+                for (const stompTarget of stompTargets) {
+                    if (stompTarget.hp <= 0) continue;
+
+                    const baseStomp = Math.max(
+                        0,
+                        Math.floor(
+                            (effectiveAttack - stompTarget.def) / 2
+                        )
+                    );
+
+                    let stompDamage = playerRoll === 1
+                        ? Math.max(1, Math.floor(baseStomp / 2))
+                        : baseStomp + playerRoll;
+
+                    if (stompTarget.id === target.id) {
+                        stompDamage +=
+                            (
+                                playerRoll === 1
+                                    ? 0
+                                    : critical
+                                        ? crewStats.luk
+                                        : vitalsBonus
+                            ) +
+                            exposedBonus;
+                    }
+
+                    applyProjectedDamage(
+                        stompTarget,
+                        Math.max(1, stompDamage)
+                    );
+                }
+            } else {
+                const stunDefenseReduction =
+                    actions.qtik === 'stun' &&
+                    ex === 0 &&
+                    target.id === actions.target
+                        ? 4 * enemyTier(target.level)
+                        : 0;
+
+                const targetDefense = Math.max(
+                    0,
+                    target.def - stunDefenseReduction
+                );
+
+                const physicalDamage = playerRoll === 1
+                    ? 1
+                    : critical
+                        ? Math.max(
+                            6 + crewStats.luk,
+                            effectiveAttack -
+                            targetDefense +
+                            6 + crewStats.luk
+                        )
+                        : Math.max(
+                            1,
+                            effectiveAttack -
+                            targetDefense +
+                            playerRoll +
+                            vitalsBonus
+                        );
+
+                applyProjectedDamage(
+                    target,
+                    physicalDamage + fireDamage + exposedBonus
+                );
+            }
+
+            if (
+                actions.tansy === 'visor' &&
+                tape.enemy[ex] === 1
+            ) {
+                projectedExposed = crewStats.luk;
+            }
+        }
+
+        const projectedClear =
+            projectedFoes.every(foe => foe.hp <= 0);
+
         const eligible =
             liveBruteCount === encounter.foes.length &&
             Number.isFinite(effectiveAttack) &&
             effectiveAttack > targetDefense &&
+            projectedClear &&
             netDamage < damageThreshold;
 
         if (eligible) {

@@ -691,11 +691,25 @@ function roll(state, sides) {
 
 function xpForKill(crewLevel, foe) {
     const base = mobStats(foe.level, foe.role).xpBase;
-    if (foe.level <= crewLevel - 10) return 0;
-    if (foe.level <= crewLevel - 5) return Math.floor(base / 2);
-    if (foe.level >= crewLevel + 2) return Math.floor(base * 1.25);
+    const gap = foe.level - crewLevel;
+
+    if (gap <= -10) return 0;
+    if (gap <= -5) return Math.floor(base * 0.5);
+    if (gap >= 10) return Math.floor(base * 2);
+    if (gap >= 5) return Math.floor(base * 1.5);
+
     return base;
 }
+
+function silverForKill(foe) {
+    const base = Math.floor(foe.level / 3);
+
+    if (foe.role === 'elite') return base * 3;
+    if (foe.role === 'boss') return base * 6;
+
+    return base;
+}
+
 
 function applyXp(crew, xp) {
     assert(
@@ -875,10 +889,10 @@ function finalizeEncounterRewards(state, slainIds) {
         );
 
         silver = encounter.foes.reduce(
-            (total, foe) =>
-                total + 2 * enemyTier(foe.level),
+            (total, foe) => total + silverForKill(foe),
             0
         );
+
 
         for (const foe of encounter.foes) {
             if (

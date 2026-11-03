@@ -877,11 +877,12 @@ function finalizeEncounterRewards(state, slainIds) {
 
 
     } else if (encounter.type === 'declared') {
-        /*
-         * A declared roster pays ordinary kill XP and zone-tier
-         * salvage silver for every slain foe. Elite/boss members also
-         * receive their normal guaranteed gear drop.
-         */
+/*
+ * A declared roster pays level-gap XP and level-based silver
+ * for every slain foe. Elite/Boss members receive their
+ * appropriate silver multiplier and guaranteed gear drop.
+ */
+
         xp = encounter.foes.reduce(
             (total, foe) =>
                 total + xpForKill(crew.level, foe),
@@ -1538,6 +1539,7 @@ function resolveTurn({
  * Visor and Hamstring are utility commands.
  * Ice Patch still suppresses the Vitals summon multiplier.
  */
+
 const summonDamageMultiplier =
     actions.tansy === 'vitals' &&
     actions.qtik !== 'ice_patch'

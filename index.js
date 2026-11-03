@@ -1,12 +1,42 @@
 import { getContext } from '../../../extensions.js';
 
-const ZONES = {
-    1: { name: 'Thornhaven', base: 2, tier: 1, levels: [2, 3, 4] },
-    2: { name: 'Reed-Fens', base: 4, tier: 1, levels: [7, 8, 9] },
-    3: { name: 'Blighted Marsh', base: 7, tier: 2, levels: [12, 13, 14] },
-    4: { name: 'Weeping Karst', base: 9, tier: 2, levels: [17, 18, 19] },
-    5: { name: 'Highgate Pass', base: 12, tier: 3, levels: [22, 23, 24] }
+const ZONE_NAMES = {
+    1: 'Thornhaven',
+    2: 'Reed-Fens',
+    3: 'Blighted Marsh',
+    4: 'Weeping Karst',
+    5: 'Highgate Pass'
 };
+
+function zoneNumber(key) {
+    if (typeof key !== 'string') return null;
+
+    const zone = Number(key);
+    return Number.isSafeInteger(zone) &&
+        zone >= 1 &&
+        String(zone) === key
+            ? zone
+            : null;
+}
+
+const ZONES = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        if (zone === null) return undefined;
+
+        return {
+            name: ZONE_NAMES[zone] || `Zone ${zone}`,
+            base: Math.floor((5 * zone - 1) / 2),
+            tier: Math.ceil(zone / 2),
+            levels: [
+                5 * zone - 3,
+                5 * zone - 2,
+                5 * zone - 1
+            ]
+        };
+    }
+});
+
 
 const TANSY_SLOTS = [
     'weapon', 'gloves', 'chest', 'trousers',
@@ -3372,33 +3402,29 @@ function register(name, displayName, description, parameters, operation) {
         stealth: false
     });
 }
-const NORMAL_BRACKETS = {
-    1: {
-        low:  { level: 2,  xpSwarm: 24,  xpMixed: 16 },
-        mid:  { level: 3,  xpSwarm: 36,  xpMixed: 24 },
-        high: { level: 4,  xpSwarm: 60,  xpMixed: 40 }
-    },
-    2: {
-        low:  { level: 7, xpSwarm: 105, xpMixed: 70 },
-        mid:  { level: 8, xpSwarm: 120, xpMixed: 80 },
-        high: { level: 9, xpSwarm: 135, xpMixed: 90 }
-    },
-    3: {
-        low:  { level: 12, xpSwarm: 180, xpMixed: 120 },
-        mid:  { level: 13, xpSwarm: 195, xpMixed: 130 },
-        high: { level: 14, xpSwarm: 210, xpMixed: 140 }
-    },
-    4: {
-        low:  { level: 17, xpSwarm: 255, xpMixed: 170 },
-        mid:  { level: 18, xpSwarm: 270, xpMixed: 180 },
-        high: { level: 19, xpSwarm: 285, xpMixed: 190 }
-    },
-    5: {
-        low:  { level: 22, xpSwarm: 330, xpMixed: 220 },
-        mid:  { level: 23, xpSwarm: 345, xpMixed: 230 },
-        high: { level: 24, xpSwarm: 360, xpMixed: 240 }
+const NORMAL_BRACKETS = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        if (zone === null) return undefined;
+
+        const [low, mid, high] = ZONES[zone].levels;
+
+        function bracket(level) {
+            return {
+                level,
+                // Reference base XP only. Paid XP uses xpForKill().
+                xpSwarm: 12 * level,
+                xpMixed: 8 * level
+            };
+        }
+
+        return {
+            low: bracket(low),
+            mid: bracket(mid),
+            high: bracket(high)
+        };
     }
-};
+});
 
 const PACK_COMPOSITIONS = {
     1: ['brute', 'brute', 'brute'],
@@ -3460,10 +3486,11 @@ function spawnNormalPack({
             ? bracketData.xpSwarm
             : bracketData.xpMixed;
 
-    const autoSalvage =
-        foes.length *
-        2 *
-        zoneData.tier;
+     const autoSalvage = foes.reduce(
+            (total, foe) => total + silverForKill(foe),
+        0
+    );
+
 
     const lockedRewards = {
         kind: 'normal_pack',
@@ -3517,21 +3544,24 @@ function spawnNormalPack({
     };
 }
 
-const ELITE_LEVELS = {
-    1: { mid: 4, high: 5 },
-    2: { mid: 8, high: 10 },
-    3: { mid: 13, high: 15 },
-    4: { mid: 18, high: 20 },
-    5: { mid: 23, high: 25 }
-};
+const ELITE_LEVELS = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        if (zone === null) return undefined;
 
-const BOSS_LEVELS = {
-    1: 5,
-    2: 10,
-    3: 15,
-    4: 20,
-    5: 25
-};
+        return {
+            mid: Math.max(4, 5 * zone - 2),
+            high: 5 * zone
+        };
+    }
+});
+
+const BOSS_LEVELS = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        return zone === null ? undefined : 5 * zone;
+    }
+});
 
 const PASSIVES = {
     1: 'armor_sunder',
@@ -3962,68 +3992,54 @@ validate(state);
     };
 }
 
-const QUEST_REWARD_TABLES = {
-    1: {
-        low: [
-            { rank: 'F', gates: 1, xp: 60,   silver: 6,   repSteps: 1, salvageRarity: 'common',   salvageStat: 2 },
-            { rank: 'E', gates: 1, xp: 90,   silver: 9,   repSteps: 1, salvageRarity: 'common',   salvageStat: 2 },
-            { rank: 'D', gates: 1, xp: 180,  silver: 18,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 }
-        ],
-        high: [
-            { rank: 'D', gates: 2, xp: 180,  silver: 18,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 },
-            { rank: 'C', gates: 2, xp: 300,  silver: 30,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 3 },
-            { rank: 'B', gates: 3, xp: 540,  silver: 54,  repSteps: 2, salvageRarity: 'rare',     salvageStat: 5 }
-        ]
-    },
-    2: {
-        low: [
-            { rank: 'F', gates: 1, xp: 160,  silver: 16,  repSteps: 1, salvageRarity: 'common',   salvageStat: 4 },
-            { rank: 'E', gates: 1, xp: 240,  silver: 24,  repSteps: 1, salvageRarity: 'common',   salvageStat: 4 },
-            { rank: 'D', gates: 1, xp: 480,  silver: 48,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 }
-        ],
-        high: [
-            { rank: 'D', gates: 2, xp: 480,  silver: 48,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 },
-            { rank: 'C', gates: 3, xp: 800,  silver: 80,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 5 },
-            { rank: 'B', gates: 3, xp: 1440, silver: 144, repSteps: 2, salvageRarity: 'rare',     salvageStat: 7 }
-        ]
-    },
-    3: {
-        low: [
-            { rank: 'F', gates: 1, xp: 260,  silver: 26,  repSteps: 1, salvageRarity: 'common',   salvageStat: 7 },
-            { rank: 'E', gates: 1, xp: 390,  silver: 39,  repSteps: 1, salvageRarity: 'common',   salvageStat: 7 },
-            { rank: 'D', gates: 2, xp: 780,  silver: 78,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 }
-        ],
-        high: [
-            { rank: 'D', gates: 2, xp: 780,  silver: 78,  repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 },
-            { rank: 'C', gates: 3, xp: 1300, silver: 130, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 8 },
-            { rank: 'B', gates: 4, xp: 2340, silver: 234, repSteps: 2, salvageRarity: 'rare',     salvageStat: 10 }
-        ]
-    },
-    4: {
-        low: [
-            { rank: 'F', gates: 1, xp: 360,  silver: 36,  repSteps: 1, salvageRarity: 'common',   salvageStat: 9 },
-            { rank: 'E', gates: 1, xp: 540,  silver: 54,  repSteps: 1, salvageRarity: 'common',   salvageStat: 9 },
-            { rank: 'D', gates: 2, xp: 1080, silver: 108, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 }
-        ],
-        high: [
-            { rank: 'D', gates: 2, xp: 1080, silver: 108, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 },
-            { rank: 'C', gates: 3, xp: 1800, silver: 180, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 10 },
-            { rank: 'B', gates: 4, xp: 3240, silver: 324, repSteps: 2, salvageRarity: 'rare',     salvageStat: 12 }
-        ]
-    },
-    5: {
-        low: [
-            { rank: 'F', gates: 1, xp: 460,  silver: 46,  repSteps: 1, salvageRarity: 'common',   salvageStat: 12 },
-            { rank: 'E', gates: 1, xp: 690,  silver: 69,  repSteps: 1, salvageRarity: 'common',   salvageStat: 12 },
-            { rank: 'D', gates: 2, xp: 1380, silver: 138, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 }
-        ],
-        high: [
-            { rank: 'D', gates: 2, xp: 1380, silver: 138, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 },
-            { rank: 'C', gates: 3, xp: 2300, silver: 230, repSteps: 2, salvageRarity: 'uncommon', salvageStat: 13 },
-            { rank: 'B', gates: 4, xp: 4140, silver: 414, repSteps: 2, salvageRarity: 'rare',     salvageStat: 15 }
-        ]
+const QUEST_REWARD_TABLES = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        if (zone === null) return undefined;
+
+        const base = ZONES[zone].base;
+        const unit = 100 * zone - 40;
+
+        function reward(
+            rank, gates, multiplier, repSteps, rarity, stat
+        ) {
+            const xp = unit * multiplier;
+
+            return {
+                rank,
+                gates,
+                xp,
+                silver: xp / 10,
+                repSteps,
+                salvageRarity: rarity,
+                salvageStat: stat
+            };
+        }
+
+        return {
+            low: [
+                reward('F', 1, 1, 1, 'common', base),
+                reward('E', 1, 1.5, 1, 'common', base),
+                reward(
+                    'D', zone <= 2 ? 1 : 2,
+                    3, 2, 'uncommon', base + 1
+                )
+            ],
+            high: [
+                reward('D', 2, 3, 2, 'uncommon', base + 1),
+                reward(
+                    'C', zone === 1 ? 2 : 3,
+                    5, 2, 'uncommon', base + 1
+                ),
+                reward(
+                    'B', zone <= 2 ? 3 : 4,
+                    9, 2, 'rare', base + 3
+                )
+            ]
+        };
     }
-};
+});
+
 
 const QUEST_RANK_LABELS = {
     F: 'Chore',
@@ -7357,13 +7373,22 @@ const LOOT_RARITY_INFO = {
     legendary:{ label: 'Legendary',color: '#fbbf24' }
 };
 
-const ZONE_LOOT_MATERIALS = {
+const ZONE_MATERIAL_NAMES = {
     1: 'Valley Iron',
     2: 'Fen-Bronze',
     3: 'Cold Bog-Iron',
     4: 'Karst Chitin',
     5: 'Highgate Steel'
 };
+
+const ZONE_LOOT_MATERIALS = new Proxy({}, {
+    get(_target, key) {
+        const zone = zoneNumber(key);
+        if (zone === null) return undefined;
+
+        return ZONE_MATERIAL_NAMES[zone] || 'Frontier Alloy';
+    }
+});
 
 function usable(owner, slot, variant = null) {
     return { owner, slot, variant, usable: true };

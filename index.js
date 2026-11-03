@@ -3256,8 +3256,7 @@ assert(
             roll(state, 100);
 
         const eliteChance =
-            Math.min(20, 2 + test.zone);
-
+            Math.min(30, 10 + test.zone);
         kind =
             encounterTypeRoll <= eliteChance
                 ? 'elite'
@@ -3632,6 +3631,16 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
     }
 });
 
+const QUEST_PROGRESSION = {
+    F: { minGates: 1, maxGates: 2, xpFraction: 0.05 },
+    E: { minGates: 2, maxGates: 3, xpFraction: 0.08 },
+    D: { minGates: 2, maxGates: 3, xpFraction: 0.14 },
+    C: { minGates: 3, maxGates: 4, xpFraction: 0.22 },
+    B: { minGates: 4, maxGates: 5, xpFraction: 0.32 }
+};
+
+const EXTRA_QUEST_GATE_XP_FRACTION = 0.02;
+const MAX_EXTRA_QUEST_GATE_XP_FRACTION = 0.06;
 
 const QUEST_RANK_LABELS = {
     F: 'Chore',
@@ -3892,6 +3901,9 @@ function resolveQuestSeed(test) {
     const questRoll =
         roll(state, 3);
 
+    const gateCountRoll =
+        roll(state, 2);
+
     const salvageSlotRoll =
         roll(state, QUEST_SALVAGE_SLOTS.length);
 
@@ -3904,6 +3916,39 @@ function resolveQuestSeed(test) {
     assert(
         row,
         'No quest table entry exists for these inputs'
+    );
+
+    const progression =
+        QUEST_PROGRESSION[row.rank];
+
+    assert(
+        progression,
+        `No quest progression settings for rank ${row.rank}`
+    );
+
+    const gates =
+        progression.minGates +
+        (
+            gateCountRoll === 2 &&
+            progression.maxGates > progression.minGates
+                ? 1
+                : 0
+        );
+
+    const nextLevelXp =
+        nextXp(state.crew.level);
+
+    const extraGateFraction = Math.min(
+        MAX_EXTRA_QUEST_GATE_XP_FRACTION,
+        Math.max(
+            0,
+            gates - progression.minGates
+        ) * EXTRA_QUEST_GATE_XP_FRACTION
+    );
+
+    const questXp = Math.round(
+        nextLevelXp *
+        (progression.xpFraction + extraGateFraction)
     );
 
     const terminalThreat =
@@ -3924,6 +3969,7 @@ function resolveQuestSeed(test) {
         zone,
         repTier: rep.label,
         questRoll,
+        gateCountRoll,
         salvageSlotRoll,
         source: sourceSeed.source,
         sourceRoll: sourceSeed.roll,
@@ -3947,7 +3993,7 @@ function resolveQuestSeed(test) {
         title:
             `Rank ${row.rank} ${QUEST_RANK_LABELS[row.rank]}`,
         rank: row.rank,
-        gates: row.gates,
+        gates,
         status: 'offered',
         seed,
 
@@ -3967,9 +4013,12 @@ function resolveQuestSeed(test) {
         },
 
         payout: {
-            xp: row.xp,
+            xp: questXp,
             silver: row.silver,
-            repSteps: row.repSteps
+            repSteps: row.repSteps,
+            xpBasis: nextLevelXp,
+            baseXpFraction: progression.xpFraction,
+            extraGateXpFraction: extraGateFraction
         },
 
         intermediateGateBonus: {
@@ -4093,14 +4142,6 @@ function resolveQuestAction(test) {
             'Final gate must use complete, not clear_gate'
         );
 
-        const enemyTier =
-            ZONES[quest.seed.zone].tier;
-
-        const milestone = {
-            xp: 100 * enemyTier,
-            silver: 10 * enemyTier
-        };
-
         quest.currentGate.step += 1;
 
         const nextModes = [
@@ -4126,23 +4167,6 @@ function resolveQuestAction(test) {
 
         quest.currentGate.objective =
             test.nextGateObjective || null;
-
-        result.rewards.xp =
-            milestone.xp;
-
-        result.rewards.silver =
-            milestone.silver;
-        const levelUps =
-            applyXp(
-                state.crew,
-                milestone.xp
-            );
-
-        state.crew.purse +=
-            milestone.silver;
-
-        result.levelUps =
-            levelUps;
 
         return result;
     }

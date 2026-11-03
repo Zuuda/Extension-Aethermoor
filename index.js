@@ -3356,6 +3356,11 @@ const PASSIVES = {
 function spawnEncounter(test) {
     const state = clone(test.state || {});
 
+    assert(
+    !state.encounter || state.encounter.status !== 'active',
+    'Cannot spawn while an encounter is active'
+    );
+
     const requestedKind =
         test.encounterType ||
         'normal_pack';

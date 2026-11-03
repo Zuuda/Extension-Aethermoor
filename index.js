@@ -868,7 +868,7 @@ function finalizeEncounterRewards(state, slainIds) {
         silver = encounter.foes.reduce(
                 (total, foe) => total + silverForKill(foe),
             0
-            );
+        );
 
 
     } else if (encounter.type === 'declared') {
@@ -3356,10 +3356,15 @@ const PASSIVES = {
 function spawnEncounter(test) {
     const state = clone(test.state || {});
 
-    assert(
-    !state.encounter || state.encounter.status !== 'active',
-    'Cannot spawn while an encounter is active'
+assert(
+    !state.encounter ||
+    (
+        state.encounter.status !== 'active' &&
+        state.encounter.rewards?.resolved === true
+    ),
+        'Cannot spawn while an encounter is active or has unresolved rewards'
     );
+
 
     const requestedKind =
         test.encounterType ||

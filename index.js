@@ -2156,10 +2156,10 @@ function visorDisrupts(foe, enemyRoll) {
 
         const unpenalizedAttack =
             actions.tansy === 'recall'
-                ? 2 * c.level + activeShadowAttack
-                : baseAndGearAttack +
-                    exchangeWeaselAttack +
-                    activeShadowAttack;
+            ? baseAndGearAttack + activeDamageShadowAttack(raised)
+            : baseAndGearAttack +
+            exchangeWeaselAttack +
+            activeDamageShadowAttack(raised);
 
         const effectiveAttack = Math.max(
             0,
@@ -3358,13 +3358,13 @@ function spawnEncounter(test) {
 
 assert(
     !state.encounter ||
+    state.encounter.status === 'fled' ||
     (
-        state.encounter.status !== 'active' &&
+        ['cleared', 'dead'].includes(state.encounter.status) &&
         state.encounter.rewards?.resolved === true
     ),
-        'Cannot spawn while an encounter is active or has unresolved rewards'
-    );
-
+    'Cannot spawn while an encounter is active or has unresolved rewards'
+);
 
     const requestedKind =
         test.encounterType ||
@@ -4015,6 +4015,15 @@ function resolveQuestSeed(test) {
     );
 
     const state = clone(test.state);
+    state.gearGrantIds ||= {};
+
+assert(
+    state.gearGrantIds &&
+    typeof state.gearGrantIds === 'object' &&
+    !Array.isArray(state.gearGrantIds),
+    'Gear grant ID history must be an object'
+);
+
     state.inquiries ||= {};
 
     const zone =
@@ -4460,12 +4469,12 @@ function resolveQuestAction(test) {
 
     return result;
 }
-function resolveGearGrant(test) {
+
+    state.inventory.gearGrantIds ||= [];
     assert(
-        test.state &&
-        typeof test.state === 'object',
-        'Gear grant requires state'
-    );
+    Array.isArray(state.inventory.gearGrantIds),
+    'inventory.gearGrantIds must be an array'
+);
 
     const state = clone(test.state);
 
@@ -4513,8 +4522,9 @@ function resolveGearGrant(test) {
     const grantId = test.grantId.trim();
 
     const alreadyGranted =
-        state.inventory.bagReserves.some(
-            item => item.acquiredByGrantId === grantId
+    state.gearGrantIds[grantId] === true ||
+    state.inventory.bagReserves.some(
+        item => item.acquiredByGrantId === grantId
         ) ||
         state.inventory.activeTradeListings.some(
             item => item.acquiredByGrantId === grantId
@@ -4657,9 +4667,11 @@ function resolveGearGrant(test) {
         grantReason: test.reason
     };
 
-    state.inventory.bagReserves.push(stored);
+        state.inventory.bagReserves.push(stored);
+        state.gearGrantIds[grantId] = true;
 
-    return {
+        return {
+
         ok: true,
         action: 'grant',
         grantId,
@@ -4755,13 +4767,13 @@ function equipBagItem(stateInput, itemIndex) {
         state.crew.gear[item.owner][item.slot] || null;
 
     const equippedItem = {
-        name: item.name,
+        ...item,
         stat: item.rawStat,
-        variant: item.variant || null,
-        rarity: item.rarity || null,
         bound: true,
-        classRestricted: false
+        classRestricted: false,
+        tradeStreamEligible: false
     };
+
 
     /*
      * Remove the selected reserve item before adding the replaced item,
@@ -4769,25 +4781,25 @@ function equipBagItem(stateInput, itemIndex) {
      */
     state.inventory.bagReserves.splice(itemIndex, 1);
 
-    if (oldItem && Number(oldItem.stat) > 0) {
-        state.inventory.bagReserves.push({
-            name: oldItem.name || 'Replaced gear',
-            owner: item.owner,
-            slot: item.slot,
-            variant: oldItem.variant || null,
-            rarity: oldItem.rarity || null,
-            rawStat: oldItem.stat,
-            bound: Boolean(oldItem.bound),
-            classRestricted: false,
-            tradeStreamEligible: !oldItem.bound,
-            bonus: lootBonus(
-                item.owner,
-                item.slot,
-                oldItem.variant || null,
-                oldItem.stat
-            )
-        });
-    }
+if (oldItem && Number(oldItem.stat) > 0) {
+    state.inventory.bagReserves.push({
+        ...oldItem,
+        name: oldItem.name || 'Replaced gear',
+        owner: item.owner,
+        slot: item.slot,
+        rawStat: oldItem.stat,
+        bound: Boolean(oldItem.bound),
+        classRestricted: false,
+        tradeStreamEligible: oldItem.bound !== true,
+        sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
+        bonus: lootBonus(
+            item.owner,
+            item.slot,
+            oldItem.variant || null,
+            oldItem.stat
+        )
+    });
+}
 
     state.crew.gear[item.owner][item.slot] =
         equippedItem;

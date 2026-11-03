@@ -702,7 +702,12 @@ function xpForKill(crewLevel, foe) {
 }
 
 function silverForKill(foe) {
-    return Math.max(1, Math.floor(foe.level / 3));
+    const base = Math.max(1, Math.floor(foe.level / 3));
+
+    if (foe.role === 'elite') return base * 3;
+    if (foe.role === 'boss') return base * 6;
+
+    return base;
 }
 
 function applyXp(crew, xp) {
@@ -4470,22 +4475,31 @@ function resolveQuestAction(test) {
     return result;
 }
 
-    state.inventory.gearGrantIds ||= [];
+function resolveGearGrant(test) {
     assert(
-    Array.isArray(state.inventory.gearGrantIds),
-    'inventory.gearGrantIds must be an array'
-);
+        test.state &&
+        typeof test.state === 'object',
+        'Gear grant requires state'
+    );
 
     const state = clone(test.state);
 
     state.inventory ||= {};
     state.inventory.bagReserves ||= [];
     state.inventory.activeTradeListings ||= [];
+    state.gearGrantIds ||= {};
 
     assert(
         Array.isArray(state.inventory.bagReserves) &&
         Array.isArray(state.inventory.activeTradeListings),
         'Gear grant inventory is invalid'
+    );
+
+    assert(
+        state.gearGrantIds &&
+        typeof state.gearGrantIds === 'object' &&
+        !Array.isArray(state.gearGrantIds),
+        'state.gearGrantIds must be an object'
     );
 
     assert(
@@ -4522,15 +4536,14 @@ function resolveQuestAction(test) {
     const grantId = test.grantId.trim();
 
     const alreadyGranted =
-    state.gearGrantIds[grantId] === true ||
-    state.inventory.bagReserves.some(
-        item => item.acquiredByGrantId === grantId
+        state.gearGrantIds[grantId] === true ||
+        state.inventory.bagReserves.some(
+            item => item.acquiredByGrantId === grantId
         ) ||
         state.inventory.activeTradeListings.some(
             item => item.acquiredByGrantId === grantId
         ) ||
-        state.crew?.gear &&
-        Object.values(state.crew.gear)
+        Object.values(state.crew?.gear || {})
             .some(ownerGear =>
                 Object.values(ownerGear || {})
                     .some(item =>
@@ -4543,8 +4556,7 @@ function resolveQuestAction(test) {
         `Gear grant ${grantId} has already been applied`
     );
 
-    const item =
-        test.gearItem;
+    const item = test.gearItem;
 
     assert(
         item &&
@@ -4639,9 +4651,7 @@ function resolveQuestAction(test) {
 
     const stored = {
         name: item.name,
-        owner: classRestricted
-            ? null
-            : item.owner,
+        owner: classRestricted ? null : item.owner,
         slot: item.slot || null,
         variant: item.variant ?? null,
         rarity: normalizedRarity.label,
@@ -4649,10 +4659,9 @@ function resolveQuestAction(test) {
         rawStat: item.rawStat,
         bound: false,
         classRestricted,
-        tradeStreamEligible:
-            classRestricted
-                ? false
-                : item.tradeStreamEligible !== false,
+        tradeStreamEligible: classRestricted
+            ? false
+            : item.tradeStreamEligible !== false,
         sellValue: item.rawStat * 2,
         bonus: lootBonus(
             classRestricted ? null : item.owner,
@@ -4661,17 +4670,15 @@ function resolveQuestAction(test) {
             item.rawStat
         ),
         acquiredFrom: test.grantSource,
-        acquiredFromName:
-            test.sourceName || null,
+        acquiredFromName: test.sourceName || null,
         acquiredByGrantId: grantId,
         grantReason: test.reason
     };
 
-        state.inventory.bagReserves.push(stored);
-        state.gearGrantIds[grantId] = true;
+    state.inventory.bagReserves.push(stored);
+    state.gearGrantIds[grantId] = true;
 
-        return {
-
+    return {
         ok: true,
         action: 'grant',
         grantId,

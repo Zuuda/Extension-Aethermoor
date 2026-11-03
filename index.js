@@ -3250,19 +3250,35 @@ assert(
             zone: lockedThreat.zone
         };
     }
-
     if (requestedKind === 'wild') {
+        assert(
+            Number.isInteger(test.zone) &&
+            ZONES[test.zone],
+            `Unknown zone: ${test.zone}`
+        );
+
+        const siteAffinity =
+            test.siteAffinity || 'ordinary';
+
+        assert(
+            ['ordinary', 'ruin', 'barrow', 'lair'].includes(siteAffinity),
+            `Unsupported wild site affinity: ${siteAffinity}`
+        );
+
         encounterTypeRoll =
             roll(state, 100);
 
+        const siteBonus =
+            siteAffinity === 'ordinary' ? 0 : 15;
+
         const eliteChance =
-            Math.min(30, 10 + test.zone);
+            Math.min(40, 10 + test.zone + siteBonus);
+
         kind =
             encounterTypeRoll <= eliteChance
                 ? 'elite'
                 : 'normal_pack';
     }
-
 
     const bracketNames = [
 
@@ -3582,25 +3598,24 @@ validate(state);
         state
     };
 }
-
 const QUEST_REWARD_TABLES = new Proxy({}, {
     get(_target, key) {
         const zone = zoneNumber(key);
         if (zone === null) return undefined;
 
         const base = ZONES[zone].base;
-        const unit = 100 * zone - 40;
+        const silverUnit = 10 * zone - 4;
 
         function reward(
-            rank, gates, multiplier, repSteps, rarity, stat
+            rank,
+            silverMultiplier,
+            repSteps,
+            rarity,
+            stat
         ) {
-            const xp = unit * multiplier;
-
             return {
                 rank,
-                gates,
-                xp,
-                silver: xp / 10,
+                silver: silverUnit * silverMultiplier,
                 repSteps,
                 salvageRarity: rarity,
                 salvageStat: stat
@@ -3609,23 +3624,14 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
 
         return {
             low: [
-                reward('F', 1, 1, 1, 'common', base),
-                reward('E', 1, 1.5, 1, 'common', base),
-                reward(
-                    'D', zone <= 2 ? 1 : 2,
-                    3, 2, 'uncommon', base + 1
-                )
+                reward('F', 0.1, 1, 'common', base),
+                reward('E', 0.15, 1, 'common', base),
+                reward('D', 0.3, 2, 'uncommon', base + 1)
             ],
             high: [
-                reward('D', 2, 3, 2, 'uncommon', base + 1),
-                reward(
-                    'C', zone === 1 ? 2 : 3,
-                    5, 2, 'uncommon', base + 1
-                ),
-                reward(
-                    'B', zone <= 2 ? 3 : 4,
-                    9, 2, 'rare', base + 3
-                )
+                reward('D', 0.3, 2, 'uncommon', base + 1),
+                reward('C', 0.5, 2, 'uncommon', base + 1),
+                reward('B', 0.9, 2, 'rare', base + 3)
             ]
         };
     }
@@ -4162,6 +4168,28 @@ function resolveQuestAction(test) {
             test.nextGateObjective || null;
 
         return result;
+    }
+
+        assert(
+        test.action !== 'complete' ||
+        test.objectiveCompleted === true,
+        'Quest completion requires objectiveCompleted: true'
+    );
+
+    assert(
+        test.action !== 'complete' ||
+        (
+            typeof test.completionEvidence === 'string' &&
+            test.completionEvidence.trim().length > 0
+        ),
+        'Quest completion requires completionEvidence'
+    );
+
+    if (test.action === 'complete' && quest.terminalThreat) {
+        assert(
+            quest.terminalThreat.resolved === true,
+            'Quest terminal threat must be resolved before completion'
+        );
     }
 
     assert(
@@ -7713,6 +7741,17 @@ function registerTools() {
                                     'Stable NPC or consequential-deal ID; choose before rolling'
                             },
 
+                            objectiveCompleted: {
+                                type: 'boolean',
+                                description:
+                                    'Must be true when the final quest objective has been completed in the fiction'
+                            },
+
+                            completionEvidence: {
+                                type: 'string',
+                                description:
+                                    'Brief diegetic evidence that the final quest objective was completed'
+                            },
 
                             inquiryId: {
                                 type: 'string',

@@ -3225,7 +3225,7 @@ assert(
             (
                 activeQuest.terminalThreat.revealed !== true ||
                 (
-                    state.encounter?.status === 'fled' &&
+                    ['fled', 'dead'].includes(state.encounter?.status) &&
                     state.encounter.questTerminal?.questId === activeQuest.id
                 )
             ),
@@ -4150,7 +4150,7 @@ function resolveQuestAction(test) {
 
         assert(
             quest.currentGate.step < quest.gates,
-            'Final gate must use complete, not clear_gate'
+            'Final gate must use resolve_objective before complete.'
         );
 
         quest.currentGate.step += 1;

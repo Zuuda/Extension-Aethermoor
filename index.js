@@ -3281,8 +3281,11 @@ assert(
         const siteBonus =
             siteAffinity === 'ordinary' ? 0 : 15;
 
-        const eliteChance =
-            Math.min(40, 10 + test.zone + siteBonus);
+const eliteChance =
+    siteAffinity === 'ordinary'
+        ? Math.min(15, 10 + test.zone)
+        : Math.min(30, 10 + test.zone + siteBonus);
+
 
         kind =
             encounterTypeRoll <= eliteChance
@@ -4226,12 +4229,13 @@ function resolveQuestAction(test) {
     }
 
     assert(
-        test.action !== 'complete' ||
+        test.objectiveCompleted === true,
+        'Quest completion requires objectiveCompleted: true'
+    );
 
-        (
-            typeof test.completionEvidence === 'string' &&
-            test.completionEvidence.trim().length > 0
-        ),
+    assert(
+        typeof test.completionEvidence === 'string' &&
+        test.completionEvidence.trim().length > 0,
         'Quest completion requires completionEvidence'
     );
 

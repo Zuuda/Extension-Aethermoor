@@ -705,13 +705,6 @@ function silverForKill(foe) {
     return Math.max(1, Math.floor(foe.level / 3));
 }
 
-    if (foe.role === 'elite') return base * 3;
-    if (foe.role === 'boss') return base * 6;
-
-    return base;
-}
-
-
 function applyXp(crew, xp) {
     assert(
         Number.isInteger(xp) && xp >= 0,
@@ -875,7 +868,8 @@ function finalizeEncounterRewards(state, slainIds) {
         silver = encounter.foes.reduce(
                 (total, foe) => total + silverForKill(foe),
             0
-        );
+            );
+
 
     } else if (encounter.type === 'declared') {
         /*
@@ -890,9 +884,10 @@ function finalizeEncounterRewards(state, slainIds) {
         );
 
         silver = encounter.foes.reduce(
-            (total, foe) => total + silverForKill(foe),
+                (total, foe) => total + silverForKill(foe),
             0
         );
+
 
 
         for (const foe of encounter.foes) {
@@ -4015,13 +4010,6 @@ function resolveQuestSeed(test) {
         'quest requires state'
     );
 
-        const state = clone(test.state);
-    assert(
-        state.encounter &&
-        typeof state.encounter === 'object',
-        'quest requires state.encounter'
-    );
-
     const zone =
         test.zone ?? state.zone;
 
@@ -4050,6 +4038,10 @@ function resolveQuestSeed(test) {
     );
 
     const trigger = inquiryRecord || state.encounter;
+    assert(
+    trigger && typeof trigger === 'object',
+    'Quest offer requires an encounter or rumor inquiry'
+    );
 
     const sourceSeed = trigger.questSeed;
 

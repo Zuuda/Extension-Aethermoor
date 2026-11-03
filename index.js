@@ -3221,9 +3221,15 @@ assert(
 
         assert(
             activeQuest.terminalThreat &&
-            activeQuest.terminalThreat.revealed !== true &&
-            activeQuest.terminalThreat.resolved !== true,
-            'Quest terminal threat has already been revealed or resolved'
+            activeQuest.terminalThreat.resolved !== true &&
+            (
+                activeQuest.terminalThreat.revealed !== true ||
+                (
+                    state.encounter?.status === 'fled' &&
+                    state.encounter.questTerminal?.questId === activeQuest.id
+                )
+            ),
+            'Quest terminal threat cannot be spawned again'
         );
 
         assert(

@@ -949,6 +949,7 @@ function finalizeEncounterRewards(state, slainIds) {
         );
 
         xp = xpForKill(crew.level, foe);
+        silver = silverForKill(foe);
 
         const guaranteedGear =
             encounter.rewards.guaranteedGear;
@@ -4020,14 +4021,6 @@ function resolveQuestSeed(test) {
     );
 
     const state = clone(test.state);
-    state.gearGrantIds ||= {};
-
-assert(
-    state.gearGrantIds &&
-    typeof state.gearGrantIds === 'object' &&
-    !Array.isArray(state.gearGrantIds),
-    'Gear grant ID history must be an object'
-);
 
     state.inquiries ||= {};
 

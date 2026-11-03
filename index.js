@@ -66,10 +66,22 @@ function enemyTier(level) {
 }
 
 function nextXp(level) {
-    if (level < 10) return 250 * level;
-    if (level < 30) return 500 * level;
-    if (level < 50) return 1000 * level;
-    return 2000 * level;
+    int(level, 'level', 1);
+
+    if (level < 10) {
+        return 250 * level;
+    }
+
+    const targetPunchUpPacks =
+        10 + 0.3 * (level - 10);
+
+    const mixedPackXpAtTenLevelsAbove =
+        16 * (level + 10);
+
+    return Math.round(
+        targetPunchUpPacks *
+        mixedPackXpAtTenLevelsAbove
+    );
 }
 
 function mobStats(level, role) {

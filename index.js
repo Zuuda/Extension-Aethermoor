@@ -3711,9 +3711,9 @@ const eliteChance =
     }
     // Ordinary spawns are discoveries first. The player chooses when
     // to engage after the discovery has been narrated.
-    if (spawned.encounter.type !== 'quest_terminal') {
-        spawned.encounter.status = 'spotted';
-    }
+if (!questTerminal) {
+    spawned.encounter.status = 'spotted';
+}
 
     state.zone = test.zone;
     state.encounter = spawned.encounter;

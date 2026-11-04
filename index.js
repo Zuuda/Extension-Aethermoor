@@ -9166,13 +9166,15 @@ function formatCombatTurnResult(result) {
 
         if (exchange.frontlineDamage > 0) {
             lines.push(
-                `- Enemy pack dealt ${exchange.frontlineDamage} damage to Q'tik.`
+                `- Enemy pack dealt ${exchange.frontlineDamage} ` +
+                `damage to Q'tik.`
             );
         }
 
         if (exchange.backlineDamage > 0) {
             lines.push(
-                `- Enemies dealt ${exchange.backlineDamage} damage to Tansy.`
+                `- Enemies dealt ${exchange.backlineDamage} ` +
+                `damage to Tansy.`
             );
         }
 
@@ -9187,14 +9189,16 @@ function formatCombatTurnResult(result) {
         }
 
         lines.push(
-            `- HP: Q'tik ${exchange.qtikHp}; Tansy ${exchange.tansyHp}.`
+            `- HP: Q'tik ${exchange.qtikHp}; ` +
+            `Tansy ${exchange.tansyHp}.`
         );
         lines.push('');
     }
 
     for (const kill of result.kills || []) {
         lines.push(
-            `Slain: ${foeName(kill.id)} (${kill.role}, Lv ${kill.level}).`
+            `Slain: ${foeName(kill.id)} ` +
+            `(${kill.role}, Lv ${kill.level}).`
         );
     }
 
@@ -9214,6 +9218,29 @@ function formatCombatTurnResult(result) {
             `Encounter rewards: ${result.rewards.xp} XP, ` +
             `${result.rewards.silver}s.`
         );
+
+        for (const item of result.rewards.loot || []) {
+            lines.push(
+                `Loot: ${item.name} (${item.rarity}).`
+            );
+        }
+
+        const drop = result.rewards.packDrop;
+
+        if (drop?.result === 'auto_salvage_only') {
+            lines.push('Pack drop: no additional loot.');
+        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
+            lines.push(
+                'Pack drop: quest breadcrumb discovered.'
+            );
+        }
+    } else if (result.packCleared) {
+        lines.push(
+            'The encounter was cleared, but no encounter rewards ' +
+            'were applied.'
+        );
+    } else {
+        lines.push('Encounter rewards have not been applied.');
     }
 
     if (result.summary) {
@@ -9221,8 +9248,10 @@ function formatCombatTurnResult(result) {
             '',
             `Current state: Lv ${result.summary.level} ` +
             `(${result.summary.xp}/${result.summary.nextXp} XP), ` +
-            `Q'tik ${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP, ` +
-            `Tansy ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP, ` +
+            `Q'tik ${result.summary.qtikHp}/` +
+            `${result.summary.qtikMaxHp} HP, ` +
+            `Tansy ${result.summary.tansyHp}/` +
+            `${result.summary.tansyMaxHp} HP, ` +
             `revision ${result.summary.revision}.`
         );
     }

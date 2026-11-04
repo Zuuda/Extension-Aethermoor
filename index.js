@@ -7671,8 +7671,12 @@ async function runStoredMechanic(args) {
             pendingDiscovery: discoveryPacket
                 ? {
                     packet: discoveryPacket,
-                    encounterId: nextEncounter.id,
-                    status: 'spotted'
+                    encounterId: beganNewEncounter
+                        ? nextEncounter.id
+                        : null,
+                    status: beganNewEncounter
+                        ? 'spotted'
+                        : 'travel'
                 }
                 : stored.pendingDiscovery || null,
 

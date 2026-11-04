@@ -3163,7 +3163,38 @@ const PASSIVES = {
 };
 
 function spawnEncounter(test) {
-    const state = clone(test.state || {});
+    assert(
+        test.state && typeof test.state === 'object',
+        'spawn requires state'
+    );
+
+    const state = clone(test.state);
+
+    assert(state.crew, 'spawn requires state.crew');
+    assert(state.crew.qtik, 'spawn requires state.crew.qtik');
+    assert(state.crew.tansy, 'spawn requires state.crew.tansy');
+    assert(state.crew.weasels, 'spawn requires state.crew.weasels');
+    assert(state.crew.gear?.tansy, 'spawn requires state.crew.gear.tansy');
+    assert(state.crew.gear?.qtik, 'spawn requires state.crew.gear.qtik');
+
+    assert(
+        state.inventory &&
+        typeof state.inventory === 'object' &&
+        !Array.isArray(state.inventory),
+        'spawn requires top-level state.inventory; do not nest it inside state.crew'
+    );
+
+    state.inventory.bagReserves ??= [];
+    state.inventory.activeTradeListings ??= [];
+
+    assert(
+        Array.isArray(state.inventory.bagReserves),
+        'spawn requires state.inventory.bagReserves to be an array'
+    );
+    assert(
+        Array.isArray(state.inventory.activeTradeListings),
+        'spawn requires state.inventory.activeTradeListings to be an array'
+    );
 
     // Spawn callers may provide the zone directly or rely on the saved state.
     const zone = test.zone ?? state.zone;
@@ -3599,20 +3630,9 @@ const eliteChance =
             zone: questTerminal.zone
         };
     }
-    assert(
-    state.crew?.qtik &&
-    state.crew?.tansy &&
-    state.crew?.weasels &&
-    state.crew?.gear?.tansy &&
-    state.crew?.gear?.qtik &&
-    state.inventory &&
-    typeof state.inventory === 'object',
-    'Spawn requires complete crew and inventory state'
-);
-
-state.zone = test.zone;
-state.encounter = spawned.encounter;
-validate(state);
+    state.zone = test.zone;
+    state.encounter = spawned.encounter;
+    validate(state);
 
     return {
 

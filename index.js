@@ -9229,51 +9229,130 @@ async function openCombatPanel() {
     panel.append(controls, resultBox);
 }
 
-function registerCombatNarrationMacro() {
-    const { macros } = getContext();
+const AETHERMOOR_HANDOFF_MARKER =
+    '<aethermoor-mechanics-handoff>';
 
-    if (!macros?.register) {
-        console.warn('Aethermoor: SillyTavern macros API unavailable');
-        return;
+let aethermoorInjectedHandoff = null;
+
+function getPendingAethermoorHandoff() {
+    const stored = getContext()
+        .chatMetadata?.[AETHERMOOR_METADATA_KEY];
+
+    if (stored?.pendingDiscovery?.packet) {
+        return {
+            type: 'discovery',
+            packet: stored.pendingDiscovery.packet
+        };
     }
 
-    macros.register('aethermoorCombatResolution', {
-        description: 'Latest resolved Aethermoor combat turn',
-        handler: () => {
-            const pending =
-                getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ?.pendingNarration;
+    if (stored?.pendingNarration?.packet) {
+        return {
+            type: 'combat',
+            packet: stored.pendingNarration.packet
+        };
+    }
 
-            return pending?.packet || '';
-        }
-    });
+    return null;
 }
 
-function clearCombatNarrationAfterGeneration() {
+function makeAethermoorHandoffMessage(handoff) {
+    return {
+        is_user: false,
+        is_system: true,
+        name: 'Aethermoor Mechanics',
+        send_date: Date.now(),
+        mes:
+            `${AETHERMOOR_HANDOFF_MARKER}\n` +
+            `The following ${handoff.type} facts are authoritative.\n` +
+            `Use them to write the next scene. Do not invent or alter ` +
+            `mechanical results.\n\n` +
+            handoff.packet +
+            `\n${AETHERMOOR_HANDOFF_MARKER}`
+    };
+}
+
+function findLastUserMessage(chat) {
+    for (let index = chat.length - 1; index >= 0; index--) {
+        if (chat[index]?.is_user) return index;
+    }
+
+    return -1;
+}
+
+function removeAethermoorHandoffFromChat(chat) {
+    if (!Array.isArray(chat)) return;
+
+    for (let index = chat.length - 1; index >= 0; index--) {
+        const message = chat[index];
+        if (
+            typeof message?.mes === 'string' &&
+            message.mes.includes(AETHERMOOR_HANDOFF_MARKER)
+        ) {
+            chat.splice(index, 1);
+        }
+    }
+}
+
+globalThis.aethermoorMechanicsInterceptor =
+    async function (chat) {
+        const handoff = getPendingAethermoorHandoff();
+
+        if (!handoff || !Array.isArray(chat)) return;
+
+        // Do not insert the same handoff twice if ST invokes the
+        // interceptor more than once during one generation request.
+        removeAethermoorHandoffFromChat(chat);
+
+        const message = makeAethermoorHandoffMessage(handoff);
+        const lastUserIndex = findLastUserMessage(chat);
+        const insertionIndex = lastUserIndex >= 0
+            ? lastUserIndex + 1
+            : chat.length;
+
+        chat.splice(insertionIndex, 0, message);
+
+        aethermoorInjectedHandoff = {
+            chat,
+            message
+        };
+    };
+
+function registerAethermoorGenerationCleanup() {
     const { eventSource, event_types } = getContext();
 
     if (!eventSource || !event_types?.GENERATION_ENDED) {
         console.warn(
-            'Aethermoor: generation completion event unavailable; ' +
-            'combat packet will remain in chat metadata'
+            'Aethermoor: GENERATION_ENDED is unavailable; ' +
+            'temporary handoff cleanup is disabled'
         );
         return;
     }
 
     eventSource.on(event_types.GENERATION_ENDED, async () => {
+        const injected = aethermoorInjectedHandoff;
+
+        if (injected?.chat) {
+            removeAethermoorHandoffFromChat(injected.chat);
+        }
+
         const context = getContext();
-        const metadata = context.chatMetadata;
-        const stored = metadata?.[AETHERMOOR_METADATA_KEY];
+        const stored = context.chatMetadata?.[AETHERMOOR_METADATA_KEY];
 
-        if (!stored?.pendingNarration) return;
+        if (stored?.pendingDiscovery) {
+            delete stored.pendingDiscovery;
+        }
 
-        delete stored.pendingNarration;
+        if (stored?.pendingNarration) {
+            delete stored.pendingNarration;
+        }
+
+        aethermoorInjectedHandoff = null;
 
         try {
             await context.saveMetadata();
         } catch (error) {
             console.error(
-                'Aethermoor: Could not clear consumed combat narration',
+                'Aethermoor: Could not clear consumed mechanics handoff',
                 error
             );
         }
@@ -9282,8 +9361,6 @@ function clearCombatNarrationAfterGeneration() {
 
 jQuery(function () {
     registerAethermoorTools();
-    registerCombatNarrationMacro();
-    clearCombatNarrationAfterGeneration();
+    registerAethermoorGenerationCleanup();
     createCombatController();
 });
-

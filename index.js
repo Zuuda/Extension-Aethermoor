@@ -7548,7 +7548,7 @@ function combatNarrationPacket(result, actions) {
         } else if (drop?.result === 'diegetic_quest_breadcrumb') {
             lines.push('Pack drop: quest breadcrumb discovered.');
         }
-    
+    }
         for (const item of result.rewards.loot || []) {
             lines.push(`Loot acquired: ${item.name} (${item.rarity}).`);
         }

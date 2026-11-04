@@ -9770,6 +9770,7 @@ const AETHERMOOR_HANDOFF_MARKER =
     '<aethermoor-mechanics-handoff>';
 
 let aethermoorInjectedHandoff = null;
+let aethermoorGenerationReceived = false;
 
 function getPendingAethermoorHandoffs() {
     const context = getContext();
@@ -9895,12 +9896,15 @@ globalThis.aethermoorMechanicsInterceptor =
             message
         );
 
+        aethermoorGenerationReceived = false;
+
         aethermoorInjectedHandoff = {
             chat,
             message,
             metadata,
             ids: entries.map(entry => entry.id)
         };
+
 
         console.log(
             '[Aethermoor] Injected ordered mechanics handoff',
@@ -9915,16 +9919,43 @@ globalThis.aethermoorMechanicsInterceptor =
 function registerAethermoorGenerationCleanup() {
     const { eventSource, event_types } = getContext();
 
-    if (!eventSource || !event_types?.GENERATION_ENDED) {
+    if (!eventSource || !event_types) {
         console.warn(
-            'Aethermoor: GENERATION_ENDED unavailable; ' +
+            'Aethermoor: SillyTavern event API unavailable; ' +
             'handoff cleanup disabled'
         );
         return;
     }
 
-    eventSource.on(event_types.GENERATION_ENDED, async () => {
+    const receivedEvent = event_types.MESSAGE_RECEIVED;
+    const endedEvent = event_types.GENERATION_ENDED;
+
+    if (!receivedEvent || !endedEvent) {
+        console.warn(
+            'Aethermoor: Required generation events unavailable; ' +
+            'handoff cleanup disabled'
+        );
+        return;
+    }
+
+    eventSource.on(receivedEvent, () => {
+        if (!aethermoorInjectedHandoff) return;
+
+        /*
+         * MESSAGE_RECEIVED means SillyTavern recorded an assistant
+         * response. The queued facts may now be consumed safely.
+         */
+        aethermoorGenerationReceived = true;
+
+        console.log(
+            '[Aethermoor] Assistant reply recorded; ' +
+            'handoff may be consumed'
+        );
+    });
+
+    eventSource.on(endedEvent, async () => {
         const injected = aethermoorInjectedHandoff;
+
         if (!injected) return;
 
         removeAethermoorHandoffFromChat(
@@ -9932,11 +9963,26 @@ function registerAethermoorGenerationCleanup() {
             injected.message
         );
 
+        /*
+         * A stopped or failed generation must leave the queue intact.
+         * The next generation can inject the same facts again.
+         */
+        if (!aethermoorGenerationReceived) {
+            console.warn(
+                '[Aethermoor] Generation ended without an assistant reply; ' +
+                'handoff preserved'
+            );
+
+            aethermoorInjectedHandoff = null;
+            return;
+        }
+
         const stored =
             injected.metadata?.[AETHERMOOR_METADATA_KEY];
 
         if (!stored) {
             aethermoorInjectedHandoff = null;
+            aethermoorGenerationReceived = false;
             return;
         }
 
@@ -9947,31 +9993,41 @@ function registerAethermoorGenerationCleanup() {
             entry => !consumedIds.has(entry.id)
         );
 
-        // Clear only legacy fields that were included in this injection.
         if (consumedIds.has('legacy-combat')) {
             delete stored.pendingNarration;
         }
+
         if (consumedIds.has('legacy-discovery')) {
             delete stored.pendingDiscovery;
         }
 
-        aethermoorInjectedHandoff = null;
-
         try {
-            // Save only if this is still the selected chat. If the user
-            // switched chats, the referenced metadata object is updated
-            // in memory but must not be saved into the new chat.
+            /*
+             * Save only if this is still the chat from which the
+             * generation started.
+             */
             if (getContext().chatMetadata === injected.metadata) {
                 await getContext().saveMetadata();
             }
+
+            console.log(
+                '[Aethermoor] Consumed ordered mechanics handoff',
+                {
+                    ids: injected.ids
+                }
+            );
         } catch (error) {
             console.error(
                 '[Aethermoor] Could not save handoff cleanup',
                 error
             );
+        } finally {
+            aethermoorInjectedHandoff = null;
+            aethermoorGenerationReceived = false;
         }
     });
 }
+
 
 jQuery(function () {
     try {

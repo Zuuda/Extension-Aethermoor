@@ -8518,16 +8518,33 @@ function addCombatPanelStyles() {
             flex-wrap: wrap;
             gap: 6px;
         }
-        .aethermoor-combat-choice {
+        .aethermoor-combat-panel .aethermoor-combat-choice {
             display: inline-flex;
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 90px;
+            max-width: 100%;
+            height: auto;
+            padding: 8px 12px;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 2px;
+            gap: 3px;
             text-align: center;
             white-space: normal;
+            word-break: normal;
+            overflow-wrap: normal;
             line-height: 1.25;
         }
+        .aethermoor-combat-choice-title,
+        .aethermoor-combat-choice-detail {
+            white-space: nowrap;
+        }
+        .aethermoor-combat-choice-telegraph {
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
         .aethermoor-combat-choice[aria-pressed="true"] {
             outline: 2px solid var(--SmartThemeQuoteColor, #4ade80);
             outline-offset: 1px;
@@ -8564,52 +8581,71 @@ function addCombatPanelStyles() {
     document.head.appendChild(style);
 }
 
-header.append(title, closeButton);
-header.addEventListener('pointerdown', event => {
-    if (
-        event.button !== 0 ||
-        event.target.closest('button')
-    ) {
-        return;
-    }
+function enableCombatPanelDragging(header, panel) {
+    header.addEventListener('pointerdown', event => {
+        if (
+            event.button !== 0 ||
+            event.target.closest('button')
+        ) {
+            return;
+        }
 
-    const rect = panel.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left;
-    const offsetY = event.clientY - rect.top;
+        event.preventDefault();
 
-    panel.style.left = `${rect.left}px`;
-    panel.style.top = `${rect.top}px`;
-    panel.style.right = 'auto';
-    panel.style.bottom = 'auto';
+        const rect = panel.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+        const pointerId = event.pointerId;
 
-    function movePanel(moveEvent) {
-        const left = Math.max(
-            0,
-            Math.min(
-                window.innerWidth - panel.offsetWidth,
-                moveEvent.clientX - offsetX
-            )
-        );
-        const top = Math.max(
-            0,
-            Math.min(
-                window.innerHeight - panel.offsetHeight,
-                moveEvent.clientY - offsetY
-            )
-        );
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
 
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-    }
+        header.setPointerCapture(pointerId);
 
-    function stopMoving() {
-        document.removeEventListener('pointermove', movePanel);
-        document.removeEventListener('pointerup', stopMoving);
-    }
+        function movePanel(moveEvent) {
+            if (moveEvent.pointerId !== pointerId) return;
 
-    document.addEventListener('pointermove', movePanel);
-    document.addEventListener('pointerup', stopMoving, { once: true });
-});
+            const maxLeft = Math.max(
+                0,
+                window.innerWidth - panel.offsetWidth
+            );
+            const maxTop = Math.max(
+                0,
+                window.innerHeight - panel.offsetHeight
+            );
+
+            panel.style.left = `${Math.max(
+                0,
+                Math.min(maxLeft, moveEvent.clientX - offsetX)
+            )}px`;
+
+            panel.style.top = `${Math.max(
+                0,
+                Math.min(maxTop, moveEvent.clientY - offsetY)
+            )}px`;
+        }
+
+        function stopMoving(stopEvent) {
+            if (stopEvent.pointerId !== pointerId) return;
+
+            header.removeEventListener('pointermove', movePanel);
+            header.removeEventListener('pointerup', stopMoving);
+            header.removeEventListener('pointercancel', stopMoving);
+            header.removeEventListener('lostpointercapture', stopMoving);
+
+            if (header.hasPointerCapture(pointerId)) {
+                header.releasePointerCapture(pointerId);
+            }
+        }
+
+        header.addEventListener('pointermove', movePanel);
+        header.addEventListener('pointerup', stopMoving);
+        header.addEventListener('pointercancel', stopMoving);
+        header.addEventListener('lostpointercapture', stopMoving);
+    });
+}
 
 function formatCombatTurnResult(result) {
     const lines = [
@@ -8744,8 +8780,10 @@ async function openCombatPanel() {
     });
 
     header.append(title, closeButton);
+    enableCombatPanelDragging(header, panel);
 
     const status = document.createElement('pre');
+
     status.className = 'aethermoor-combat-status';
     status.textContent = combatStatusText(state, snapshot.revision);
 
@@ -8803,18 +8841,17 @@ async function openCombatPanel() {
         value => { combatSelections.tansy = value; }
     );
 
-    const targetGroup = makeChoiceGroup(
+    let targetGroup = makeChoiceGroup(
         'Target',
         'target',
-livingFoes.map(foe => ({
-    value: foe.id,
-    label: foe.label,
-    detail: `${foe.hp}/${foe.maxHp} HP`,
-    telegraph: foe.nextTelegraph
-        ? telegraphLabel(foe.nextTelegraph)
-        : null
-}))
-
+        livingFoes.map(foe => ({
+            value: foe.id,
+            label: foe.name || foe.label,
+            detail: `${foe.hp}/${foe.maxHp} HP`,
+            telegraph: foe.nextTelegraph
+                ? telegraphLabel(foe.nextTelegraph)
+                : null
+        })),
         combatSelections.target,
         value => { combatSelections.target = value; }
     );
@@ -8882,21 +8919,22 @@ livingFoes.map(foe => ({
                 const newTargetGroup = makeChoiceGroup(
                     'Target',
                     'target',
-                refreshedLiving.map(foe => ({
-                    value: foe.id,
-                    label: foe.label,
-                    detail: `${foe.hp}/${foe.maxHp} HP`,
-                    telegraph: foe.nextTelegraph
-                    ? telegraphLabel(foe.nextTelegraph)
-                    : null
-        }))
-
+                    refreshedLiving.map(foe => ({
+                        value: foe.id,
+                        label: foe.name || foe.label,
+                        detail: `${foe.hp}/${foe.maxHp} HP`,
+                        telegraph: foe.nextTelegraph
+                            ? telegraphLabel(foe.nextTelegraph)
+                            : null
+                    })),
                     combatSelections.target,
                     value => { combatSelections.target = value; }
                 );
 
                 targetGroup.replaceWith(newTargetGroup);
+                targetGroup = newTargetGroup;
             }
+            
         } catch (error) {
             resultBox.textContent =
                 `Turn was not resolved: ${

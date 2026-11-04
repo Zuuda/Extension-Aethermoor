@@ -9255,6 +9255,24 @@ function formatCombatTurnResult(result) {
             `${result.summary.tansyMaxHp} HP, ` +
             `revision ${result.summary.revision}.`
         );
+
+        const living = (result.summary.encounter?.foes || [])
+            .filter(foe => foe.hp > 0);
+
+        lines.push(
+            living.length
+                ? `Living foes: ${living.map(foe => {
+                    const originalIndex = roster.findIndex(
+                        entry => entry.id === foe.id
+                    );
+
+                    return (
+                        `${combatFoeLabel(foe, originalIndex)} ` +
+                        `at ${foe.hp}/${foe.maxHp} HP`
+                    );
+                }).join('; ')}.`
+                : 'No foes remain alive.'
+        );
     }
 
     return lines.join('\n');

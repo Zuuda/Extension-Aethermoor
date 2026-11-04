@@ -5,6 +5,7 @@
   "optional": [],
   "dependencies": [],
   "js": "index.js",
+  "generate_interceptor": "aethermoorMechanicsInterceptor",
   "author": "Aethermoor",
   "version": "0.2.0"
 }

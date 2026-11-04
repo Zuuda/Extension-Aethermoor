@@ -9318,14 +9318,7 @@ globalThis.aethermoorMechanicsInterceptor =
         };
 
         console.debug(
-            '[Aethermoor] Injected mechanics handoff',
-        {
-            type: handoff.type,
-            packet: handoff.packet
-        }
-);
-
-function registerAethermoorGenerationCleanup() {
+'[Aethermoor] Injected mechanics handoff',
     const { eventSource, event_types } = getContext();
 
     if (!eventSource || !event_types?.GENERATION_ENDED) {

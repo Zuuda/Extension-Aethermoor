@@ -7197,7 +7197,26 @@ function resolveBatch(args) {
                     };
                     break;
                 }
+                case 'avoid': {
+                    const state = clone(test.state);
+                    assert(
+                        state.encounter?.status === 'spotted',
+                        'There is no spotted encounter to avoid'
+                    );
 
+                    state.encounter.status = 'fled';
+                    state.encounter.spottedDisposition = 'avoided';
+
+                    result = {
+                        ok: true,
+                        action: 'avoid',
+                        created: true,
+                        encounterId: state.encounter.id,
+                        state
+                    };
+                    break;
+                }
+                    
                 case 'turn':
                     assert(
                         test.state &&
@@ -7581,6 +7600,14 @@ function questOfferNarrationPacket(quest) {
     ].join('\n');
 }
 
+function avoidEncounterNarrationPacket(encounter) {
+    return [
+        `The crew chose to avoid spotted encounter ${encounter.id}.`,
+        'Combat did not begin. No combat rewards were earned.',
+        'Narrate the crew leaving or bypassing the group in a way consistent with the user’s stated approach. Do not claim the enemies were defeated.'
+    ].join('\n');
+}
+
 function combatNarrationPacket(result, actions) {
     const qtikActions = {
         fire_melee: 'Fire Melee',
@@ -7946,11 +7973,14 @@ async function runStoredMechanic(args) {
         const discoveryPacket = beganNewEncounter
             ? discoveryNarrationPacket(nextEncounter)
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
-              caseResult.created && caseResult.quest
+              caseResult.created && caseResult.quest        
                 ? questOfferNarrationPacket(caseResult.quest)
-                : batch && oneCase?.kind === 'travel' && caseResult.created
-                    ? travelNarrationPacket(caseResult)
-                    : null;
+             : batch && oneCase?.kind === 'avoid' &&
+              caseResult.created
+                ? avoidEncounterNarrationPacket(nextEncounter)
+             : batch && oneCase?.kind === 'travel' && caseResult.created
+               ? travelNarrationPacket(caseResult)
+               : null;
 
         const handoffQueue = migrateAethermoorHandoffs(stored);
 
@@ -8474,6 +8504,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'engage',
+                                    'avoid',
                                     'turn',
                                     'reference',
                                     'world_seeds',
@@ -9639,6 +9670,50 @@ async function openCombatPanel() {
         });
 
         actionsRow.appendChild(engageButton);
+                const avoidButton = document.createElement('button');
+        avoidButton.type = 'button';
+        avoidButton.className = 'menu_button';
+        avoidButton.textContent = 'Avoid';
+
+        avoidButton.addEventListener('click', async () => {
+            avoidButton.disabled = true;
+
+            try {
+                const output = await runStoredMechanic({
+                    cases: [{
+                        name: 'avoid_spotted_encounter',
+                        kind: 'avoid'
+                    }]
+                });
+
+                assert(
+                    output?.ok === true,
+                    output?.results?.[0]?.error ||
+                        'Could not avoid encounter'
+                );
+
+                const updated = await readStoredCombatState();
+                status.textContent = combatStatusText(
+                    updated.state,
+                    updated.revision
+                );
+
+                message.textContent =
+                    'Encounter avoided. Generate the next scene to narrate the escape.';
+                engageButton.remove();
+                avoidButton.remove();
+            } catch (error) {
+                toastr.error(
+                    error instanceof Error
+                        ? error.message
+                        : String(error),
+                    'Aethermoor'
+                );
+                avoidButton.disabled = false;
+            }
+        });
+
+        actionsRow.appendChild(avoidButton);
         panel.appendChild(actionsRow);
         return;
     }

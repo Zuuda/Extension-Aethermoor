@@ -7199,6 +7199,94 @@ function stateSummary(state, revision) {
             state.inventory.activeTradeListings.length
     };
 }
+function combatNarrationPacket(result) {
+    const lines = [
+        `Aethermoor combat turn ${result.turn} has resolved.`,
+        'Treat these outcomes as authoritative. Do not change actions, damage, HP, effects, kills, or rewards.'
+    ];
+
+    for (const exchange of result.exchanges || []) {
+        lines.push(`Exchange ${exchange.exchange}:`);
+
+        if (exchange.hits?.length) {
+            for (const hit of exchange.hits) {
+                lines.push(
+                    `The crew dealt ${hit.damage} damage to ${hit.id}; ` +
+                    `it now has ${hit.hp} HP.`
+                );
+            }
+        }
+
+        if (exchange.enemyMiss === true) {
+            lines.push('The enemy attack missed.');
+        } else {
+            if (exchange.frontlineDamage > 0) {
+                lines.push(
+                    `The enemy pack dealt ${exchange.frontlineDamage} ` +
+                    `damage to Q'tik.`
+                );
+            }
+            if (exchange.backlineDamage > 0) {
+                lines.push(
+                    `Enemies dealt ${exchange.backlineDamage} ` +
+                    `damage to Tansy.`
+                );
+            }
+        }
+
+        if (exchange.effectiveRegen > 0) {
+            lines.push(
+                `Q'tik regenerated ${exchange.effectiveRegen} HP.`
+            );
+        }
+
+        for (const effect of exchange.effects || []) {
+            lines.push(`Effect: ${effect}.`);
+        }
+
+        lines.push(
+            `After this exchange: Q'tik ${exchange.qtikHp} HP; ` +
+            `Tansy ${exchange.tansyHp} HP.`
+        );
+    }
+
+    for (const kill of result.kills || []) {
+        lines.push(
+            `${kill.id} (${kill.role}, level ${kill.level}) was slain.`
+        );
+    }
+
+    if (result.rewards?.applied) {
+        lines.push(
+            `Encounter rewards applied: ${result.rewards.xp} XP and ` +
+            `${result.rewards.silver} silver.`
+        );
+    } else {
+        lines.push('Encounter rewards have not been applied.');
+    }
+
+    if (result.summary) {
+        lines.push(
+            `Current crew state: level ${result.summary.level}, ` +
+            `${result.summary.xp}/${result.summary.nextXp} XP; ` +
+            `Q'tik ${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP; ` +
+            `Tansy ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP.`
+        );
+
+        const foes = result.summary.encounter?.foes || [];
+        const living = foes.filter(foe => foe.hp > 0);
+
+        lines.push(
+            living.length
+                ? `Living foes: ${living.map(foe =>
+                    `${foe.id} (${foe.role}) at ${foe.hp}/${foe.maxHp} HP`
+                ).join('; ')}.`
+                : 'No foes remain alive.'
+        );
+    }
+
+    return lines.join('\n');
+}
 
 async function runStoredMechanic(args) {
     return queueAethermoor(async () => {
@@ -7330,13 +7418,29 @@ async function runStoredMechanic(args) {
         const previous = metadata[AETHERMOOR_METADATA_KEY];
         const revision = previous.revision + 1;
 
+        const isCombatTurn = batch
+            ? oneCase?.kind === 'turn'
+            : Boolean(args.actions);
+
+        const narrationPacket = isCombatTurn
+            ? combatNarrationPacket(caseResult)
+            : null;
+
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,
-            state: nextState
+            state: nextState,
+            pendingNarration: narrationPacket
+                ? {
+                    packet: narrationPacket,
+                    encounterId: nextState.encounter?.id || null,
+                    turn: caseResult.turn
+                }
+                : stored.pendingNarration || null
         };
 
         try {
             await context.saveMetadata();
+
         } catch (error) {
             metadata[AETHERMOOR_METADATA_KEY] = previous;
             throw error;
@@ -8956,3 +9060,40 @@ jQuery(function () {
     registerAethermoorTools();
     createCombatController();
 });
+globalThis.aethermoorCombatNarrationInterceptor =
+    async function (chat) {
+        const stored =
+            getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY];
+
+        const pending = stored?.pendingNarration;
+        if (!pending?.packet || !Array.isArray(chat)) return;
+
+        const message = {
+            is_user: false,
+            is_system: true,
+            name: 'Aethermoor Combat Resolution',
+            send_date: Date.now(),
+            mes:
+                '<aethermoor-combat-resolution>\n' +
+                pending.packet +
+                '\n</aethermoor-combat-resolution>'
+        };
+
+        const lastUserIndex = chat.findLastIndex
+            ? chat.findLastIndex(entry => entry?.is_user)
+            : (() => {
+                for (let index = chat.length - 1; index >= 0; index--) {
+                    if (chat[index]?.is_user) return index;
+                }
+                return -1;
+            })();
+
+        chat.splice(
+            lastUserIndex >= 0 ? lastUserIndex : chat.length,
+            0,
+            message
+        );
+
+        delete stored.pendingNarration;
+        await getContext().saveMetadata();
+    };

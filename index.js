@@ -7199,39 +7199,73 @@ function stateSummary(state, revision) {
             state.inventory.activeTradeListings.length
     };
 }
-function combatNarrationPacket(result) {
+function combatNarrationPacket(result, actions) {
+    const qtikActions = {
+        fire_melee: 'Fire Melee',
+        ice_melee: 'Ice Melee',
+        stun: 'Stun',
+        ice_patch: 'Ice Patch',
+        frost_stomp: 'Frost Stomp',
+        drink: 'Drink'
+    };
+
+    const tansyActions = {
+        visor: 'Point: Visor',
+        vitals: 'Point: Vitals',
+        hamstring: 'Point: Hamstring',
+        recall: 'Recall',
+        surge: 'Surge',
+        drink: 'Drink',
+        raise_shadow: 'Raise Shadow'
+    };
+
+    const foeNames = new Map();
+    const foeCounts = {};
+
+    for (const foe of result.summary?.encounter?.foes || []) {
+        foeCounts[foe.role] = (foeCounts[foe.role] || 0) + 1;
+        foeNames.set(
+            foe.id,
+            `${foe.role} ${foeCounts[foe.role]}`
+        );
+    }
+
+    const foeName = id => foeNames.get(id) || id;
     const lines = [
         `Aethermoor combat turn ${result.turn} has resolved.`,
-        'Treat these outcomes as authoritative. Do not change actions, damage, HP, effects, kills, or rewards.'
-    ];
+        `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
+        `Tansy used ${tansyActions[actions?.tansy] || actions?.tansy || 'a command'}.`,
+        actions?.target
+            ? `The selected target was ${foeName(actions.target)}.`
+            : '',
+        'The mechanics results below are authoritative. Do not change actions, damage, HP, effects, kills, or rewards.'
+    ].filter(Boolean);
 
     for (const exchange of result.exchanges || []) {
         lines.push(`Exchange ${exchange.exchange}:`);
 
-        if (exchange.hits?.length) {
-            for (const hit of exchange.hits) {
-                lines.push(
-                    `The crew dealt ${hit.damage} damage to ${hit.id}; ` +
-                    `it now has ${hit.hp} HP.`
-                );
-            }
+        for (const hit of exchange.hits || []) {
+            lines.push(
+                `The crew dealt ${hit.damage} damage to ${foeName(hit.id)}; ` +
+                `it now has ${hit.hp} HP.`
+            );
         }
 
         if (exchange.enemyMiss === true) {
             lines.push('The enemy attack missed.');
-        } else {
-            if (exchange.frontlineDamage > 0) {
-                lines.push(
-                    `The enemy pack dealt ${exchange.frontlineDamage} ` +
-                    `damage to Q'tik.`
-                );
-            }
-            if (exchange.backlineDamage > 0) {
-                lines.push(
-                    `Enemies dealt ${exchange.backlineDamage} ` +
-                    `damage to Tansy.`
-                );
-            }
+        }
+
+        if (exchange.frontlineDamage > 0) {
+            lines.push(
+                `The enemy pack dealt ${exchange.frontlineDamage} ` +
+                `damage to Q'tik.`
+            );
+        }
+
+        if (exchange.backlineDamage > 0) {
+            lines.push(
+                `Enemies dealt ${exchange.backlineDamage} damage to Tansy.`
+            );
         }
 
         if (exchange.effectiveRegen > 0) {
@@ -7252,7 +7286,7 @@ function combatNarrationPacket(result) {
 
     for (const kill of result.kills || []) {
         lines.push(
-            `${kill.id} (${kill.role}, level ${kill.level}) was slain.`
+            `${foeName(kill.id)} was slain.`
         );
     }
 
@@ -7273,13 +7307,13 @@ function combatNarrationPacket(result) {
             `Tansy ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP.`
         );
 
-        const foes = result.summary.encounter?.foes || [];
-        const living = foes.filter(foe => foe.hp > 0);
+        const living = (result.summary.encounter?.foes || [])
+            .filter(foe => foe.hp > 0);
 
         lines.push(
             living.length
                 ? `Living foes: ${living.map(foe =>
-                    `${foe.id} (${foe.role}) at ${foe.hp}/${foe.maxHp} HP`
+                    `${foeName(foe.id)} at ${foe.hp}/${foe.maxHp} HP`
                 ).join('; ')}.`
                 : 'No foes remain alive.'
         );
@@ -7287,6 +7321,7 @@ function combatNarrationPacket(result) {
 
     return lines.join('\n');
 }
+
 
 async function runStoredMechanic(args) {
     return queueAethermoor(async () => {
@@ -7423,10 +7458,13 @@ async function runStoredMechanic(args) {
             : Boolean(args.actions);
 
         const narrationPacket = isCombatTurn
-            ? combatNarrationPacket({
-                ...caseResult,
-                summary: stateSummary(nextState, revision)
-            })
+            ? combatNarrationPacket(
+                {
+                    ...caseResult,
+                    summary: stateSummary(nextState, revision)
+                },
+                batch ? oneCase.actions : args.actions
+            )
             : null;
 
         metadata[AETHERMOOR_METADATA_KEY] = {

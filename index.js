@@ -9313,9 +9313,17 @@ globalThis.aethermoorMechanicsInterceptor =
 
         aethermoorInjectedHandoff = {
             chat,
-            message
+            message,
+            handoffType: handoff.type
         };
-    };
+
+        console.debug(
+            '[Aethermoor] Injected mechanics handoff',
+        {
+            type: handoff.type,
+            packet: handoff.packet
+        }
+);
 
 function registerAethermoorGenerationCleanup() {
     const { eventSource, event_types } = getContext();
@@ -9331,28 +9339,51 @@ function registerAethermoorGenerationCleanup() {
     eventSource.on(event_types.GENERATION_ENDED, async () => {
         const injected = aethermoorInjectedHandoff;
 
-        if (injected?.chat) {
-            removeAethermoorHandoffFromChat(injected.chat);
+        console.debug(
+            '[Aethermoor] GENERATION_ENDED',
+            {
+                handoffWasInjected: Boolean(injected),
+                handoffType: injected?.handoffType || null
+            }
+        );
+
+        /*
+         * Do not consume pending facts unless this interceptor actually
+         * inserted them into the generation chat.
+         */
+        if (!injected?.chat) {
+            console.warn(
+                '[Aethermoor] Generation ended without an injected handoff. ' +
+                'Pending mechanics facts were preserved.'
+            );
+            return;
         }
+
+        removeAethermoorHandoffFromChat(injected.chat);
 
         const context = getContext();
-        const stored = context.chatMetadata?.[AETHERMOOR_METADATA_KEY];
+        const stored =
+            context.chatMetadata?.[AETHERMOOR_METADATA_KEY];
 
-        if (stored?.pendingDiscovery) {
-            delete stored.pendingDiscovery;
+        if (injected.handoffType === 'discovery') {
+            delete stored?.pendingDiscovery;
         }
 
-        if (stored?.pendingNarration) {
-            delete stored.pendingNarration;
+        if (injected.handoffType === 'combat') {
+            delete stored?.pendingNarration;
         }
 
         aethermoorInjectedHandoff = null;
 
         try {
             await context.saveMetadata();
+
+            console.debug(
+                '[Aethermoor] Consumed injected mechanics handoff'
+            );
         } catch (error) {
             console.error(
-                'Aethermoor: Could not clear consumed mechanics handoff',
+                '[Aethermoor] Could not clear consumed mechanics handoff',
                 error
             );
         }

@@ -3767,6 +3767,7 @@ function resolveTravelStep(test) {
 
     const outcome = {
         stepId: test.stepId,
+        zone: state.zone,
         travelRoll,
         event,
         encounterId: null,

@@ -7423,7 +7423,10 @@ async function runStoredMechanic(args) {
             : Boolean(args.actions);
 
         const narrationPacket = isCombatTurn
-            ? combatNarrationPacket(caseResult)
+            ? combatNarrationPacket({
+                ...caseResult,
+                summary: stateSummary(nextState, revision)
+            })
             : null;
 
         metadata[AETHERMOOR_METADATA_KEY] = {
@@ -8741,6 +8744,7 @@ function enableCombatPanelDragging(header, panel) {
 
             if (header.hasPointerCapture(pointerId)) {
                 header.releasePointerCapture(pointerId);
+                saveCombatPanelGeometry(panel);
             }
         }
 
@@ -8824,6 +8828,63 @@ function formatCombatTurnResult(result) {
 
     return lines.join('\n');
 }
+const COMBAT_PANEL_GEOMETRY_KEY = 'aethermoorCombatPanelGeometry';
+
+function restoreCombatPanelGeometry(panel) {
+    try {
+        const saved = JSON.parse(
+            localStorage.getItem(COMBAT_PANEL_GEOMETRY_KEY) || 'null'
+        );
+
+        if (
+            !saved ||
+            !Number.isFinite(saved.left) ||
+            !Number.isFinite(saved.top) ||
+            !Number.isFinite(saved.width) ||
+            !Number.isFinite(saved.height)
+        ) {
+            return;
+        }
+
+        const width = Math.max(
+            300,
+            Math.min(saved.width, window.innerWidth - 24)
+        );
+        const height = Math.max(
+            300,
+            Math.min(saved.height, window.innerHeight - 24)
+        );
+
+        panel.style.left =
+            `${Math.max(0, Math.min(saved.left, window.innerWidth - width))}px`;
+        panel.style.top =
+            `${Math.max(0, Math.min(saved.top, window.innerHeight - height))}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.width = `${width}px`;
+        panel.style.height = `${height}px`;
+    } catch (error) {
+        console.warn('Aethermoor: Could not restore combat panel geometry', error);
+    }
+}
+
+function saveCombatPanelGeometry(panel) {
+    const rect = panel.getBoundingClientRect();
+
+    try {
+        localStorage.setItem(
+            COMBAT_PANEL_GEOMETRY_KEY,
+            JSON.stringify({
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            })
+        );
+    } catch (error) {
+        console.warn('Aethermoor: Could not save combat panel geometry', error);
+    }
+}
 
 async function openCombatPanel() {
     addCombatPanelStyles();
@@ -8859,7 +8920,15 @@ async function openCombatPanel() {
         combatPanelElement.className = 'aethermoor-combat-panel';
         combatPanelElement.setAttribute('role', 'region');
         combatPanelElement.setAttribute('aria-label', 'Aethermoor Combat');
-        document.body.appendChild(combatPanelElement);
+                document.body.appendChild(combatPanelElement);
+        restoreCombatPanelGeometry(combatPanelElement);
+
+        combatPanelElement.addEventListener('pointerup', () => {
+            setTimeout(
+                () => saveCombatPanelGeometry(combatPanelElement),
+                0
+            );
+        });
     }
 
     const panel = combatPanelElement;

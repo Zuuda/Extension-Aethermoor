@@ -9295,12 +9295,30 @@ function removeAethermoorHandoffFromChat(chat) {
 
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
+        console.debug(
+            '[Aethermoor] Interceptor entered',
+            {
+                chatIsArray: Array.isArray(chat),
+                chatLength: Array.isArray(chat)
+                    ? chat.length
+                    : null,
+                pending: getPendingAethermoorHandoff()
+            }
+        );
+
         const handoff = getPendingAethermoorHandoff();
 
-        if (!handoff || !Array.isArray(chat)) return;
+        if (!handoff || !Array.isArray(chat)) {
+            console.debug(
+                '[Aethermoor] No handoff injected',
+                {
+                    hasHandoff: Boolean(handoff),
+                    chatIsArray: Array.isArray(chat)
+                }
+            );
+            return;
+        }
 
-        // Do not insert the same handoff twice if ST invokes the
-        // interceptor more than once during one generation request.
         removeAethermoorHandoffFromChat(chat);
 
         const message = makeAethermoorHandoffMessage(handoff);
@@ -9317,10 +9335,14 @@ globalThis.aethermoorMechanicsInterceptor =
             handoffType: handoff.type
         };
 
-        console.debug('[Aethermoor] Injected mechanics handoff', {
-            type: handoff.type,
-            packet: handoff.packet
-        });
+        console.debug(
+            '[Aethermoor] Injected mechanics handoff',
+            {
+                type: handoff.type,
+                packet: handoff.packet,
+                insertionIndex
+            }
+        );
     };
 
 function registerAethermoorGenerationCleanup() {

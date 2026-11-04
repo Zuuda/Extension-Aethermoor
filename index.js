@@ -9974,7 +9974,9 @@ function registerAethermoorGenerationCleanup() {
             );
 
             aethermoorInjectedHandoff = null;
+            aethermoorGenerationReceived = false;
             return;
+
         }
 
         const stored =

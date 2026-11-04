@@ -3711,8 +3711,10 @@ function resolveTravelStep(test) {
             encounterId: `travel-${test.stepId}`
         });
 
+        state.rngState = spawned.state.rngState;
         state.encounter = spawned.encounter;
         state.encounter.status = 'spotted';
+
         encounter = clone(state.encounter);
     }
 
@@ -7630,12 +7632,7 @@ async function runStoredMechanic(args) {
         const nextEncounter = nextState.encounter;
         const beganNewEncounter =
             ['active', 'spotted'].includes(nextEncounter?.status) &&
-
-            (
-                !previousEncounter ||
-                previousEncounter.status !== 'active' ||
-                previousEncounter.id !== nextEncounter.id
-            );
+            nextEncounter.id !== previousEncounter?.id;
 
         const discoveryPacket = beganNewEncounter
             ? discoveryNarrationPacket(nextEncounter)
@@ -9257,7 +9254,10 @@ async function openCombatPanel() {
                 assert(result?.ok === true,
                     result?.error || 'Could not engage encounter');
 
+                panel.hidden = true;
+                combatPanelOpen = false;
                 await openCombatPanel();
+
             } catch (error) {
                 toastr.error(
                     error instanceof Error ? error.message : String(error),
@@ -9502,18 +9502,13 @@ function removeAethermoorHandoffFromChat(chat) {
 function findLatestUserMove(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         const message = chat[index];
-        if (
-            message?.is_user === true &&
-            typeof message.mes === 'string' &&
-            /\[moved\]/i.test(message.mes)
-        ) {
-            return {
-                index,
-                text: message.mes
-            };
-        }
-    }
+        if (message?.is_user !== true) continue;
 
+        return typeof message.mes === 'string' &&
+            /\[moved\]/i.test(message.mes)
+            ? { index, text: message.mes }
+            : null;
+    }
     return null;
 }
 

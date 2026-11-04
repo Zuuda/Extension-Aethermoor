@@ -8645,6 +8645,19 @@ function addCombatPanelStyles() {
         .aethermoor-combat-panel[hidden] {
             display: none;
         }
+        .aethermoor-combat-controls {
+            position: sticky;
+            top: -14px;
+            z-index: 2;
+            padding: 8px 0;
+            background: var(--SmartThemeBlurTintColor, #20242a);
+            border-bottom: 1px solid var(--SmartThemeBorderColor, #666);
+        }
+        .aethermoor-combat-result {
+            max-height: 180px;
+            overflow: auto;
+        }
+
         .aethermoor-combat-panel h3 {
             margin: 0;
         }
@@ -9122,6 +9135,7 @@ async function openCombatPanel() {
             );
 
             resultBox.textContent = formatCombatTurnResult(result);
+            resultBox.scrollTop = resultBox.scrollHeight;
 
             const refreshed = await readStoredCombatState();
             status.textContent = combatStatusText(
@@ -9182,9 +9196,7 @@ async function openCombatPanel() {
             }
         }
     });
-
-    actionsRow.appendChild(resolveButton);
-    panel.append(choices, resultBox, actionsRow);
+actionsRow.appendChild(resolveButton);
 }
 
 function registerCombatNarrationMacro() {

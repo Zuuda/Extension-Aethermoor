@@ -3649,6 +3649,91 @@ const eliteChance =
         state
     };
 }
+
+function resolveTravelStep(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Travel step requires saved state'
+    );
+    assert(
+        typeof test.stepId === 'string' && test.stepId.length > 0,
+        'Travel step requires a stable stepId'
+    );
+
+    const state = clone(test.state);
+    state.travelSteps ||= {};
+
+    const existing = state.travelSteps[test.stepId];
+    if (existing) {
+        return {
+            ok: true,
+            created: false,
+            ...clone(existing),
+            state
+        };
+    }
+
+    const travelRoll = roll(state, 100);
+
+    // One primary event at most per movement. Detailed site, rumor,
+    // pack-composition, and loot tables remain separate locked rolls.
+    let event;
+    if (travelRoll <= 65) {
+        event = 'quiet_travel';
+    } else if (travelRoll <= 75) {
+        event = 'environmental_sign';
+    } else if (travelRoll <= 85) {
+        event = 'point_of_interest';
+    } else if (travelRoll <= 94) {
+        event = 'wild_encounter';
+    } else if (travelRoll <= 97) {
+        event = 'social_opportunity';
+    } else if (travelRoll <= 99) {
+        event = 'significant_discovery';
+    } else {
+        event = 'rare_event';
+    }
+
+    let encounter = null;
+
+    if (event === 'wild_encounter') {
+        assert(
+            !state.encounter ||
+            ['cleared', 'fled', 'dead'].includes(state.encounter.status),
+            'Cannot discover a new encounter while another is unresolved'
+        );
+
+        const spawned = spawnEncounter({
+            state,
+            zone: state.zone,
+            encounterType: 'wild',
+            siteAffinity: test.siteAffinity || 'ordinary',
+            encounterId: `travel-${test.stepId}`
+        });
+
+        state.encounter = spawned.encounter;
+        state.encounter.status = 'spotted';
+        encounter = clone(state.encounter);
+    }
+
+    const outcome = {
+        stepId: test.stepId,
+        travelRoll,
+        event,
+        encounterId: encounter?.id || null,
+        encounter
+    };
+
+    state.travelSteps[test.stepId] = clone(outcome);
+
+    return {
+        ok: true,
+        created: true,
+        ...outcome,
+        state
+    };
+}
+
 const QUEST_REWARD_TABLES = new Proxy({}, {
     get(_target, key) {
         const zone = zoneNumber(key);
@@ -6937,10 +7022,30 @@ function resolveBatch(args) {
                 case 'trade':
                     result = resolveTradeAction(test);
                     break;
-
+                    
                 case 'spawn':
                     result = spawnEncounter(test);
                     break;
+
+                case 'travel':
+                    result = resolveTravelStep(test);
+                    break;
+                                    case 'engage': {
+                    const state = clone(test.state);
+                    assert(
+                        state.encounter?.status === 'spotted',
+                        'There is no spotted encounter to engage'
+                    );
+                    state.encounter.status = 'active';
+
+                    result = {
+                        ok: true,
+                        action: 'engage',
+                        encounterId: state.encounter.id,
+                        state
+                    };
+                    break;
+                }
 
                 case 'turn':
                     assert(
@@ -7523,9 +7628,9 @@ async function runStoredMechanic(args) {
 
         const previousEncounter = savedState.encounter;
         const nextEncounter = nextState.encounter;
-
         const beganNewEncounter =
-            nextEncounter?.status === 'active' &&
+            ['active', 'spotted'].includes(nextEncounter?.status) &&
+
             (
                 !previousEncounter ||
                 previousEncounter.status !== 'active' ||
@@ -8048,6 +8153,7 @@ function registerTools() {
                                 enum: [
                                     'state',
                                     'spawn',
+                                    'travel',
                                     'turn',
                                     'reference',
                                     'world_seeds',
@@ -9122,7 +9228,52 @@ async function openCombatPanel() {
 
     panel.append(header, status);
 
+    if (encounter?.status === 'spotted') {
+        const message = document.createElement('p');
+        message.textContent =
+            'The encounter has been spotted. Generate the discovery scene, ' +
+            'then choose whether to engage.';
+        panel.appendChild(message);
+
+        const actionsRow = document.createElement('div');
+        actionsRow.className = 'aethermoor-combat-actions';
+
+        const engageButton = document.createElement('button');
+        engageButton.type = 'button';
+        engageButton.className = 'menu_button';
+        engageButton.textContent = 'Engage';
+
+        engageButton.addEventListener('click', async () => {
+            engageButton.disabled = true;
+
+            try {
+                const result = await runStoredMechanic({
+                    cases: [{
+                        name: 'engage_spotted_encounter',
+                        kind: 'engage'
+                    }]
+                });
+
+                assert(result?.ok === true,
+                    result?.error || 'Could not engage encounter');
+
+                await openCombatPanel();
+            } catch (error) {
+                toastr.error(
+                    error instanceof Error ? error.message : String(error),
+                    'Aethermoor'
+                );
+                engageButton.disabled = false;
+            }
+        });
+
+        actionsRow.appendChild(engageButton);
+        panel.appendChild(actionsRow);
+        return;
+    }
+
     if (!encounter || encounter.status !== 'active') {
+
         const message = document.createElement('p');
         message.textContent = 'There is no active encounter to resolve.';
         panel.append(message);
@@ -9348,19 +9499,61 @@ function removeAethermoorHandoffFromChat(chat) {
         }
     }
 }
+function findLatestUserMove(chat) {
+    for (let index = chat.length - 1; index >= 0; index--) {
+        const message = chat[index];
+        if (
+            message?.is_user === true &&
+            typeof message.mes === 'string' &&
+            /\[moved\]/i.test(message.mes)
+        ) {
+            return {
+                index,
+                text: message.mes
+            };
+        }
+    }
+
+    return null;
+}
+
+function travelStepId(message) {
+    // The message index remains stable during regeneration/swipes.
+    // The text hash distinguishes edited messages at that index.
+    let hash = 2166136261;
+
+    for (let index = 0; index < message.text.length; index++) {
+        hash ^= message.text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return `chat-message-${message.index}-${(hash >>> 0).toString(36)}`;
+}
 
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
-        console.log(
-            '[Aethermoor] Interceptor entered',
-            {
-                chatIsArray: Array.isArray(chat),
-                chatLength: Array.isArray(chat)
-                    ? chat.length
-                    : null,
-                pending: getPendingAethermoorHandoff()
+        if (!Array.isArray(chat)) return;
+
+        const movement = findLatestUserMove(chat);
+
+        if (movement) {
+            const stepId = travelStepId(movement);
+
+            try {
+                await runStoredMechanic({
+                    cases: [{
+                        name: 'resolve_moved_travel_step',
+                        kind: 'travel',
+                        stepId
+                    }]
+                });
+            } catch (error) {
+                console.error(
+                    '[Aethermoor] [moved] travel check failed',
+                    error
+                );
             }
-        );
+        }
 
         const handoff = getPendingAethermoorHandoff();
 

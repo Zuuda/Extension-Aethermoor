@@ -9351,7 +9351,7 @@ function removeAethermoorHandoffFromChat(chat) {
 
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
-        console.debug(
+        console.log(
             '[Aethermoor] Interceptor entered',
             {
                 chatIsArray: Array.isArray(chat),
@@ -9365,7 +9365,7 @@ globalThis.aethermoorMechanicsInterceptor =
         const handoff = getPendingAethermoorHandoff();
 
         if (!handoff || !Array.isArray(chat)) {
-            console.debug(
+            console.log(
                 '[Aethermoor] No handoff injected',
                 {
                     hasHandoff: Boolean(handoff),
@@ -9391,7 +9391,7 @@ globalThis.aethermoorMechanicsInterceptor =
             handoffType: handoff.type
         };
 
-        console.debug(
+        console.log(
             '[Aethermoor] Injected mechanics handoff',
             {
                 type: handoff.type,
@@ -9415,7 +9415,7 @@ function registerAethermoorGenerationCleanup() {
     eventSource.on(event_types.GENERATION_ENDED, async () => {
         const injected = aethermoorInjectedHandoff;
 
-        console.debug(
+        console.log(
             '[Aethermoor] GENERATION_ENDED',
             {
                 handoffWasInjected: Boolean(injected),
@@ -9454,7 +9454,7 @@ function registerAethermoorGenerationCleanup() {
         try {
             await context.saveMetadata();
 
-            console.debug(
+            console.log(
                 '[Aethermoor] Consumed injected mechanics handoff'
             );
         } catch (error) {

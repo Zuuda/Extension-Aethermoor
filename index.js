@@ -7532,39 +7532,31 @@ function combatNarrationPacket(result, actions) {
         );
     }
 
-    if (result.rewards?.applied) {
+       if (result.rewards?.applied) {
         lines.push(
             `Encounter rewards: ${result.rewards.xp} XP, ` +
             `${result.rewards.silver}s.`
         );
 
         for (const item of result.rewards.loot || []) {
-            lines.push(`Loot: ${item.name} (${item.rarity}).`);
+            lines.push(
+                `Loot: ${item.name} (${item.rarity}).`
+            );
         }
 
         const drop = result.rewards.packDrop;
+
         if (drop?.result === 'auto_salvage_only') {
             lines.push('Pack drop: no additional loot.');
         } else if (drop?.result === 'diegetic_quest_breadcrumb') {
-            lines.push('Pack drop: quest breadcrumb discovered.');
-        }
-    }
-        for (const item of result.rewards.loot || []) {
-            lines.push(`Loot acquired: ${item.name} (${item.rarity}).`);
-        }
-
-        const drop = result.rewards.packDrop;
-        if (drop?.result === 'auto_salvage_only') {
-            lines.push('The pack yielded no additional drop beyond its silver.');
-        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
             lines.push(
-                'The pack yielded a quest breadcrumb. Its concrete form ' +
-                'has not been established; no quest offer has been generated yet.'
+                'Pack drop: quest breadcrumb discovered.'
             );
         }
     } else if (result.packCleared) {
         lines.push(
-            'The encounter was cleared, but no encounter rewards were applied.'
+            'The encounter was cleared, but no encounter rewards ' +
+            'were applied.'
         );
     } else {
         lines.push('Encounter rewards have not been applied.');

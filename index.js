@@ -865,6 +865,71 @@ function dealDamage(state, target, amount, kills) {
     return hits;
 }
 
+function resolveClearedPackDrop(state) {
+    const encounter = state.encounter;
+    const ordinaryPack =
+        encounter.type === 'normal_pack' ||
+        (
+            encounter.type === 'declared' &&
+            encounter.foes.every(foe =>
+                ['brute', 'archer', 'mender', 'hexer', 'buffer']
+                    .includes(foe.role)
+            ) &&
+            !encounter.reinforcementLog?.length
+        );
+
+    // Quest-terminal fights have their own reward path.
+    if (!ordinaryPack || encounter.questTerminal) return null;
+
+    assert(
+        encounter.packDropRoll == null,
+        'This pack already has a drop roll'
+    );
+
+    const value = roll(state, 10);
+    encounter.packDropRoll = value;
+
+    if (value <= 8) {
+        return { roll: value, result: 'auto_salvage_only' };
+    }
+
+    if (value === 10) {
+        encounter.questSeed = {
+            source: 'pack_drop',
+            roll: value,
+            result: 'diegetic_quest_breadcrumb'
+        };
+        encounter.questSeedConsumed = false;
+        return { roll: value, result: 'diegetic_quest_breadcrumb' };
+    }
+
+    encounter.lootSeed = {
+        source: 'pack_drop',
+        roll: value,
+        result: 'wild_equipment_drop',
+        claimed: true
+    };
+
+    const generated = rollLootFromState(
+        state,
+        'wild',
+        encounter.zone
+    );
+    const item = {
+        ...generated.item,
+        acquiredFrom: 'pack_drop',
+        acquiredAtEncounter: encounter.id,
+        bound: false
+    };
+    state.inventory.bagReserves.push(item);
+
+    return {
+        roll: value,
+        result: 'wild_equipment_drop',
+        item
+    };
+}
+
 function finalizeEncounterRewards(state, slainIds) {
     const encounter = state.encounter;
     const crew = state.crew;
@@ -1026,8 +1091,12 @@ function finalizeEncounterRewards(state, slainIds) {
             `Unsupported encounter reward type: ${encounter.type}`
         );
     }
+    const packDrop = resolveClearedPackDrop(state);
+    if (packDrop?.item) loot.push(packDrop.item);
+
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
+
 
     if (encounter.questTerminal) {
         const activeQuest =
@@ -1055,6 +1124,7 @@ function finalizeEncounterRewards(state, slainIds) {
         resolved: true,
         encounterCleared: true,
         loot,
+        packDrop,
         trophies: []
     };
 }
@@ -2899,6 +2969,7 @@ if (frontliners.length > 0) {
             applied: encounterRewards.resolved,
             resolved: encounterRewards.resolved,
             loot: encounterRewards.loot,
+            packDrop: encounterRewards.packDrop || null,
             trophies: encounterRewards.trophies
         },
 
@@ -7468,7 +7539,17 @@ function combatNarrationPacket(result, actions) {
         );
 
         for (const item of result.rewards.loot || []) {
-            lines.push(`Loot acquired: ${item.name}.`);
+            lines.push(`Loot acquired: ${item.name} (${item.rarity}).`);
+        }
+
+        const drop = result.rewards.packDrop;
+        if (drop?.result === 'auto_salvage_only') {
+            lines.push('The pack yielded no additional drop beyond its silver.');
+        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
+            lines.push(
+                'The pack yielded a quest breadcrumb. Its concrete form ' +
+                'has not been established; no quest offer has been generated yet.'
+            );
         }
     } else if (result.packCleared) {
         lines.push(

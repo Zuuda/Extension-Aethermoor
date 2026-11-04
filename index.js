@@ -9144,8 +9144,7 @@ async function openCombatPanel() {
             );
 
             const refreshedEncounter = refreshed.state.encounter;
-            const refreshedFoes = refreshedEncounter?.foes || [];
-            const refreshedLiving = refreshedFoes
+            const refreshedLiving = (refreshedEncounter?.foes || [])
                 .map((foe, index) => ({
                     ...foe,
                     label: combatFoeLabel(foe, index)
@@ -9170,7 +9169,7 @@ async function openCombatPanel() {
                     'target',
                     refreshedLiving.map(foe => ({
                         value: foe.id,
-                        label: foe.name || foe.label,
+                        label: foe.label,
                         detail: `${foe.hp}/${foe.maxHp} HP`,
                         telegraph: foe.nextTelegraph
                             ? telegraphLabel(foe.nextTelegraph)
@@ -9183,7 +9182,6 @@ async function openCombatPanel() {
                 targetGroup.replaceWith(newTargetGroup);
                 targetGroup = newTargetGroup;
             }
-            
         } catch (error) {
             resultBox.textContent =
                 `Turn was not resolved: ${
@@ -9196,7 +9194,14 @@ async function openCombatPanel() {
             }
         }
     });
-actionsRow.appendChild(resolveButton);
+
+    actionsRow.appendChild(resolveButton);
+
+    const controls = document.createElement('div');
+    controls.className = 'aethermoor-combat-controls';
+    controls.append(choices, actionsRow);
+
+    panel.append(controls, resultBox);
 }
 
 function registerCombatNarrationMacro() {

@@ -8377,25 +8377,54 @@ function combatStatusText(state, revision) {
     return lines.join('\n');
 }
 
-function makeSelect(label, options, id) {
-    const wrapper = document.createElement('label');
-    wrapper.className = 'aethermoor-combat-field';
+let combatPanelElement = null;
+let combatPanelOpen = false;
 
-    const caption = document.createElement('span');
-    caption.textContent = label;
+const combatSelections = {
+    qtik: 'fire_melee',
+    tansy: 'visor',
+    target: null
+};
 
-    const select = document.createElement('select');
-    select.id = id;
+function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
+    const wrapper = document.createElement('fieldset');
+    wrapper.className = 'aethermoor-combat-choice-group';
+
+    const legend = document.createElement('legend');
+    legend.textContent = label;
+    wrapper.appendChild(legend);
+
+    const choices = document.createElement('div');
+    choices.className = 'aethermoor-combat-choices';
 
     for (const option of options) {
-        const element = document.createElement('option');
-        element.value = option.value;
-        element.textContent = option.label;
-        select.appendChild(element);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'menu_button aethermoor-combat-choice';
+        button.textContent = option.label;
+        button.dataset.group = groupName;
+        button.dataset.value = option.value;
+        button.setAttribute(
+            'aria-pressed',
+            String(option.value === selectedValue)
+        );
+
+        button.addEventListener('click', () => {
+            onSelect(option.value);
+
+            for (const sibling of choices.querySelectorAll('button')) {
+                sibling.setAttribute(
+                    'aria-pressed',
+                    String(sibling === button)
+                );
+            }
+        });
+
+        choices.appendChild(button);
     }
 
-    wrapper.append(caption, select);
-    return { wrapper, select };
+    wrapper.appendChild(choices);
+    return wrapper;
 }
 
 function addCombatPanelStyles() {
@@ -8404,28 +8433,33 @@ function addCombatPanelStyles() {
     const style = document.createElement('style');
     style.id = 'aethermoor_combat_styles';
     style.textContent = `
-        .aethermoor-combat-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 10000;
-            display: grid;
-            place-items: center;
-            padding: 16px;
-            background: rgba(0, 0, 0, 0.72);
-        }
         .aethermoor-combat-panel {
-            width: min(680px, 100%);
-            max-height: min(85vh, 820px);
+            position: fixed;
+            right: 16px;
+            bottom: 82px;
+            z-index: 10000;
+            width: min(620px, calc(100vw - 32px));
+            max-height: min(78vh, 760px);
             overflow: auto;
-            padding: 18px;
+            padding: 16px;
             color: var(--SmartThemeBodyColor, #eee);
             background: var(--SmartThemeBlurTintColor, #20242a);
             border: 1px solid var(--SmartThemeBorderColor, #666);
             border-radius: 6px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
         }
+        .aethermoor-combat-panel[hidden] {
+            display: none;
+        }
         .aethermoor-combat-panel h3 {
-            margin: 0 0 12px;
+            margin: 0;
+        }
+        .aethermoor-combat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
         }
         .aethermoor-combat-status,
         .aethermoor-combat-result {
@@ -8437,31 +8471,38 @@ function addCombatPanelStyles() {
             font-family: monospace;
             font-size: 0.92em;
         }
-        .aethermoor-combat-fields {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin: 14px 0;
+        .aethermoor-combat-choice-group {
+            min-width: 0;
+            margin: 12px 0;
+            padding: 0;
+            border: 0;
         }
-        .aethermoor-combat-field {
-            display: grid;
-            gap: 5px;
+        .aethermoor-combat-choice-group legend {
+            margin-bottom: 6px;
+            font-weight: 700;
         }
-        .aethermoor-combat-field select {
-            width: 100%;
+        .aethermoor-combat-choices {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .aethermoor-combat-choice[aria-pressed="true"] {
+            outline: 2px solid var(--SmartThemeQuoteColor, #4ade80);
+            outline-offset: 1px;
+            filter: brightness(1.2);
         }
         .aethermoor-combat-actions {
             display: flex;
             justify-content: flex-end;
             gap: 8px;
-            margin-top: 14px;
+            margin-top: 12px;
         }
-        .aethermoor-combat-extra[hidden] {
-            display: none;
-        }
-        @media (max-width: 520px) {
-            .aethermoor-combat-fields {
-                grid-template-columns: 1fr;
+        @media (max-width: 600px) {
+            .aethermoor-combat-panel {
+                right: 8px;
+                bottom: 72px;
+                width: calc(100vw - 16px);
+                max-height: 72vh;
             }
         }
     `;
@@ -8546,6 +8587,12 @@ function formatCombatTurnResult(result) {
 async function openCombatPanel() {
     addCombatPanelStyles();
 
+    if (combatPanelElement && combatPanelOpen) {
+        combatPanelElement.hidden = true;
+        combatPanelOpen = false;
+        return;
+    }
+
     let snapshot;
 
     try {
@@ -8558,20 +8605,44 @@ async function openCombatPanel() {
         return;
     }
 
-    const { state } = snapshot;
+    const state = snapshot.state;
     const encounter = state.encounter;
 
-    const overlay = document.createElement('div');
-    overlay.className = 'aethermoor-combat-overlay';
+    if (!combatSelections.target && encounter) {
+        combatSelections.target =
+            encounter.foes.find(foe => foe.hp > 0)?.id || null;
+    }
 
-    const panel = document.createElement('section');
-    panel.className = 'aethermoor-combat-panel';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-modal', 'true');
-    panel.setAttribute('aria-label', 'Aethermoor Combat');
+    if (!combatPanelElement) {
+        combatPanelElement = document.createElement('section');
+        combatPanelElement.className = 'aethermoor-combat-panel';
+        combatPanelElement.setAttribute('role', 'region');
+        combatPanelElement.setAttribute('aria-label', 'Aethermoor Combat');
+        document.body.appendChild(combatPanelElement);
+    }
+
+    const panel = combatPanelElement;
+    panel.replaceChildren();
+    panel.hidden = false;
+    combatPanelOpen = true;
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-combat-header';
 
     const title = document.createElement('h3');
     title.textContent = 'Aethermoor Combat';
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'menu_button';
+    closeButton.textContent = 'Hide';
+    closeButton.title = 'Hide the combat panel';
+    closeButton.addEventListener('click', () => {
+        panel.hidden = true;
+        combatPanelOpen = false;
+    });
+
+    header.append(title, closeButton);
 
     const status = document.createElement('pre');
     status.className = 'aethermoor-combat-status';
@@ -8581,153 +8652,155 @@ async function openCombatPanel() {
     resultBox.className = 'aethermoor-combat-result';
     resultBox.hidden = true;
 
-    panel.append(title, status);
+    panel.append(header, status);
 
     if (!encounter || encounter.status !== 'active') {
         const message = document.createElement('p');
         message.textContent = 'There is no active encounter to resolve.';
         panel.append(message);
-    } else {
-        const livingFoes = encounter.foes
-            .map((foe, index) => ({
-                ...foe,
-                label: combatFoeLabel(foe, index)
-            }))
-            .filter(foe => foe.hp > 0);
+        return;
+    }
 
-        const fields = document.createElement('div');
-        fields.className = 'aethermoor-combat-fields';
+    const livingFoes = encounter.foes
+        .map((foe, index) => ({
+            ...foe,
+            label: combatFoeLabel(foe, index)
+        }))
+        .filter(foe => foe.hp > 0);
 
-        const qtik = makeSelect('Q’tik action', [
+    if (!livingFoes.some(foe => foe.id === combatSelections.target)) {
+        combatSelections.target = livingFoes[0]?.id || null;
+    }
+
+    const choices = document.createElement('div');
+
+    const qtikGroup = makeChoiceGroup(
+        "Q'tik's Move",
+        'qtik',
+        [
             { value: 'fire_melee', label: 'Fire Melee' },
             { value: 'ice_melee', label: 'Ice Melee' },
             { value: 'stun', label: 'Stun' },
             { value: 'ice_patch', label: 'Ice Patch' },
             { value: 'frost_stomp', label: 'Frost Stomp' }
-        ], 'aethermoor_qtik_action');
+        ],
+        combatSelections.qtik,
+        value => { combatSelections.qtik = value; }
+    );
 
-        const tansy = makeSelect('Tansy command', [
-            { value: 'visor', label: 'Point: Visor' },
-            { value: 'vitals', label: 'Point: Vitals' },
-            { value: 'hamstring', label: 'Point: Hamstring' },
+    const tansyGroup = makeChoiceGroup(
+        "Tansy's Command",
+        'tansy',
+        [
+            { value: 'visor', label: 'Visor' },
+            { value: 'vitals', label: 'Vitals' },
+            { value: 'hamstring', label: 'Hamstring' },
             { value: 'recall', label: 'Recall' },
             { value: 'surge', label: 'Surge' }
-        ], 'aethermoor_tansy_action');
+        ],
+        combatSelections.tansy,
+        value => { combatSelections.tansy = value; }
+    );
 
-        const target = makeSelect('Target', livingFoes.map(foe => ({
+    const targetGroup = makeChoiceGroup(
+        'Target',
+        'target',
+        livingFoes.map(foe => ({
             value: foe.id,
-            label: `${foe.label} (${foe.hp}/${foe.maxHp} HP)`
-        })), 'aethermoor_target');
+            label: `${foe.label} · ${foe.hp}/${foe.maxHp} HP`
+        })),
+        combatSelections.target,
+        value => { combatSelections.target = value; }
+    );
 
-        fields.append(qtik.wrapper, tansy.wrapper, target.wrapper);
+    choices.append(qtikGroup, tansyGroup, targetGroup);
 
-        const buttons = document.createElement('div');
-        buttons.className = 'aethermoor-combat-actions';
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'aethermoor-combat-actions';
 
-        const closeButton = document.createElement('button');
-        closeButton.type = 'button';
-        closeButton.className = 'menu_button';
-        closeButton.textContent = 'Close';
-        closeButton.addEventListener('click', () => overlay.remove());
+    const resolveButton = document.createElement('button');
+    resolveButton.type = 'button';
+    resolveButton.className = 'menu_button';
+    resolveButton.textContent = 'Resolve Turn';
 
-        const resolveButton = document.createElement('button');
-        resolveButton.type = 'button';
-        resolveButton.className = 'menu_button';
-        resolveButton.textContent = 'Resolve Turn';
+    resolveButton.addEventListener('click', async () => {
+        resolveButton.disabled = true;
+        resolveButton.textContent = 'Resolving…';
+        resultBox.hidden = false;
+        resultBox.textContent = 'Resolving combat turn…';
 
-        resolveButton.addEventListener('click', async () => {
-            resolveButton.disabled = true;
-            resolveButton.textContent = 'Resolving…';
-            resultBox.hidden = false;
-            resultBox.textContent = 'Resolving combat turn…';
+        try {
+            const result = await runStoredMechanic({
+                actions: {
+                    qtik: combatSelections.qtik,
+                    tansy: combatSelections.tansy,
+                    target: combatSelections.target
+                }
+            });
 
-            const actions = {
-                qtik: qtik.select.value,
-                tansy: tansy.select.value,
-                target: target.select.value
-            };
+            assert(
+                result?.ok === true,
+                result?.error || 'Combat turn failed'
+            );
 
-            try {
-                const result = await runStoredMechanic({ actions });
+            resultBox.textContent = formatCombatTurnResult(result);
 
-                assert(
-                    result?.ok === true,
-                    result?.error || 'Combat turn failed'
+            const refreshed = await readStoredCombatState();
+            status.textContent = combatStatusText(
+                refreshed.state,
+                refreshed.revision
+            );
+
+            const refreshedEncounter = refreshed.state.encounter;
+            const refreshedFoes = refreshedEncounter?.foes || [];
+            const refreshedLiving = refreshedFoes
+                .map((foe, index) => ({
+                    ...foe,
+                    label: combatFoeLabel(foe, index)
+                }))
+                .filter(foe => foe.hp > 0);
+
+            if (
+                refreshedEncounter?.status !== 'active' ||
+                refreshedLiving.length === 0
+            ) {
+                choices.hidden = true;
+                resolveButton.hidden = true;
+            } else {
+                if (!refreshedLiving.some(
+                    foe => foe.id === combatSelections.target
+                )) {
+                    combatSelections.target = refreshedLiving[0].id;
+                }
+
+                const newTargetGroup = makeChoiceGroup(
+                    'Target',
+                    'target',
+                    refreshedLiving.map(foe => ({
+                        value: foe.id,
+                        label: `${foe.label} · ${foe.hp}/${foe.maxHp} HP`
+                    })),
+                    combatSelections.target,
+                    value => { combatSelections.target = value; }
                 );
 
-                resultBox.textContent = formatCombatTurnResult(result);
-
-                const refreshed = await readStoredCombatState();
-                status.textContent = combatStatusText(
-                    refreshed.state,
-                    refreshed.revision
-                );
-
-                if (
-                    refreshed.state.encounter?.status !== 'active' ||
-                    refreshed.state.encounter?.foes.every(foe => foe.hp <= 0)
-                ) {
-                    fields.hidden = true;
-                    resolveButton.hidden = true;
-                } else {
-                    const refreshedLiving = refreshed.state.encounter.foes
-                        .filter(foe => foe.hp > 0);
-
-                    target.select.replaceChildren();
-                    for (const foe of refreshedLiving) {
-                        const index = refreshed.state.encounter.foes
-                            .findIndex(entry => entry.id === foe.id);
-                        const option = document.createElement('option');
-                        option.value = foe.id;
-                        option.textContent =
-                            `${combatFoeLabel(foe, index)} ` +
-                            `(${foe.hp}/${foe.maxHp} HP)`;
-                        target.select.appendChild(option);
-                    }
-                }
-            } catch (error) {
-                resultBox.textContent =
-                    `Turn was not resolved: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`;
-            } finally {
-                if (!resolveButton.hidden) {
-                    resolveButton.disabled = false;
-                    resolveButton.textContent = 'Resolve Turn';
-                }
+                targetGroup.replaceWith(newTargetGroup);
             }
-        });
-
-        buttons.append(closeButton, resolveButton);
-        panel.append(fields, resultBox, buttons);
-    }
-
-    if (!encounter || encounter.status !== 'active') {
-        const buttons = document.createElement('div');
-        buttons.className = 'aethermoor-combat-actions';
-
-        const closeButton = document.createElement('button');
-        closeButton.type = 'button';
-        closeButton.className = 'menu_button';
-        closeButton.textContent = 'Close';
-        closeButton.addEventListener('click', () => overlay.remove());
-
-        buttons.appendChild(closeButton);
-        panel.appendChild(buttons);
-    }
-
-    overlay.addEventListener('click', event => {
-        if (event.target === overlay) overlay.remove();
+        } catch (error) {
+            resultBox.textContent =
+                `Turn was not resolved: ${
+                    error instanceof Error ? error.message : String(error)
+                }`;
+        } finally {
+            if (!resolveButton.hidden) {
+                resolveButton.disabled = false;
+                resolveButton.textContent = 'Resolve Turn';
+            }
+        }
     });
 
-    document.addEventListener('keydown', function onEscape(event) {
-        if (event.key !== 'Escape') return;
-        overlay.remove();
-        document.removeEventListener('keydown', onEscape);
-    });
-
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
+    actionsRow.appendChild(resolveButton);
+    panel.append(choices, resultBox, actionsRow);
 }
 
 jQuery(function () {

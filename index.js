@@ -7629,7 +7629,25 @@ async function runStoredMechanic(args) {
             return output;
         }
 
+        // A repeated [moved] message reuses its locked result without
+        // saving another revision or replacing a pending handoff.
+        if (batch && oneCase.kind === 'travel' && caseResult.created === false) {
+            const { state: _saved, ...visibleResult } = caseResult;
+            return {
+                ok: true,
+                total: 1,
+                passed: 1,
+                failed: 0,
+                results: [{
+                    ...output.results[0],
+                    result: visibleResult
+                }],
+                summary: stateSummary(stored.state, stored.revision)
+            };
+        }
+
         const nextState = caseResult.state;
+
 
         assert(getContext().chatMetadata === metadata,
             'Chat changed during operation; nothing was saved');
@@ -7682,8 +7700,11 @@ async function runStoredMechanic(args) {
 
             pendingNarration: narrationPacket
                 ? {
-                    packet: narrationPacket,
-                    encounterId: nextState.encounter?.id || null,
+                    packet:
+                        stored.pendingNarration?.encounterId === nextEncounter?.id
+                            ? `${stored.pendingNarration.packet}\n\n${narrationPacket}`
+                            : narrationPacket,
+                    encounterId: nextEncounter?.id || null,
                     turn: caseResult.turn
                 }
                 : stored.pendingNarration || null

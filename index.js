@@ -3731,8 +3731,10 @@ function resolveTravelStep(test) {
         'Travel step requires a stable stepId'
     );
 
-    const state = clone(test.state);
+    let state = clone(test.state);
     state.travelSteps ||= {};
+    state.inquiries ||= {};
+    state.socialSeeds ||= {};
 
     const existing = state.travelSteps[test.stepId];
     if (existing) {
@@ -3745,10 +3747,8 @@ function resolveTravelStep(test) {
     }
 
     const travelRoll = roll(state, 100);
-
-    // One primary event at most per movement. Detailed site, rumor,
-    // pack-composition, and loot tables remain separate locked rolls.
     let event;
+
     if (travelRoll <= 65) {
         event = 'quiet_travel';
     } else if (travelRoll <= 75) {
@@ -3765,7 +3765,75 @@ function resolveTravelStep(test) {
         event = 'rare_event';
     }
 
-    let encounter = null;
+    const outcome = {
+        stepId: test.stepId,
+        travelRoll,
+        event,
+        encounterId: null,
+        encounter: null,
+        environmentalSign: null,
+        site: null,
+        social: null
+    };
+
+    if (event === 'environmental_sign') {
+        const signs = [
+            'fresh tracks cross the route',
+            'recent smoke or cooking smells drift from nearby',
+            'a damaged trail marker suggests recent passage',
+            'the local wildlife abruptly falls quiet'
+        ];
+
+        outcome.environmentalSign =
+            signs[roll(state, signs.length) - 1];
+    }
+
+    if (event === 'point_of_interest') {
+        const siteId = `site-${test.stepId}`;
+        const inquiryKey = `site:${siteId}`;
+        const existingSite = state.inquiries[inquiryKey];
+
+        let siteRecord = existingSite;
+
+        if (!siteRecord) {
+            const curiosityRoll = roll(state, 10);
+            const curiosity =
+                curiosityRoll <= 7
+                    ? 'nothing_hidden'
+                    : curiosityRoll === 8
+                        ? 'hidden_lore_or_shortcut'
+                        : curiosityRoll === 9
+                            ? 'trap_or_ambush_hazard'
+                            : 'hidden_loot_stash';
+
+            siteRecord = {
+                id: siteId,
+                type: 'site',
+                zone: state.zone,
+                roll: curiosityRoll,
+                result: curiosity,
+                lootSeed: curiosity === 'hidden_loot_stash'
+                    ? {
+                        source: 'curiosity',
+                        roll: curiosityRoll,
+                        result: curiosity,
+                        claimed: false
+                    }
+                    : null,
+                questSeed: null,
+                questSeedConsumed: false
+            };
+
+            state.inquiries[inquiryKey] = siteRecord;
+        }
+
+        outcome.site = {
+            id: siteId,
+            zone: state.zone,
+            curiosityRoll: siteRecord.roll,
+            curiosity: siteRecord.result
+        };
+    }
 
     if (event === 'wild_encounter') {
         assert(
@@ -3786,16 +3854,20 @@ function resolveTravelStep(test) {
         state.encounter = spawned.encounter;
         state.encounter.status = 'spotted';
 
-        encounter = clone(state.encounter);
+        outcome.encounterId = state.encounter.id;
+        outcome.encounter = clone(state.encounter);
     }
 
-    const outcome = {
-        stepId: test.stepId,
-        travelRoll,
-        event,
-        encounterId: encounter?.id || null,
-        encounter
-    };
+    if (event === 'social_opportunity') {
+        const socialId = `traveler-${test.stepId}`;
+        const social = resolveSocialSeed({
+            state,
+            socialId
+        });
+
+        state = social.state;
+        outcome.social = clone(social.seed);
+    }
 
     state.travelSteps[test.stepId] = clone(outcome);
 
@@ -7415,26 +7487,49 @@ function stateSummary(state, revision) {
 }
 
 function travelNarrationPacket(result) {
-    const descriptions = {
-        quiet_travel:
-            'This stretch of travel passes without a notable encounter or discovery.',
-        environmental_sign:
-            'The crew notices an environmental sign. No enemy, NPC, quest, or specific hazard has been established.',
-        point_of_interest:
-            'The crew reaches a point of interest. Its details have not been mechanically established; no curiosity roll has occurred.',
-        social_opportunity:
-            'The crew has an opportunity to meet someone. No NPC identity, motive, or quest has been established.',
-        significant_discovery:
-            'The crew notices something potentially significant. No specific secret, reward, or quest has been established.',
-        rare_event:
-            'An unusual event presents itself. No specific enemy, reward, or quest has been established.'
-    };
+    const lines = [
+        `One [moved] travel step was resolved in Zone ${result.zone}.`
+    ];
 
-    return [
-        'One [moved] travel step was resolved.',
-        descriptions[result.event],
-        'Narrate the movement in the direction described by the user. Do not invent a mechanical reward or start combat.'
-    ].join('\n');
+    if (result.event === 'quiet_travel') {
+        lines.push(
+            'Nothing notable was discovered on this stretch.'
+        );
+    } else if (result.event === 'environmental_sign') {
+        lines.push(
+            `Environmental sign: ${result.environmentalSign}.`,
+            'This is a sign only; it does not establish an encounter, NPC, or quest.'
+        );
+    } else if (result.event === 'point_of_interest') {
+        const site = result.site;
+
+        lines.push(
+            `The crew reached a new point of interest, site ${site.id}.`,
+            `The site's curiosity result is: ${site.curiosity.replaceAll('_', ' ')}.`,
+            'Describe the site around this established result. Do not add an unrolled reward or quest.'
+        );
+    } else if (result.event === 'wild_encounter') {
+        lines.push(
+            `The crew spotted encounter ${result.encounterId}.`,
+            'The encounter remains spotted, not engaged. Narrate signs of the group and leave the response to the protagonists.'
+        );
+    } else if (result.event === 'social_opportunity') {
+        lines.push(
+            'The crew has encountered a traveler.',
+            `The traveler's locked social disposition is ${result.social.demeanor}; their sincerity is ${result.social.sincerity}.`,
+            'The traveler has no mechanically established quest or offer yet.'
+        );
+    } else if (result.event === 'significant_discovery') {
+        lines.push(
+            'The travel roll produced a significant-discovery opportunity, but no specific discovery has been mechanically established yet.'
+        );
+    } else if (result.event === 'rare_event') {
+        lines.push(
+            'The travel roll produced a rare-event opportunity, but no specific event has been mechanically established yet.'
+        );
+    }
+
+    return lines.join('\n');
 }
 
 function discoveryNarrationPacket(encounter) {

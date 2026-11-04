@@ -3165,15 +3165,25 @@ const PASSIVES = {
 function spawnEncounter(test) {
     const state = clone(test.state || {});
 
-assert(
-    !state.encounter ||
-    state.encounter.status === 'fled' ||
-    (
-        ['cleared', 'dead'].includes(state.encounter.status) &&
-        state.encounter.rewards?.resolved === true
-    ),
-    'Cannot spawn while an encounter is active or has unresolved rewards'
-);
+    // Spawn callers may provide the zone directly or rely on the saved state.
+    const zone = test.zone ?? state.zone;
+
+    assert(
+        Number.isInteger(zone) && ZONES[zone],
+        `Unknown zone: ${zone}`
+    );
+
+    test = { ...test, zone };
+
+    assert(
+        !state.encounter ||
+        state.encounter.status === 'fled' ||
+        (
+            ['cleared', 'dead'].includes(state.encounter.status) &&
+            state.encounter.rewards?.resolved === true
+        ),
+        'Cannot spawn while an encounter is active or has unresolved rewards'
+    );
 
     const requestedKind =
         test.encounterType ||

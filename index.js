@@ -7637,6 +7637,43 @@ function combatNarrationPacket(result, actions) {
     return lines.join('\n');
 }
 
+function migrateAethermoorHandoffs(stored) {
+    if (Array.isArray(stored?.handoffQueue)) {
+        return clone(stored.handoffQueue);
+    }
+
+    // Older saves had two slots. Their original creation order was not
+    // recorded; combat before the subsequently opened quest lead is
+    // the safest ordering for this workflow.
+    const queue = [];
+
+    if (stored?.pendingNarration?.packet) {
+        queue.push({
+            id: 'legacy-combat',
+            type: 'combat',
+            packet: stored.pendingNarration.packet
+        });
+    }
+
+    if (stored?.pendingDiscovery?.packet) {
+        queue.push({
+            id: 'legacy-discovery',
+            type: 'discovery',
+            packet: stored.pendingDiscovery.packet
+        });
+    }
+
+    return queue;
+}
+
+function appendAethermoorHandoff(queue, entry, revision) {
+    queue.push({
+        id: `${revision}-${queue.length + 1}`,
+        type: entry.type,
+        packet: entry.packet
+    });
+}
+
 async function runStoredMechanic(args) {
     return queueAethermoor(async () => {
         const context = getContext();
@@ -7814,34 +7851,35 @@ async function runStoredMechanic(args) {
                     ? travelNarrationPacket(caseResult)
                     : null;
 
+        const handoffQueue = migrateAethermoorHandoffs(stored);
+
+        if (discoveryPacket) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'discovery',
+                    packet: discoveryPacket
+                },
+                revision
+            );
+        }
+
+        if (narrationPacket) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'combat',
+                    packet: narrationPacket
+                },
+                revision
+            );
+        }
+
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,
             state: nextState,
-
-            pendingDiscovery: discoveryPacket
-                ? {
-                    packet: discoveryPacket,
-                    encounterId: beganNewEncounter
-                        ? nextEncounter.id
-                        : null,
-                    status: beganNewEncounter
-                        ? 'spotted'
-                        : 'travel'
-                }
-                : stored.pendingDiscovery || null,
-
-            pendingNarration: narrationPacket
-                ? {
-                    packet:
-                        stored.pendingNarration?.encounterId === nextEncounter?.id
-                            ? `${stored.pendingNarration.packet}\n\n${narrationPacket}`
-                            : narrationPacket,
-                    encounterId: nextEncounter?.id || null,
-                    turn: caseResult.turn
-                }
-                : stored.pendingNarration || null
+            handoffQueue
         };
-
 
         try {
             await context.saveMetadata();
@@ -9733,28 +9771,30 @@ const AETHERMOOR_HANDOFF_MARKER =
 
 let aethermoorInjectedHandoff = null;
 
-function getPendingAethermoorHandoff() {
-    const stored = getContext()
-        .chatMetadata?.[AETHERMOOR_METADATA_KEY];
+function getPendingAethermoorHandoffs() {
+    const context = getContext();
+    const metadata = context.chatMetadata;
+    const stored = metadata?.[AETHERMOOR_METADATA_KEY];
 
-    if (stored?.pendingDiscovery?.packet) {
+    if (!stored) {
         return {
-            type: 'discovery',
-            packet: stored.pendingDiscovery.packet
+            metadata,
+            entries: []
         };
     }
 
-    if (stored?.pendingNarration?.packet) {
-        return {
-            type: 'combat',
-            packet: stored.pendingNarration.packet
-        };
-    }
-
-    return null;
+    return {
+        metadata,
+        entries: migrateAethermoorHandoffs(stored)
+    };
 }
 
-function makeAethermoorHandoffMessage(handoff) {
+function makeAethermoorHandoffMessage(entries) {
+    const packets = entries.map((entry, index) =>
+        `${index + 1}. [${entry.type.toUpperCase()}]\n` +
+        entry.packet
+    );
+
     return {
         is_user: false,
         is_system: true,
@@ -9762,10 +9802,10 @@ function makeAethermoorHandoffMessage(handoff) {
         send_date: Date.now(),
         mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
-            `The following ${handoff.type} facts are authoritative.\n` +
-            `Use them to write the next scene. Do not invent or alter ` +
-            `mechanical results.\n\n` +
-            handoff.packet +
+            'The following mechanics events occurred in this order. ' +
+            'Use them to write the next scene. Do not alter established ' +
+            'actions, damage, HP, kills, rewards, or discovery outcomes.\n\n' +
+            packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
     };
 }
@@ -9778,19 +9818,15 @@ function findLastUserMessage(chat) {
     return -1;
 }
 
-function removeAethermoorHandoffFromChat(chat) {
-    if (!Array.isArray(chat)) return;
+function removeAethermoorHandoffFromChat(chat, message) {
+    if (!Array.isArray(chat) || !message) return;
 
-    for (let index = chat.length - 1; index >= 0; index--) {
-        const message = chat[index];
-        if (
-            typeof message?.mes === 'string' &&
-            message.mes.includes(AETHERMOOR_HANDOFF_MARKER)
-        ) {
-            chat.splice(index, 1);
-        }
+    const index = chat.indexOf(message);
+    if (index >= 0) {
+        chat.splice(index, 1);
     }
 }
+
 function findLatestUserMove(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         const message = chat[index];
@@ -9805,8 +9841,6 @@ function findLatestUserMove(chat) {
 }
 
 function travelStepId(message) {
-    // The message index remains stable during regeneration/swipes.
-    // The text hash distinguishes edited messages at that index.
     let hash = 2166136261;
 
     for (let index = 0; index < message.text.length; index++) {
@@ -9824,14 +9858,12 @@ globalThis.aethermoorMechanicsInterceptor =
         const movement = findLatestUserMove(chat);
 
         if (movement) {
-            const stepId = travelStepId(movement);
-
             try {
                 await runStoredMechanic({
                     cases: [{
                         name: 'resolve_moved_travel_step',
                         kind: 'travel',
-                        stepId
+                        stepId: travelStepId(movement)
                     }]
                 });
             } catch (error) {
@@ -9842,41 +9874,40 @@ globalThis.aethermoorMechanicsInterceptor =
             }
         }
 
-        const handoff = getPendingAethermoorHandoff();
+        const { metadata, entries } =
+            getPendingAethermoorHandoffs();
 
-        if (!handoff || !Array.isArray(chat)) {
-            console.log(
-                '[Aethermoor] No handoff injected',
-                {
-                    hasHandoff: Boolean(handoff),
-                    chatIsArray: Array.isArray(chat)
-                }
-            );
+        if (!metadata || entries.length === 0) {
+            console.log('[Aethermoor] No handoff queued');
             return;
         }
 
-        removeAethermoorHandoffFromChat(chat);
-
-        const message = makeAethermoorHandoffMessage(handoff);
+        // The handoff is inserted for generation. Retain its exact object
+        // and metadata reference so cleanup cannot affect another chat.
+        const message = makeAethermoorHandoffMessage(entries);
         const lastUserIndex = findLastUserMessage(chat);
-        const insertionIndex = lastUserIndex >= 0
-            ? lastUserIndex + 1
-            : chat.length;
 
-        chat.splice(insertionIndex, 0, message);
+        chat.splice(
+            lastUserIndex >= 0
+                ? lastUserIndex + 1
+                : chat.length,
+            0,
+            message
+        );
 
         aethermoorInjectedHandoff = {
             chat,
             message,
-            handoffType: handoff.type
+            metadata,
+            ids: entries.map(entry => entry.id)
         };
 
         console.log(
-            '[Aethermoor] Injected mechanics handoff',
+            '[Aethermoor] Injected ordered mechanics handoff',
             {
-                type: handoff.type,
-                packet: handoff.packet,
-                insertionIndex
+                count: entries.length,
+                ids: entries.map(entry => entry.id),
+                packet: message.mes
             }
         );
     };
@@ -9886,60 +9917,56 @@ function registerAethermoorGenerationCleanup() {
 
     if (!eventSource || !event_types?.GENERATION_ENDED) {
         console.warn(
-            'Aethermoor: GENERATION_ENDED is unavailable; ' +
-            'temporary handoff cleanup is disabled'
+            'Aethermoor: GENERATION_ENDED unavailable; ' +
+            'handoff cleanup disabled'
         );
         return;
     }
 
     eventSource.on(event_types.GENERATION_ENDED, async () => {
         const injected = aethermoorInjectedHandoff;
+        if (!injected) return;
 
-        console.log(
-            '[Aethermoor] GENERATION_ENDED',
-            {
-                handoffWasInjected: Boolean(injected),
-                handoffType: injected?.handoffType || null
-            }
+        removeAethermoorHandoffFromChat(
+            injected.chat,
+            injected.message
         );
 
-        /*
-         * Do not consume pending facts unless this interceptor actually
-         * inserted them into the generation chat.
-         */
-        if (!injected?.chat) {
-            console.warn(
-                '[Aethermoor] Generation ended without an injected handoff. ' +
-                'Pending mechanics facts were preserved.'
-            );
+        const stored =
+            injected.metadata?.[AETHERMOOR_METADATA_KEY];
+
+        if (!stored) {
+            aethermoorInjectedHandoff = null;
             return;
         }
 
-        removeAethermoorHandoffFromChat(injected.chat);
+        const consumedIds = new Set(injected.ids);
+        const queue = migrateAethermoorHandoffs(stored);
 
-        const context = getContext();
-        const stored =
-            context.chatMetadata?.[AETHERMOOR_METADATA_KEY];
+        stored.handoffQueue = queue.filter(
+            entry => !consumedIds.has(entry.id)
+        );
 
-        if (injected.handoffType === 'discovery') {
-            delete stored?.pendingDiscovery;
+        // Clear only legacy fields that were included in this injection.
+        if (consumedIds.has('legacy-combat')) {
+            delete stored.pendingNarration;
         }
-
-        if (injected.handoffType === 'combat') {
-            delete stored?.pendingNarration;
+        if (consumedIds.has('legacy-discovery')) {
+            delete stored.pendingDiscovery;
         }
 
         aethermoorInjectedHandoff = null;
 
         try {
-            await context.saveMetadata();
-
-            console.log(
-                '[Aethermoor] Consumed injected mechanics handoff'
-            );
+            // Save only if this is still the selected chat. If the user
+            // switched chats, the referenced metadata object is updated
+            // in memory but must not be saved into the new chat.
+            if (getContext().chatMetadata === injected.metadata) {
+                await getContext().saveMetadata();
+            }
         } catch (error) {
             console.error(
-                '[Aethermoor] Could not clear consumed mechanics handoff',
+                '[Aethermoor] Could not save handoff cleanup',
                 error
             );
         }

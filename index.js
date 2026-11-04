@@ -7186,6 +7186,39 @@ function resolveBatch(args) {
                     result = claimLockedLoot(test);
                     break;
 
+                case 'follow_breadcrumb': {
+                    const state = test.state;
+                    const encounter = state?.encounter;
+                    const seed = encounter?.questSeed;
+
+                    assert(
+                        encounter?.status === 'cleared' &&
+                        seed?.result === 'diegetic_quest_breadcrumb',
+                        'No cleared-pack quest breadcrumb is available'
+                    );
+
+                    assert(
+                        seed.source === 'pack_drop',
+                        'Breadcrumb is not from this pack'
+                    );
+
+                    const town = test.town || 'Peat-Cairn Outpost';
+                    const repTier = state.reputation?.[town]?.tier;
+
+                    assert(
+                        repTier,
+                        `No saved reputation tier for ${town}`
+                    );
+
+                    result = resolveQuestSeed({
+                        state,
+                        zone: encounter.zone,
+                        repTier,
+                        town
+                    });
+                    break;
+                }
+
                 case 'quest':
                     if (test.action) {
                         result = resolveQuestAction(test);
@@ -7433,6 +7466,19 @@ function discoveryNarrationPacket(encounter) {
     ].join('\n');
 }
 
+function questOfferNarrationPacket(quest) {
+    return [
+        'The crew followed a quest breadcrumb found on a cleared pack.',
+        `A ${quest.title} offer is now available in zone ${quest.seed.zone}.`,
+        `It has ${quest.gates} gate(s).`,
+        `Completion would award ${quest.payout.xp} XP and ` +
+            `${quest.payout.silver} silver, plus ` +
+            `${quest.payout.repSteps} reputation step(s).`,
+        `The offered salvage is ${quest.salvage.name} ` +
+            `(${quest.salvage.rarity}).`,
+        'No specific quest objective, culprit, or core truth has been established yet. Present the lead diegetically and leave accepting or declining it to the protagonists.'
+    ].join('\n');
+}
 
 function combatNarrationPacket(result, actions) {
     const qtikActions = {
@@ -7761,10 +7807,12 @@ async function runStoredMechanic(args) {
 
         const discoveryPacket = beganNewEncounter
             ? discoveryNarrationPacket(nextEncounter)
-            : batch && oneCase?.kind === 'travel' && caseResult.created
-                ? travelNarrationPacket(caseResult)
-                : null;
-
+            : batch && oneCase?.kind === 'follow_breadcrumb' &&
+              caseResult.created && caseResult.quest
+                ? questOfferNarrationPacket(caseResult.quest)
+                : batch && oneCase?.kind === 'travel' && caseResult.created
+                    ? travelNarrationPacket(caseResult)
+                    : null;
 
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,
@@ -8292,6 +8340,7 @@ function registerTools() {
                                     'world_seeds',
                                     'social',
                                     'loot',
+                                    'follow_breadcrumb',
                                     'quest',
                                     'gear',
                                     'trade',
@@ -9455,8 +9504,68 @@ async function openCombatPanel() {
         return;
     }
 
-    if (!encounter || encounter.status !== 'active') {
+    if (encounter?.status === 'cleared') {
+        const message = document.createElement('p');
+        message.textContent = 'This encounter is cleared.';
+        panel.append(message);
 
+        const breadcrumbAvailable =
+            encounter.questSeed?.result ===
+                'diegetic_quest_breadcrumb' &&
+            encounter.questSeedConsumed !== true;
+
+        if (breadcrumbAvailable) {
+            const followButton = document.createElement('button');
+            followButton.type = 'button';
+            followButton.className = 'menu_button';
+            followButton.textContent = 'Follow Breadcrumb';
+
+            followButton.addEventListener('click', async () => {
+                followButton.disabled = true;
+
+                try {
+                    const output = await runStoredMechanic({
+                        cases: [{
+                            name: 'follow_pack_breadcrumb',
+                            kind: 'follow_breadcrumb'
+                        }]
+                    });
+
+                    assert(
+                        output?.ok === true,
+                        output?.results?.[0]?.error ||
+                            'Could not follow breadcrumb'
+                    );
+
+                    const updated = await readStoredCombatState();
+                    status.textContent = combatStatusText(
+                        updated.state,
+                        updated.revision
+                    );
+
+                    message.textContent =
+                        'Quest lead opened. Generate the next scene ' +
+                        'to narrate the offer.';
+
+                    followButton.remove();
+                } catch (error) {
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor'
+                    );
+                    followButton.disabled = false;
+                }
+            });
+
+            panel.append(followButton);
+        }
+
+        return;
+    }
+
+    if (!encounter || encounter.status !== 'active') {
         const message = document.createElement('p');
         message.textContent = 'There is no active encounter to resolve.';
         panel.append(message);

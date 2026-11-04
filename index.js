@@ -7202,6 +7202,37 @@ function stateSummary(state, revision) {
             state.inventory.activeTradeListings.length
     };
 }
+
+function discoveryNarrationPacket(encounter) {
+    const roleNames = {
+        brute: 'Brute',
+        archer: 'Archer',
+        mender: 'Mender',
+        hexer: 'Hexer',
+        buffer: 'Buffer',
+        elite: 'Elite',
+        boss: 'Boss'
+    };
+
+    const counts = {};
+    const foes = encounter.foes.map(foe => {
+        counts[foe.role] = (counts[foe.role] || 0) + 1;
+
+        return `${roleNames[foe.role] || foe.role} ` +
+            `${counts[foe.role]} (level ${foe.level})`;
+    });
+
+    return [
+        'A new encounter has been discovered.',
+        `Zone: ${encounter.zone}.`,
+        `Enemies present: ${foes.join('; ')}.`,
+        'The enemies have been spotted, but combat has not begun.',
+        'Do not narrate an attack or resolve combat yet.',
+        'Narrate what the crew can hear, see, smell, or infer about the group, then leave the decision to engage, avoid, investigate, negotiate, or retreat to the protagonists.'
+    ].join('\n');
+}
+
+
 function combatNarrationPacket(result, actions) {
     const qtikActions = {
         fire_melee: 'Fire Melee',
@@ -7490,9 +7521,33 @@ async function runStoredMechanic(args) {
             )
             : null;
 
+        const previousEncounter = savedState.encounter;
+        const nextEncounter = nextState.encounter;
+
+        const beganNewEncounter =
+            nextEncounter?.status === 'active' &&
+            (
+                !previousEncounter ||
+                previousEncounter.status !== 'active' ||
+                previousEncounter.id !== nextEncounter.id
+            );
+
+        const discoveryPacket = beganNewEncounter
+            ? discoveryNarrationPacket(nextEncounter)
+            : null;
+
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,
             state: nextState,
+
+            pendingDiscovery: discoveryPacket
+                ? {
+                    packet: discoveryPacket,
+                    encounterId: nextEncounter.id,
+                    status: 'spotted'
+                }
+                : stored.pendingDiscovery || null,
+
             pendingNarration: narrationPacket
                 ? {
                     packet: narrationPacket,
@@ -7501,6 +7556,7 @@ async function runStoredMechanic(args) {
                 }
                 : stored.pendingNarration || null
         };
+
 
         try {
             await context.saveMetadata();

@@ -7310,6 +7310,29 @@ function stateSummary(state, revision) {
     };
 }
 
+function travelNarrationPacket(result) {
+    const descriptions = {
+        quiet_travel:
+            'This stretch of travel passes without a notable encounter or discovery.',
+        environmental_sign:
+            'The crew notices an environmental sign. No enemy, NPC, quest, or specific hazard has been established.',
+        point_of_interest:
+            'The crew reaches a point of interest. Its details have not been mechanically established; no curiosity roll has occurred.',
+        social_opportunity:
+            'The crew has an opportunity to meet someone. No NPC identity, motive, or quest has been established.',
+        significant_discovery:
+            'The crew notices something potentially significant. No specific secret, reward, or quest has been established.',
+        rare_event:
+            'An unusual event presents itself. No specific enemy, reward, or quest has been established.'
+    };
+
+    return [
+        'One [moved] travel step was resolved.',
+        descriptions[result.event],
+        'Narrate the movement in the direction described by the user. Do not invent a mechanical reward or start combat.'
+    ].join('\n');
+}
+
 function discoveryNarrationPacket(encounter) {
     const roleNames = {
         brute: 'Brute',
@@ -7636,7 +7659,10 @@ async function runStoredMechanic(args) {
 
         const discoveryPacket = beganNewEncounter
             ? discoveryNarrationPacket(nextEncounter)
-            : null;
+            : batch && oneCase?.kind === 'travel' && caseResult.created
+                ? travelNarrationPacket(caseResult)
+                : null;
+
 
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,

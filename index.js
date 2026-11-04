@@ -7222,18 +7222,15 @@ function combatNarrationPacket(result, actions) {
         raise_shadow: 'Raise Shadow'
     };
 
-    const foeNames = new Map();
-    const foeCounts = {};
-
-    for (const foe of result.summary?.encounter?.foes || []) {
-        foeCounts[foe.role] = (foeCounts[foe.role] || 0) + 1;
-        foeNames.set(
+    const roster = result.summary?.encounter?.foes || [];
+    const foeNames = new Map(
+        roster.map((foe, index) => [
             foe.id,
-            `${foe.role} ${foeCounts[foe.role]}`
-        );
-    }
-
+            combatFoeLabel(foe, index)
+        ])
+    );
     const foeName = id => foeNames.get(id) || id;
+
     const lines = [
         `Aethermoor combat turn ${result.turn} has resolved.`,
         `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
@@ -7288,9 +7285,7 @@ function combatNarrationPacket(result, actions) {
     }
 
     for (const kill of result.kills || []) {
-        lines.push(
-            `${foeName(kill.id)} was slain.`
-        );
+        lines.push(`${foeName(kill.id)} was slain.`);
     }
 
     for (const effect of result.turnEffects || []) {
@@ -7323,7 +7318,6 @@ function combatNarrationPacket(result, actions) {
     }
 
     if (result.summary) {
-
         lines.push(
             `Current crew state: level ${result.summary.level}, ` +
             `${result.summary.xp}/${result.summary.nextXp} XP; ` +
@@ -7336,16 +7330,21 @@ function combatNarrationPacket(result, actions) {
 
         lines.push(
             living.length
-                ? `Living foes: ${living.map(foe =>
-                    `${foeName(foe.id)} at ${foe.hp}/${foe.maxHp} HP`
-                ).join('; ')}.`
+                ? `Living foes: ${living.map((foe, index) => {
+                    const originalIndex = roster.findIndex(
+                        entry => entry.id === foe.id
+                    );
+                    return (
+                        `${combatFoeLabel(foe, originalIndex)} ` +
+                        `at ${foe.hp}/${foe.maxHp} HP`
+                    );
+                }).join('; ')}.`
                 : 'No foes remain alive.'
         );
     }
 
     return lines.join('\n');
 }
-
 
 async function runStoredMechanic(args) {
     return queueAethermoor(async () => {
@@ -8831,6 +8830,15 @@ function enableCombatPanelDragging(header, panel) {
 }
 
 function formatCombatTurnResult(result) {
+    const roster = result.summary?.encounter?.foes || [];
+    const foeNames = new Map(
+        roster.map((foe, index) => [
+            foe.id,
+            combatFoeLabel(foe, index)
+        ])
+    );
+    const foeName = id => foeNames.get(id) || id;
+
     const lines = [
         `Turn ${result.turn} resolved.`,
         ''
@@ -8842,7 +8850,8 @@ function formatCombatTurnResult(result) {
         if (exchange.hits?.length) {
             for (const hit of exchange.hits) {
                 lines.push(
-                    `- ${hit.id}: ${hit.damage} damage, ${hit.hp} HP remaining`
+                    `- ${foeName(hit.id)}: ${hit.damage} damage, ` +
+                    `${hit.hp} HP remaining`
                 );
             }
         } else {
@@ -8851,7 +8860,9 @@ function formatCombatTurnResult(result) {
 
         if (exchange.enemyMiss === true) {
             lines.push('- Enemy attack missed.');
-        } else if (exchange.frontlineDamage > 0) {
+        }
+
+        if (exchange.frontlineDamage > 0) {
             lines.push(
                 `- Enemy pack dealt ${exchange.frontlineDamage} damage to Q'tik.`
             );
@@ -8880,7 +8891,20 @@ function formatCombatTurnResult(result) {
     }
 
     for (const kill of result.kills || []) {
-        lines.push(`Slain: ${kill.id} (${kill.role}, Lv ${kill.level}).`);
+        lines.push(
+            `Slain: ${foeName(kill.id)} (${kill.role}, Lv ${kill.level}).`
+        );
+    }
+
+    for (const effect of result.turnEffects || []) {
+        lines.push(`Turn effect: ${effect}.`);
+    }
+
+    for (const levelUp of result.levelUps || []) {
+        lines.push(
+            `Level up: crew reached Lv ${levelUp.level} ` +
+            `(${levelUp.xpRemaining}/${levelUp.nextXp} XP).`
+        );
     }
 
     if (result.rewards?.applied) {
@@ -8903,6 +8927,7 @@ function formatCombatTurnResult(result) {
 
     return lines.join('\n');
 }
+
 const COMBAT_PANEL_GEOMETRY_KEY = 'aethermoorCombatPanelGeometry';
 
 function restoreCombatPanelGeometry(panel) {

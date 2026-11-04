@@ -10007,13 +10007,26 @@ function removeAethermoorHandoffFromChat(chat, message) {
 function findLatestUserMove(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         const message = chat[index];
-        if (message?.is_user !== true) continue;
 
-        return typeof message.mes === 'string' &&
-            /\[moved\]/i.test(message.mes)
-            ? { index, text: message.mes }
+        if (message?.is_user !== true) {
+            continue;
+        }
+
+        if (typeof message.mes !== 'string') {
+            return null;
+        }
+
+        const prose = message.mes
+            // Ignore fenced code blocks.
+            .replace(/```[\s\S]*?```/g, '')
+            // Ignore inline code containing the marker.
+            .replace(/`[^`]*`/g, '');
+
+        return /\[\s*moved\s*\]/i.test(prose)
+            ? { index, text: prose }
             : null;
     }
+
     return null;
 }
 

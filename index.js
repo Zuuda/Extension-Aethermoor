@@ -2982,14 +2982,22 @@ function register(name, displayName, description, parameters, operation) {
         parameters,
         action: async args => {
             try {
-                return JSON.stringify(operation(args));
+                const result =
+                    name === 'aethermoorResolveTurnV2'
+                        ? await runStoredMechanic(args)
+                        : await operation(args);
+
+                return JSON.stringify(result);
             } catch (error) {
                 return JSON.stringify({
                     ok: false,
-                    error: error instanceof Error ? error.message : String(error)
+                    error: error instanceof Error
+                        ? error.message
+                        : String(error)
                 });
             }
         },
+
         formatMessage: () => `Running ${displayName}...`,
         stealth: false
     });
@@ -7086,6 +7094,281 @@ function resolveBatch(args) {
         results
     };
 }
+
+/*
+ * Serialize state operations so two simultaneous tool calls cannot
+ * both read the same revision and overwrite each other's changes.
+ */
+let aethermoorQueue = Promise.resolve();
+
+function queueAethermoor(task) {
+    const pending = aethermoorQueue.then(task);
+    aethermoorQueue = pending.catch(() => {});
+    return pending;
+}
+
+const AETHERMOOR_METADATA_KEY = 'aethermoorV2';
+
+function checkImportedState(state) {
+    assert(
+        state && typeof state === 'object' && !Array.isArray(state),
+        'Import requires a state object'
+    );
+    assert(ZONES[state.zone], 'Import requires a valid state.zone');
+    assert(state.crew && state.crew.gear,
+        'Import requires state.crew and its gear');
+    assert(state.crew.gear.tansy && state.crew.gear.qtik,
+        'Import requires both gear owner containers');
+    assert(
+        state.crew.shadows &&
+        Array.isArray(state.crew.shadows.deck) &&
+        Array.isArray(state.crew.shadows.active),
+        'Import requires state.crew.shadows.deck and .active'
+    );
+    assert(
+        state.inventory &&
+        Array.isArray(state.inventory.bagReserves) &&
+        Array.isArray(state.inventory.activeTradeListings) &&
+        Array.isArray(state.inventory.consumables),
+        'Import requires complete top-level state.inventory'
+    );
+    assert(
+        state.gearGrantIds &&
+        typeof state.gearGrantIds === 'object' &&
+        !Array.isArray(state.gearGrantIds),
+        'Import requires top-level state.gearGrantIds'
+    );
+    assert(
+        Number.isInteger(state.rngState) && state.rngState > 0,
+        'Import requires the saved positive rngState'
+    );
+    assert(
+        state.inquiries && state.socialSeeds && state.reputation,
+        'Import requires inquiries, socialSeeds, and reputation'
+    );
+
+    const stats = derived(state.crew);
+    int(state.crew.xp, 'crew.xp');
+    int(state.crew.purse, 'crew.purse');
+    int(state.crew.qtik.hp, 'qtik.hp');
+    int(state.crew.tansy.hp, 'tansy.hp');
+
+    assert(state.crew.qtik.hp <= stats.qtikMaxHp,
+        "Q'tik HP exceeds derived maximum");
+    assert(state.crew.tansy.hp <= stats.tansyMaxHp,
+        'Tansy HP exceeds derived maximum');
+
+    normalizeConsumableInventory(state.inventory);
+
+    if (state.encounter !== null) {
+        validate(state);
+    }
+
+    return stats;
+}
+
+function stateSummary(state, revision) {
+    const stats = derived(state.crew);
+
+    return {
+        revision,
+        zone: state.zone,
+        level: state.crew.level,
+        xp: state.crew.xp,
+        nextXp: nextXp(state.crew.level),
+        purse: state.crew.purse,
+        qtikHp: state.crew.qtik.hp,
+        qtikMaxHp: stats.qtikMaxHp,
+        tansyHp: state.crew.tansy.hp,
+        tansyMaxHp: stats.tansyMaxHp,
+        atk: stats.atk,
+        def: stats.def,
+        weasels: state.crew.weasels.active,
+        encounter: state.encounter && {
+            id: state.encounter.id,
+            status: state.encounter.status,
+            foes: state.encounter.foes.map(foe => ({
+                id: foe.id,
+                role: foe.role,
+                hp: foe.hp,
+                maxHp: foe.maxHp
+            }))
+        },
+        bagItems: state.inventory.bagReserves.length,
+        activeTradeListings:
+            state.inventory.activeTradeListings.length
+    };
+}
+
+async function runStoredMechanic(args) {
+    return queueAethermoor(async () => {
+        const context = getContext();
+        const metadata = context.chatMetadata;
+
+        assert(
+            metadata && typeof context.saveMetadata === 'function',
+            'Open a chat with metadata saving available'
+        );
+
+        const stored = metadata[AETHERMOOR_METADATA_KEY];
+
+        /*
+         * Batch cases were independent test fixtures before persistence.
+         * Accept exactly one live operation per call so there is no
+         * ambiguous choice of which result should become saved state.
+         */
+        const batch = Array.isArray(args.cases);
+
+        if (batch) {
+            assert(args.cases.length === 1,
+                'Persistent mode accepts exactly one case per call');
+        }
+
+        const oneCase = batch ? args.cases[0] : null;
+
+        if (oneCase?.kind === 'state') {
+            if (oneCase.action === 'status') {
+                assert(stored?.state,
+                    'No saved Aethermoor state; import it first');
+                return {
+                    ok: true,
+                    summary: stateSummary(stored.state, stored.revision)
+                };
+            }
+
+            if (oneCase.action === 'export') {
+                assert(stored?.state,
+                    'No saved Aethermoor state; import it first');
+                return {
+                    ok: true,
+                    revision: stored.revision,
+                    state: clone(stored.state)
+                };
+            }
+
+            assert(oneCase.action === 'import',
+                'State action must be import, status, or export');
+            assert(!stored,
+                'This chat already has saved state; import will not overwrite it');
+
+            const imported = clone(oneCase.state);
+            checkImportedState(imported);
+
+            assert(getContext().chatMetadata === metadata,
+                'Chat changed during import; nothing was saved');
+
+            metadata[AETHERMOOR_METADATA_KEY] = {
+                revision: 1,
+                state: imported
+            };
+
+            try {
+                await context.saveMetadata();
+            } catch (error) {
+                delete metadata[AETHERMOOR_METADATA_KEY];
+                throw error;
+            }
+
+            return {
+                ok: true,
+                imported: true,
+                summary: stateSummary(imported, 1)
+            };
+        }
+
+        assert(stored?.state,
+            'No saved Aethermoor state; import it first');
+
+        assert(args.state === undefined,
+            'State is stored by the extension; omit top-level state');
+        assert(!batch || oneCase.state === undefined,
+            'State is stored by the extension; omit case.state');
+
+        const savedState = clone(stored.state);
+        const input = batch
+            ? {
+                ...args,
+                cases: [{
+                    ...oneCase,
+                    state: savedState
+                }]
+            }
+            : {
+                ...args,
+                state: savedState
+            };
+
+        const output = batch
+            ? resolveBatch(input)
+            : resolveTurn(input);
+
+        assert(output?.ok !== false,
+            batch
+                ? output.results?.[0]?.error ||
+                  'Mechanics case failed; state unchanged'
+                : output.error ||
+                  'Mechanics operation failed; state unchanged'
+        );
+
+        const caseResult = batch
+            ? output.results[0].result
+            : output;
+
+        /*
+         * Reference, stock, and food-list operations do not return
+         * mutated state. They are read-only.
+         */
+        if (!caseResult?.state) {
+            return output;
+        }
+
+        const nextState = caseResult.state;
+
+        assert(getContext().chatMetadata === metadata,
+            'Chat changed during operation; nothing was saved');
+
+        const previous = metadata[AETHERMOOR_METADATA_KEY];
+        const revision = previous.revision + 1;
+
+        metadata[AETHERMOOR_METADATA_KEY] = {
+            revision,
+            state: nextState
+        };
+
+        try {
+            await context.saveMetadata();
+        } catch (error) {
+            metadata[AETHERMOOR_METADATA_KEY] = previous;
+            throw error;
+        }
+
+        /*
+         * The full machine state stays in chat metadata, rather than
+         * being copied through the prompt or tool response.
+         */
+        const { state: _saved, ...visibleResult } = caseResult;
+
+        if (batch) {
+            return {
+                ok: true,
+                total: 1,
+                passed: 1,
+                failed: 0,
+                results: [{
+                    ...output.results[0],
+                    result: visibleResult
+                }],
+                summary: stateSummary(nextState, revision)
+            };
+        }
+
+        return {
+            ...visibleResult,
+            summary: stateSummary(nextState, revision)
+        };
+    });
+}
+
 const LOOT_RARITY_INFO = {
     common:   { label: 'Common',   color: '#ffffff' },
     uncommon: { label: 'Uncommon', color: '#4ade80' },
@@ -7445,10 +7728,14 @@ function registerTools() {
         'aethermoorResolveTurnV2',
         'Aethermoor: Resolve Turn or Batch',
         [
-            'Resolve one declared PvE turn, or evaluate multiple independent',
-            'mechanics cases in one call. Does not choose actions or narrate.',
-            'Single mode uses state and actions. Batch mode uses cases.'
+            'Aethermoor mechanics using saved per-chat state.',
+            'First call one case: kind state, action import, with full state.',
+            'Thereafter omit state: use one case per call for spawn and',
+            'other operations, or actions for a combat turn.',
+            'Use kind state with action status or export to inspect storage.',
+            'Do not choose actions or narrate.'
         ].join(' '),
+
         {
             type: 'object',
             properties: {
@@ -7535,6 +7822,7 @@ function registerTools() {
                             kind: {
                                 type: 'string',
                                 enum: [
+                                    'state',
                                     'spawn',
                                     'turn',
                                     'reference',
@@ -7708,6 +7996,9 @@ function registerTools() {
                             action: {
                                 type: 'string',
                                 enum: [
+                                    'import',
+                                    'status',
+                                    'export',
                                     'accept',
                                     'decline',
                                     'clear_gate',

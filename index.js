@@ -10183,10 +10183,9 @@ function registerAethermoorGenerationCleanup() {
         event_types.CHARACTER_MESSAGE_RENDERED
     ].filter(Boolean);
 
-    if (
-        successEvents.length === 0 ||
-        !event_types.GENERATION_ENDED
-    ) {
+    const endedEvent = event_types.GENERATION_ENDED;
+
+    if (successEvents.length === 0 || !endedEvent) {
         console.warn(
             'Aethermoor: Required generation events unavailable; ' +
             'handoff cleanup disabled'
@@ -10194,55 +10193,118 @@ function registerAethermoorGenerationCleanup() {
         return;
     }
 
+    async function tryConsumeInjectedHandoff() {
+        const injected = aethermoorInjectedHandoff;
+
+        if (!injected) {
+            return;
+        }
+
+        if (!injected.generationEnded) {
+            console.log(
+                '[Aethermoor] Reply event received; waiting for ' +
+                'GENERATION_ENDED before consuming'
+            );
+            return;
+        }
+
+        if (injected.consumed) {
+            return;
+        }
+
+        console.log(
+            '[Aethermoor] Consuming completed mechanics handoff',
+            { ids: injected.ids }
+        );
+
+        await consumeAethermoorHandoff(injected);
+
+        if (
+            injected.consumed &&
+            aethermoorInjectedHandoff === injected
+        ) {
+            aethermoorInjectedHandoff = null;
+            aethermoorGenerationReceived = false;
+        }
+    }
+
     for (const eventType of new Set(successEvents)) {
         eventSource.on(eventType, () => {
             const injected = aethermoorInjectedHandoff;
-            if (!injected) return;
 
-            aethermoorGenerationReceived = true;
-
-            console.log(
-                '[Aethermoor] Assistant reply event received',
-                { eventType }
-            );
-
-            void consumeAethermoorHandoff(injected);
-        });
-    }
-
-    eventSource.on(
-        event_types.GENERATION_ENDED,
-        async () => {
-            const injected = aethermoorInjectedHandoff;
-            if (!injected) return;
-
-            removeAethermoorHandoffFromChat(
-                injected.chat,
-                injected.message
-            );
-
-            injected.generationEnded = true;
-
-            if (!aethermoorGenerationReceived) {
-                console.warn(
-                    '[Aethermoor] Generation ended without a reply event; ' +
-                    'handoff preserved'
-                );
+            if (!injected) {
                 return;
             }
 
-            await consumeAethermoorHandoff(injected);
+            aethermoorGenerationReceived = true;
+            injected.replyReceived = true;
 
-            if (
-                injected.consumed &&
-                aethermoorInjectedHandoff === injected
-            ) {
-                aethermoorInjectedHandoff = null;
-            }
+            console.log(
+                '[Aethermoor] Assistant reply event received',
+                {
+                    eventType,
+                    generationEnded: injected.generationEnded
+                }
+            );
 
-            aethermoorGenerationReceived = false;
+            void tryConsumeInjectedHandoff();
+        });
+    }
+
+    eventSource.on(endedEvent, () => {
+        const injected = aethermoorInjectedHandoff;
+
+        if (!injected) {
+            return;
         }
-    );
+
+        removeAethermoorHandoffFromChat(
+            injected.chat,
+            injected.message
+        );
+
+        injected.generationEnded = true;
+
+        console.log(
+            '[Aethermoor] Generation ended',
+            {
+                replyReceived: Boolean(injected.replyReceived)
+            }
+        );
+
+        if (!injected.replyReceived) {
+            /*
+             * Do not consume yet. Some SillyTavern versions emit
+             * MESSAGE_RECEIVED after GENERATION_ENDED.
+             */
+            console.warn(
+                '[Aethermoor] No reply event yet; waiting briefly for ' +
+                'late MESSAGE_RECEIVED or CHARACTER_MESSAGE_RENDERED'
+            );
+
+            setTimeout(() => {
+                const current = aethermoorInjectedHandoff;
+
+                if (
+                    current === injected &&
+                    !current.replyReceived &&
+                    !current.consumed
+                ) {
+                    console.warn(
+                        '[Aethermoor] No assistant reply event arrived; ' +
+                        'handoff preserved'
+                    );
+
+                    aethermoorInjectedHandoff = null;
+                    aethermoorGenerationReceived = false;
+                }
+            }, 1000);
+
+            return;
+        }
+
+        void tryConsumeInjectedHandoff();
+    });
 }
 
 jQuery(function () {

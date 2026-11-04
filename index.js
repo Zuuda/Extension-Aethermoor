@@ -8281,6 +8281,98 @@ function registerAethermoorTools() {
     }
 }
 
+function formatCombatStatus(state, revision) {
+    const encounter = state.encounter;
+    const stats = derived(state.crew);
+
+    const lines = [
+        `Aethermoor Combat Status (revision ${revision})`,
+        `Zone ${state.zone}: ${ZONES[state.zone].name}`,
+        `Crew Level ${state.crew.level} | XP ${state.crew.xp}/${nextXp(state.crew.level)}`,
+        `Q'tik: ${state.crew.qtik.hp}/${stats.qtikMaxHp} HP`,
+        `Tansy: ${state.crew.tansy.hp}/${stats.tansyMaxHp} HP`,
+        `Purse: ${state.crew.purse}s`,
+        ''
+    ];
+
+    if (!encounter) {
+        lines.push('No encounter is saved.');
+        return lines.join('\n');
+    }
+
+    lines.push(
+        `Encounter: ${encounter.id}`,
+        `Status: ${encounter.status}`,
+        `Turn: ${encounter.turn}`,
+        '',
+        'Foes:'
+    );
+
+    const livingFoes = encounter.foes.filter(foe => foe.hp > 0);
+
+    if (livingFoes.length === 0) {
+        lines.push('No living foes.');
+    } else {
+        for (const foe of livingFoes) {
+            lines.push(
+                `- ${foe.id} | ${foe.role} Lv ${foe.level} | ` +
+                `${foe.hp}/${foe.maxHp} HP`
+            );
+        }
+    }
+
+    return lines.join('\n');
+}
+
+async function openCombatStatus() {
+    const { Popup } = getContext();
+
+    try {
+        const result = await runStoredMechanic({
+            cases: [{
+                kind: 'state',
+                action: 'export',
+                name: 'combat_status_ui'
+            }]
+        });
+
+        assert(
+            result?.ok === true && result.state,
+            'Could not read saved Aethermoor state'
+        );
+
+        await Popup.show.text(
+            'Aethermoor Combat Status',
+            formatCombatStatus(result.state, result.revision)
+        );
+    } catch (error) {
+        const message = error instanceof Error
+            ? error.message
+            : String(error);
+
+        toastr.error(message, 'Aethermoor');
+    }
+}
+
+function registerCombatStatusButton() {
+    const panel = document.getElementById('extensions_settings2');
+
+    if (!panel || document.getElementById('aethermoor_combat_status_button')) {
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'aethermoor_combat_status_button';
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'Open Combat Status';
+    button.title = 'View the current saved Aethermoor encounter without advancing it';
+    button.addEventListener('click', openCombatStatus);
+
+    panel.appendChild(button);
+}
+
 jQuery(function () {
     registerAethermoorTools();
+    registerCombatStatusButton();
 });

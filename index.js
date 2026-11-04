@@ -7187,12 +7187,15 @@ function stateSummary(state, revision) {
         encounter: state.encounter && {
             id: state.encounter.id,
             status: state.encounter.status,
-            foes: state.encounter.foes.map(foe => ({
-                id: foe.id,
-                role: foe.role,
-                hp: foe.hp,
-                maxHp: foe.maxHp
-            }))
+        foes: state.encounter.foes.map(foe => ({
+            id: foe.id,
+            role: foe.role,
+            level: foe.level,
+            hp: foe.hp,
+            maxHp: foe.maxHp,
+            nextTelegraph: foe.nextTelegraph || null
+        }))
+
         },
         bagItems: state.inventory.bagReserves.length,
         activeTradeListings:
@@ -9163,44 +9166,61 @@ async function openCombatPanel() {
     panel.append(choices, resultBox, actionsRow);
 }
 
-jQuery(function () {
-    registerAethermoorTools();
-    createCombatController();
-});
-globalThis.aethermoorCombatNarrationInterceptor =
-    async function (chat) {
-        const stored =
-            getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY];
+function registerCombatNarrationMacro() {
+    const { macros } = getContext();
 
-        const pending = stored?.pendingNarration;
-        if (!pending?.packet || !Array.isArray(chat)) return;
+    if (!macros?.register) {
+        console.warn('Aethermoor: SillyTavern macros API unavailable');
+        return;
+    }
 
-        const message = {
-            is_user: false,
-            is_system: true,
-            name: 'Aethermoor Combat Resolution',
-            send_date: Date.now(),
-            mes:
-                '<aethermoor-combat-resolution>\n' +
-                pending.packet +
-                '\n</aethermoor-combat-resolution>'
-        };
+    macros.register('aethermoorCombatResolution', {
+        description: 'Latest resolved Aethermoor combat turn',
+        handler: () => {
+            const pending =
+                getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ?.pendingNarration;
 
-        const lastUserIndex = chat.findLastIndex
-            ? chat.findLastIndex(entry => entry?.is_user)
-            : (() => {
-                for (let index = chat.length - 1; index >= 0; index--) {
-                    if (chat[index]?.is_user) return index;
-                }
-                return -1;
-            })();
+            return pending?.packet || '';
+        }
+    });
+}
 
-        chat.splice(
-            lastUserIndex >= 0 ? lastUserIndex : chat.length,
-            0,
-            message
+function clearCombatNarrationAfterGeneration() {
+    const { eventSource, event_types } = getContext();
+
+    if (!eventSource || !event_types?.GENERATION_ENDED) {
+        console.warn(
+            'Aethermoor: generation completion event unavailable; ' +
+            'combat packet will remain in chat metadata'
         );
+        return;
+    }
+
+    eventSource.on(event_types.GENERATION_ENDED, async () => {
+        const context = getContext();
+        const metadata = context.chatMetadata;
+        const stored = metadata?.[AETHERMOOR_METADATA_KEY];
+
+        if (!stored?.pendingNarration) return;
 
         delete stored.pendingNarration;
-        await getContext().saveMetadata();
-    };
+
+        try {
+            await context.saveMetadata();
+        } catch (error) {
+            console.error(
+                'Aethermoor: Could not clear consumed combat narration',
+                error
+            );
+        }
+    });
+}
+
+jQuery(function () {
+    registerAethermoorTools();
+    registerCombatNarrationMacro();
+    clearCombatNarrationAfterGeneration();
+    createCombatController();
+});
+

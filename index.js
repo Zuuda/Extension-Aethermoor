@@ -3709,13 +3709,19 @@ const eliteChance =
             zone: questTerminal.zone
         };
     }
+    // Ordinary spawns are discoveries first. The player chooses when
+    // to engage after the discovery has been narrated.
+    if (spawned.encounter.type !== 'quest_terminal') {
+        spawned.encounter.status = 'spotted';
+    }
+
     state.zone = test.zone;
     state.encounter = spawned.encounter;
     validate(state);
 
     return {
-
         ...spawned,
+
         rngState: state.rngState,
         state
     };
@@ -3853,8 +3859,7 @@ function resolveTravelStep(test) {
 
         state.rngState = spawned.state.rngState;
         state.encounter = spawned.encounter;
-        state.encounter.status = 'spotted';
-
+       
         outcome.encounterId = state.encounter.id;
         outcome.encounter = clone(state.encounter);
     }

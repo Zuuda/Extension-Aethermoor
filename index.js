@@ -8294,6 +8294,7 @@ function registerTools() {
                                     'state',
                                     'spawn',
                                     'travel',
+                                    'engage',
                                     'turn',
                                     'reference',
                                     'world_seeds',
@@ -9827,7 +9828,31 @@ function registerAethermoorGenerationCleanup() {
 }
 
 jQuery(function () {
-    registerAethermoorTools();
-    registerAethermoorGenerationCleanup();
-    createCombatController();
+    try {
+        registerAethermoorTools();
+    } catch (error) {
+        console.error(
+            'Aethermoor: Function-tool registration failed',
+            error
+        );
+    }
+
+    try {
+        registerAethermoorGenerationCleanup();
+    } catch (error) {
+        console.error(
+            'Aethermoor: Generation cleanup registration failed',
+            error
+        );
+    }
+
+    try {
+        createCombatController();
+    } catch (error) {
+        console.error(
+            'Aethermoor: Combat controller initialization failed',
+            error
+        );
+    }
 });
+

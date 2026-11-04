@@ -10092,75 +10092,20 @@ globalThis.aethermoorMechanicsInterceptor =
         );
     };
 
-function registerAethermoorGenerationCleanup() {
-    const { eventSource, event_types } = getContext();
+async function consumeAethermoorHandoff(injected) {
+    if (!injected || injected.consumed) return;
 
-    if (!eventSource || !event_types) {
-        console.warn(
-            'Aethermoor: SillyTavern event API unavailable; ' +
-            'handoff cleanup disabled'
-        );
+    if (injected.consumePromise) {
+        await injected.consumePromise;
         return;
     }
 
-    const receivedEvent = event_types.MESSAGE_RECEIVED;
-    const endedEvent = event_types.GENERATION_ENDED;
-
-    if (!receivedEvent || !endedEvent) {
-        console.warn(
-            'Aethermoor: Required generation events unavailable; ' +
-            'handoff cleanup disabled'
-        );
-        return;
-    }
-
-    eventSource.on(receivedEvent, () => {
-        if (!aethermoorInjectedHandoff) return;
-
-        /*
-         * MESSAGE_RECEIVED means SillyTavern recorded an assistant
-         * response. The queued facts may now be consumed safely.
-         */
-        aethermoorGenerationReceived = true;
-
-        console.log(
-            '[Aethermoor] Assistant reply recorded; ' +
-            'handoff may be consumed'
-        );
-    });
-
-    eventSource.on(endedEvent, async () => {
-        const injected = aethermoorInjectedHandoff;
-
-        if (!injected) return;
-
-        removeAethermoorHandoffFromChat(
-            injected.chat,
-            injected.message
-        );
-
-        /*
-         * A stopped or failed generation must leave the queue intact.
-         * The next generation can inject the same facts again.
-         */
-        if (!aethermoorGenerationReceived) {
-            console.warn(
-                '[Aethermoor] Generation ended without an assistant reply; ' +
-                'handoff preserved'
-            );
-
-            aethermoorInjectedHandoff = null;
-            aethermoorGenerationReceived = false;
-            return;
-
-        }
-
+    injected.consumePromise = (async () => {
         const stored =
             injected.metadata?.[AETHERMOOR_METADATA_KEY];
 
         if (!stored) {
-            aethermoorInjectedHandoff = null;
-            aethermoorGenerationReceived = false;
+            injected.consumed = true;
             return;
         }
 
@@ -10179,33 +10124,113 @@ function registerAethermoorGenerationCleanup() {
             delete stored.pendingDiscovery;
         }
 
-        try {
-            /*
-             * Save only if this is still the chat from which the
-             * generation started.
-             */
-            if (getContext().chatMetadata === injected.metadata) {
-                await getContext().saveMetadata();
-            }
-
-            console.log(
-                '[Aethermoor] Consumed ordered mechanics handoff',
-                {
-                    ids: injected.ids
-                }
-            );
-        } catch (error) {
-            console.error(
-                '[Aethermoor] Could not save handoff cleanup',
-                error
-            );
-        } finally {
-            aethermoorInjectedHandoff = null;
-            aethermoorGenerationReceived = false;
+        if (getContext().chatMetadata === injected.metadata) {
+            await getContext().saveMetadata();
         }
-    });
+
+        injected.consumed = true;
+
+        console.log(
+            '[Aethermoor] Consumed ordered mechanics handoff',
+            { ids: injected.ids }
+        );
+
+        if (
+            injected.generationEnded &&
+            aethermoorInjectedHandoff === injected
+        ) {
+            aethermoorInjectedHandoff = null;
+        }
+    })();
+
+    try {
+        await injected.consumePromise;
+    } catch (error) {
+        injected.consumePromise = null;
+        console.error(
+            '[Aethermoor] Could not consume mechanics handoff',
+            error
+        );
+    }
 }
 
+function registerAethermoorGenerationCleanup() {
+    const { eventSource, event_types } = getContext();
+
+    if (!eventSource || !event_types) {
+        console.warn(
+            'Aethermoor: SillyTavern event API unavailable; ' +
+            'handoff cleanup disabled'
+        );
+        return;
+    }
+
+    const successEvents = [
+        event_types.MESSAGE_RECEIVED,
+        event_types.CHARACTER_MESSAGE_RENDERED
+    ].filter(Boolean);
+
+    if (
+        successEvents.length === 0 ||
+        !event_types.GENERATION_ENDED
+    ) {
+        console.warn(
+            'Aethermoor: Required generation events unavailable; ' +
+            'handoff cleanup disabled'
+        );
+        return;
+    }
+
+    for (const eventType of new Set(successEvents)) {
+        eventSource.on(eventType, () => {
+            const injected = aethermoorInjectedHandoff;
+            if (!injected) return;
+
+            aethermoorGenerationReceived = true;
+
+            console.log(
+                '[Aethermoor] Assistant reply event received',
+                { eventType }
+            );
+
+            void consumeAethermoorHandoff(injected);
+        });
+    }
+
+    eventSource.on(
+        event_types.GENERATION_ENDED,
+        async () => {
+            const injected = aethermoorInjectedHandoff;
+            if (!injected) return;
+
+            removeAethermoorHandoffFromChat(
+                injected.chat,
+                injected.message
+            );
+
+            injected.generationEnded = true;
+
+            if (!aethermoorGenerationReceived) {
+                console.warn(
+                    '[Aethermoor] Generation ended without a reply event; ' +
+                    'handoff preserved'
+                );
+                return;
+            }
+
+            await consumeAethermoorHandoff(injected);
+
+            if (
+                injected.consumed &&
+                aethermoorInjectedHandoff === injected
+            ) {
+                aethermoorInjectedHandoff = null;
+            }
+
+            aethermoorGenerationReceived = false;
+        }
+    );
+}
 
 jQuery(function () {
     try {

@@ -7534,9 +7534,21 @@ function combatNarrationPacket(result, actions) {
 
     if (result.rewards?.applied) {
         lines.push(
-            `Encounter rewards applied: ${result.rewards.xp} XP and ` +
-            `${result.rewards.silver} silver.`
+            `Encounter rewards: ${result.rewards.xp} XP, ` +
+            `${result.rewards.silver}s.`
         );
+
+        for (const item of result.rewards.loot || []) {
+            lines.push(`Loot: ${item.name} (${item.rarity}).`);
+        }
+
+        const drop = result.rewards.packDrop;
+        if (drop?.result === 'auto_salvage_only') {
+            lines.push('Pack drop: no additional loot.');
+        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
+            lines.push('Pack drop: quest breadcrumb discovered.');
+        }
+    }
 
         for (const item of result.rewards.loot || []) {
             lines.push(`Loot acquired: ${item.name} (${item.rarity}).`);

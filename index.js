@@ -8401,13 +8401,31 @@ function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'menu_button aethermoor-combat-choice';
-        button.textContent = option.label;
         button.dataset.group = groupName;
         button.dataset.value = option.value;
         button.setAttribute(
             'aria-pressed',
             String(option.value === selectedValue)
         );
+
+        const title = document.createElement('span');
+        title.className = 'aethermoor-combat-choice-title';
+        title.textContent = option.label;
+        button.appendChild(title);
+
+        if (option.detail) {
+            const detail = document.createElement('span');
+            detail.className = 'aethermoor-combat-choice-detail';
+            detail.textContent = option.detail;
+            button.appendChild(detail);
+        }
+
+        if (option.telegraph) {
+            const telegraph = document.createElement('span');
+            telegraph.className = 'aethermoor-combat-choice-telegraph';
+            telegraph.textContent = `[${option.telegraph}]`;
+            button.appendChild(telegraph);
+        }
 
         button.addEventListener('click', () => {
             onSelect(option.value);
@@ -8435,13 +8453,20 @@ function addCombatPanelStyles() {
     style.textContent = `
         .aethermoor-combat-panel {
             position: fixed;
+            left: auto;
+            top: auto;
             right: 16px;
             bottom: 82px;
             z-index: 10000;
-            width: min(620px, calc(100vw - 32px));
-            max-height: min(78vh, 760px);
+            width: 420px;
+            height: 540px;
+            min-width: 300px;
+            min-height: 300px;
+            max-width: calc(100vw - 24px);
+            max-height: calc(100vh - 24px);
             overflow: auto;
-            padding: 16px;
+            resize: both;
+            padding: 14px;
             color: var(--SmartThemeBodyColor, #eee);
             background: var(--SmartThemeBlurTintColor, #20242a);
             border: 1px solid var(--SmartThemeBorderColor, #666);
@@ -8459,7 +8484,14 @@ function addCombatPanelStyles() {
             justify-content: space-between;
             align-items: center;
             gap: 12px;
-            margin-bottom: 12px;
+            margin: -2px -2px 12px;
+            padding: 2px;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+        }
+        .aethermoor-combat-header button {
+            cursor: pointer;
         }
         .aethermoor-combat-status,
         .aethermoor-combat-result {
@@ -8486,10 +8518,30 @@ function addCombatPanelStyles() {
             flex-wrap: wrap;
             gap: 6px;
         }
+        .aethermoor-combat-choice {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            text-align: center;
+            white-space: normal;
+            line-height: 1.25;
+        }
         .aethermoor-combat-choice[aria-pressed="true"] {
             outline: 2px solid var(--SmartThemeQuoteColor, #4ade80);
             outline-offset: 1px;
             filter: brightness(1.2);
+        }
+        .aethermoor-combat-choice-detail {
+            font-size: 0.9em;
+            opacity: 0.85;
+        }
+        .aethermoor-combat-choice-telegraph {
+            margin-top: 2px;
+            color: var(--SmartThemeEmColor, #f0c674);
+            font-size: 0.85em;
+            font-weight: 700;
         }
         .aethermoor-combat-actions {
             display: flex;
@@ -8502,13 +8554,62 @@ function addCombatPanelStyles() {
                 right: 8px;
                 bottom: 72px;
                 width: calc(100vw - 16px);
-                max-height: 72vh;
+                height: min(70vh, 540px);
+                min-width: 0;
+                resize: both;
             }
         }
     `;
 
     document.head.appendChild(style);
 }
+
+header.append(title, closeButton);
+header.addEventListener('pointerdown', event => {
+    if (
+        event.button !== 0 ||
+        event.target.closest('button')
+    ) {
+        return;
+    }
+
+    const rect = panel.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+
+    panel.style.left = `${rect.left}px`;
+    panel.style.top = `${rect.top}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+
+    function movePanel(moveEvent) {
+        const left = Math.max(
+            0,
+            Math.min(
+                window.innerWidth - panel.offsetWidth,
+                moveEvent.clientX - offsetX
+            )
+        );
+        const top = Math.max(
+            0,
+            Math.min(
+                window.innerHeight - panel.offsetHeight,
+                moveEvent.clientY - offsetY
+            )
+        );
+
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+    }
+
+    function stopMoving() {
+        document.removeEventListener('pointermove', movePanel);
+        document.removeEventListener('pointerup', stopMoving);
+    }
+
+    document.addEventListener('pointermove', movePanel);
+    document.addEventListener('pointerup', stopMoving, { once: true });
+});
 
 function formatCombatTurnResult(result) {
     const lines = [
@@ -8705,10 +8806,15 @@ async function openCombatPanel() {
     const targetGroup = makeChoiceGroup(
         'Target',
         'target',
-        livingFoes.map(foe => ({
-            value: foe.id,
-            label: `${foe.label} · ${foe.hp}/${foe.maxHp} HP`
-        })),
+livingFoes.map(foe => ({
+    value: foe.id,
+    label: foe.label,
+    detail: `${foe.hp}/${foe.maxHp} HP`,
+    telegraph: foe.nextTelegraph
+        ? telegraphLabel(foe.nextTelegraph)
+        : null
+}))
+
         combatSelections.target,
         value => { combatSelections.target = value; }
     );
@@ -8776,10 +8882,15 @@ async function openCombatPanel() {
                 const newTargetGroup = makeChoiceGroup(
                     'Target',
                     'target',
-                    refreshedLiving.map(foe => ({
-                        value: foe.id,
-                        label: `${foe.label} · ${foe.hp}/${foe.maxHp} HP`
-                    })),
+                refreshedLiving.map(foe => ({
+                    value: foe.id,
+                    label: foe.label,
+                    detail: `${foe.hp}/${foe.maxHp} HP`,
+                    telegraph: foe.nextTelegraph
+                    ? telegraphLabel(foe.nextTelegraph)
+                    : null
+        }))
+
                     combatSelections.target,
                     value => { combatSelections.target = value; }
                 );

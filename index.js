@@ -7293,16 +7293,37 @@ function combatNarrationPacket(result, actions) {
         );
     }
 
+    for (const effect of result.turnEffects || []) {
+        lines.push(`Turn effect: ${effect}.`);
+    }
+
+    for (const levelUp of result.levelUps || []) {
+        lines.push(
+            `The crew reached level ${levelUp.level}. ` +
+            `They have ${levelUp.xpRemaining}/${levelUp.nextXp} XP ` +
+            `toward the next level.`
+        );
+    }
+
     if (result.rewards?.applied) {
         lines.push(
             `Encounter rewards applied: ${result.rewards.xp} XP and ` +
             `${result.rewards.silver} silver.`
+        );
+
+        for (const item of result.rewards.loot || []) {
+            lines.push(`Loot acquired: ${item.name}.`);
+        }
+    } else if (result.packCleared) {
+        lines.push(
+            'The encounter was cleared, but no encounter rewards were applied.'
         );
     } else {
         lines.push('Encounter rewards have not been applied.');
     }
 
     if (result.summary) {
+
         lines.push(
             `Current crew state: level ${result.summary.level}, ` +
             `${result.summary.xp}/${result.summary.nextXp} XP; ` +

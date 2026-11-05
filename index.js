@@ -5107,6 +5107,79 @@ function prepareMissingCargoDiscovery(state) {
     return discovery;
 }
 
+function reconcileQuestDiscovery(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Quest discovery reconciliation requires state'
+    );
+
+    const state = clone(test.state);
+    const quest = state.activeQuest;
+
+    assert(
+        quest?.status === 'in_progress',
+        'Quest discovery reconciliation requires an in-progress quest'
+    );
+
+    const gate = quest.currentGate;
+    const requiredId = gate?.requiredDiscoveryId;
+
+    assert(
+        typeof requiredId === 'string' &&
+        requiredId.length > 0,
+        'Current quest gate has no required discovery'
+    );
+
+    const discovery = (quest.discoveries || []).find(
+        item => item.id === requiredId
+    );
+
+    assert(
+        discovery,
+        `Required quest discovery is missing: ${requiredId}`
+    );
+
+    assert(
+        discovery.state === 'acquired' ||
+        discovery.state === 'found',
+        `Required discovery is not acquired: ${discovery.state}`
+    );
+
+    assert(
+        state.currentLocationId === discovery.locationId,
+        'Crew is not at the discovery location'
+    );
+
+    assert(
+        state.encounter?.status !== 'active' &&
+        state.encounter?.status !== 'spotted',
+        'Resolve or avoid the current encounter first'
+    );
+
+    const progression = resolveQuestAction({
+        state,
+        action: 'clear_gate',
+        objectiveCompleted: true,
+        completionEvidence:
+            `The crew had already secured ${discovery.name} at ` +
+            `${state.places?.[discovery.locationId]?.label ||
+                discovery.locationId}.`
+    });
+
+    return {
+        ok: true,
+        created: true,
+        action: 'quest_discovery_reconcile',
+        discovery: clone(discovery),
+        questGate: {
+            completed: progression.completedGate,
+            next: progression.nextGate
+        },
+        state: progression.state
+    };
+}
+
 function resolveQuestEvent(test) {
     assert(
         test.state &&
@@ -8138,10 +8211,13 @@ function resolveBatch(args) {
                     };
                     break;
                 }
+                case 'quest_discovery_reconcile':
+                    result = reconcileQuestDiscovery(test);
+                    break;
+
                 case 'quest_event':
                     result = resolveQuestEvent(test);
                     break;
-
 
                 case 'quest_site_inspect': {
                     const state = test.state;
@@ -9322,6 +9398,13 @@ async function runStoredMechanic(args) {
             : questActionPacket
                 ? questActionPacket
 
+            : batch && oneCase?.kind === 'quest_discovery_reconcile' &&
+              caseResult.created
+                ? questDiscoveryNarrationPacket(
+                    caseResult,
+                    nextState.activeQuest
+                )
+
             : batch && oneCase?.kind === 'quest_event' &&
               caseResult.created
                 ? questDiscoveryNarrationPacket(
@@ -9880,6 +9963,7 @@ function registerTools() {
                                     'travel',
                                     'journey',
                                     'quest_discovery_prepare',
+                                    'quest_discovery_reconcile',
                                     'quest_event',
                                     'quest_site_inspect',
                                     'cleanup_test_data',

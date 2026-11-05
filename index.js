@@ -9604,11 +9604,6 @@ async function openWorldPanel() {
             );
 
         const actions = [];
-                actions.push({
-            label: 'Remove Test Data',
-            action: 'cleanup_test_data'
-        });
-
 
         if (journey) {
             actions.push({

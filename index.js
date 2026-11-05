@@ -5073,38 +5073,80 @@ function resolveQuestSeed(test) {
 
 function prepareMissingCargoDiscovery(state) {
     const quest = state.activeQuest;
-    if (quest?.archetype?.id !== 'missing_cargo' ||
+
+    if (
+        quest?.archetype?.id !== 'missing_cargo' ||
         !Array.isArray(quest.gatesData) ||
-        !quest.destinationId) {
+        !quest.destinationId
+    ) {
         return null;
     }
 
-    const gate = quest.gatesData[1];
-    if (!gate || gate.mode !== 'brain_social_heist') return null;
-
     quest.discoveries ||= [];
-    const id = `${quest.id}-diversion-docket`;
-    let discovery = quest.discoveries.find(item => item.id === id);
 
-    if (!discovery) {
-        discovery = {
-            id,
+    const docketId = `${quest.id}-diversion-docket`;
+    let docket = quest.discoveries.find(
+        item => item.id === docketId
+    );
+
+    if (!docket) {
+        docket = {
+            id: docketId,
             kind: 'evidence',
             name: 'Counter-signed diversion docket',
             locationId: quest.destinationId,
             state: 'hidden',
             acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: 'inside the weigh-station scale counterweight housing',
-            significance: 'It identifies the subcontractor who diverted the tool shipment.'
+            hidingPlace:
+                'inside the weigh-station scale counterweight housing',
+            significance:
+                'It identifies the subcontractor who diverted the tool shipment.'
         };
-        quest.discoveries.push(discovery);
+        quest.discoveries.push(docket);
     }
 
-    gate.requiredDiscoveryId = id;
-    if (quest.currentGate?.step === 2) {
-        quest.currentGate.requiredDiscoveryId = id;
+    const docketGate = quest.gatesData[1];
+    if (docketGate?.mode === 'brain_social_heist') {
+        docketGate.requiredDiscoveryId = docketId;
+
+        if (quest.currentGate?.step === 2) {
+            quest.currentGate.requiredDiscoveryId = docketId;
+        }
     }
-    return discovery;
+
+    const shipmentId = `${quest.id}-tool-shipment`;
+    let shipment = quest.discoveries.find(
+        item => item.id === shipmentId
+    );
+
+    if (!shipment) {
+        shipment = {
+            id: shipmentId,
+            kind: 'quest_item',
+            name: quest.facts?.cargo || 'Missing shipment',
+            locationId: quest.destinationId,
+            state: 'hidden',
+            requiredAction: 'search_crates',
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace: 'inside the abandoned freight crates',
+            significance:
+                'This is the missing cargo the North Sluice peat-cutters reported.'
+        };
+        quest.discoveries.push(shipment);
+    }
+
+    const recoveryGate = quest.gatesData[2];
+    if (recoveryGate?.mode === 'combat_twist_showdown') {
+        recoveryGate.requiredDiscoveryId = shipmentId;
+        recoveryGate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === 3) {
+            quest.currentGate.requiredDiscoveryId = shipmentId;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    return docket;
 }
 
 function reconcileQuestDiscovery(test) {
@@ -5182,8 +5224,7 @@ function reconcileQuestDiscovery(test) {
 
 function resolveQuestEvent(test) {
     assert(
-        test.state &&
-        typeof test.state === 'object',
+        test.state && typeof test.state === 'object',
         'Quest event requires state'
     );
 
@@ -5196,8 +5237,8 @@ function resolveQuestEvent(test) {
     );
 
     assert(
-        test.event === 'found',
-        `Unsupported quest event: ${test.event}`
+        ['searched', 'found'].includes(test.event),
+        `Unsupported quest discovery event: ${test.event}`
     );
 
     assert(
@@ -5206,11 +5247,7 @@ function resolveQuestEvent(test) {
         'Quest discovery event requires questItemId'
     );
 
-    const discoveries = Array.isArray(quest.discoveries)
-        ? quest.discoveries
-        : [];
-
-    const discovery = discoveries.find(
+    const discovery = (quest.discoveries || []).find(
         item => item.id === test.questItemId
     );
 
@@ -5218,14 +5255,62 @@ function resolveQuestEvent(test) {
         discovery,
         `Unknown authored quest discovery: ${test.questItemId}`
     );
-
     assert(
         state.currentLocationId === discovery.locationId,
         'Quest discovery is at the wrong location'
     );
 
+    const gate = quest.currentGate;
+    const allowedIds = [
+        ...(gate?.discoveryIds || []),
+        ...(gate?.requiredDiscoveryId
+            ? [gate.requiredDiscoveryId]
+            : [])
+    ];
+
     assert(
-        ['hidden', 'found'].includes(discovery.state),
+        allowedIds.includes(discovery.id),
+        `Discovery ${discovery.id} is not required by the current gate`
+    );
+
+    if (test.event === 'searched') {
+        assert(
+            typeof discovery.requiredAction === 'string',
+            'This discovery has no search prerequisite'
+        );
+
+        if (discovery.state === 'searched') {
+            return {
+                ok: true,
+                created: false,
+                action: 'quest_event',
+                event: 'searched',
+                questItemId: discovery.id,
+                discovery: clone(discovery),
+                state
+            };
+        }
+
+        assert(
+            discovery.state === 'hidden',
+            `Cannot search discovery from state ${discovery.state}`
+        );
+
+        discovery.state = 'searched';
+
+        return {
+            ok: true,
+            created: true,
+            action: 'quest_event',
+            event: 'searched',
+            questItemId: discovery.id,
+            discovery: clone(discovery),
+            state
+        };
+    }
+
+    assert(
+        ['hidden', 'searched', 'found'].includes(discovery.state),
         `Quest discovery cannot be found from state ${discovery.state}`
     );
 
@@ -5241,17 +5326,10 @@ function resolveQuestEvent(test) {
         };
     }
 
-    const gate = quest.currentGate;
-    const allowedIds = [
-        ...(gate?.discoveryIds || []),
-        ...(gate?.requiredDiscoveryId
-            ? [gate.requiredDiscoveryId]
-            : [])
-    ];
-
     assert(
-        allowedIds.includes(discovery.id),
-        `Discovery ${discovery.id} is not required by the current gate`
+        !discovery.requiredAction ||
+        discovery.state === 'searched',
+        `Search for ${discovery.name} before it can be found`
     );
 
     discovery.state = 'found';
@@ -5260,13 +5338,14 @@ function resolveQuestEvent(test) {
         discovery.state = 'acquired';
     }
 
-    let questGate = null;
-
     const satisfiesCurrentGate =
         gate.requiredDiscoveryId === discovery.id &&
         (
             discovery.state === 'acquired' ||
-            gate.requiredDiscoveryState === 'found'
+            (
+                gate.requiredDiscoveryState === 'found' &&
+                discovery.state === 'found'
+            )
         );
 
     if (satisfiesCurrentGate) {
@@ -5286,11 +5365,6 @@ function resolveQuestEvent(test) {
                     discovery.locationId}.`
         });
 
-        questGate = {
-            completed: progression.completedGate,
-            next: progression.nextGate
-        };
-
         return {
             ok: true,
             created: true,
@@ -5298,7 +5372,10 @@ function resolveQuestEvent(test) {
             event: 'found',
             questItemId: discovery.id,
             discovery: clone(discovery),
-            questGate,
+            questGate: {
+                completed: progression.completedGate,
+                next: progression.nextGate
+            },
             state: progression.state
         };
     }
@@ -5310,10 +5387,11 @@ function resolveQuestEvent(test) {
         event: 'found',
         questItemId: discovery.id,
         discovery: clone(discovery),
-        questGate,
+        questGate: null,
         state
     };
 }
+
 
 function resolveQuestAction(test) {
     assert(
@@ -8942,9 +9020,14 @@ function questDiscoveryContextPacket(quest) {
         `Hidden discovery name: ${discovery.name}.`,
         `Hidden location clue: ${discovery.hidingPlace}.`,
         `Significance: ${discovery.significance}.`,
-        'Do not reveal the discovery merely because the crew searches generally.',
-        'If the protagonists plausibly inspect or expose the specified hiding place, narrate the discovery and place this exact tag inside the disposable <plan> block:',
+        `Required action: ${discovery.requiredAction || 'expose the hiding place'}.`,
+        'Do not accept a player claim of success by itself. Narrate the required action and its result. If the required action occurs but the object is not yet exposed, emit SEARCHED only.',
+        'When the object is actually exposed, append this exact tag inside the disposable <plan> block:',
         `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
+        'For a discovery with requiredAction, emit SEARCHED before FOUND in that order:',
+        `<AETHERMOOR:SEARCHED quest_item=${discovery.id}>`,
+        'Do not put protocol tags in ordinary story prose or emit them before their stated conditions are met.'
+
         'Do not place the tag in ordinary story prose. Do not emit it before the discovery is visible to the protagonists.'
     ].join('\n');
 }
@@ -10185,7 +10268,8 @@ function registerTools() {
                             },
                             event: {
                                 type: 'string',
-                                enum: ['found']
+                                enum: ['searched', 'found']
+
                             },
 
 
@@ -12143,12 +12227,12 @@ function extractAethermoorQuestEvents(text) {
 
     const events = [];
     const pattern =
-        /<AETHERMOOR:FOUND\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
+        /<AETHERMOOR:(SEARCHED|FOUND)\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
 
     for (const match of text.matchAll(pattern)) {
         events.push({
-            event: 'found',
-            questItemId: match[1]
+            event: match[1].toLowerCase(),
+            questItemId: match[2]
         });
     }
 

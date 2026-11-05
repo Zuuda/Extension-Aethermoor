@@ -8762,6 +8762,28 @@ function questOfferNarrationPacket(quest) {
     ].join('\n');
 }
 
+function questDiscoveryContextPacket(quest) {
+    const discovery = quest.discoveries?.find(
+        item => item.id === quest.currentGate?.requiredDiscoveryId
+    );
+
+    if (!discovery) return null;
+
+    return [
+        'Private Aethermoor quest-discovery context.',
+        `Active quest: ${quest.title}.`,
+        `Current location: ${discovery.locationId}.`,
+        `Hidden discovery ID: ${discovery.id}.`,
+        `Hidden discovery name: ${discovery.name}.`,
+        `Hidden location clue: ${discovery.hidingPlace}.`,
+        `Significance: ${discovery.significance}.`,
+        'Do not reveal the discovery merely because the crew searches generally.',
+        'If the protagonists plausibly inspect or expose the specified hiding place, narrate the discovery and place this exact tag inside the disposable <plan> block:',
+        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
+        'Do not place the tag in ordinary story prose. Do not emit it before the discovery is visible to the protagonists.'
+    ].join('\n');
+}
+
 function questDiscoveryNarrationPacket(result, quest) {
     const discovery = result.discovery;
 
@@ -9204,6 +9226,13 @@ async function runStoredMechanic(args) {
                 batch ? oneCase.actions : args.actions
             )
             : null;
+                const questDiscoveryContext =
+            batch &&
+            oneCase?.kind === 'quest_discovery_prepare' &&
+            caseResult.created !== false
+                ? questDiscoveryContextPacket(nextState.activeQuest)
+                : null;
+
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
@@ -9260,8 +9289,18 @@ async function runStoredMechanic(args) {
 
             : null;
 
-
         const handoffQueue = migrateAethermoorHandoffs(stored);
+
+                if (questDiscoveryContext) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'quest_context',
+                    packet: questDiscoveryContext
+                },
+                revision
+            );
+        }
 
         if (discoveryPacket) {
             appendAethermoorHandoff(

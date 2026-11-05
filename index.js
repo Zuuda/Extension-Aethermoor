@@ -9174,6 +9174,13 @@ async function runStoredMechanic(args) {
             : questActionPacket
                 ? questActionPacket
 
+            : batch && oneCase?.kind === 'quest_event' &&
+              caseResult.created
+                ? questDiscoveryNarrationPacket(
+                    caseResult,
+                    nextState.activeQuest
+                )
+
             : batch && oneCase?.kind === 'quest_site_inspect'
                 ? questSiteInspectionPacket(caseResult, nextState.activeQuest)
 
@@ -9856,6 +9863,11 @@ function registerTools() {
                                 description:
                                     'Stable ID of an authored quest discovery'
                             },
+                            event: {
+                                type: 'string',
+                                enum: ['found']
+                            },
+
 
                             mob: {
                                 type: 'object'

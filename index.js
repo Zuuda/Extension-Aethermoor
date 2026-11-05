@@ -7332,9 +7332,82 @@ function resolveBatch(args) {
                 case 'travel':
                     result = resolveTravelStep(test);
                     break;
+                
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
+               
+                case 'investigate_lead': {
+                    let state = clone(test.state);
+                    const lead = state.leads?.[test.leadId];
+
+                    assert(
+                        lead?.kind === 'rumor' &&
+                        lead.status === 'known',
+                        'Choose a known, uninvestigated rumor'
+                    );
+                    assert(
+                        lead.targetType === 'place' &&
+                        state.currentLocationId === lead.targetId,
+                        'The crew must arrive at the rumor destination first'
+                    );
+                    assert(
+                        !state.activeQuest ||
+                        !['offered', 'in_progress'].includes(
+                            state.activeQuest.status
+                        ),
+                        'Resolve the existing quest offer before investigating another rumor'
+                    );
+
+                    const town = test.town || 'Peat-Cairn Outpost';
+                    const repTier = state.reputation?.[town]?.tier;
+
+                    assert(
+                        repTier,
+                        `No saved reputation tier for ${town}`
+                    );
+
+                    const inquiry = resolveWorldSeeds({
+                        state,
+                        inquiryId: lead.id,
+                        investigatedRumor: true
+                    });
+
+                    state = inquiry.state;
+                    const finding = inquiry.findings.rumor;
+                    let quest = null;
+
+                    if (
+                        finding ===
+                        'genuine_unclaimed_quest_or_dungeon_hook'
+                    ) {
+                        const offer = resolveQuestSeed({
+                            state,
+                            inquiryId: lead.id,
+                            zone: lead.zone || state.zone,
+                            repTier,
+                            town
+                        });
+
+                        state = offer.state;
+                        if (offer.created) quest = offer.quest;
+                    }
+
+                    state.leads[test.leadId].status = 'investigated';
+                    state.leads[test.leadId].finding = finding;
+
+                    result = {
+                        ok: true,
+                        action: 'investigate_lead',
+                        created: true,
+                        leadId: test.leadId,
+                        finding,
+                        quest,
+                        state
+                    };
+                    break;
+                }
+
 
                 case 'engage': {
                     const state = clone(test.state);
@@ -7800,6 +7873,29 @@ function avoidEncounterNarrationPacket(encounter) {
     ].join('\n');
 }
 
+function rumorInvestigationNarrationPacket(result) {
+    const lines = [
+        `The crew investigated lead ${result.leadId} at its destination.`,
+        `The rumor resolves as: ${result.finding.replaceAll('_', ' ')}.`
+    ];
+
+    if (result.quest) {
+        lines.push(
+            'A quest offer was generated from the genuine lead.',
+            'Present the offer without inventing its objective or core truth.'
+        );
+    } else if (
+        result.finding === 'travelogue_flub_benign_oddity' ||
+        result.finding === 'already_cleared_by_other_immortals'
+    ) {
+        lines.push(
+            'This result resolves only the specific rumor. It does not mean the location has nothing else to explore.'
+        );
+    }
+
+    return lines.join('\n');
+}
+
 function combatNarrationPacket(result, actions) {
     const qtikActions = {
         fire_melee: 'Fire Melee',
@@ -8171,6 +8267,9 @@ async function runStoredMechanic(args) {
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created && caseResult.quest        
                 ? questOfferNarrationPacket(caseResult.quest)
+            : batch && oneCase?.kind === 'investigate_lead' &&
+               caseResult.created
+                 ? rumorInvestigationNarrationPacket(caseResult)
              : batch && oneCase?.kind === 'avoid' &&
               caseResult.created
                 ? avoidEncounterNarrationPacket(nextEncounter)
@@ -8700,6 +8799,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'journey',
+                                    'investigate_lead',
                                     'engage',
                                     'avoid',
                                     'turn',
@@ -9248,54 +9348,131 @@ async function openWorldPanel() {
                 state.places?.[lead.targetId]
             );
 
-        const options = journey
-            ? [{ text: 'Cancel Journey', result: POPUP_RESULT.CUSTOM1 }]
-            : leads.map((lead, index) => ({
-                text: `Go: ${state.places[lead.targetId].label} ` +
-                    `(${lead.travelSegments || 2} segments)`,
-                result: POPUP_RESULT[`CUSTOM${index + 1}`]
-            })).filter(option => option.result !== undefined);
+        const actions = [];
 
-        const description = journey
+        if (journey) {
+            actions.push({
+                label: 'Cancel Journey',
+                action: 'cancel_journey'
+            });
+        } else {
+            for (const lead of leads) {
+                actions.push({
+                    label:
+                        `Go: ${state.places[lead.targetId].label} ` +
+                        `(${lead.travelSegments || 2} segments)`,
+                    action: 'start_journey',
+                    leadId: lead.id
+                });
+            }
+        }
+
+        for (const lead of leads) {
+            if (
+                lead.kind === 'rumor' &&
+                lead.status === 'known' &&
+                state.currentLocationId === lead.targetId
+            ) {
+                actions.push({
+                    label:
+                        `Investigate: ` +
+                        `${state.places[lead.targetId].label} rumor`,
+                    action: 'investigate_lead',
+                    leadId: lead.id
+                });
+            }
+        }
+
+        const buttons = actions.map((entry, index) => ({
+            text: entry.label,
+            result: POPUP_RESULT[`CUSTOM${index + 1}`]
+        })).filter(button => button.result !== undefined);
+
+        const journeyText = journey
             ? `\n\nCurrent journey: ${journey.destinationLabel} ` +
               `(${journey.completedSegments}/${journey.totalSegments}; ` +
               `${journey.status}).`
             : '';
 
+        const locationText = state.currentLocationId
+            ? `\nCurrent location: ${
+                state.places?.[state.currentLocationId]?.label ||
+                state.currentLocationId
+              }.`
+            : '\nCurrent location: not recorded.';
+
         const popup = new Popup(
-            formatWorldStatus(state) + description,
+            formatWorldStatus(state) + locationText + journeyText,
             POPUP_TYPE.TEXT,
             '',
-            { customButtons: options, okButton: 'Close' }
+            {
+                customButtons: buttons,
+                okButton: 'Close'
+            }
         );
-        const choice = await popup.show();
-        if (choice === POPUP_RESULT.AFFIRMATIVE) return;
 
-        if (journey && choice === POPUP_RESULT.CUSTOM1) {
+        const choice = await popup.show();
+        const selectedIndex = actions.findIndex(
+            (_entry, index) =>
+                choice === POPUP_RESULT[`CUSTOM${index + 1}`]
+        );
+
+        if (selectedIndex < 0) return;
+
+        const selected = actions[selectedIndex];
+
+        if (selected.action === 'cancel_journey') {
             await runStoredMechanic({
-                cases: [{ name: 'cancel_journey', kind: 'journey', action: 'cancel' }]
+                cases: [{
+                    name: 'cancel_journey',
+                    kind: 'journey',
+                    action: 'cancel'
+                }]
             });
             return;
         }
 
-        const selected = leads.find((_, index) =>
-            choice === POPUP_RESULT[`CUSTOM${index + 1}`]
-        );
-        if (!selected) return;
+        if (selected.action === 'start_journey') {
+            await runStoredMechanic({
+                cases: [{
+                    name: 'start_journey',
+                    kind: 'journey',
+                    action: 'start',
+                    leadId: selected.leadId
+                }]
+            });
 
-        await runStoredMechanic({
-            cases: [{
-                name: 'start_journey',
-                kind: 'journey',
-                action: 'start',
-                leadId: selected.id
-            }]
-        });
-        toastr.info(
-            `Journey started: ${state.places[selected.targetId].label}. ` +
-            'Each [moved] advances one segment.',
-            'Aethermoor'
-        );
+            toastr.info(
+                `Journey started toward ${
+                    state.places[
+                        state.leads[selected.leadId].targetId
+                    ].label
+                }. Each [moved] advances one segment.`,
+                'Aethermoor'
+            );
+            return;
+        }
+
+        if (selected.action === 'investigate_lead') {
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'investigate_rumor_lead',
+                    kind: 'investigate_lead',
+                    leadId: selected.leadId
+                }]
+            });
+
+            assert(
+                output?.ok === true,
+                output?.results?.[0]?.error ||
+                    'Could not investigate rumor'
+            );
+
+            toastr.info(
+                'Rumor investigated. Generate the next scene to narrate what they learn.',
+                'Aethermoor'
+            );
+        }
     } catch (error) {
         toastr.error(
             error instanceof Error ? error.message : String(error),

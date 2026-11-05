@@ -9966,15 +9966,18 @@ function formatQuestStatus(quest) {
         lines.push('This quest was declined.');
     } else if (quest.status === 'complete') {
         lines.push('This quest has been completed.');
-    }
-        } else if (quest.status === 'retired_test') {
+    } else if (quest.status === 'retired_test') {
         lines.push(
-            `This test quest was retired: ${quest.retiredReason || 'no reason recorded'}.`,
+            `This test quest was retired: ${
+                quest.retiredReason || 'no reason recorded'
+            }.`,
             'No rewards were granted.'
         );
+    }
 
     return lines.join('\n');
 }
+
 
 async function openQuestPanel() {
     try {

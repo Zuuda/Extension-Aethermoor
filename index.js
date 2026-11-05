@@ -4030,6 +4030,8 @@ function resolveTravelStep(test) {
     // situation is resolved; resuming does not roll an extra encounter.
     if (journey && journey.completedSegments === journey.totalSegments) {
         state.places[journey.destinationId].visited = true;
+        journey.status = 'arrived';
+
         const arrival = {
             stepId: test.stepId,
             zone: state.zone,
@@ -4038,6 +4040,8 @@ function resolveTravelStep(test) {
             destinationLabel: journey.destinationLabel,
             destinationId: journey.destinationId,
             journey: clone(journey)
+        };
+
         };
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;

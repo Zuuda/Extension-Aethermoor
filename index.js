@@ -4126,7 +4126,6 @@ function resolveTravelStep(test) {
                 sourceId: socialId,
                 targetType: 'place',
                 targetId: placeId,
-                travelSegments: template.segments,
                 status: 'known'
             };
 
@@ -7460,45 +7459,6 @@ function resolveBatch(args) {
                     result = resolveTravelStep(test);
                     break;
 
-                                    case 'test_lead': {
-                    const state = clone(test.state);
-                    ensureWorldLocation(state);
-
-                    const placeId = routeNodeId(state.zone, 'stone-ford');
-                    const leadId = `test-rumor-stone-ford-z${state.zone}`;
-
-                    state.places[placeId] ||= {
-                        id: placeId,
-                        label: 'Stone Ford',
-                        zone: state.zone,
-                        kind: 'place',
-                        visited: false
-                    };
-
-                    if (!state.leads[leadId]) {
-                        state.leads[leadId] = {
-                            id: leadId,
-                            kind: 'rumor',
-                            claim: 'TEST LEAD: A traveler says someone has been leaving fresh supplies at Stone Ford.',
-                            sourceId: 'temporary-route-test',
-                            targetType: 'place',
-                            targetId: placeId,
-                            status: 'known',
-                            testOnly: true
-                        };
-                    }
-
-                    result = {
-                        ok: true,
-                        action: 'test_lead',
-                        created: true,
-                        leadId,
-                        placeId,
-                        state
-                    };
-                    break;
-                }
-                
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
@@ -7848,6 +7808,17 @@ function checkImportedState(state) {
         state.inquiries && state.socialSeeds && state.reputation,
         'Import requires inquiries, socialSeeds, and reputation'
     );
+
+    state.places ||= {};
+    state.leads ||= {};
+    state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
+
+    state.places[state.currentLocationId] ||= {
+        id: state.currentLocationId,
+        label: 'Peat-Cairn Outpost',
+        zone: state.zone,
+        kind: 'settlement'
+    };
 
     const stats = derived(state.crew);
     int(state.crew.xp, 'crew.xp');
@@ -8966,7 +8937,6 @@ function registerTools() {
                                     'travel',
                                     'journey',
                                     'investigate_lead',
-                                    'test_lead',
                                     'engage',
                                     'avoid',
                                     'turn',
@@ -9516,11 +9486,6 @@ async function openWorldPanel() {
             );
 
         const actions = [];
-                actions.push({
-            label: 'Create Test Lead: Stone Ford',
-            action: 'test_lead'
-        });
-
 
         if (journey) {
             actions.push({
@@ -9597,21 +9562,6 @@ async function openWorldPanel() {
         if (selectedIndex < 0) return;
 
         const selected = actions[selectedIndex];
-                if (selected.action === 'test_lead') {
-            await runStoredMechanic({
-                cases: [{
-                    name: 'create_test_stone_ford_lead',
-                    kind: 'test_lead'
-                }]
-            });
-
-            toastr.info(
-                'Temporary Stone Ford test lead created. Reopen World to start the route.',
-                'Aethermoor'
-            );
-            return;
-        }
-
         if (selected.action === 'cancel_journey') {
             await runStoredMechanic({
                 cases: [{

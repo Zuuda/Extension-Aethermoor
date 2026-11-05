@@ -8653,6 +8653,70 @@ function resolveBatch(args) {
                     break;
                 }
 
+                case 'debug_create_quest_offer': {
+                    const state = clone(test.state);
+
+                    assert(
+                        !state.activeQuest ||
+                        !['offered', 'in_progress'].includes(
+                            state.activeQuest.status
+                        ),
+                        'Resolve or abandon the current quest before creating a test offer'
+                    );
+
+                    const town = test.town || 'Peat-Cairn Outpost';
+                    const repTier = state.reputation?.[town]?.tier;
+
+                    assert(
+                        repTier,
+                        `No saved reputation tier for ${town}`
+                    );
+
+                    state.inquiries ||= {};
+
+                    const inquiryId = test.inquiryId ||
+                        `debug-quest-${Date.now()}`;
+
+                    const inquiryKey = `rumor:${inquiryId}`;
+
+                    assert(
+                        !state.inquiries[inquiryKey],
+                        `Debug quest trigger already exists: ${inquiryId}`
+                    );
+
+                    state.inquiries[inquiryKey] = {
+                        id: inquiryId,
+                        type: 'rumor',
+                        zone: state.zone,
+                        roll: 5,
+                        result: 'genuine_unclaimed_quest_or_dungeon_hook',
+                        lootSeed: null,
+                        questSeed: {
+                            source: 'debug_test',
+                            roll: 5,
+                            result: 'genuine_unclaimed_quest_or_dungeon_hook',
+                            testOnly: true
+                        },
+                        questSeedConsumed: false
+                    };
+
+                    result = resolveQuestSeed({
+                        state,
+                        inquiryId,
+                        zone: state.zone,
+                        repTier,
+                        town
+                    });
+
+                    if (result.quest) {
+                        result.quest.seed.testOnly = true;
+                        result.quest.seed.source = 'debug_test';
+                    }
+
+                    result.action = 'debug_create_quest_offer';
+                    break;
+                }
+
                 case 'quest':
                     if (test.action) {
                         result = resolveQuestAction(test);
@@ -9569,6 +9633,12 @@ async function runStoredMechanic(args) {
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
+            
+             : batch &&
+              oneCase?.kind === 'debug_create_quest_offer' &&
+              caseResult.created &&
+              caseResult.quest
+                ? questOfferNarrationPacket(caseResult.quest)
 
             : questActionPacket
                 ? questActionPacket
@@ -10151,7 +10221,6 @@ function registerTools() {
                                     'quest_event',
                                     'quest_site_inspect',
                                     'quest_reveal_terminal',
-                                    'cleanup_test_data',
                                     'investigate_lead',
                                     'engage',
                                     'avoid',
@@ -10160,6 +10229,8 @@ function registerTools() {
                                     'world_seeds',
                                     'social',
                                     'loot',
+                                    'cleanup_test_data',
+                                    'debug_create_quest_offer',
                                     'debug_create_quest_breadcrumb',
                                     'follow_breadcrumb',
                                     'quest',
@@ -10950,9 +11021,39 @@ async function openQuestPanel() {
         const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
 
         if (!quest) {
-            await Popup.show.text(
-                'Aethermoor Quests',
-                'No active quest offer.'
+            const popup = new Popup(
+                'No active quest offer.',
+                POPUP_TYPE.TEXT,
+                '',
+                {
+                    customButtons: [{
+                        text: 'Debug: Create Quest Offer',
+                        result: POPUP_RESULT.CUSTOM1
+                    }],
+                    okButton: 'Close'
+                }
+            );
+
+            const choice = await popup.show();
+
+            if (choice !== POPUP_RESULT.CUSTOM1) return;
+
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'debug_create_authored_quest_offer',
+                    kind: 'debug_create_quest_offer'
+                }]
+            });
+
+            assert(
+                output?.ok === true,
+                output?.results?.[0]?.error ||
+                    'Could not create debug quest offer'
+            );
+
+            toastr.info(
+                'Debug quest offer created. Generate a reply to narrate it.',
+                'Aethermoor Debug'
             );
             return;
         }

@@ -4041,8 +4041,6 @@ function resolveTravelStep(test) {
             destinationId: journey.destinationId,
             journey: clone(journey)
         };
-
-        };
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
         state.currentPosition = { nodeId: journey.destinationId };

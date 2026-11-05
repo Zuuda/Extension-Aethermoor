@@ -10873,18 +10873,6 @@ async function openQuestPanel() {
             );
         }
 
-            buttons.push(
-                {
-                    text: 'Accept Quest',
-                    result: POPUP_RESULT.CUSTOM1
-                },
-                {
-                    text: 'Decline Quest',
-                    result: POPUP_RESULT.CUSTOM2
-                }
-            );
-        }
-
         const popup = new Popup(
             formatQuestStatus(quest),
             POPUP_TYPE.TEXT,
@@ -10896,7 +10884,8 @@ async function openQuestPanel() {
         );
 
         const choice = await popup.show();
-            if (
+
+        if (
             canRevealTerminal &&
             choice === POPUP_RESULT.CUSTOM1
         ) {
@@ -10920,7 +10909,7 @@ async function openQuestPanel() {
             return;
         }
 
-         let action = null;
+        let action = null;
 
         if (
             quest.status === 'offered' &&
@@ -10957,6 +10946,7 @@ async function openQuestPanel() {
         );
     }
 }
+
 
 function createQuestController() {
     if (document.getElementById('aethermoor_quest_button')) return;

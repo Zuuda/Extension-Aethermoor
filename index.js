@@ -4466,6 +4466,99 @@ function rollQuestTerminalThreat(state, rank, zone) {
     };
 }
 
+const QUEST_ARCHETYPES = [
+    {
+        id: 'missing_cargo',
+        label: 'Missing Cargo',
+        truth: 'A cargo shipment was deliberately diverted and concealed.',
+        gates: [
+            ['traversal_discovery', 'Locate the last verified cargo marker.'],
+            ['brain_social_heist', 'Identify who changed the shipment route.'],
+            ['combat_twist_showdown', 'Recover the shipment from its current guards.'],
+            ['traversal_discovery', 'Trace the diversion to its organizer.'],
+            ['brain_social_heist', 'Secure proof and settle the claim with the sponsor.']
+        ]
+    },
+    {
+        id: 'ruin_clearance',
+        label: 'Ruin Clearance',
+        truth: 'A newly active threat is occupying a previously quiet ruin.',
+        gates: [
+            ['traversal_discovery', 'Find a safe approach to the ruin entrance.'],
+            ['combat_twist_showdown', 'Clear the first occupied section.'],
+            ['brain_social_heist', 'Determine what is drawing the inhabitants there.'],
+            ['combat_twist_showdown', 'Stop the threat at its source.'],
+            ['traversal_discovery', 'Verify the site is safe for local use.']
+        ]
+    },
+    {
+        id: 'herb_foraging',
+        label: 'Herb Foraging',
+        truth: 'A medicinal plant grows in a hazardous, identifiable part of the local wilds.',
+        gates: [
+            ['traversal_discovery', 'Locate the correct growing ground.'],
+            ['brain_social_heist', 'Identify and gather the requested specimen.'],
+            ['combat_twist_showdown', 'Protect the harvest from its territorial guardian.'],
+            ['traversal_discovery', 'Find a viable second patch before the first is depleted.'],
+            ['brain_social_heist', 'Deliver the intact harvest to the requesting healer.']
+        ]
+    },
+    {
+        id: 'missing_person',
+        label: 'Missing Person Search',
+        truth: 'The missing person left the known roads and is alive at the time of the search.',
+        gates: [
+            ['traversal_discovery', 'Find the missing person’s last known trail.'],
+            ['brain_social_heist', 'Learn which route the missing person took.'],
+            ['traversal_discovery', 'Reach the latest confirmed location.'],
+            ['combat_twist_showdown', 'Overcome the immediate danger blocking access.'],
+            ['brain_social_heist', 'Bring the missing person safely back or secure their chosen message.']
+        ]
+    },
+    {
+        id: 'sunken_salvage',
+        label: 'Sunken Salvage',
+        truth: 'The marked wreck contains recoverable cargo, but access is obstructed.',
+        gates: [
+            ['traversal_discovery', 'Locate the wreck using the surviving route marks.'],
+            ['brain_social_heist', 'Find a way to open or detach the cargo hold.'],
+            ['combat_twist_showdown', 'Clear the creatures guarding the wreck.'],
+            ['traversal_discovery', 'Recover the marked cargo without losing it to the current.'],
+            ['brain_social_heist', 'Return the cargo or its verified contents to the claimant.']
+        ]
+    },
+    {
+        id: 'territorial_beast',
+        label: 'Territorial Beast Hunt',
+        truth: 'A dangerous beast is driving local wildlife away from its territory.',
+        gates: [
+            ['traversal_discovery', 'Find the beast’s recent trail.'],
+            ['traversal_discovery', 'Locate its territory without provoking it prematurely.'],
+            ['combat_twist_showdown', 'Confront the beast on its ground.'],
+            ['brain_social_heist', 'Determine whether the territory can be made safe without killing it.'],
+            ['traversal_discovery', 'Verify that the local route is safe after the confrontation.']
+        ]
+    }
+];
+
+function buildAuthoredQuestGates(state, archetype, gateCount) {
+    assert(
+        Array.isArray(archetype.gates) &&
+        archetype.gates.length >= gateCount,
+        `Quest archetype ${archetype.id} lacks ${gateCount} gate templates`
+    );
+
+    return archetype.gates.slice(0, gateCount).map(
+        ([mode, objective], index) => ({
+            step: index + 1,
+            total: gateCount,
+            mode,
+            objective
+        })
+    );
+}
+
+
 function resolveQuestSeed(test) {
     assert(
         test.state &&
@@ -4620,12 +4713,22 @@ function resolveQuestSeed(test) {
             row
         );
 
+       const archetypeRoll = roll(state, QUEST_ARCHETYPES.length);
+    const archetype = QUEST_ARCHETYPES[archetypeRoll - 1];
+    const gatesData = buildAuthoredQuestGates(
+        state,
+        archetype,
+        gates
+    );
+
     const seed = {
         zone,
         repTier: rep.label,
         questRoll,
         gateCountRoll,
         salvageSlotRoll,
+        archetypeRoll,
+        archetypeId: archetype.id,
         source: sourceSeed.source,
         sourceRoll: sourceSeed.roll,
         sourceResult: sourceSeed.result,
@@ -4636,35 +4739,34 @@ function resolveQuestSeed(test) {
         }
     };
 
-    const tier =
-        ZONES[zone].tier;
+    const salvage = makeQuestSalvage(
+        zone,
+        salvageSlotRoll,
+        row
+    );
 
     const quest = {
         id:
             `quest-${inquiryRecord
                 ? `rumor-${inquiryRecord.id}`
                 : state.encounter.id}-` +
-            `${row.rank}-${questRoll}`,
+            `${row.rank}-${questRoll}-${archetype.id}`,
         title:
-            `Rank ${row.rank} ${QUEST_RANK_LABELS[row.rank]}`,
+            `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
+        archetype: {
+            id: archetype.id,
+            label: archetype.label
+        },
         gates,
+        gatesData,
         status: 'offered',
-        seed,
 
-        /*
-         * The model writes the scene-specific truth and objective.
-         * Future gates are intentionally not generated here.
-         */
-        coreTruth: null,
+        // Stored by the engine, but not exposed as hidden truth in the offer.
+        coreTruth: archetype.truth,
+
         currentGate: {
-            step: 1,
-            total: gates,
-            mode:
-                gates === 1
-                    ? 'arrival_warmup'
-                    : 'traversal_discovery',
-            objective: null
+            ...gatesData[0]
         },
         objectiveResolution: null,
 
@@ -4677,12 +4779,8 @@ function resolveQuestSeed(test) {
             extraGateXpFraction: extraGateFraction
         },
 
-               salvage,
+        salvage,
 
-        /*
-         * This is locked now but may remain hidden in the diegetic
-         * contract presentation until the crew reaches the objective.
-         */
         terminalThreat: {
             kind: terminalThreat.kind,
             zone: terminalThreat.zone,
@@ -4690,13 +4788,8 @@ function resolveQuestSeed(test) {
             resolved: false
         },
 
-        town:
-            test.town ||
-            null,
-
-
-        repTierAtOffer:
-            rep.label
+        town: test.town || null,
+        repTierAtOffer: rep.label
     };
 
     state.activeQuest =
@@ -4780,46 +4873,48 @@ function resolveQuestAction(test) {
         `Quest action requires an in-progress quest, got ${quest.status}`
     );
 
-    if (test.action === 'clear_gate') {
+     if (test.action === 'clear_gate') {
         assert(
-            quest.currentGate &&
-            Number.isInteger(quest.currentGate.step),
-            'Quest current gate is invalid'
+            Array.isArray(quest.gatesData) &&
+            quest.gatesData.length === quest.gates,
+            'This legacy quest has no engine-authored gate plan'
+        );
+        assert(
+            quest.currentGate?.step < quest.gates,
+            'Final gate must use resolve_objective before complete'
+        );
+        assert(
+            test.objectiveCompleted === true,
+            'Gate clearance requires objectiveCompleted: true'
+        );
+        assert(
+            typeof test.completionEvidence === 'string' &&
+            test.completionEvidence.trim().length > 0,
+            'Gate clearance requires completionEvidence'
+        );
+        assert(
+            state.encounter?.status !== 'active',
+            'Resolve or flee the active encounter first'
         );
 
-        assert(
-            quest.currentGate.step < quest.gates,
-            'Final gate must use resolve_objective before complete.'
-        );
+        const completedGate = {
+            ...quest.currentGate,
+            completionEvidence: test.completionEvidence.trim()
+        };
 
-        quest.currentGate.step += 1;
+        quest.completedGates ||= [];
+        quest.completedGates.push(completedGate);
 
-        const nextModes = [
-            'traversal_discovery',
-            'brain_social_heist',
-            'combat_twist_showdown'
-        ];
+        const nextStep = completedGate.step + 1;
+        quest.currentGate = {
+            ...quest.gatesData[nextStep - 1]
+        };
 
-        const selectedMode =
-            test.nextGateMode ||
-            nextModes[
-                (quest.currentGate.step - 1) %
-                nextModes.length
-            ];
-
-        assert(
-            nextModes.includes(selectedMode),
-            `Unsupported next gate mode: ${selectedMode}`
-        );
-
-        quest.currentGate.mode =
-            selectedMode;
-
-        quest.currentGate.objective =
-            test.nextGateObjective || null;
-
+        result.completedGate = completedGate;
+        result.nextGate = { ...quest.currentGate };
         return result;
     }
+
 
     if (test.action === 'resolve_objective') {
         assert(
@@ -8117,7 +8212,8 @@ function questOfferNarrationPacket(quest) {
             `${quest.payout.repSteps} reputation step(s).`,
         `The offered salvage is ${quest.salvage.name} ` +
             `(${quest.salvage.rarity}).`,
-        'No specific quest objective, culprit, or core truth has been established yet. Present the lead diegetically and leave accepting or declining it to the protagonists.'
+        `The first gate is ${quest.currentGate.mode}: ${quest.currentGate.objective}`,
+        'The quest offer and its hidden cause are established by the mechanics. Present the offer without revealing coreTruth, and leave accepting or declining it to the protagonists.'
     ].join('\n');
 }
 function questActionNarrationPacket(result, questAction) {
@@ -8132,7 +8228,8 @@ function questActionNarrationPacket(result, questAction) {
                 `${quest.payout.repSteps} reputation step(s).`,
             `The offered salvage is ${quest.salvage.name} ` +
                 `(${quest.salvage.rarity}).`,
-            'The specific objective and core truth have not yet been established. Do not invent them.'
+            `The current gate is ${quest.currentGate.mode}: ${quest.currentGate.objective}`,
+            'Do not reveal coreTruth or invent a different objective.'
         ].join('\n');
     }
 

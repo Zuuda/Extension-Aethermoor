@@ -3741,6 +3741,8 @@ function resolveTravelStep(test) {
     state.travelSteps ||= {};
     state.inquiries ||= {};
     state.socialSeeds ||= {};
+    state.places ||= {};
+    state.leads ||= {};
 
     const existing = state.travelSteps[test.stepId];
     if (existing) {
@@ -3833,6 +3835,14 @@ function resolveTravelStep(test) {
 
             state.inquiries[inquiryKey] = siteRecord;
         }
+
+        state.places[siteId] ||= {
+            id: siteId,
+            label: 'Uncharted point of interest',
+            zone: state.zone,
+            sourceStepId: test.stepId,
+            inquiryId: siteId
+        };
 
         outcome.site = {
             id: siteId,
@@ -8977,6 +8987,97 @@ function combatFoeLabel(foe, index) {
     return `${roleNames[foe.role] || foe.role} ${index + 1}`;
 }
 
+function formatWorldStatus(state) {
+    const places = new Map();
+
+    for (const place of Object.values(state.places || {})) {
+        if (place?.id) places.set(place.id, place);
+    }
+
+    // Show places discovered before the places collection was added.
+    for (const step of Object.values(state.travelSteps || {})) {
+        if (step?.event !== 'point_of_interest' || !step.site?.id) {
+            continue;
+        }
+
+        if (!places.has(step.site.id)) {
+            places.set(step.site.id, {
+                id: step.site.id,
+                label: 'Uncharted point of interest',
+                zone: step.site.zone
+            });
+        }
+    }
+
+    const leads = Object.values(state.leads || {});
+    const lines = [
+        'Known places',
+        places.size
+            ? [...places.values()].map((place, index) =>
+                `${index + 1}. ${place.label} ` +
+                `(Zone ${place.zone}; reference: ${place.id})`
+            ).join('\n')
+            : 'None recorded.',
+        '',
+        'Rumors'
+    ];
+
+    const rumors = leads.filter(lead => lead?.kind === 'rumor');
+    lines.push(
+        rumors.length
+            ? rumors.map(lead =>
+                `- ${lead.claim || lead.label || lead.id}`
+            ).join('\n')
+            : 'None recorded.'
+    );
+
+    const otherLeads = leads.filter(lead => lead?.kind !== 'rumor');
+    lines.push('', 'Other leads');
+    lines.push(
+        otherLeads.length
+            ? otherLeads.map(lead =>
+                `- ${lead.claim || lead.label || lead.id}`
+            ).join('\n')
+            : 'None recorded.'
+    );
+
+    return lines.join('\n');
+}
+
+async function openWorldPanel() {
+    try {
+        const snapshot = await readStoredCombatState();
+        await getContext().Popup.show.text(
+            'Aethermoor World',
+            formatWorldStatus(snapshot.state)
+        );
+    } catch (error) {
+        toastr.error(
+            error instanceof Error ? error.message : String(error),
+            'Aethermoor'
+        );
+    }
+}
+
+function createWorldController() {
+    if (document.getElementById('aethermoor_world_button')) return;
+
+    const composer = document.querySelector('#send_form');
+    if (!composer) {
+        console.warn('Aethermoor: chat composer not found; World button not added');
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'aethermoor_world_button';
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'World';
+    button.title = 'View known places and leads';
+    button.addEventListener('click', openWorldPanel);
+    composer.insertBefore(button, composer.firstChild);
+}
+
 function createCombatController() {
     const button = document.createElement('button');
     button.id = 'aethermoor_combat_button';
@@ -10334,5 +10435,14 @@ jQuery(function () {
             error
         );
     }
+        try {
+        createWorldController();
+    } catch (error) {
+        console.error(
+            'Aethermoor: World controller initialization failed',
+            error
+        );
+    }
+
 });
 

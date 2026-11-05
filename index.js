@@ -3748,9 +3748,27 @@ const TRAVELER_RUMORS = [
 const ROUTE_SEGMENT_EDGES = [
     ['outpost', 'stone-ford', 1],
     ['stone-ford', 'old-mill', 2],
-    ['stone-ford', 'watchtower', 3],
-    ['old-mill', 'watchtower', 2]
+    ['stone-ford', 'abandoned-watchtower', 3],
+    ['old-mill', 'abandoned-watchtower', 2]
 ];
+
+function ensureWorldLocation(state) {
+    state.places ||= {};
+    state.leads ||= {};
+
+    state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
+
+    state.places[state.currentLocationId] ||= {
+        id: state.currentLocationId,
+        label: state.currentLocationId === routeNodeId(state.zone, 'outpost')
+            ? 'Peat-Cairn Outpost'
+            : state.currentLocationId,
+        zone: state.zone,
+        kind: 'settlement'
+    };
+
+    return state.currentLocationId;
+}
 
 function routeNodeId(zone, place) {
     return place === 'outpost'
@@ -3873,8 +3891,7 @@ function resolveJourneyAction(test) {
     const place = state.places?.[lead.targetId];
     assert(place, 'Lead destination is not recorded');
 
-    // Existing saves without a recorded location start from the outpost.
-    state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
+    ensureWorldLocation(state);
 
     const route = shortestRoute(state, place.id);
     assert(
@@ -7442,6 +7459,45 @@ function resolveBatch(args) {
                 case 'travel':
                     result = resolveTravelStep(test);
                     break;
+
+                                    case 'test_lead': {
+                    const state = clone(test.state);
+                    ensureWorldLocation(state);
+
+                    const placeId = routeNodeId(state.zone, 'stone-ford');
+                    const leadId = `test-rumor-stone-ford-z${state.zone}`;
+
+                    state.places[placeId] ||= {
+                        id: placeId,
+                        label: 'Stone Ford',
+                        zone: state.zone,
+                        kind: 'place',
+                        visited: false
+                    };
+
+                    if (!state.leads[leadId]) {
+                        state.leads[leadId] = {
+                            id: leadId,
+                            kind: 'rumor',
+                            claim: 'TEST LEAD: A traveler says someone has been leaving fresh supplies at Stone Ford.',
+                            sourceId: 'temporary-route-test',
+                            targetType: 'place',
+                            targetId: placeId,
+                            status: 'known',
+                            testOnly: true
+                        };
+                    }
+
+                    result = {
+                        ok: true,
+                        action: 'test_lead',
+                        created: true,
+                        leadId,
+                        placeId,
+                        state
+                    };
+                    break;
+                }
                 
                 case 'journey':
                     result = resolveJourneyAction(test);
@@ -8910,6 +8966,7 @@ function registerTools() {
                                     'travel',
                                     'journey',
                                     'investigate_lead',
+                                    'test_lead',
                                     'engage',
                                     'avoid',
                                     'turn',
@@ -9459,6 +9516,11 @@ async function openWorldPanel() {
             );
 
         const actions = [];
+                actions.push({
+            label: 'Create Test Lead: Stone Ford',
+            action: 'test_lead'
+        });
+
 
         if (journey) {
             actions.push({
@@ -9508,12 +9570,13 @@ async function openWorldPanel() {
               `${journey.status}).`
             : '';
 
-        const locationText = state.currentLocationId
-            ? `\nCurrent location: ${
-                state.places?.[state.currentLocationId]?.label ||
-                state.currentLocationId
-              }.`
-            : '\nCurrent location: not recorded.';
+        const currentLocationId =
+            state.currentLocationId ||
+            routeNodeId(state.zone, 'outpost');
+
+        const locationText = state.places?.[currentLocationId]
+            ? `\nCurrent location: ${state.places[currentLocationId].label}.`
+            : `\nCurrent location: ${currentLocationId}.`;
 
         const popup = new Popup(
             formatWorldStatus(state) + locationText + journeyText,
@@ -9534,6 +9597,20 @@ async function openWorldPanel() {
         if (selectedIndex < 0) return;
 
         const selected = actions[selectedIndex];
+                if (selected.action === 'test_lead') {
+            await runStoredMechanic({
+                cases: [{
+                    name: 'create_test_stone_ford_lead',
+                    kind: 'test_lead'
+                }]
+            });
+
+            toastr.info(
+                'Temporary Stone Ford test lead created. Reopen World to start the route.',
+                'Aethermoor'
+            );
+            return;
+        }
 
         if (selected.action === 'cancel_journey') {
             await runStoredMechanic({

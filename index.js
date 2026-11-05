@@ -7861,6 +7861,57 @@ function resolveBatch(args) {
                     result = claimLockedLoot(test);
                     break;
 
+                                    case 'debug_create_quest_breadcrumb': {
+                    const state = clone(test.state);
+                    const encounter = state.encounter;
+
+                    assert(
+                        encounter?.status === 'cleared',
+                        'Test breadcrumb requires a cleared encounter'
+                    );
+                    assert(
+                        encounter.type === 'normal_pack' ||
+                        (
+                            encounter.type === 'declared' &&
+                            encounter.foes.every(foe =>
+                                ['brute', 'archer', 'mender', 'hexer', 'buffer']
+                                    .includes(foe.role)
+                            ) &&
+                            !encounter.reinforcementLog?.length
+                        ),
+                        'Test breadcrumb requires a cleared ordinary pack'
+                    );
+                    assert(
+                        !encounter.questSeed,
+                        'This encounter already has a quest seed'
+                    );
+                    assert(
+                        !state.activeQuest ||
+                        !['offered', 'in_progress'].includes(
+                            state.activeQuest.status
+                        ),
+                        'Resolve the existing quest offer before testing another'
+                    );
+
+                    encounter.questSeed = {
+                        source: 'pack_drop',
+                        roll: 10,
+                        result: 'diegetic_quest_breadcrumb',
+                        testOnly: true
+                    };
+                    encounter.questSeedConsumed = false;
+
+                    result = {
+                        ok: true,
+                        action: 'debug_create_quest_breadcrumb',
+                        created: true,
+                        encounterId: encounter.id,
+                        questSeed: clone(encounter.questSeed),
+                        state
+                    };
+                    break;
+                }
+
                 case 'follow_breadcrumb': {
                     const state = test.state;
                     const encounter = state?.encounter;
@@ -9225,6 +9276,7 @@ function registerTools() {
                                     'world_seeds',
                                     'social',
                                     'loot',
+                                    'debug_create_quest_breadcrumb',
                                     'follow_breadcrumb',
                                     'quest',
                                     'gear',
@@ -10902,6 +10954,71 @@ async function openCombatPanel() {
             });
 
             panel.append(followButton);
+        }
+        const ordinaryPack =
+            encounter.type === 'normal_pack' ||
+            (
+                encounter.type === 'declared' &&
+                encounter.foes.every(foe =>
+                    ['brute', 'archer', 'mender', 'hexer', 'buffer']
+                        .includes(foe.role)
+                ) &&
+                !encounter.reinforcementLog?.length
+            );
+
+        const noActiveQuest =
+            !state.activeQuest ||
+            !['offered', 'in_progress'].includes(
+                state.activeQuest.status
+            );
+
+        if (
+            ordinaryPack &&
+            !encounter.questSeed &&
+            noActiveQuest
+        ) {
+            const testButton = document.createElement('button');
+            testButton.type = 'button';
+            testButton.className = 'menu_button';
+            testButton.textContent = 'Debug: Seed Test Breadcrumb';
+
+            testButton.addEventListener('click', async () => {
+                testButton.disabled = true;
+
+                try {
+                    const output = await runStoredMechanic({
+                        cases: [{
+                            name: 'debug_create_test_breadcrumb',
+                            kind: 'debug_create_quest_breadcrumb'
+                        }]
+                    });
+
+                    assert(
+                        output?.ok === true,
+                        output?.results?.[0]?.error ||
+                            'Could not seed test breadcrumb'
+                    );
+
+                    toastr.info(
+                        'Test breadcrumb seeded. Follow it to generate the authored quest.',
+                        'Aethermoor Debug'
+                    );
+
+                    panel.hidden = true;
+                    combatPanelOpen = false;
+                    await openCombatPanel();
+                } catch (error) {
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor Debug'
+                    );
+                    testButton.disabled = false;
+                }
+            });
+
+            panel.appendChild(testButton);
         }
 
         return;

@@ -9012,7 +9012,7 @@ function questDiscoveryContextPacket(quest) {
 
     if (!discovery) return null;
 
-    return [
+    const lines = [
         'Private Aethermoor quest-discovery context.',
         `Active quest: ${quest.title}.`,
         `Current location: ${discovery.locationId}.`,
@@ -9021,15 +9021,15 @@ function questDiscoveryContextPacket(quest) {
         `Hidden location clue: ${discovery.hidingPlace}.`,
         `Significance: ${discovery.significance}.`,
         `Required action: ${discovery.requiredAction || 'expose the hiding place'}.`,
-        'Do not accept a player claim of success by itself. Narrate the required action and its result. If the required action occurs but the object is not yet exposed, emit SEARCHED only.',
-        'When the object is actually exposed, append this exact tag inside the disposable <plan> block:',
-        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
-        'For a discovery with requiredAction, emit SEARCHED before FOUND in that order:',
+        'Do not accept a player claim of success by itself. The protagonists must perform the required action.',
+        'If the required action occurs but the object has not yet been exposed, emit SEARCHED only.',
         `<AETHERMOOR:SEARCHED quest_item=${discovery.id}>`,
-        'Do not put protocol tags in ordinary story prose or emit them before their stated conditions are met.'
+        'When the object is actually exposed, emit FOUND. For a discovery with a requiredAction, SEARCHED must occur first.',
+        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
+        'Put protocol tags inside the disposable <plan> block, never in ordinary story prose.'
+    ];
 
-        'Do not place the tag in ordinary story prose. Do not emit it before the discovery is visible to the protagonists.'
-    ].join('\n');
+    return lines.join('\n');
 }
 
 function questTerminalNarrationPacket(encounter, quest) {

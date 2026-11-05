@@ -4227,8 +4227,11 @@ function resolveTravelStep(test) {
             state.currentPosition = { nodeId: journey.destinationId };
             outcome.arrived = true;
             state.currentJourney = null;
+            journey.status = 'arrived';
         }
+
         outcome.journey = clone(journey);
+
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
@@ -7539,6 +7542,40 @@ function resolveBatch(args) {
                     result = resolveTravelStep(test);
                     break;
 
+                                    case 'cleanup_test_data': {
+                    const state = clone(test.state);
+
+                    state.leads ||= {};
+                    state.places ||= {};
+
+                    const removedLeads = [];
+                    const removedPlaces = [];
+
+                    for (const [leadId, lead] of Object.entries(state.leads)) {
+                        if (lead?.testOnly === true) {
+                            removedLeads.push(leadId);
+                            delete state.leads[leadId];
+
+                            if (
+                                lead.targetId &&
+                                state.places[lead.targetId]?.testOnly === true
+                            ) {
+                                removedPlaces.push(lead.targetId);
+                                delete state.places[lead.targetId];
+                            }
+                        }
+                    }
+
+                    result = {
+                        ok: true,
+                        action: 'cleanup_test_data',
+                        removedLeads,
+                        removedPlaces,
+                        state
+                    };
+                    break;
+                }
+
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
@@ -9016,6 +9053,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'journey',
+                                    'cleanup_test_data',
                                     'investigate_lead',
                                     'engage',
                                     'avoid',
@@ -9566,6 +9604,11 @@ async function openWorldPanel() {
             );
 
         const actions = [];
+                actions.push({
+            label: 'Remove Test Data',
+            action: 'cleanup_test_data'
+        });
+
 
         if (journey) {
             actions.push({
@@ -9656,6 +9699,21 @@ async function openWorldPanel() {
         if (selectedIndex < 0) return;
 
         const selected = actions[selectedIndex];
+                if (selected.action === 'cleanup_test_data') {
+            await runStoredMechanic({
+                cases: [{
+                    name: 'cleanup_test_data',
+                    kind: 'cleanup_test_data'
+                }]
+            });
+
+            toastr.info(
+                'Temporary test leads and places removed.',
+                'Aethermoor'
+            );
+            return;
+        }
+
         if (selected.action === 'cancel_journey') {
             await runStoredMechanic({
                 cases: [{

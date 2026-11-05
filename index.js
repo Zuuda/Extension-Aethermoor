@@ -5059,7 +5059,9 @@ function resolveQuestSeed(test) {
 
     registerQuestDestination(state, quest);
     state.activeQuest = quest;
+    prepareMissingCargoDiscovery(state);
     trigger.questSeedConsumed = true;
+
 
     return {
         ok: true,
@@ -5067,6 +5069,42 @@ function resolveQuestSeed(test) {
         quest,
         state
     };
+}
+
+function prepareMissingCargoDiscovery(state) {
+    const quest = state.activeQuest;
+    if (quest?.archetype?.id !== 'missing_cargo' ||
+        !Array.isArray(quest.gatesData) ||
+        !quest.destinationId) {
+        return null;
+    }
+
+    const gate = quest.gatesData[1];
+    if (!gate || gate.mode !== 'brain_social_heist') return null;
+
+    quest.discoveries ||= [];
+    const id = `${quest.id}-diversion-docket`;
+    let discovery = quest.discoveries.find(item => item.id === id);
+
+    if (!discovery) {
+        discovery = {
+            id,
+            kind: 'evidence',
+            name: 'Counter-signed diversion docket',
+            locationId: quest.destinationId,
+            state: 'hidden',
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace: 'inside the weigh-station scale counterweight housing',
+            significance: 'It identifies the subcontractor who diverted the tool shipment.'
+        };
+        quest.discoveries.push(discovery);
+    }
+
+    gate.requiredDiscoveryId = id;
+    if (quest.currentGate?.step === 2) {
+        quest.currentGate.requiredDiscoveryId = id;
+    }
+    return discovery;
 }
 
 function resolveQuestEvent(test) {
@@ -8044,9 +8082,22 @@ function resolveBatch(args) {
                     };
                     break;
                 }
+                case 'quest_discovery_prepare': {
+                    const state = clone(test.state);
+                    const discovery = prepareMissingCargoDiscovery(state);
+                    assert(discovery, 'No eligible Missing Cargo discovery to prepare');
+                    result = {
+                        ok: true,
+                        action: 'quest_discovery_prepare',
+                        discoveryId: discovery.id,
+                        state
+                    };
+                    break;
+                }
                 case 'quest_event':
                     result = resolveQuestEvent(test);
                     break;
+
 
                 case 'quest_site_inspect': {
                     const state = test.state;
@@ -9732,6 +9783,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'journey',
+                                    'quest_discovery_prepare',
                                     'quest_event',
                                     'quest_site_inspect',
                                     'cleanup_test_data',

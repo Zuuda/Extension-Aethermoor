@@ -1525,9 +1525,9 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
-        assert(
-        encounter.status === 'active',
-        `Cannot resolve a turn from encounter status ${encounter.status}`
+    assert(
+        c.qtik.hp > 0 && c.tansy.hp > 0,
+        'Cannot resolve a combat turn after a crew member has fallen; resolve death or respawn first'
     );
 
     assert(
@@ -11859,10 +11859,19 @@ async function openCombatPanel() {
 
         return;
     }
+    if (
+        !encounter ||
+        encounter.status !== 'active' ||
+        state.crew.qtik.hp <= 0 ||
+        state.crew.tansy.hp <= 0
+    ) {
 
-    if (!encounter || encounter.status !== 'active') {
         const message = document.createElement('p');
-        message.textContent = 'There is no active encounter to resolve.';
+        message.textContent =
+            state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0
+                ? 'A crew member has fallen. Resolve death/respawn before continuing.'
+                : 'There is no active encounter to resolve.';
+
         panel.append(message);
         return;
     }
@@ -11972,10 +11981,21 @@ async function openCombatPanel() {
 
             if (
                 refreshedEncounter?.status !== 'active' ||
-                refreshedLiving.length === 0
+                refreshedLiving.length === 0 ||
+                refreshed.state.crew.qtik.hp <= 0 ||
+                refreshed.state.crew.tansy.hp <= 0
             ) {
                 choices.hidden = true;
                 resolveButton.hidden = true;
+
+                if (
+                    refreshed.state.crew.qtik.hp <= 0 ||
+                    refreshed.state.crew.tansy.hp <= 0
+                ) {
+                    resultBox.textContent +=
+                        '\n\nA crew member has fallen. Resolve the death/respawn state before continuing.';
+                }
+
             } else {
                 if (!refreshedLiving.some(
                     foe => foe.id === combatSelections.target

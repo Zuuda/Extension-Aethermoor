@@ -3727,6 +3727,24 @@ if (!questTerminal) {
     };
 }
 
+const TRAVELER_RUMORS = [
+    {
+        id: 'old-mill',
+        place: 'Old Mill',
+        claim: 'A traveler says lights have been seen inside the Old Mill after dark.'
+    },
+    {
+        id: 'stone-ford',
+        place: 'Stone Ford',
+        claim: 'A traveler says someone has been leaving fresh supplies at Stone Ford.'
+    },
+    {
+        id: 'abandoned-watchtower',
+        place: 'Abandoned Watchtower',
+        claim: 'A traveler says the Abandoned Watchtower has been occupied recently.'
+    }
+];
+
 function resolveTravelStep(test) {
     assert(
         test.state && typeof test.state === 'object',
@@ -3782,7 +3800,8 @@ function resolveTravelStep(test) {
         encounter: null,
         environmentalSign: null,
         site: null,
-        social: null
+        social: null,
+        rumor: null
     };
 
     if (event === 'environmental_sign') {
@@ -3876,13 +3895,46 @@ function resolveTravelStep(test) {
 
     if (event === 'social_opportunity') {
         const socialId = `traveler-${test.stepId}`;
-        const social = resolveSocialSeed({
-            state,
-            socialId
-        });
+        const social = resolveSocialSeed({ state, socialId });
 
         state = social.state;
         outcome.social = clone(social.seed);
+
+        // A traveler may have nothing useful to tell the crew.
+        const hasRumor = roll(state, 2) === 1;
+
+        if (hasRumor) {
+            const template = TRAVELER_RUMORS[
+                roll(state, TRAVELER_RUMORS.length) - 1
+            ];
+            const placeId = `place-z${state.zone}-${template.id}`;
+            const leadId = `rumor-${test.stepId}`;
+
+            state.places[placeId] ||= {
+                id: placeId,
+                label: template.place,
+                zone: state.zone,
+                knownFrom: 'rumor',
+                visited: false
+            };
+
+            state.leads[leadId] = {
+                id: leadId,
+                kind: 'rumor',
+                claim: template.claim,
+                sourceId: socialId,
+                targetType: 'place',
+                targetId: placeId,
+                status: 'known'
+            };
+
+            outcome.rumor = {
+                id: leadId,
+                claim: template.claim,
+                targetId: placeId,
+                targetLabel: template.place
+            };
+        }
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
@@ -7551,9 +7603,22 @@ function travelNarrationPacket(result) {
     } else if (result.event === 'social_opportunity') {
         lines.push(
             'The crew has encountered a traveler.',
-            `The traveler's locked social disposition is ${result.social.demeanor}; their sincerity is ${result.social.sincerity}.`,
-            'The traveler has no mechanically established quest or offer yet.'
+            `The traveler appears ${result.social.demeanor}.`
         );
+
+        if (result.rumor) {
+            lines.push(
+                `The traveler shares this claim: ${result.rumor.claim}`,
+                `The claim points to ${result.rumor.targetLabel}.`,
+                'Whether the claim is true has not been established. ' +
+                'The crew has not visited that place or received a quest.'
+            );
+        } else {
+            lines.push(
+                'The traveler offers no rumor or quest lead.'
+            );
+        }
+
     } else if (result.event === 'significant_discovery') {
         lines.push(
             'The travel roll produced a significant-discovery opportunity, but no specific discovery has been mechanically established yet.'

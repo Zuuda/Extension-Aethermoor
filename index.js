@@ -3731,19 +3731,65 @@ const TRAVELER_RUMORS = [
     {
         id: 'old-mill',
         place: 'Old Mill',
+        segments: 3,
         claim: 'A traveler says lights have been seen inside the Old Mill after dark.'
     },
     {
         id: 'stone-ford',
         place: 'Stone Ford',
+        segments: 1,
         claim: 'A traveler says someone has been leaving fresh supplies at Stone Ford.'
     },
     {
         id: 'abandoned-watchtower',
         place: 'Abandoned Watchtower',
+        segments: 4,
         claim: 'A traveler says the Abandoned Watchtower has been occupied recently.'
     }
 ];
+
+function resolveJourneyAction(test) {
+    assert(test.state && typeof test.state === 'object',
+        'Journey requires saved state');
+    const state = clone(test.state);
+
+    if (test.action === 'cancel') {
+        assert(state.currentJourney, 'No journey to cancel');
+        const journey = state.currentJourney;
+        state.currentJourney = null;
+        return { ok: true, action: 'cancel', journey, state };
+    }
+
+    assert(test.action === 'start',
+        `Unsupported journey action: ${test.action}`);
+    assert(!state.currentJourney,
+        'Finish or cancel the current journey first');
+
+    const lead = state.leads?.[test.leadId];
+    assert(lead?.status === 'known' && lead.targetType === 'place',
+        'Choose a known place lead');
+    const place = state.places?.[lead.targetId];
+    assert(place, 'Lead destination is not recorded');
+
+    const totalSegments = lead.travelSegments || 2;
+    int(totalSegments, 'journey segments', 1);
+
+    state.currentJourney = {
+        leadId: lead.id,
+        destinationId: place.id,
+        destinationLabel: place.label,
+        totalSegments,
+        completedSegments: 0,
+        status: 'traveling'
+    };
+
+    return {
+        ok: true,
+        action: 'start',
+        journey: clone(state.currentJourney),
+        state
+    };
+}
 
 function resolveTravelStep(test) {
     assert(
@@ -3772,7 +3818,35 @@ function resolveTravelStep(test) {
         };
     }
 
+    assert(!['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the current encounter before moving');
+
+    const journey = state.currentJourney;
+    if (journey?.status === 'paused') {
+        journey.status = 'traveling';
+    }
+
+    // An interruption on the final segment delays arrival until the
+    // situation is resolved; resuming does not roll an extra encounter.
+    if (journey && journey.completedSegments === journey.totalSegments) {
+        state.places[journey.destinationId].visited = true;
+        const arrival = {
+            stepId: test.stepId,
+            zone: state.zone,
+            travelRoll: null,
+            event: 'journey_arrival',
+            destinationLabel: journey.destinationLabel,
+            destinationId: journey.destinationId,
+            journey: clone(journey)
+        };
+        state.currentJourney = null;
+        state.currentLocationId = journey.destinationId;
+        state.travelSteps[test.stepId] = clone(arrival);
+        return { ok: true, created: true, ...arrival, state };
+    }
+
     const travelRoll = roll(state, 100);
+
     let event;
 
     if (travelRoll <= 65) {
@@ -3925,6 +3999,7 @@ function resolveTravelStep(test) {
                 sourceId: socialId,
                 targetType: 'place',
                 targetId: placeId,
+                travelSegments: template.segments,
                 status: 'known'
             };
 
@@ -3937,7 +4012,21 @@ function resolveTravelStep(test) {
         }
     }
 
+        if (journey) {
+        journey.completedSegments += 1;
+        if (event === 'wild_encounter') {
+            journey.status = 'paused';
+        } else if (journey.completedSegments === journey.totalSegments) {
+            state.places[journey.destinationId].visited = true;
+            state.currentLocationId = journey.destinationId;
+            outcome.arrived = true;
+            state.currentJourney = null;
+        }
+        outcome.journey = clone(journey);
+    }
+
     state.travelSteps[test.stepId] = clone(outcome);
+
 
     return {
         ok: true,
@@ -7243,7 +7332,11 @@ function resolveBatch(args) {
                 case 'travel':
                     result = resolveTravelStep(test);
                     break;
-                                    case 'engage': {
+                case 'journey':
+                    result = resolveJourneyAction(test);
+                    break;
+
+                case 'engage': {
                     const state = clone(test.state);
                     assert(
                         state.encounter?.status === 'spotted',
@@ -7629,10 +7722,34 @@ function travelNarrationPacket(result) {
         );
     }
 
+    if (result.event === 'journey_arrival') {
+        lines.push(`The crew arrived at ${result.destinationLabel}.`);
+    } else if (result.journey) {
+        const journey = result.journey;
+        lines.push(
+            `Journey toward ${journey.destinationLabel}: ` +
+            `${journey.completedSegments}/${journey.totalSegments} segments.`
+        );
+        if (journey.status === 'paused') {
+            lines.push('Travel is paused by the spotted encounter.');
+        } else if (result.arrived) {
+            lines.push(`The crew arrived at ${journey.destinationLabel}.`);
+        } else {
+            lines.push('The crew has not reached the destination yet.');
+        }
+    }
+
+    if (result.arrived || result.event === 'journey_arrival') {
+        lines.push(
+            'Arrival does not establish whether any rumor about this place is true.'
+        );
+    }
+
     return lines.join('\n');
 }
 
 function discoveryNarrationPacket(encounter) {
+
     const roleNames = {
         brute: 'Brute',
         archer: 'Archer',
@@ -8046,7 +8163,11 @@ async function runStoredMechanic(args) {
             nextEncounter.id !== previousEncounter?.id;
 
         const discoveryPacket = beganNewEncounter
-            ? discoveryNarrationPacket(nextEncounter)
+            ? discoveryNarrationPacket(nextEncounter) +
+              (caseResult.journey
+                  ? `\n${travelNarrationPacket(caseResult)}`
+                  : '')
+
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created && caseResult.quest        
                 ? questOfferNarrationPacket(caseResult.quest)
@@ -8578,6 +8699,7 @@ function registerTools() {
                                     'state',
                                     'spawn',
                                     'travel',
+                                    'journey',
                                     'engage',
                                     'avoid',
                                     'turn',
@@ -8704,6 +8826,10 @@ function registerTools() {
                             },
 
                             encounterId: {
+                                type: 'string'
+                            },
+                            
+                            leadId: {
                                 type: 'string'
                             },
 
@@ -9112,9 +9238,63 @@ function formatWorldStatus(state) {
 async function openWorldPanel() {
     try {
         const snapshot = await readStoredCombatState();
-        await getContext().Popup.show.text(
-            'Aethermoor World',
-            formatWorldStatus(snapshot.state)
+        const state = snapshot.state;
+        const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
+        const journey = state.currentJourney;
+        const leads = Object.values(state.leads || {})
+            .filter(lead =>
+                lead?.status === 'known' &&
+                lead.targetType === 'place' &&
+                state.places?.[lead.targetId]
+            );
+
+        const options = journey
+            ? [{ text: 'Cancel Journey', result: POPUP_RESULT.CUSTOM1 }]
+            : leads.map((lead, index) => ({
+                text: `Go: ${state.places[lead.targetId].label} ` +
+                    `(${lead.travelSegments || 2} segments)`,
+                result: POPUP_RESULT[`CUSTOM${index + 1}`]
+            })).filter(option => option.result !== undefined);
+
+        const description = journey
+            ? `\n\nCurrent journey: ${journey.destinationLabel} ` +
+              `(${journey.completedSegments}/${journey.totalSegments}; ` +
+              `${journey.status}).`
+            : '';
+
+        const popup = new Popup(
+            formatWorldStatus(state) + description,
+            POPUP_TYPE.TEXT,
+            '',
+            { customButtons: options, okButton: 'Close' }
+        );
+        const choice = await popup.show();
+        if (choice === POPUP_RESULT.AFFIRMATIVE) return;
+
+        if (journey && choice === POPUP_RESULT.CUSTOM1) {
+            await runStoredMechanic({
+                cases: [{ name: 'cancel_journey', kind: 'journey', action: 'cancel' }]
+            });
+            return;
+        }
+
+        const selected = leads.find((_, index) =>
+            choice === POPUP_RESULT[`CUSTOM${index + 1}`]
+        );
+        if (!selected) return;
+
+        await runStoredMechanic({
+            cases: [{
+                name: 'start_journey',
+                kind: 'journey',
+                action: 'start',
+                leadId: selected.id
+            }]
+        });
+        toastr.info(
+            `Journey started: ${state.places[selected.targetId].label}. ` +
+            'Each [moved] advances one segment.',
+            'Aethermoor'
         );
     } catch (error) {
         toastr.error(
@@ -9124,24 +9304,6 @@ async function openWorldPanel() {
     }
 }
 
-function createWorldController() {
-    if (document.getElementById('aethermoor_world_button')) return;
-
-    const composer = document.querySelector('#send_form');
-    if (!composer) {
-        console.warn('Aethermoor: chat composer not found; World button not added');
-        return;
-    }
-
-    const button = document.createElement('button');
-    button.id = 'aethermoor_world_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'World';
-    button.title = 'View known places and leads';
-    button.addEventListener('click', openWorldPanel);
-    composer.insertBefore(button, composer.firstChild);
-}
 
 function createCombatController() {
     const button = document.createElement('button');

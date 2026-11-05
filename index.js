@@ -4739,12 +4739,6 @@ function resolveQuestSeed(test) {
         }
     };
 
-    const salvage = makeQuestSalvage(
-        zone,
-        salvageSlotRoll,
-        row
-    );
-
     const quest = {
         id:
             `quest-${inquiryRecord

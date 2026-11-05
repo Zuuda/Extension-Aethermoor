@@ -8671,14 +8671,28 @@ function discoveryNarrationPacket(encounter) {
     ].join('\n');
 }
 
+const PUBLIC_QUEST_FACT_KEYS = {
+    missing_cargo: ['sponsor', 'cargo', 'place'],
+    ruin_clearance: ['sponsor', 'site'],
+    herb_foraging: ['sponsor', 'herb', 'place'],
+    missing_person: ['sponsor', 'person', 'place'],
+    sunken_salvage: ['sponsor', 'cargo', 'wreck'],
+    territorial_beast: ['sponsor', 'beast', 'place']
+};
+
+function publicQuestFactLines(quest) {
+    const keys = PUBLIC_QUEST_FACT_KEYS[quest.archetype?.id] || [];
+    return keys
+        .filter(key => typeof quest.facts?.[key] === 'string')
+        .map(key => `${key}: ${quest.facts[key]}`);
+}
+
 function questOfferNarrationPacket(quest) {
     const sourceText = quest.seed?.source === 'rumor'
         ? 'The crew followed a rumor lead.'
         : 'The crew followed a quest breadcrumb found on a cleared pack.';
 
-    const factLines = Object.entries(quest.facts || {})
-        .map(([key, value]) => `${key}: ${value}`);
-
+    const factLines = publicQuestFactLines(quest);
     return [
         sourceText,
         `Quest offered: ${quest.title}.`,
@@ -8736,8 +8750,7 @@ function questActionNarrationPacket(result, questAction) {
             `The offered salvage is ${quest.salvage.name} ` +
                 `(${quest.salvage.rarity}).`,
             quest.pitch || 'The accepted request is now active.',
-            ...Object.entries(quest.facts || {})
-                .map(([key, value]) => `${key}: ${value}`),
+            ...publicQuestFactLines(quest),
             `The current gate is ${quest.currentGate.mode}: ` +
                 `${quest.currentGate.objective}`,
             'Do not reveal coreTruth or change established quest facts.'
@@ -8771,10 +8784,8 @@ function rumorInvestigationNarrationPacket(result) {
     ];
 
     if (result.quest) {
-        lines.push(
-            'A quest offer was generated from the genuine lead.',
-            'Present the offer without inventing its objective or core truth.'
-        );
+        lines.push(questOfferNarrationPacket(result.quest));
+
     } else if (
         result.finding === 'travelogue_flub_benign_oddity' ||
         result.finding === 'already_cleared_by_other_immortals'

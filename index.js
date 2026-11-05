@@ -8219,6 +8219,51 @@ function resolveBatch(args) {
                     result = resolveQuestEvent(test);
                     break;
 
+                                    case 'quest_reveal_terminal': {
+                    const state = clone(test.state);
+                    const quest = state.activeQuest;
+
+                    assert(
+                        quest?.status === 'in_progress',
+                        'Quest threat requires an in-progress quest'
+                    );
+
+                    assert(
+                        quest.currentGate?.mode ===
+                            'combat_twist_showdown',
+                        'The current quest gate does not require a combat showdown'
+                    );
+
+                    assert(
+                        quest.terminalThreat &&
+                        quest.terminalThreat.resolved !== true,
+                        'Quest terminal threat is already resolved'
+                    );
+
+                    assert(
+                        state.currentLocationId === quest.destinationId,
+                        'The crew must reach the quest destination first'
+                    );
+
+                    assert(
+                        !state.encounter ||
+                        ['cleared', 'fled', 'dead'].includes(
+                            state.encounter.status
+                        ),
+                        'Resolve the current encounter before revealing the quest threat'
+                    );
+
+                    result = spawnEncounter({
+                        state,
+                        encounterType: 'quest_terminal',
+                        encounterId:
+                            `quest-terminal-${quest.id}`
+                    });
+
+                    result.action = 'quest_reveal_terminal';
+                    break;
+                }
+
                 case 'quest_site_inspect': {
                     const state = test.state;
                     const quest = state?.activeQuest;
@@ -8903,6 +8948,18 @@ function questDiscoveryContextPacket(quest) {
         'Do not place the tag in ordinary story prose. Do not emit it before the discovery is visible to the protagonists.'
     ].join('\n');
 }
+
+function questTerminalNarrationPacket(encounter, quest) {
+    const foe = encounter.foes?.[0];
+
+    return [
+        `The quest threat for ${quest.title} has been revealed.`,
+        `A level ${foe.level} ${foe.role} is guarding the objective.`,
+        'The encounter is active and combat has begun.',
+        'Narrate the threat and its relation to the established quest objective. Do not invent a different enemy level, reward, zone, or quest objective.'
+    ].join('\n');
+}
+
 function questDiscoveryNarrationPacket(result, quest) {
     const discovery = result.discovery;
     const lines = [
@@ -9385,45 +9442,64 @@ async function runStoredMechanic(args) {
             ['active', 'spotted'].includes(nextEncounter?.status) &&
             nextEncounter.id !== previousEncounter?.id;
 
-        const discoveryPacket = beganNewEncounter
-            ? discoveryNarrationPacket(nextEncounter) +
-              (caseResult.journey
-                  ? `\n${travelNarrationPacket(caseResult)}`
-                  : '')
+         const discoveryPacket =
+            batch &&
+            oneCase?.kind === 'quest_reveal_terminal' &&
+            caseResult.created !== false
+                ? questTerminalNarrationPacket(
+                    nextState.encounter,
+                    nextState.activeQuest
+                )
+
+            : beganNewEncounter
+                ? discoveryNarrationPacket(nextEncounter) +
+                  (caseResult.journey
+                      ? `\n${travelNarrationPacket(caseResult)}`
+                      : '')
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
+
             : questActionPacket
                 ? questActionPacket
 
-            : batch && oneCase?.kind === 'quest_discovery_reconcile' &&
+            : batch &&
+              oneCase?.kind === 'quest_discovery_reconcile' &&
               caseResult.created
                 ? questDiscoveryNarrationPacket(
                     caseResult,
                     nextState.activeQuest
                 )
 
-            : batch && oneCase?.kind === 'quest_event' &&
+            : batch &&
+              oneCase?.kind === 'quest_event' &&
               caseResult.created
                 ? questDiscoveryNarrationPacket(
                     caseResult,
                     nextState.activeQuest
                 )
 
-            : batch && oneCase?.kind === 'quest_site_inspect'
-                ? questSiteInspectionPacket(caseResult, nextState.activeQuest)
+            : batch &&
+              oneCase?.kind === 'quest_site_inspect'
+                ? questSiteInspectionPacket(
+                    caseResult,
+                    nextState.activeQuest
+                )
 
-            : batch && oneCase?.kind === 'investigate_lead' &&
+            : batch &&
+              oneCase?.kind === 'investigate_lead' &&
               caseResult.created
                 ? rumorInvestigationNarrationPacket(caseResult)
 
-            : batch && oneCase?.kind === 'avoid' &&
+            : batch &&
+              oneCase?.kind === 'avoid' &&
               caseResult.created
                 ? avoidEncounterNarrationPacket(nextEncounter)
 
-            : batch && oneCase?.kind === 'travel' &&
+            : batch &&
+              oneCase?.kind === 'travel' &&
               caseResult.created
                 ? travelNarrationPacket(caseResult)
 
@@ -9966,6 +10042,7 @@ function registerTools() {
                                     'quest_discovery_reconcile',
                                     'quest_event',
                                     'quest_site_inspect',
+                                    'quest_reveal_terminal',
                                     'cleanup_test_data',
                                     'investigate_lead',
                                     'engage',
@@ -10722,6 +10799,14 @@ function formatQuestStatus(quest) {
             `${quest.currentGate?.total || quest.gates}`,
             `Mode: ${quest.currentGate?.mode || 'not established'}`,
             `Objective: ${quest.currentGate?.objective || 'not established'}`
+            `Terminal threat: ${
+                quest.terminalThreat?.revealed
+                    ? quest.terminalThreat.resolved
+                        ? 'resolved'
+                        : 'revealed'
+                    : 'not revealed'
+            }`
+
         );
     } else if (quest.status === 'declined') {
         lines.push('This quest was declined.');
@@ -10757,7 +10842,36 @@ async function openQuestPanel() {
         }
 
         const buttons = [];
+
+        const canRevealTerminal =
+            quest.status === 'in_progress' &&
+            quest.currentGate?.mode ===
+                'combat_twist_showdown' &&
+            quest.terminalThreat?.resolved !== true &&
+            quest.destinationId === state.currentLocationId &&
+            !['active', 'spotted'].includes(
+                state.encounter?.status
+            );
+
+        if (canRevealTerminal) {
+            buttons.push({
+                text: 'Reveal Quest Threat',
+                result: POPUP_RESULT.CUSTOM1
+            });
+        }
+
         if (quest.status === 'offered') {
+            buttons.push(
+                {
+                    text: 'Accept Quest',
+                    result: POPUP_RESULT.CUSTOM1
+                },
+                {
+                    text: 'Decline Quest',
+                    result: POPUP_RESULT.CUSTOM2
+                }
+            );
+        }
 
             buttons.push(
                 {
@@ -10782,6 +10896,30 @@ async function openQuestPanel() {
         );
 
         const choice = await popup.show();
+            if (
+            canRevealTerminal &&
+            choice === POPUP_RESULT.CUSTOM1
+        ) {
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'reveal_quest_terminal',
+                    kind: 'quest_reveal_terminal'
+                }]
+            });
+
+            assert(
+                output?.ok === true,
+                output?.results?.[0]?.error ||
+                    'Could not reveal quest threat'
+            );
+
+            toastr.info(
+                'Quest threat revealed. Open Combat to resolve it.',
+                'Aethermoor'
+            );
+            return;
+        }
+
          let action = null;
 
         if (

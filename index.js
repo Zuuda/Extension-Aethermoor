@@ -5413,10 +5413,12 @@ function resolveQuestAction(test) {
         [
             'accept',
             'decline',
+            'abandon',
             'clear_gate',
             'resolve_objective',
-            'complete'            
+            'complete'
         ].includes(test.action),
+
         `Unsupported quest action: ${test.action}`
     );
 
@@ -5463,6 +5465,21 @@ function resolveQuestAction(test) {
         quest.status === 'in_progress',
         `Quest action requires an in-progress quest, got ${quest.status}`
     );
+
+        if (test.action === 'abandon') {
+        assert(
+            !['active', 'spotted'].includes(
+                state.encounter?.status
+            ),
+            'Resolve, avoid, or flee the encounter before abandoning the quest'
+        );
+
+        quest.status = 'abandoned';
+        quest.abandonedAtGate = quest.currentGate?.step || null;
+        quest.abandonReason = test.reason || null;
+
+        return result;
+    }
 
      if (test.action === 'clear_gate') {
         assert(
@@ -9112,6 +9129,14 @@ function questActionNarrationPacket(result, questAction) {
         ].join('\n');
     }
 
+        if (questAction === 'abandon') {
+        return [
+            `The crew abandoned the active quest: ${quest.title}.`,
+            'No quest rewards or reputation were granted.',
+            'The quest was not completed. The crew is free to pursue other plans.'
+        ].join('\n');
+    }
+
     return null;
 }
 
@@ -9509,7 +9534,7 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-            ['accept', 'decline'].includes(oneCase.action)
+            ['accept', 'decline', 'abandon'].includes(oneCase.action)
                 ? questActionNarrationPacket(
                     {
                         ...caseResult,
@@ -10324,6 +10349,7 @@ function registerTools() {
                                     'export',
                                     'accept',
                                     'decline',
+                                    'abandon',
                                     'clear_gate',
                                     'resolve_objective',
                                     'complete',
@@ -10892,6 +10918,12 @@ function formatQuestStatus(quest) {
             }`
 
         );
+            } else if (quest.status === 'abandoned') {
+        lines.push(
+            `Abandoned at gate ${quest.abandonedAtGate || 'unknown'}.`,
+            'No quest rewards or reputation were granted.'
+        );
+
     } else if (quest.status === 'declined') {
         lines.push('This quest was declined.');
     } else if (quest.status === 'complete') {
@@ -10957,6 +10989,13 @@ async function openQuestPanel() {
             );
         }
 
+       if (quest.status === 'in_progress') {
+            buttons.push({
+                text: 'Abandon Quest',
+                result: POPUP_RESULT.CUSTOM3
+            });
+        }
+
         const popup = new Popup(
             formatQuestStatus(quest),
             POPUP_TYPE.TEXT,
@@ -11005,6 +11044,13 @@ async function openQuestPanel() {
             choice === POPUP_RESULT.CUSTOM2
         ) {
             action = 'decline';
+        }
+
+        if (
+            quest.status === 'in_progress' &&
+            choice === POPUP_RESULT.CUSTOM3
+        ) {
+            action = 'abandon';
         }
 
         if (!action) return;

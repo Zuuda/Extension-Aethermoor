@@ -11063,12 +11063,15 @@ async function openQuestPanel() {
             }]
         });
 
-        toastr.info(
-            action === 'accept'
-                ? 'Quest accepted. Generate the next scene to narrate the acceptance.'
-                : 'Quest declined.',
-            'Aethermoor'
-        );
+toastr.info(
+    action === 'accept'
+        ? 'Quest accepted. Generate the next scene to narrate the acceptance.'
+        : action === 'abandon'
+            ? 'Quest abandoned. No rewards or reputation were granted.'
+            : 'Quest declined.',
+    'Aethermoor'
+);
+
     } catch (error) {
         toastr.error(
             error instanceof Error ? error.message : String(error),

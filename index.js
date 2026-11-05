@@ -4755,9 +4755,11 @@ function resolveQuestSeed(test) {
         gates,
         gatesData,
         status: 'offered',
+        seed,
 
         // Stored by the engine, but not exposed as hidden truth in the offer.
         coreTruth: archetype.truth,
+
 
         currentGate: {
             ...gatesData[0]

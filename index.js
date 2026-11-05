@@ -3731,54 +3731,164 @@ const TRAVELER_RUMORS = [
     {
         id: 'old-mill',
         place: 'Old Mill',
-        segments: 3,
         claim: 'A traveler says lights have been seen inside the Old Mill after dark.'
     },
     {
         id: 'stone-ford',
         place: 'Stone Ford',
-        segments: 1,
         claim: 'A traveler says someone has been leaving fresh supplies at Stone Ford.'
     },
     {
         id: 'abandoned-watchtower',
         place: 'Abandoned Watchtower',
-        segments: 4,
         claim: 'A traveler says the Abandoned Watchtower has been occupied recently.'
     }
 ];
 
+const ROUTE_SEGMENT_EDGES = [
+    ['outpost', 'stone-ford', 1],
+    ['stone-ford', 'old-mill', 2],
+    ['stone-ford', 'watchtower', 3],
+    ['old-mill', 'watchtower', 2]
+];
+
+function routeNodeId(zone, place) {
+    return place === 'outpost'
+        ? `outpost-z${zone}`
+        : `place-z${zone}-${place}`;
+}
+
+function shortestRoute(state, destinationId) {
+    const zone = state.zone;
+    const originId =
+        state.currentLocationId || routeNodeId(zone, 'outpost');
+
+    const nodeFor = name => routeNodeId(zone, name);
+    const edges = ROUTE_SEGMENT_EDGES.map(([from, to, cost]) => ({
+        from: nodeFor(from),
+        to: nodeFor(to),
+        cost
+    }));
+
+    const distances = new Map([[originId, 0]]);
+    const previous = new Map();
+    const unvisited = new Set([originId, destinationId]);
+
+    for (const edge of edges) {
+        unvisited.add(edge.from);
+        unvisited.add(edge.to);
+    }
+
+    while (unvisited.size > 0) {
+        let current = null;
+        let bestDistance = Infinity;
+
+        for (const node of unvisited) {
+            const distance = distances.get(node) ?? Infinity;
+            if (distance < bestDistance) {
+                current = node;
+                bestDistance = distance;
+            }
+        }
+
+        if (current === null || bestDistance === Infinity) break;
+        if (current === destinationId) break;
+
+        unvisited.delete(current);
+
+        for (const edge of edges) {
+            const neighbor = edge.from === current
+                ? edge.to
+                : edge.to === current
+                    ? edge.from
+                    : null;
+
+            if (!neighbor) continue;
+
+            const candidate = bestDistance + edge.cost;
+            if (candidate < (distances.get(neighbor) ?? Infinity)) {
+                distances.set(neighbor, candidate);
+                previous.set(neighbor, current);
+            }
+        }
+    }
+
+    const totalSegments = distances.get(destinationId);
+    if (!Number.isFinite(totalSegments)) return null;
+
+    const path = [];
+    let cursor = destinationId;
+
+    while (cursor) {
+        path.unshift(cursor);
+        if (cursor === originId) break;
+        cursor = previous.get(cursor);
+    }
+
+    return {
+        originId,
+        destinationId,
+        totalSegments,
+        path
+    };
+}
+
 function resolveJourneyAction(test) {
-    assert(test.state && typeof test.state === 'object',
-        'Journey requires saved state');
+    assert(
+        test.state && typeof test.state === 'object',
+        'Journey requires saved state'
+    );
+
     const state = clone(test.state);
 
     if (test.action === 'cancel') {
         assert(state.currentJourney, 'No journey to cancel');
+
         const journey = state.currentJourney;
         state.currentJourney = null;
-        return { ok: true, action: 'cancel', journey, state };
+
+        return {
+            ok: true,
+            action: 'cancel',
+            journey,
+            state
+        };
     }
 
-    assert(test.action === 'start',
-        `Unsupported journey action: ${test.action}`);
-    assert(!state.currentJourney,
-        'Finish or cancel the current journey first');
+    assert(
+        test.action === 'start',
+        `Unsupported journey action: ${test.action}`
+    );
+    assert(
+        !state.currentJourney,
+        'Finish or cancel the current journey first'
+    );
 
     const lead = state.leads?.[test.leadId];
-    assert(lead?.status === 'known' && lead.targetType === 'place',
-        'Choose a known place lead');
+    assert(
+        lead?.status === 'known' && lead.targetType === 'place',
+        'Choose a known place lead'
+    );
+
     const place = state.places?.[lead.targetId];
     assert(place, 'Lead destination is not recorded');
 
-    const totalSegments = lead.travelSegments || 2;
-    int(totalSegments, 'journey segments', 1);
+    // Existing saves without a recorded location start from the outpost.
+    state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
+
+    const route = shortestRoute(state, place.id);
+    assert(
+        route,
+        `No known route from the current location to ${place.label}`
+    );
 
     state.currentJourney = {
         leadId: lead.id,
         destinationId: place.id,
         destinationLabel: place.label,
-        totalSegments,
+        originId: route.originId,
+        route: route.path,
+        totalSegments: route.totalSegments,
         completedSegments: 0,
         status: 'traveling'
     };
@@ -9357,13 +9467,17 @@ async function openWorldPanel() {
             });
         } else {
             for (const lead of leads) {
-                actions.push({
-                    label:
-                        `Go: ${state.places[lead.targetId].label} ` +
-                        `(${lead.travelSegments || 2} segments)`,
-                    action: 'start_journey',
-                    leadId: lead.id
-                });
+         const place = state.places[lead.targetId];
+         const route = shortestRoute(state, place.id);
+         if (!route) continue;
+         actions.push({
+            label:
+                 `Go: ${place.label} ` +
+                 `(${route.totalSegments} segments)`,
+            action: 'start_journey',
+            leadId: lead.id
+         });
+
             }
         }
 

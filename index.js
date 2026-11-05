@@ -10798,7 +10798,7 @@ function formatQuestStatus(quest) {
             `Current gate: ${quest.currentGate?.step || 1}/` +
             `${quest.currentGate?.total || quest.gates}`,
             `Mode: ${quest.currentGate?.mode || 'not established'}`,
-            `Objective: ${quest.currentGate?.objective || 'not established'}`
+            `Objective: ${quest.currentGate?.objective || 'not established'}`,
             `Terminal threat: ${
                 quest.terminalThreat?.revealed
                     ? quest.terminalThreat.resolved

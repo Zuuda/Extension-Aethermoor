@@ -5068,6 +5068,98 @@ function resolveQuestSeed(test) {
         state
     };
 }
+
+function resolveQuestEvent(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Quest event requires state'
+    );
+
+    const state = clone(test.state);
+    const quest = state.activeQuest;
+
+    assert(
+        quest?.status === 'in_progress',
+        'Quest event requires an in-progress quest'
+    );
+
+    assert(
+        test.event === 'found',
+        `Unsupported quest event: ${test.event}`
+    );
+
+    assert(
+        typeof test.questItemId === 'string' &&
+        test.questItemId.trim().length > 0,
+        'Quest discovery event requires questItemId'
+    );
+
+    const discoveries = Array.isArray(quest.discoveries)
+        ? quest.discoveries
+        : [];
+
+    const discovery = discoveries.find(
+        item => item.id === test.questItemId
+    );
+
+    assert(
+        discovery,
+        `Unknown authored quest discovery: ${test.questItemId}`
+    );
+
+    assert(
+        state.currentLocationId === discovery.locationId,
+        'Quest discovery is at the wrong location'
+    );
+
+    assert(
+        ['hidden', 'found'].includes(discovery.state),
+        `Quest discovery cannot be found from state ${discovery.state}`
+    );
+
+    if (discovery.state === 'found') {
+        return {
+            ok: true,
+            created: false,
+            action: 'quest_event',
+            event: 'found',
+            questItemId: discovery.id,
+            discovery: clone(discovery),
+            state
+        };
+    }
+
+    const gate = quest.currentGate;
+    const allowedIds = [
+        ...(gate?.discoveryIds || []),
+        ...(gate?.requiredDiscoveryId
+            ? [gate.requiredDiscoveryId]
+            : [])
+    ];
+
+    assert(
+        allowedIds.includes(discovery.id),
+        `Discovery ${discovery.id} is not required by the current gate`
+    );
+
+    discovery.state = 'found';
+
+    if (discovery.acquisitionPolicy === 'auto_on_reveal') {
+        discovery.state = 'acquired';
+    }
+
+    return {
+        ok: true,
+        created: true,
+        action: 'quest_event',
+        event: 'found',
+        questItemId: discovery.id,
+        discovery: clone(discovery),
+        state
+    };
+}
+
 function resolveQuestAction(test) {
     assert(
         test.state &&
@@ -7952,8 +8044,11 @@ function resolveBatch(args) {
                     };
                     break;
                 }
+                case 'quest_event':
+                    result = resolveQuestEvent(test);
+                    break;
 
-                                    case 'quest_site_inspect': {
+                case 'quest_site_inspect': {
                     const state = test.state;
                     const quest = state?.activeQuest;
 
@@ -8599,6 +8694,19 @@ function questOfferNarrationPacket(quest) {
             `${quest.currentGate.objective}`,
         'These quest facts and objectives are mechanically established. ' +
             'Do not reveal hidden truth or replace the objective.'
+    ].join('\n');
+}
+
+function questDiscoveryNarrationPacket(result, quest) {
+    const discovery = result.discovery;
+
+    return [
+        `The authored quest discovery was exposed: ${discovery.name}.`,
+        `Discovery state: ${discovery.state}.`,
+        `Quest item ID: ${discovery.id}.`,
+        'The discovery was validated by the mechanics engine. ' +
+            'Narrate the protagonists recognizing or taking possession of it as appropriate.',
+        'Do not reveal hidden quest truth or complete later gates unless another mechanics event establishes that.'
     ].join('\n');
 }
 
@@ -9606,6 +9714,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'journey',
+                                    'quest_event',
                                     'quest_site_inspect',
                                     'cleanup_test_data',
                                     'investigate_lead',
@@ -9741,6 +9850,11 @@ function registerTools() {
                             
                             leadId: {
                                 type: 'string'
+                            },
+                            questItemId: {
+                                type: 'string',
+                                description:
+                                    'Stable ID of an authored quest discovery'
                             },
 
                             mob: {
@@ -11571,6 +11685,119 @@ function makeAethermoorHandoffMessage(entries) {
     };
 }
 
+function getAssistantMessageText(data) {
+    const candidates = [
+        data?.message,
+        data
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string') {
+            return {
+                text: candidate,
+                messageId: null
+            };
+        }
+
+        if (
+            candidate &&
+            typeof candidate === 'object' &&
+            typeof candidate.mes === 'string' &&
+            candidate.is_user !== true
+        ) {
+            return {
+                text: candidate.mes,
+                messageId: candidate.messageId ??
+                    candidate.id ??
+                    null
+            };
+        }
+    }
+
+    const chat = getContext().chat;
+    if (!Array.isArray(chat)) return null;
+
+    for (let index = chat.length - 1; index >= 0; index--) {
+        const message = chat[index];
+
+        if (
+            message?.is_user !== true &&
+            message?.is_system !== true &&
+            typeof message?.mes === 'string'
+        ) {
+            return {
+                text: message.mes,
+                messageId: index
+            };
+        }
+    }
+
+    return null;
+}
+
+function extractAethermoorQuestEvents(text) {
+    if (typeof text !== 'string') return [];
+
+    const events = [];
+    const pattern =
+        /<AETHERMOOR:FOUND\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
+
+    for (const match of text.matchAll(pattern)) {
+        events.push({
+            event: 'found',
+            questItemId: match[1]
+        });
+    }
+
+    return events;
+}
+
+async function processAethermoorAssistantEvents(data) {
+    const message = getAssistantMessageText(data);
+    if (!message) return;
+
+    const events = extractAethermoorQuestEvents(message.text);
+    if (events.length === 0) return;
+
+    for (const event of events) {
+        try {
+            const result = await runStoredMechanic({
+                cases: [{
+                    name: 'assistant_quest_event',
+                    kind: 'quest_event',
+                    event: event.event,
+                    questItemId: event.questItemId
+                }]
+            });
+
+            console.log(
+                '[Aethermoor] Accepted assistant quest event',
+                {
+                    messageId: message.messageId,
+                    event,
+                    result
+                }
+            );
+        } catch (error) {
+            /*
+             * Invalid or repeated protocol tags are ignored mechanically.
+             * The story text remains subject to the user's existing
+             * SillyTavern <plan> cleanup rule.
+             */
+            console.warn(
+                '[Aethermoor] Ignored assistant quest event',
+                {
+                    messageId: message.messageId,
+                    event,
+                    reason: error instanceof Error
+                        ? error.message
+                        : String(error)
+                }
+            );
+        }
+    }
+}
+
 function findLastUserMessage(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         if (chat[index]?.is_user) return index;
@@ -11813,7 +12040,9 @@ function registerAethermoorGenerationCleanup() {
     }
 
     for (const eventType of new Set(successEvents)) {
-        eventSource.on(eventType, () => {
+        eventSource.on(eventType, data => {
+            void processAethermoorAssistantEvents(data);
+
             const injected = aethermoorInjectedHandoff;
 
             if (!injected) {

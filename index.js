@@ -4470,78 +4470,242 @@ const QUEST_ARCHETYPES = [
     {
         id: 'missing_cargo',
         label: 'Missing Cargo',
-        truth: 'A cargo shipment was deliberately diverted and concealed.',
+        scenarios: [
+            {
+                pitch: 'A local trading concern reports that a promised shipment never reached its destination.',
+                truth: 'The cargo was deliberately diverted and concealed.',
+                facts: {
+                    sponsor: 'the Peat-Cairn Excavation Co.',
+                    cargo: 'a sealed payroll strongbox',
+                    place: 'the old gravel weir',
+                    evidence: 'the cargo tally and fresh drag marks',
+                    obstacle: 'a locked storehouse guarded after dusk'
+                }
+            },
+            {
+                pitch: 'A peat-cutting crew reports that its winter tool shipment vanished between depots.',
+                truth: 'A subcontractor hid the tools to force the crew into an unfavorable debt.',
+                facts: {
+                    sponsor: 'the North Sluice peat-cutters',
+                    cargo: 'a crate of iron dredging tools',
+                    place: 'the abandoned weigh-station',
+                    evidence: 'a split company seal and mismatched cart tracks',
+                    obstacle: 'a flooded approach watched by hired guards'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Locate the last verified cargo marker.'],
-            ['brain_social_heist', 'Identify who changed the shipment route.'],
-            ['combat_twist_showdown', 'Recover the shipment from its current guards.'],
-            ['traversal_discovery', 'Trace the diversion to its organizer.'],
-            ['brain_social_heist', 'Secure proof and settle the claim with the sponsor.']
+            ['traversal_discovery', 'Locate {place} and inspect {evidence}.'],
+            ['brain_social_heist', 'Determine who diverted {cargo} from {sponsor}.'],
+            ['combat_twist_showdown', 'Recover {cargo} despite {obstacle}.'],
+            ['traversal_discovery', 'Trace the diversion from {place} to its beneficiary.'],
+            ['brain_social_heist', 'Present the recovered evidence to {sponsor}.']
         ]
     },
     {
         id: 'ruin_clearance',
         label: 'Ruin Clearance',
-        truth: 'A newly active threat is occupying a previously quiet ruin.',
+        scenarios: [
+            {
+                pitch: 'A nearby route has become unsafe after activity was seen inside an old structure.',
+                truth: 'A territorial group has occupied the ruin while following a source of food deeper inside.',
+                facts: {
+                    sponsor: 'the Peat-Cairn road wardens',
+                    site: 'the drowned watch-house',
+                    threat: 'a band of marsh scavengers',
+                    evidence: 'fresh cookfire ash and newly cut trail marks',
+                    obstacle: 'a collapsed entrance and guarded upper windows'
+                }
+            },
+            {
+                pitch: 'A storage ruin thought to be empty has begun producing noises at night.',
+                truth: 'An opportunistic crew is using the ruin as cover while stripping its foundations.',
+                facts: {
+                    sponsor: 'the local stonecutters’ guild',
+                    site: 'the split-stone storehouse',
+                    threat: 'a salvage crew with armed lookouts',
+                    evidence: 'recent chisel marks and a hidden haul path',
+                    obstacle: 'a narrow approach overlooked from the roof'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Find a safe approach to the ruin entrance.'],
-            ['combat_twist_showdown', 'Clear the first occupied section.'],
-            ['brain_social_heist', 'Determine what is drawing the inhabitants there.'],
-            ['combat_twist_showdown', 'Stop the threat at its source.'],
-            ['traversal_discovery', 'Verify the site is safe for local use.']
+            ['traversal_discovery', 'Find a safe approach to {site} and verify {evidence}.'],
+            ['combat_twist_showdown', 'Secure the first occupied section against {threat}.'],
+            ['brain_social_heist', 'Determine why {threat} is using {site}.'],
+            ['combat_twist_showdown', 'Stop {threat} from reaching its objective.'],
+            ['traversal_discovery', 'Verify that the route past {site} is safe for {sponsor}.']
         ]
     },
     {
         id: 'herb_foraging',
         label: 'Herb Foraging',
-        truth: 'A medicinal plant grows in a hazardous, identifiable part of the local wilds.',
+        scenarios: [
+            {
+                pitch: 'A healer needs a fresh medicinal plant before the next supply sled departs.',
+                truth: 'The plant grows near a hazardous spring where territorial wildlife gathers.',
+                facts: {
+                    sponsor: 'Daga at the Sodden Beam',
+                    herb: 'silver-vein marshmallow root',
+                    place: 'the warm spring beyond the reed beds',
+                    need: 'a treatment for lung fever',
+                    obstacle: 'unstable ground around the spring'
+                }
+            },
+            {
+                pitch: 'A camp medic has run short of a plant used to treat infected cuts.',
+                truth: 'The remaining patch is in a nesting area avoided by local gatherers.',
+                facts: {
+                    sponsor: 'Vena’s stilt-camp',
+                    herb: 'bitter blue woundleaf',
+                    place: 'the shaded bank beneath the leaning cypress',
+                    need: 'a remedy for infected wounds',
+                    obstacle: 'a nesting animal guarding the bank'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Locate the correct growing ground.'],
-            ['brain_social_heist', 'Identify and gather the requested specimen.'],
-            ['combat_twist_showdown', 'Protect the harvest from its territorial guardian.'],
-            ['traversal_discovery', 'Find a viable second patch before the first is depleted.'],
-            ['brain_social_heist', 'Deliver the intact harvest to the requesting healer.']
+            ['traversal_discovery', 'Locate {place} using local growing signs.'],
+            ['brain_social_heist', 'Identify and gather {herb} without contaminating it.'],
+            ['combat_twist_showdown', 'Protect the harvest from the danger at {place}.'],
+            ['traversal_discovery', 'Confirm that enough {herb} remains for {need}.'],
+            ['brain_social_heist', 'Deliver the usable harvest to {sponsor}.']
         ]
     },
     {
         id: 'missing_person',
         label: 'Missing Person Search',
-        truth: 'The missing person left the known roads and is alive at the time of the search.',
+        scenarios: [
+            {
+                pitch: 'A relative has not returned from a routine trip along the marsh road.',
+                truth: 'The missing traveler left the road to shelter from a sudden flood.',
+                facts: {
+                    sponsor: 'the missing traveler’s sister',
+                    person: 'Mara Venn',
+                    place: 'the old ferry landing',
+                    evidence: 'a dropped satchel and a broken walking staff',
+                    obstacle: 'flooded ground beyond the landing'
+                }
+            },
+            {
+                pitch: 'A local courier missed two expected check-ins while carrying sealed letters.',
+                truth: 'The courier was detained by a bandit crew searching for one particular letter.',
+                facts: {
+                    sponsor: 'the Peat-Cairn message office',
+                    person: 'Tovin Reed',
+                    place: 'the north causeway marker',
+                    evidence: 'a torn route docket and a fresh boot trail',
+                    obstacle: 'armed watchers controlling the causeway'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Find the missing person’s last known trail.'],
-            ['brain_social_heist', 'Learn which route the missing person took.'],
-            ['traversal_discovery', 'Reach the latest confirmed location.'],
-            ['combat_twist_showdown', 'Overcome the immediate danger blocking access.'],
-            ['brain_social_heist', 'Bring the missing person safely back or secure their chosen message.']
+            ['traversal_discovery', 'Search {place} for {evidence}.'],
+            ['brain_social_heist', 'Learn which route {person} took after leaving the last known marker.'],
+            ['traversal_discovery', 'Follow the trail to {person} without losing it in the marsh.'],
+            ['combat_twist_showdown', 'Reach {person} despite {obstacle}.'],
+            ['brain_social_heist', 'Establish what {person} wants and report back to {sponsor}.']
         ]
     },
     {
         id: 'sunken_salvage',
         label: 'Sunken Salvage',
-        truth: 'The marked wreck contains recoverable cargo, but access is obstructed.',
+        scenarios: [
+            {
+                pitch: 'A claimant has identified a sunken company scow and wants its sealed cargo recovered.',
+                truth: 'The cargo remains inside the wreck, concealed by silt and a collapsed section of hull.',
+                facts: {
+                    sponsor: 'the Peat-Cairn Excavation Co.',
+                    cargo: 'the sealed pay-chest',
+                    wreck: 'the scow at Sunken Channel #3',
+                    evidence: 'the stamped barge-lock plate',
+                    obstacle: 'root-bound iron brackets beneath the waterline'
+                }
+            },
+            {
+                pitch: 'A ferry crew wants a marked navigation case recovered before it is lost to the current.',
+                truth: 'The case is wedged beneath the wreck, while scavengers have begun stripping the deck.',
+                facts: {
+                    sponsor: 'the third-weir ferry crew',
+                    cargo: 'the brass navigation case',
+                    wreck: 'the split-hull ferry below the limestone bend',
+                    evidence: 'a painted ferry number on a floating plank',
+                    obstacle: 'a fast undertow and active scavengers'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Locate the wreck using the surviving route marks.'],
-            ['brain_social_heist', 'Find a way to open or detach the cargo hold.'],
-            ['combat_twist_showdown', 'Clear the creatures guarding the wreck.'],
-            ['traversal_discovery', 'Recover the marked cargo without losing it to the current.'],
-            ['brain_social_heist', 'Return the cargo or its verified contents to the claimant.']
+            ['traversal_discovery', 'Locate {wreck} and confirm it using {evidence}.'],
+            ['brain_social_heist', 'Find a way past {obstacle} to reach {cargo}.'],
+            ['combat_twist_showdown', 'Secure the wreck against its current guardians.'],
+            ['traversal_discovery', 'Extract {cargo} without losing it to the water or wreckage.'],
+            ['brain_social_heist', 'Return the recovered cargo to {sponsor}.']
         ]
     },
     {
         id: 'territorial_beast',
         label: 'Territorial Beast Hunt',
-        truth: 'A dangerous beast is driving local wildlife away from its territory.',
+        scenarios: [
+            {
+                pitch: 'A dangerous animal has begun driving local gatherers away from a familiar route.',
+                truth: 'The animal is defending a den after nearby logging exposed its young.',
+                facts: {
+                    sponsor: 'the peat-cutters’ trail warden',
+                    beast: 'a scar-backed mire drake',
+                    place: 'the cypress ridge trail',
+                    evidence: 'fresh claw marks and a trampled den approach',
+                    obstacle: 'the beast’s short, defended territory'
+                }
+            },
+            {
+                pitch: 'A herd animal has stopped returning to its usual grazing ground.',
+                truth: 'A predator has established a hunting path beside the herd’s watering place.',
+                facts: {
+                    sponsor: 'the Fen-Trollkin camp herders',
+                    beast: 'a pale marsh tusker',
+                    place: 'the reed-ringed watering hollow',
+                    evidence: 'broken reeds and a repeated set of heavy tracks',
+                    obstacle: 'the predator’s approach through deep water'
+                }
+            }
+        ],
         gates: [
-            ['traversal_discovery', 'Find the beast’s recent trail.'],
-            ['traversal_discovery', 'Locate its territory without provoking it prematurely.'],
-            ['combat_twist_showdown', 'Confront the beast on its ground.'],
-            ['brain_social_heist', 'Determine whether the territory can be made safe without killing it.'],
-            ['traversal_discovery', 'Verify that the local route is safe after the confrontation.']
+            ['traversal_discovery', 'Follow {evidence} to locate {beast} near {place}.'],
+            ['traversal_discovery', 'Determine the boundaries of {beast}’s territory.'],
+            ['combat_twist_showdown', 'Confront {beast} while accounting for {obstacle}.'],
+            ['brain_social_heist', 'Determine whether the danger can be addressed without unnecessary killing.'],
+            ['traversal_discovery', 'Verify that {place} is safe enough for {sponsor} to use again.']
         ]
     }
 ];
 
-function buildAuthoredQuestGates(state, archetype, gateCount) {
+function buildQuestFacts(state, archetype) {
+    assert(
+        Array.isArray(archetype.scenarios) &&
+        archetype.scenarios.length > 0,
+        `Quest archetype ${archetype.id} has no fact scenarios`
+    );
+
+    const scenarioRoll = roll(state, archetype.scenarios.length);
+    const scenario = archetype.scenarios[scenarioRoll - 1];
+
+    assert(
+        scenario &&
+        typeof scenario.pitch === 'string' &&
+        scenario.facts &&
+        typeof scenario.facts === 'object',
+        `Quest archetype ${archetype.id} has an invalid scenario`
+    );
+
+    return {
+        scenarioRoll,
+        pitch: scenario.pitch,
+        truth: scenario.truth,
+        facts: clone(scenario.facts)
+    };
+}
+
+function buildAuthoredQuestGates(archetype, gateCount, facts) {
     assert(
         Array.isArray(archetype.gates) &&
         archetype.gates.length >= gateCount,
@@ -4549,15 +4713,17 @@ function buildAuthoredQuestGates(state, archetype, gateCount) {
     );
 
     return archetype.gates.slice(0, gateCount).map(
-        ([mode, objective], index) => ({
+        ([mode, template], index) => ({
             step: index + 1,
             total: gateCount,
             mode,
-            objective
+            objective: template.replace(
+                /\{([a-zA-Z0-9_]+)\}/g,
+                (_match, key) => facts[key] ?? `{${key}}`
+            )
         })
     );
 }
-
 
 function resolveQuestSeed(test) {
     assert(
@@ -4713,12 +4879,13 @@ function resolveQuestSeed(test) {
             row
         );
 
-       const archetypeRoll = roll(state, QUEST_ARCHETYPES.length);
+    const archetypeRoll = roll(state, QUEST_ARCHETYPES.length);
     const archetype = QUEST_ARCHETYPES[archetypeRoll - 1];
+    const authored = buildQuestFacts(state, archetype);
     const gatesData = buildAuthoredQuestGates(
-        state,
         archetype,
-        gates
+        gates,
+        authored.facts
     );
 
     const seed = {
@@ -4729,6 +4896,7 @@ function resolveQuestSeed(test) {
         salvageSlotRoll,
         archetypeRoll,
         archetypeId: archetype.id,
+        scenarioRoll: authored.scenarioRoll,
         source: sourceSeed.source,
         sourceRoll: sourceSeed.roll,
         sourceResult: sourceSeed.result,
@@ -4757,11 +4925,15 @@ function resolveQuestSeed(test) {
         status: 'offered',
         seed,
 
-        // Stored by the engine, but not exposed as hidden truth in the offer.
-        coreTruth: archetype.truth,
+        pitch: authored.pitch,
+        facts: authored.facts,
 
+        // Internal truth: only use this for quest validation/resolution,
+        // never include it in narrator-facing offer packets.
+        coreTruth: authored.truth,
 
         currentGate: {
+
             ...gatesData[0]
         },
         objectiveResolution: null,
@@ -8268,18 +8440,24 @@ function questOfferNarrationPacket(quest) {
         ? 'The crew followed a rumor lead.'
         : 'The crew followed a quest breadcrumb found on a cleared pack.';
 
+    const factLines = Object.entries(quest.facts || {})
+        .map(([key, value]) => `${key}: ${value}`);
+
     return [
         sourceText,
-        `A ${quest.title} offer is now available in zone ${quest.seed.zone}.`,
+        `Quest offered: ${quest.title}.`,
+        quest.pitch || 'A local request has been presented.',
+        ...factLines,
         `It has ${quest.gates} gate(s).`,
         `Completion would award ${quest.payout.xp} XP and ` +
             `${quest.payout.silver} silver, plus ` +
             `${quest.payout.repSteps} reputation step(s).`,
-        `The offered salvage is ${quest.salvage.name} ` +
+        `Offered salvage: ${quest.salvage.name} ` +
             `(${quest.salvage.rarity}).`,
-        `The first gate is ${quest.currentGate.mode}: ` +
+        `First gate: ${quest.currentGate.mode}: ` +
             `${quest.currentGate.objective}`,
-        'The quest and its hidden cause are established by the mechanics. Present the offer without revealing coreTruth, and leave accepting or declining it to the protagonists.'
+        'These quest facts and objectives are mechanically established. ' +
+            'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
 
@@ -8295,8 +8473,13 @@ function questActionNarrationPacket(result, questAction) {
                 `${quest.payout.repSteps} reputation step(s).`,
             `The offered salvage is ${quest.salvage.name} ` +
                 `(${quest.salvage.rarity}).`,
-            `The current gate is ${quest.currentGate.mode}: ${quest.currentGate.objective}`,
-            'Do not reveal coreTruth or invent a different objective.'
+            quest.pitch || 'The accepted request is now active.',
+            ...Object.entries(quest.facts || {})
+                .map(([key, value]) => `${key}: ${value}`),
+            `The current gate is ${quest.currentGate.mode}: ` +
+                `${quest.currentGate.objective}`,
+            'Do not reveal coreTruth or change established quest facts.'
+
         ].join('\n');
     }
 

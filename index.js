@@ -8118,6 +8118,32 @@ function questOfferNarrationPacket(quest) {
         'No specific quest objective, culprit, or core truth has been established yet. Present the lead diegetically and leave accepting or declining it to the protagonists.'
     ].join('\n');
 }
+function questActionNarrationPacket(result, questAction) {
+    const quest = result.quest;
+
+    if (questAction === 'accept') {
+        return [
+            `The crew accepted the quest offer: ${quest.title}.`,
+            `The quest has ${quest.gates} gate(s).`,
+            `The payout is ${quest.payout.xp} XP and ` +
+                `${quest.payout.silver} silver, plus ` +
+                `${quest.payout.repSteps} reputation step(s).`,
+            `The offered salvage is ${quest.salvage.name} ` +
+                `(${quest.salvage.rarity}).`,
+            'The specific objective and core truth have not yet been established. Do not invent them.'
+        ].join('\n');
+    }
+
+    if (questAction === 'decline') {
+        return [
+            `The crew declined the quest offer: ${quest.title}.`,
+            'No quest rewards were paid and no objective was completed.',
+            'The crew remains free to pursue other leads or explore.'
+        ].join('\n');
+    }
+
+    return null;
+}
 
 function avoidEncounterNarrationPacket(encounter) {
     return [
@@ -8505,6 +8531,18 @@ async function runStoredMechanic(args) {
                 batch ? oneCase.actions : args.actions
             )
             : null;
+        const questActionPacket =
+            batch &&
+            oneCase?.kind === 'quest' &&
+            ['accept', 'decline'].includes(oneCase.action)
+                ? questActionNarrationPacket(
+                    {
+                        ...caseResult,
+                        quest: nextState.activeQuest
+                    },
+                    oneCase.action
+                )
+                : null;
 
         const previousEncounter = savedState.encounter;
         const nextEncounter = nextState.encounter;
@@ -8519,17 +8557,27 @@ async function runStoredMechanic(args) {
                   : '')
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
-              caseResult.created && caseResult.quest        
+              caseResult.created &&
+              caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
+
+            : questActionPacket
+                ? questActionPacket
+
             : batch && oneCase?.kind === 'investigate_lead' &&
-               caseResult.created
-                 ? rumorInvestigationNarrationPacket(caseResult)
-             : batch && oneCase?.kind === 'avoid' &&
+              caseResult.created
+                ? rumorInvestigationNarrationPacket(caseResult)
+
+            : batch && oneCase?.kind === 'avoid' &&
               caseResult.created
                 ? avoidEncounterNarrationPacket(nextEncounter)
-             : batch && oneCase?.kind === 'travel' && caseResult.created
-               ? travelNarrationPacket(caseResult)
-               : null;
+
+            : batch && oneCase?.kind === 'travel' &&
+              caseResult.created
+                ? travelNarrationPacket(caseResult)
+
+            : null;
+
 
         const handoffQueue = migrateAethermoorHandoffs(stored);
 
@@ -9767,6 +9815,149 @@ async function openWorldPanel() {
             'Aethermoor'
         );
     }
+}
+
+function formatQuestStatus(quest) {
+    if (!quest) {
+        return 'No active quest offer.';
+    }
+
+    const lines = [
+        `Quest: ${quest.title}`,
+        `Status: ${quest.status}`,
+        `Rank: ${quest.rank}`,
+        `Gates: ${quest.gates}`,
+        `Payout: ${quest.payout.xp} XP, ` +
+            `${quest.payout.silver} silver, ` +
+            `${quest.payout.repSteps} reputation step(s)`,
+        `Salvage: ${quest.salvage.name} ` +
+            `(${quest.salvage.rarity})`,
+        ''
+    ];
+
+    if (quest.status === 'offered') {
+        lines.push(
+            'This quest has been offered but not accepted.',
+            'Accepting it does not invent its objective; the objective must be established later.'
+        );
+    } else if (quest.status === 'in_progress') {
+        lines.push(
+            `Current gate: ${quest.currentGate?.step || 1}/` +
+            `${quest.currentGate?.total || quest.gates}`,
+            `Mode: ${quest.currentGate?.mode || 'not established'}`,
+            `Objective: ${quest.currentGate?.objective || 'not established'}`
+        );
+    } else if (quest.status === 'declined') {
+        lines.push('This quest was declined.');
+    } else if (quest.status === 'complete') {
+        lines.push('This quest has been completed.');
+    }
+
+    return lines.join('\n');
+}
+
+async function openQuestPanel() {
+    try {
+        const snapshot = await readStoredCombatState();
+        const state = snapshot.state;
+        const quest = state.activeQuest;
+
+        const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
+
+        if (!quest) {
+            await Popup.show.text(
+                'Aethermoor Quests',
+                'No active quest offer.'
+            );
+            return;
+        }
+
+        const buttons = [];
+
+        if (quest.status === 'offered') {
+            buttons.push(
+                {
+                    text: 'Accept Quest',
+                    result: POPUP_RESULT.CUSTOM1
+                },
+                {
+                    text: 'Decline Quest',
+                    result: POPUP_RESULT.CUSTOM2
+                }
+            );
+        }
+
+        const popup = new Popup(
+            formatQuestStatus(quest),
+            POPUP_TYPE.TEXT,
+            '',
+            {
+                customButtons: buttons,
+                okButton: 'Close'
+            }
+        );
+
+        const choice = await popup.show();
+
+        let action = null;
+
+        if (
+            quest.status === 'offered' &&
+            choice === POPUP_RESULT.CUSTOM1
+        ) {
+            action = 'accept';
+        } else if (
+            quest.status === 'offered' &&
+            choice === POPUP_RESULT.CUSTOM2
+        ) {
+            action = 'decline';
+        }
+
+        if (!action) return;
+
+        await runStoredMechanic({
+            cases: [{
+                name: `quest_${action}`,
+                kind: 'quest',
+                action
+            }]
+        });
+
+        toastr.info(
+            action === 'accept'
+                ? 'Quest accepted. Generate the next scene to narrate the acceptance.'
+                : 'Quest declined.',
+            'Aethermoor'
+        );
+    } catch (error) {
+        toastr.error(
+            error instanceof Error ? error.message : String(error),
+            'Aethermoor'
+        );
+    }
+}
+
+function createQuestController() {
+    if (document.getElementById('aethermoor_quest_button')) return;
+
+    const composer = document.querySelector('#send_form');
+
+    if (!composer) {
+        console.warn(
+            'Aethermoor: chat composer not found; Quest button not added'
+        );
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'aethermoor_quest_button';
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'Quests';
+    button.title = 'View the active Aethermoor quest';
+    button.addEventListener('click', openQuestPanel);
+
+    composer.insertBefore(button, composer.firstChild);
 }
 
 function createWorldController() {
@@ -11153,6 +11344,14 @@ jQuery(function () {
     } catch (error) {
         console.error(
             'Aethermoor: World controller initialization failed',
+            error
+        );
+    }
+        try {
+        createQuestController();
+    } catch (error) {
+        console.error(
+            'Aethermoor: Quest controller initialization failed',
             error
         );
     }

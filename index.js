@@ -3999,6 +3999,40 @@ function resolveJourneyAction(test) {
     };
 }
 
+function completeQuestArrivalGate(state, outcome) {
+    const quest = state.activeQuest;
+    const gate = quest?.currentGate;
+    const eligible = gate?.trigger === 'arrival_with_evidence' ||
+        (gate?.trigger === undefined && gate?.step === 1 &&
+            ['missing_cargo', 'ruin_clearance', 'sunken_salvage']
+                .includes(quest?.archetype?.id));
+
+    if (quest?.status !== 'in_progress' || !eligible ||
+        gate.step !== 1 || gate.step >= quest.gates ||
+        state.currentLocationId !== quest.destinationId ||
+        ['active', 'spotted'].includes(state.encounter?.status)) {
+        return state;
+    }
+
+    const place = state.places[quest.destinationId];
+    const evidence = quest.facts?.evidence;
+    assert(place && typeof evidence === 'string' && evidence.length > 0,
+        'Arrival gate needs an established place and evidence');
+
+    const cleared = resolveQuestAction({
+        state,
+        action: 'clear_gate',
+        objectiveCompleted: true,
+        completionEvidence: `Found ${evidence} at ${place.label}.`
+    });
+
+    outcome.questGate = {
+        completed: cleared.completedGate,
+        next: cleared.nextGate,
+        evidence
+    };
+    return cleared.state;
+}
 
 function resolveTravelStep(test) {
     assert(
@@ -4053,6 +4087,7 @@ function resolveTravelStep(test) {
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
         state.currentPosition = { nodeId: journey.destinationId };
+        state = completeQuestArrivalGate(state, arrival);
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
     }
@@ -4245,9 +4280,10 @@ function resolveTravelStep(test) {
 
     }
 
+    if (outcome.arrived) {
+        state = completeQuestArrivalGate(state, outcome);
+    }
     state.travelSteps[test.stepId] = clone(outcome);
-
-
     return {
         ok: true,
         created: true,
@@ -4726,7 +4762,13 @@ function buildAuthoredQuestGates(archetype, gateCount, facts) {
             step: index + 1,
             total: gateCount,
             mode,
+            trigger: index === 0 && [
+                'missing_cargo', 'ruin_clearance', 'sunken_salvage'
+            ].includes(archetype.id)
+                ? 'arrival_with_evidence'
+                : null,
             objective: template.replace(
+
                 /\{([a-zA-Z0-9_]+)\}/g,
                 (_match, key) => facts[key] ?? `{${key}}`
             )
@@ -8490,6 +8532,17 @@ function travelNarrationPacket(result) {
         );
     }
 
+        if (result.questGate) {
+        lines.push(
+            `Evidence found at the destination: ${result.questGate.evidence}.`,
+            `Quest gate ${result.questGate.completed.step} completed: ` +
+                result.questGate.completed.objective,
+            `Next gate ${result.questGate.next.step}: ` +
+                result.questGate.next.objective,
+            'No later gate or final quest reward has been completed.'
+        );
+    }
+
     return lines.join('\n');
 }
 
@@ -10335,19 +10388,6 @@ async function openQuestPanel() {
         }
 
         const buttons = [];
-        const canInspect = quest.status === 'in_progress' &&
-            quest.destinationId === state.currentLocationId &&
-            quest.currentGate?.step === 1 &&
-            quest.currentGate.step < quest.gates &&
-            !['active', 'spotted'].includes(state.encounter?.status);
-
-        if (canInspect) {
-            buttons.push({
-                text: 'Inspect Quest Site',
-                result: POPUP_RESULT.CUSTOM1
-            });
-        }
-
         if (quest.status === 'offered') {
 
             buttons.push(
@@ -10373,20 +10413,7 @@ async function openQuestPanel() {
         );
 
         const choice = await popup.show();
-                if (canInspect && choice === POPUP_RESULT.CUSTOM1) {
-            const output = await runStoredMechanic({
-                cases: [{
-                    name: 'inspect_first_quest_gate',
-                    kind: 'quest_site_inspect'
-                }]
-            });
-            assert(output?.ok === true,
-                output?.results?.[0]?.error || 'Inspection failed');
-            toastr.info('First quest gate cleared.', 'Aethermoor');
-            return;
-        }
-
-        let action = null;
+         let action = null;
 
         if (
             quest.status === 'offered' &&

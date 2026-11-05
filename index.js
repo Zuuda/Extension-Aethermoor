@@ -3776,128 +3776,200 @@ function routeNodeId(zone, place) {
         : `place-z${zone}-${place}`;
 }
 
-function shortestRoute(state, destinationId) {
-    const zone = state.zone;
-    const originId =
-        state.currentLocationId || routeNodeId(zone, 'outpost');
-
-    const nodeFor = name => routeNodeId(zone, name);
-    const edges = ROUTE_SEGMENT_EDGES.map(([from, to, cost]) => ({
-        from: nodeFor(from),
-        to: nodeFor(to),
-        cost
-    }));
-
-    const distances = new Map([[originId, 0]]);
-    const previous = new Map();
-    const unvisited = new Set([originId, destinationId]);
-
-    for (const edge of edges) {
-        unvisited.add(edge.from);
-        unvisited.add(edge.to);
+function routeEdgeLength(fromId, toId, zone) {
+    for (const [from, to, length] of ROUTE_SEGMENT_EDGES) {
+        const a = routeNodeId(zone, from);
+        const b = routeNodeId(zone, to);
+        if ((a === fromId && b === toId) ||
+            (a === toId && b === fromId)) return length;
     }
-
-    while (unvisited.size > 0) {
-        let current = null;
-        let bestDistance = Infinity;
-
-        for (const node of unvisited) {
-            const distance = distances.get(node) ?? Infinity;
-            if (distance < bestDistance) {
-                current = node;
-                bestDistance = distance;
-            }
-        }
-
-        if (current === null || bestDistance === Infinity) break;
-        if (current === destinationId) break;
-
-        unvisited.delete(current);
-
-        for (const edge of edges) {
-            const neighbor = edge.from === current
-                ? edge.to
-                : edge.to === current
-                    ? edge.from
-                    : null;
-
-            if (!neighbor) continue;
-
-            const candidate = bestDistance + edge.cost;
-            if (candidate < (distances.get(neighbor) ?? Infinity)) {
-                distances.set(neighbor, candidate);
-                previous.set(neighbor, current);
-            }
-        }
-    }
-
-    const totalSegments = distances.get(destinationId);
-    if (!Number.isFinite(totalSegments)) return null;
-
-    const path = [];
-    let cursor = destinationId;
-
-    while (cursor) {
-        path.unshift(cursor);
-        if (cursor === originId) break;
-        cursor = previous.get(cursor);
-    }
-
-    return {
-        originId,
-        destinationId,
-        totalSegments,
-        path
-    };
+    return null;
 }
 
-function resolveJourneyAction(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Journey requires saved state'
-    );
+function journeyLegs(journey, zone) {
+    if (Array.isArray(journey.legs)) return journey.legs;
 
-    const state = clone(test.state);
+    // Journeys started before this change contain a node path instead.
+    assert(Array.isArray(journey.route), 'Journey route is missing');
+    journey.legs = journey.route.slice(1).map((toId, index) => {
+        const fromId = journey.route[index];
+        const length = routeEdgeLength(fromId, toId, zone);
+        assert(length !== null, 'Journey uses an unknown route edge');
+        return { fromId, toId, length, startOffset: 0, endOffset: length };
+    });
+    return journey.legs;
+}
 
-    if (test.action === 'cancel') {
-        assert(state.currentJourney, 'No journey to cancel');
+function positionAfterSegments(legs, completed) {
+    let remaining = completed;
+    for (const leg of legs) {
+        const distance = Math.abs(leg.endOffset - leg.startOffset);
+        if (remaining < distance) {
+            const direction = Math.sign(leg.endOffset - leg.startOffset);
+            return {
+                fromId: leg.fromId,
+                toId: leg.toId,
+                length: leg.length,
+                offset: leg.startOffset + direction * remaining
+            };
+        }
+        remaining -= distance;
+        if (remaining === 0) {
+            return {
+                nodeId: leg.endOffset === 0 ? leg.fromId : leg.toId
+            };
+        }
+    }
+    assert(remaining === 0, 'Journey progress exceeds its route');
+    const last = legs.at(-1);
+    return last ? {
+        nodeId: last.endOffset === 0 ? last.fromId : last.toId
+    } : null;
+}
 
-        const journey = state.currentJourney;
-        state.currentJourney = null;
+function shortestRoute(state, destinationId) {
+    const zone = state.zone;
+    const edges = ROUTE_SEGMENT_EDGES.map(([from, to, length]) => ({
+        fromId: routeNodeId(zone, from),
+        toId: routeNodeId(zone, to),
+        length
+    }));
 
-        return {
-            ok: true,
-            action: 'cancel',
-            journey,
-            state
+    function fromNode(originId) {
+        const distances = new Map([[originId, 0]]);
+        const previous = new Map();
+        const visited = new Set();
+
+        while (true) {
+            let current = null;
+            let best = Infinity;
+            for (const [id, distance] of distances) {
+                if (!visited.has(id) && distance < best) {
+                    current = id;
+                    best = distance;
+                }
+            }
+            if (current === null || current === destinationId) break;
+            visited.add(current);
+            for (const edge of edges) {
+                const neighbor = edge.fromId === current
+                    ? edge.toId
+                    : edge.toId === current ? edge.fromId : null;
+                if (!neighbor) continue;
+                const candidate = best + edge.length;
+                if (candidate < (distances.get(neighbor) ?? Infinity)) {
+                    distances.set(neighbor, candidate);
+                    previous.set(neighbor, current);
+                }
+            }
+        }
+
+        if (!distances.has(destinationId)) return null;
+        const path = [destinationId];
+        while (path[0] !== originId) {
+            const parent = previous.get(path[0]);
+            if (!parent) return null;
+            path.unshift(parent);
+        }
+        const legs = path.slice(1).map((toId, index) => {
+            const fromId = path[index];
+            const length = routeEdgeLength(fromId, toId, zone);
+            return { fromId, toId, length, startOffset: 0, endOffset: length };
+        });
+        return { totalSegments: distances.get(destinationId), path, legs };
+    }
+
+    let position = state.currentPosition;
+    if (!position && state.currentJourney) {
+        position = positionAfterSegments(
+            journeyLegs(state.currentJourney, zone),
+            state.currentJourney.completedSegments
+        );
+    }
+    position ||= {
+        nodeId: state.currentLocationId || routeNodeId(zone, 'outpost')
+    };
+
+    if (position.nodeId) {
+        const route = fromNode(position.nodeId);
+        return route && {
+            ...route,
+            originId: position.nodeId,
+            destinationId
         };
     }
 
-    assert(
-        test.action === 'start',
-        `Unsupported journey action: ${test.action}`
-    );
-    assert(
-        !state.currentJourney,
-        'Finish or cancel the current journey first'
-    );
+    // From partway along an edge, compare continuing forward with
+    // doubling back. Both options include the remaining route.
+    const options = [
+        {
+            endpoint: position.fromId,
+            partial: {
+                ...position,
+                startOffset: position.offset,
+                endOffset: 0
+            }
+        },
+        {
+            endpoint: position.toId,
+            partial: {
+                ...position,
+                startOffset: position.offset,
+                endOffset: position.length
+            }
+        }
+    ];
+    const candidates = options.map(option => {
+        const onward = fromNode(option.endpoint);
+        if (!onward) return null;
+        return {
+            originId: position.fromId,
+            destinationId,
+            path: onward.path,
+            legs: [option.partial, ...onward.legs],
+            totalSegments:
+                Math.abs(option.partial.endOffset - position.offset) +
+                onward.totalSegments
+        };
+    }).filter(Boolean);
+
+    return candidates.sort((a, b) =>
+        a.totalSegments - b.totalSegments
+    )[0] || null;
+}
+
+function resolveJourneyAction(test) {
+    assert(test.state && typeof test.state === 'object',
+        'Journey requires saved state');
+    const state = clone(test.state);
+    ensureWorldLocation(state);
+
+    if (test.action === 'cancel') {
+        assert(state.currentJourney, 'No journey to cancel');
+        const journey = state.currentJourney;
+        state.currentPosition = positionAfterSegments(
+            journeyLegs(journey, state.zone),
+            journey.completedSegments
+        ) || { nodeId: state.currentLocationId };
+        state.currentJourney = null;
+        return { ok: true, action: 'cancel', journey, state };
+    }
+
+    assert(test.action === 'start',
+        `Unsupported journey action: ${test.action}`);
+    assert(!state.currentJourney,
+        'Finish or cancel the current journey first');
 
     const lead = state.leads?.[test.leadId];
-    assert(
-        lead?.status === 'known' && lead.targetType === 'place',
-        'Choose a known place lead'
-    );
-
+    assert(lead?.status === 'known' && lead.targetType === 'place',
+        'Choose a known place lead');
     const place = state.places?.[lead.targetId];
     assert(place, 'Lead destination is not recorded');
 
-    ensureWorldLocation(state);
-
     const route = shortestRoute(state, place.id);
-    assert(
-        route,
-        `No known route from the current location to ${place.label}`
-    );
+    assert(route, `No known route to ${place.label}`);
+    assert(route.totalSegments > 0,
+        `Already at ${place.label}; investigate or explore here`);
 
     state.currentJourney = {
         leadId: lead.id,
@@ -3905,11 +3977,11 @@ function resolveJourneyAction(test) {
         destinationLabel: place.label,
         originId: route.originId,
         route: route.path,
+        legs: route.legs,
         totalSegments: route.totalSegments,
         completedSegments: 0,
         status: 'traveling'
     };
-
     return {
         ok: true,
         action: 'start',
@@ -3917,6 +3989,7 @@ function resolveJourneyAction(test) {
         state
     };
 }
+
 
 function resolveTravelStep(test) {
     assert(
@@ -3968,6 +4041,7 @@ function resolveTravelStep(test) {
         };
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
+        state.currentPosition = { nodeId: journey.destinationId };
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
     }
@@ -4137,14 +4211,20 @@ function resolveTravelStep(test) {
             };
         }
     }
-
-        if (journey) {
+    
+    if (journey) {
         journey.completedSegments += 1;
+        state.currentPosition = positionAfterSegments(
+            journeyLegs(journey, state.zone),
+            journey.completedSegments
+        );
+
         if (event === 'wild_encounter') {
             journey.status = 'paused';
         } else if (journey.completedSegments === journey.totalSegments) {
             state.places[journey.destinationId].visited = true;
             state.currentLocationId = journey.destinationId;
+            state.currentPosition = { nodeId: journey.destinationId };
             outcome.arrived = true;
             state.currentJourney = null;
         }
@@ -9496,7 +9576,8 @@ async function openWorldPanel() {
             for (const lead of leads) {
          const place = state.places[lead.targetId];
          const route = shortestRoute(state, place.id);
-         if (!route) continue;
+         if (!route || route.totalSegments === 0) continue;
+
          actions.push({
             label:
                  `Go: ${place.label} ` +
@@ -9543,8 +9624,21 @@ async function openWorldPanel() {
             ? `\nCurrent location: ${state.places[currentLocationId].label}.`
             : `\nCurrent location: ${currentLocationId}.`;
 
+        const betweenText = state.currentPosition?.fromId &&
+            state.currentPosition?.toId
+            ? `\nBetween ${
+                state.places?.[state.currentPosition.fromId]?.label ||
+                state.currentPosition.fromId
+              } and ${
+                state.places?.[state.currentPosition.toId]?.label ||
+                state.currentPosition.toId
+              }; ${state.currentPosition.offset}/` +
+              `${state.currentPosition.length} segments along that edge.`
+            : '';
+
         const popup = new Popup(
-            formatWorldStatus(state) + locationText + journeyText,
+            formatWorldStatus(state) + locationText + betweenText + journeyText,
+
             POPUP_TYPE.TEXT,
             '',
             {

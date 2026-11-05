@@ -3829,11 +3829,16 @@ function positionAfterSegments(legs, completed) {
 
 function shortestRoute(state, destinationId) {
     const zone = state.zone;
-    const edges = ROUTE_SEGMENT_EDGES.map(([from, to, length]) => ({
-        fromId: routeNodeId(zone, from),
-        toId: routeNodeId(zone, to),
-        length
-    }));
+    const edges = [
+        ...ROUTE_SEGMENT_EDGES.map(([from, to, length]) => ({
+            fromId: routeNodeId(zone, from),
+            toId: routeNodeId(zone, to),
+            length
+        })),
+        ...(state.routeEdges || []).filter(edge =>
+            Number.isInteger(edge.length) && edge.length > 0
+        )
+    ];
 
     function fromNode(originId) {
         const distances = new Map([[originId, 0]]);
@@ -3873,7 +3878,11 @@ function shortestRoute(state, destinationId) {
         }
         const legs = path.slice(1).map((toId, index) => {
             const fromId = path[index];
-            const length = routeEdgeLength(fromId, toId, zone);
+            const length = edges.find(edge =>
+                (edge.fromId === fromId && edge.toId === toId) ||
+                (edge.fromId === toId && edge.toId === fromId)
+            )?.length;
+            assert(Number.isInteger(length), 'Route edge has no length');
             return { fromId, toId, length, startOffset: 0, endOffset: length };
         });
         return { totalSegments: distances.get(destinationId), path, legs };
@@ -4725,6 +4734,52 @@ function buildAuthoredQuestGates(archetype, gateCount, facts) {
     );
 }
 
+function registerQuestDestination(state, quest) {
+    state.places ||= {};
+    state.leads ||= {};
+    state.routeEdges ||= [];
+
+    const label = quest.facts?.site || quest.facts?.place ||
+        quest.facts?.wreck;
+    assert(typeof label === 'string' && label.length > 0,
+        'Quest has no named destination');
+
+    const placeId = `quest-place-${quest.id}`;
+    const leadId = `quest-lead-${quest.id}`;
+    const originId = routeNodeId(quest.seed.zone, 'outpost');
+
+    state.places[placeId] ||= {
+        id: placeId,
+        label,
+        zone: quest.seed.zone,
+        kind: 'quest_site',
+        visited: false
+    };
+    state.leads[leadId] ||= {
+        id: leadId,
+        kind: 'quest',
+        label: `${quest.title}: ${label}`,
+        claim: quest.pitch,
+        targetType: 'place',
+        targetId: placeId,
+        status: 'known'
+    };
+
+    if (!state.routeEdges.some(edge =>
+        (edge.fromId === originId && edge.toId === placeId) ||
+        (edge.fromId === placeId && edge.toId === originId)
+    )) {
+        state.routeEdges.push({
+            fromId: originId,
+            toId: placeId,
+            length: 2
+        });
+    }
+
+    quest.destinationId = placeId;
+    return { placeId, leadId };
+}
+
 function resolveQuestSeed(test) {
     assert(
         test.state &&
@@ -4960,9 +5015,9 @@ function resolveQuestSeed(test) {
         repTierAtOffer: rep.label
     };
 
-    state.activeQuest =
-        quest;
-        trigger.questSeedConsumed = true;
+    registerQuestDestination(state, quest);
+    state.activeQuest = quest;
+    trigger.questSeedConsumed = true;
 
     return {
         ok: true,
@@ -5020,6 +5075,7 @@ function resolveQuestAction(test) {
             `Quest cannot be accepted from status ${quest.status}`
         );
 
+        registerQuestDestination(state, quest);
         quest.status = 'in_progress';
 
         return result;
@@ -7855,6 +7911,38 @@ function resolveBatch(args) {
                     break;
                 }
 
+                                    case 'quest_site_inspect': {
+                    const state = test.state;
+                    const quest = state?.activeQuest;
+
+                    assert(quest?.status === 'in_progress',
+                        'Accept the quest before inspecting its site');
+                    assert(quest.destinationId &&
+                        state.currentLocationId === quest.destinationId,
+                        'Travel to the quest destination first');
+                    assert(quest.currentGate?.step === 1 &&
+                        quest.currentGate.step < quest.gates,
+                        'The first gate is not available for inspection');
+                    assert(!['active', 'spotted'].includes(
+                        state.encounter?.status
+                    ), 'Resolve or avoid the nearby encounter first');
+
+                    const place = state.places[quest.destinationId];
+                    const evidence = quest.facts?.evidence
+                        ? `Inspected ${quest.facts.evidence} at ${place.label}.`
+                        : `Reached ${place.label} and inspected the signs relevant to the first gate.`;
+
+                    result = resolveQuestAction({
+                        state,
+                        action: 'clear_gate',
+                        objectiveCompleted: true,
+                        completionEvidence: evidence
+                    });
+                    result.action = 'quest_site_inspect';
+                    result.evidence = evidence;
+                    break;
+                }
+
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
@@ -8461,6 +8549,19 @@ function questOfferNarrationPacket(quest) {
     ].join('\n');
 }
 
+function questSiteInspectionPacket(result, quest) {
+    return [
+        `At ${quest.facts.site || quest.facts.place || quest.facts.wreck}, ` +
+            `the crew inspected the quest site.`,
+        `Evidence found: ${result.evidence}`,
+        `Gate ${result.completedGate.step} completed: ` +
+            result.completedGate.objective,
+        `Next gate ${result.nextGate.step}/${quest.gates}: ` +
+            result.nextGate.objective,
+        'Do not reveal the hidden cause or claim later gates are complete.'
+    ].join('\n');
+}
+
 function questActionNarrationPacket(result, questAction) {
     const quest = result.quest;
 
@@ -8909,9 +9010,11 @@ async function runStoredMechanic(args) {
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
-
             : questActionPacket
                 ? questActionPacket
+
+            : batch && oneCase?.kind === 'quest_site_inspect'
+                ? questSiteInspectionPacket(caseResult, nextState.activeQuest)
 
             : batch && oneCase?.kind === 'investigate_lead' &&
               caseResult.created
@@ -9450,6 +9553,7 @@ function registerTools() {
                                     'spawn',
                                     'travel',
                                     'journey',
+                                    'quest_site_inspect',
                                     'cleanup_test_data',
                                     'investigate_lead',
                                     'engage',
@@ -10231,8 +10335,21 @@ async function openQuestPanel() {
         }
 
         const buttons = [];
+        const canInspect = quest.status === 'in_progress' &&
+            quest.destinationId === state.currentLocationId &&
+            quest.currentGate?.step === 1 &&
+            quest.currentGate.step < quest.gates &&
+            !['active', 'spotted'].includes(state.encounter?.status);
+
+        if (canInspect) {
+            buttons.push({
+                text: 'Inspect Quest Site',
+                result: POPUP_RESULT.CUSTOM1
+            });
+        }
 
         if (quest.status === 'offered') {
+
             buttons.push(
                 {
                     text: 'Accept Quest',
@@ -10256,6 +10373,18 @@ async function openQuestPanel() {
         );
 
         const choice = await popup.show();
+                if (canInspect && choice === POPUP_RESULT.CUSTOM1) {
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'inspect_first_quest_gate',
+                    kind: 'quest_site_inspect'
+                }]
+            });
+            assert(output?.ok === true,
+                output?.results?.[0]?.error || 'Inspection failed');
+            toastr.info('First quest gate cleared.', 'Aethermoor');
+            return;
+        }
 
         let action = null;
 

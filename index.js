@@ -5187,6 +5187,49 @@ function resolveQuestEvent(test) {
         discovery.state = 'acquired';
     }
 
+    let questGate = null;
+
+    const satisfiesCurrentGate =
+        gate.requiredDiscoveryId === discovery.id &&
+        (
+            discovery.state === 'acquired' ||
+            gate.requiredDiscoveryState === 'found'
+        );
+
+    if (satisfiesCurrentGate) {
+        assert(
+            state.encounter?.status !== 'active' &&
+            state.encounter?.status !== 'spotted',
+            'Resolve or avoid the encounter before completing this gate'
+        );
+
+        const progression = resolveQuestAction({
+            state,
+            action: 'clear_gate',
+            objectiveCompleted: true,
+            completionEvidence:
+                `The crew found ${discovery.name} at ` +
+                `${state.places?.[discovery.locationId]?.label ||
+                    discovery.locationId}.`
+        });
+
+        questGate = {
+            completed: progression.completedGate,
+            next: progression.nextGate
+        };
+
+        return {
+            ok: true,
+            created: true,
+            action: 'quest_event',
+            event: 'found',
+            questItemId: discovery.id,
+            discovery: clone(discovery),
+            questGate,
+            state: progression.state
+        };
+    }
+
     return {
         ok: true,
         created: true,
@@ -5194,6 +5237,7 @@ function resolveQuestEvent(test) {
         event: 'found',
         questItemId: discovery.id,
         discovery: clone(discovery),
+        questGate,
         state
     };
 }
@@ -8783,18 +8827,31 @@ function questDiscoveryContextPacket(quest) {
         'Do not place the tag in ordinary story prose. Do not emit it before the discovery is visible to the protagonists.'
     ].join('\n');
 }
-
 function questDiscoveryNarrationPacket(result, quest) {
     const discovery = result.discovery;
-
-    return [
+    const lines = [
         `The authored quest discovery was exposed: ${discovery.name}.`,
         `Discovery state: ${discovery.state}.`,
         `Quest item ID: ${discovery.id}.`,
-        'The discovery was validated by the mechanics engine. ' +
-            'Narrate the protagonists recognizing or taking possession of it as appropriate.',
-        'Do not reveal hidden quest truth or complete later gates unless another mechanics event establishes that.'
-    ].join('\n');
+        'The discovery was validated by the mechanics engine.'
+    ];
+
+    if (result.questGate) {
+        lines.push(
+            `Quest gate ${result.questGate.completed.step} completed: ` +
+                `${result.questGate.completed.objective}`,
+            `Next gate ${result.questGate.next.step}: ` +
+                `${result.questGate.next.objective}`,
+            'Do not reveal hidden quest truth or claim later gates are complete.'
+        );
+    } else {
+        lines.push(
+            'This discovery did not complete the current quest gate.',
+            'Do not reveal hidden quest truth or complete another gate.'
+        );
+    }
+
+    return lines.join('\n');
 }
 
 function questSiteInspectionPacket(result, quest) {

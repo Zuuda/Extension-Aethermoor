@@ -9304,6 +9304,27 @@ async function openWorldPanel() {
     }
 }
 
+function createWorldController() {
+    if (document.getElementById('aethermoor_world_button')) return;
+
+    const composer = document.querySelector('#send_form');
+    if (!composer) {
+        console.warn(
+            'Aethermoor: chat composer not found; World button not added'
+        );
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'aethermoor_world_button';
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'World';
+    button.title = 'View known places and leads';
+    button.addEventListener('click', openWorldPanel);
+
+    composer.insertBefore(button, composer.firstChild);
+}
 
 function createCombatController() {
     const button = document.createElement('button');

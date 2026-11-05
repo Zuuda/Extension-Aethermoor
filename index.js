@@ -7635,7 +7635,7 @@ function resolveBatch(args) {
                     result = resolveTravelStep(test);
                     break;
 
-                                    case 'cleanup_test_data': {
+                case 'cleanup_test_data': {
                     const state = clone(test.state);
 
                     state.leads ||= {};
@@ -7658,10 +7658,24 @@ function resolveBatch(args) {
                             }
                         }
                     }
+                    const retiredQuestId =
+                        'quest-travel-chat-message-171-1xp31t5-D-1';
+                    let retiredQuest = null;
+
+                    if (
+                        state.activeQuest?.id === retiredQuestId &&
+                        !Array.isArray(state.activeQuest.gatesData)
+                    ) {
+                        retiredQuest = state.activeQuest.id;
+                        state.activeQuest.status = 'retired_test';
+                        state.activeQuest.retiredReason =
+                            'Legacy test quest predating authored quest gates';
+                    }
 
                     result = {
                         ok: true,
                         action: 'cleanup_test_data',
+                        retiredQuest,
                         removedLeads,
                         removedPlaces,
                         state
@@ -8199,8 +8213,12 @@ function discoveryNarrationPacket(encounter) {
 }
 
 function questOfferNarrationPacket(quest) {
+    const sourceText = quest.seed?.source === 'rumor'
+        ? 'The crew followed a rumor lead.'
+        : 'The crew followed a quest breadcrumb found on a cleared pack.';
+
     return [
-        'The crew followed a quest breadcrumb found on a cleared pack.',
+        sourceText,
         `A ${quest.title} offer is now available in zone ${quest.seed.zone}.`,
         `It has ${quest.gates} gate(s).`,
         `Completion would award ${quest.payout.xp} XP and ` +
@@ -8208,10 +8226,12 @@ function questOfferNarrationPacket(quest) {
             `${quest.payout.repSteps} reputation step(s).`,
         `The offered salvage is ${quest.salvage.name} ` +
             `(${quest.salvage.rarity}).`,
-        `The first gate is ${quest.currentGate.mode}: ${quest.currentGate.objective}`,
-        'The quest offer and its hidden cause are established by the mechanics. Present the offer without revealing coreTruth, and leave accepting or declining it to the protagonists.'
+        `The first gate is ${quest.currentGate.mode}: ` +
+            `${quest.currentGate.objective}`,
+        'The quest and its hidden cause are established by the mechanics. Present the offer without revealing coreTruth, and leave accepting or declining it to the protagonists.'
     ].join('\n');
 }
+
 function questActionNarrationPacket(result, questAction) {
     const quest = result.quest;
 

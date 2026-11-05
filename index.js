@@ -4031,7 +4031,7 @@ function resolveTravelStep(test) {
     if (journey && journey.completedSegments === journey.totalSegments) {
         state.places[journey.destinationId].visited = true;
         journey.status = 'arrived';
-
+       
         const arrival = {
             stepId: test.stepId,
             zone: state.zone,
@@ -9967,6 +9967,11 @@ function formatQuestStatus(quest) {
     } else if (quest.status === 'complete') {
         lines.push('This quest has been completed.');
     }
+        } else if (quest.status === 'retired_test') {
+        lines.push(
+            `This test quest was retired: ${quest.retiredReason || 'no reason recorded'}.`,
+            'No rewards were granted.'
+        );
 
     return lines.join('\n');
 }

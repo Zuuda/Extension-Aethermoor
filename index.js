@@ -4354,23 +4354,64 @@ function resolveJourneyAction(test) {
 
 function completeQuestArrivalGate(state, outcome) {
     const quest = state.activeQuest;
+
+    if (
+        quest?.status === 'in_progress' &&
+        quest.objectiveResolution &&
+        quest.turnIn &&
+        state.currentLocationId === quest.turnIn.locationId &&
+        !quest.deliveryReady
+    ) {
+        const cargo = quest.discoveries?.find(
+            item => item.id === quest.turnIn.discoveryId
+        );
+
+        assert(
+            !quest.turnIn.discoveryId ||
+            cargo?.state === 'acquired',
+            'Quest cargo must be acquired before delivery is ready'
+        );
+
+        quest.deliveryReady = true;
+        quest.deliveryReadyAt = state.currentLocationId;
+
+        outcome.deliveryReady = {
+            questId: quest.id,
+            title: quest.title,
+            recipient: quest.turnIn.recipient,
+            cargoName: cargo?.name || quest.facts?.cargo || 'quest cargo'
+        };
+
+        return state;
+    }
+
     const gate = quest?.currentGate;
     const eligible = gate?.trigger === 'arrival_with_evidence' ||
-        (gate?.trigger === undefined && gate?.step === 1 &&
+        (
+            gate?.trigger === undefined &&
+            gate?.step === 1 &&
             ['missing_cargo', 'ruin_clearance', 'sunken_salvage']
-                .includes(quest?.archetype?.id));
+                .includes(quest?.archetype?.id)
+        );
 
-    if (quest?.status !== 'in_progress' || !eligible ||
-        gate.step !== 1 || gate.step >= quest.gates ||
+    if (
+        quest?.status !== 'in_progress' ||
+        !eligible ||
+        gate.step !== 1 ||
+        gate.step >= quest.gates ||
         state.currentLocationId !== quest.destinationId ||
-        ['active', 'spotted'].includes(state.encounter?.status)) {
+        ['active', 'spotted'].includes(state.encounter?.status)
+    ) {
         return state;
     }
 
     const place = state.places[quest.destinationId];
     const evidence = quest.facts?.evidence;
-    assert(place && typeof evidence === 'string' && evidence.length > 0,
-        'Arrival gate needs an established place and evidence');
+
+    assert(
+        place && typeof evidence === 'string' && evidence.length > 0,
+        'Arrival gate needs an established place and evidence'
+    );
 
     const cleared = resolveQuestAction({
         state,
@@ -4384,6 +4425,7 @@ function completeQuestArrivalGate(state, outcome) {
         next: cleared.nextGate,
         evidence
     };
+
     return cleared.state;
 }
 
@@ -4403,6 +4445,51 @@ function resolveTravelStep(test) {
     state.socialSeeds ||= {};
     state.places ||= {};
     state.leads ||= {};
+
+        /*
+     * Once the field objective is secured, the next movement defaults
+     * to the quest's locked turn-in location. An explicitly selected
+     * journey already in progress is left untouched.
+     */
+    const returnQuest = state.activeQuest;
+
+    if (
+        !state.currentJourney &&
+        returnQuest?.status === 'in_progress' &&
+        returnQuest.objectiveResolution &&
+        returnQuest.turnIn &&
+        state.currentLocationId !== returnQuest.turnIn.locationId
+    ) {
+        const turnInPlace =
+            state.places?.[returnQuest.turnIn.locationId];
+
+        assert(
+            turnInPlace,
+            'Quest turn-in location is missing from the place registry'
+        );
+
+        const route = shortestRoute(state, turnInPlace.id);
+
+        assert(
+            route && route.totalSegments > 0,
+            `No return route to ${turnInPlace.label}`
+        );
+
+        state.currentJourney = {
+            id: `return-${returnQuest.id}`,
+            type: 'quest_return',
+            questId: returnQuest.id,
+            leadId: `quest-return-${returnQuest.id}`,
+            destinationId: turnInPlace.id,
+            destinationLabel: turnInPlace.label,
+            originId: route.originId,
+            route: route.path,
+            legs: route.legs,
+            totalSegments: route.totalSegments,
+            completedSegments: 0,
+            status: 'traveling'
+        };
+    }
 
     const existing = state.travelSteps[test.stepId];
     if (existing) {
@@ -5878,6 +5965,33 @@ function resolveQuestEvent(test) {
     };
 }
 
+/*
+ * QUEST DELIVERY MODEL
+ *
+ * Field objective completion and quest delivery are separate:
+ *
+ * 1. The extension detects that the field objective and cargo are secured.
+ * 2. Returning to quest.turnIn.locationId sets deliveryReady, but does not
+ *    pay rewards or mark the quest complete.
+ * 3. The narrator stages the fictional handoff with the quest giver.
+ * 4. The assistant may emit the validated protocol event:
+ *
+ *    <AETHERMOOR:DELIVERED quest_id=...>
+ *
+ * 5. The extension validates quest ID, location, acquired cargo, and
+ *    deliveryReady, then completes the quest and applies rewards exactly once.
+ *
+ * The LLM never supplies XP, silver, reputation, loot, or quest identity.
+ * It only confirms the fictional handoff after the extension has made it
+ * mechanically eligible.
+ *
+ * Future HUD work:
+ * Mechanical state should eventually render the HUD directly from saved
+ * state. Until then, completion packets provide the next narrator reply
+ * with authoritative post-delivery values.
+ */
+
+
 function resolveQuestAction(test) {
     assert(
         test.state &&
@@ -6115,6 +6229,11 @@ function resolveQuestAction(test) {
 
         cargo.state = 'delivered';
     }
+
+        assert(
+        quest.deliveryReady === true,
+        'The quest must arrive at its turn-in location before delivery'
+    );
 
     quest.status = 'complete';
     quest.turnInEvidence = test.completionEvidence.trim();
@@ -9238,6 +9357,40 @@ function resolveBatch(args) {
                     break;
                 }
 
+                case 'quest_delivery': {
+                    const state = test.state;
+                    const quest = state?.activeQuest;
+
+                    assert(
+                        quest?.status === 'in_progress',
+                        'No in-progress quest can be delivered'
+                    );
+                    assert(
+                        quest.deliveryReady === true,
+                        'Quest delivery is not ready'
+                    );
+                    assert(
+                        state.currentLocationId ===
+                            quest.turnIn?.locationId,
+                        'The crew is not at this quest turn-in location'
+                    );
+
+                    result = resolveQuestAction({
+                        state,
+                        action: 'complete',
+                        objectiveCompleted: true,
+                        completionEvidence:
+                            `Delivered ${quest.discoveries?.find(
+                                item =>
+                                    item.id === quest.turnIn.discoveryId
+                            )?.name || quest.facts?.cargo || 'the quest cargo'} ` +
+                            `to ${quest.turnIn.recipient}.`
+                    });
+
+                    result.action = 'quest_delivery';
+                    break;
+                }
+
                 case 'quest':
                     if (test.action) {
                         result = resolveQuestAction(test);
@@ -9526,6 +9679,16 @@ function travelNarrationPacket(result) {
             `Next gate ${result.questGate.next.step}: ` +
                 result.questGate.next.objective,
             'No later gate or final quest reward has been completed.'
+        );
+    }
+
+        if (result.deliveryReady) {
+        lines.push(
+            `The crew returned to the turn-in location with ` +
+                `${result.deliveryReady.cargoName}.`,
+            `The quest is eligible for delivery to ` +
+                `${result.deliveryReady.recipient}.`,
+            'Do not complete the quest mechanically until the fictional handoff occurs.'
         );
     }
 
@@ -10816,6 +10979,7 @@ function registerTools() {
                                     'travel',
                                     'journey',
                                     'quest_discovery_prepare',
+                                    'quest_delivery',
                                     'quest_discovery_reconcile',
                                     'quest_event',
                                     'quest_site_inspect',
@@ -11622,6 +11786,15 @@ function formatQuestStatus(quest) {
                 quest.retiredReason || 'no reason recorded'
             }.`,
             'No rewards were granted.'
+        );
+    }
+
+        if (quest.deliveryReady && quest.turnIn) {
+        lines.push(
+            `Delivery is eligible to ${quest.turnIn.recipient}.`,
+            'When the protagonists actually hand over the cargo in the fiction, place this exact tag inside the disposable <plan> block:',
+            `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
+            'Do not emit the delivery tag before the fictional handoff.'
         );
     }
 
@@ -13034,17 +13207,46 @@ function extractAethermoorQuestEvents(text) {
     if (typeof text !== 'string') return [];
 
     const events = [];
-    const pattern =
+
+    const foundPattern =
         /<AETHERMOOR:(SEARCHED|FOUND)\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
 
-    for (const match of text.matchAll(pattern)) {
+    for (const match of text.matchAll(foundPattern)) {
         events.push({
             event: match[1].toLowerCase(),
             questItemId: match[2]
         });
     }
 
-    return events;
+    const deliveredPattern =
+        /<AETHERMOOR:DELIVERED\s+quest_id=([A-Za-z0-9._:-]+)\s*>/g;
+
+    for (const match of text.matchAll(deliveredPattern)) {
+        events.push({
+            event: 'delivered',
+            questId: match[1],
+            index: match.index
+        });
+    }
+
+    const searchedFoundPositions = events
+        .filter(event => event.event !== 'delivered')
+        .map(event => event.index);
+
+    const deliveryEvents = events
+        .filter(event => event.event === 'delivered')
+        .map(event => ({
+            ...event,
+            index: Number.MAX_SAFE_INTEGER
+        }));
+
+    const itemEvents = events.filter(
+        event => event.event !== 'delivered'
+    );
+
+    return [...itemEvents, ...deliveryEvents].map(
+        ({ index: _index, ...event }) => event
+    );
 }
 
 async function processAethermoorAssistantEvents(data) {
@@ -13054,31 +13256,41 @@ async function processAethermoorAssistantEvents(data) {
     const events = extractAethermoorQuestEvents(message.text);
     if (events.length === 0) return;
 
-    for (const event of events) {
+        for (const event of events) {
         try {
-            const result = await runStoredMechanic({
-                cases: [{
-                    name: 'assistant_quest_event',
-                    kind: 'quest_event',
-                    event: event.event,
-                    questItemId: event.questItemId
-                }]
-            });
+            let result;
+
+            if (event.event === 'delivered') {
+                const stateResult = await readStoredCombatState();
+                const activeQuest = stateResult.state.activeQuest;
+
+                assert(
+                    activeQuest?.id === event.questId,
+                    'Delivery tag does not match the active quest'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_quest_delivery',
+                        kind: 'quest_delivery'
+                    }]
+                });
+            } else {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_quest_event',
+                        kind: 'quest_event',
+                        event: event.event,
+                        questItemId: event.questItemId
+                    }]
+                });
+            }
 
             console.log(
                 '[Aethermoor] Accepted assistant quest event',
-                {
-                    messageId: message.messageId,
-                    event,
-                    result
-                }
+                { messageId: message.messageId, event, result }
             );
         } catch (error) {
-            /*
-             * Invalid or repeated protocol tags are ignored mechanically.
-             * The story text remains subject to the user's existing
-             * SillyTavern <plan> cleanup rule.
-             */
             console.warn(
                 '[Aethermoor] Ignored assistant quest event',
                 {
@@ -13091,7 +13303,6 @@ async function processAethermoorAssistantEvents(data) {
             );
         }
     }
-}
 
 function findLastUserMessage(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {

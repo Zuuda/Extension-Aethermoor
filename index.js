@@ -8717,20 +8717,6 @@ function resolveBatch(args) {
                     break;
                 }
 
-                case 'quest':
-                    if (test.action) {
-                        result = resolveQuestAction(test);
-                    } else {
-                        result = resolveQuestSeed(test);
-                    }
-                    break;
-
-                default:
-                    throw new Error(
-                        `${name}: unknown batch case kind '${test.kind}'`
-                    );
-            }
-
             if (test.expectError) {
                 results.push({
                     name,

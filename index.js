@@ -7,6 +7,359 @@ const ZONE_NAMES = {
     4: 'Weeping Karst',
     5: 'Highgate Pass'
 };
+/*
+ * ARCHITECTURE / CAMPAIGN CONTEXT
+ *
+ * Preserve the reasoning behind cross-system changes in comments.
+ * Document invariants, migration assumptions, and unfinished integration;
+ * do not merely describe what an individual line does.
+ *
+ * World invariants:
+ * - Zone numbers control progression formulas, not settlement identity.
+ * - Geography flows between neighboring regions.
+ * - Zones may contain multiple independent settlements.
+ * - Names are presentation; stable IDs identify places and factions.
+ * - Generated world records are saved and must not be regenerated later.
+ * - Quests must eventually lock their actual issuer and return location.
+ * - World generation must not advance combat/loot RNG.
+ *
+ * This foundation does not yet replace the old quest-town defaults,
+ * route graph, or UI name lookups. Those are subsequent integration steps.
+ */
+
+const WORLD_SCHEMA_VERSION = 1;
+
+/*
+ * Profiles describe traversable geographic regions, not a full planet
+ * simulation. The LLM may elaborate scenery but cannot replace these facts.
+ *
+ * Multiple consecutive zones may share a profile. A transition changes
+ * the terrain gradually rather than selecting an unrelated random biome.
+ */
+const WORLD_GEOGRAPHY = {
+    valley: {
+        label: 'river valley',
+        next: ['marsh_edge', 'rising_hills'],
+        zoneWords: ['Vale', 'Valley', 'Basin'],
+        settlementWords: ['Bridge', 'Hearth', 'Crossing']
+    },
+    marsh_edge: {
+        label: 'marsh outskirts',
+        next: ['marsh', 'valley'],
+        zoneWords: ['Fens', 'Reedlands', 'Wetlands'],
+        settlementWords: ['Ford', 'Landing', 'Reedhaven']
+    },
+    marsh: {
+        label: 'deep marsh',
+        next: ['karst', 'marsh_edge'],
+        zoneWords: ['Mire', 'Marsh', 'Sluices'],
+        settlementWords: ['Cairn', 'Pilings', 'Outpost']
+    },
+    karst: {
+        label: 'karst caverns',
+        next: ['hills'],
+        zoneWords: ['Karst', 'Hollows', 'Caverns'],
+        settlementWords: ['Lantern', 'Vault', 'Delve']
+    },
+    hills: {
+        label: 'open hills',
+        next: ['rising_hills', 'valley', 'coastal_uplands'],
+        zoneWords: ['Downs', 'Hills', 'Heights'],
+        settlementWords: ['Gate', 'Rest', 'Hillstead']
+    },
+    rising_hills: {
+        label: 'rising uplands',
+        next: ['mountain'],
+        zoneWords: ['Uplands', 'Ridges', 'Fells'],
+        settlementWords: ['Watch', 'Climb', 'Highstead']
+    },
+    mountain: {
+        label: 'mountain slopes below the snowline',
+        next: ['snowline'],
+        zoneWords: ['Crags', 'Peaks', 'Spines'],
+        settlementWords: ['Hold', 'Aerie', 'Stonehaven']
+    },
+    snowline: {
+        label: 'mountain snowline',
+        next: ['high_mountain', 'descending_mountain'],
+        zoneWords: ['Snowfields', 'White Ridges', 'Frostlands'],
+        settlementWords: ['Shelter', 'Frosthold', 'Winterhearth']
+    },
+    high_mountain: {
+        label: 'high snowy mountains',
+        next: ['descending_mountain'],
+        zoneWords: ['Summits', 'Icefields', 'High Passes'],
+        settlementWords: ['Refuge', 'Peakwatch', 'Snowhaven']
+    },
+    descending_mountain: {
+        label: 'descending mountain valleys',
+        next: ['coastal_uplands', 'valley'],
+        zoneWords: ['Thawlands', 'Lower Ridges', 'Steps'],
+        settlementWords: ['Thawrest', 'Lowpass', 'Springhaven']
+    },
+    coastal_uplands: {
+        label: 'uplands overlooking the coast',
+        next: ['coast'],
+        zoneWords: ['Sea Heights', 'Cliff Downs', 'Headlands'],
+        settlementWords: ['Beacon', 'Seawatch', 'Cliffhaven']
+    },
+    coast: {
+        label: 'coastal shores and tidal inlets',
+        next: ['ocean', 'coastal_uplands'],
+        zoneWords: ['Shores', 'Tideways', 'Inlets'],
+        settlementWords: ['Harbor', 'Quay', 'Port']
+    },
+    ocean: {
+        label: 'ocean crossings and inhabited sea routes',
+        next: ['floating_city', 'archipelago'],
+        zoneWords: ['Reach', 'Sea Roads', 'Blue Expanse'],
+        settlementWords: ['Anchorage', 'Raftstead', 'Haven']
+    },
+    floating_city: {
+        label: 'floating-city waters',
+        next: ['archipelago', 'underwater'],
+        zoneWords: ['Driftwaters', 'Floating Reaches', 'Anchor Sea'],
+        settlementWords: ['Drift', 'Flotilla', 'Anchorhold']
+    },
+    underwater: {
+        label: 'inhabited underwater passages',
+        next: ['archipelago'],
+        zoneWords: ['Deepways', 'Coral Halls', 'Sunken Reaches'],
+        settlementWords: ['Pearlhold', 'Reefhaven', 'Glass Dome']
+    },
+    archipelago: {
+        label: 'island chains',
+        next: ['far_coast', 'ocean'],
+        zoneWords: ['Isles', 'Island Chain', 'Reefs'],
+        settlementWords: ['Island Port', 'Reefwatch', 'Palmhaven']
+    },
+    far_coast: {
+        label: 'shores of another landmass',
+        next: ['valley', 'hills', 'marsh_edge'],
+        zoneWords: ['Far Shores', 'New Coast', 'Estuaries'],
+        settlementWords: ['Landfall', 'New Harbor', 'Seagate']
+    }
+};
+
+/*
+ * Preserve established campaign geography. These are overrides, not the
+ * maximum world size. Beyond Zone 7, compatible transitions are generated.
+ *
+ * Settlement names not yet established in play are generated placeholders.
+ * They can later be renamed without changing IDs or quest ownership.
+ */
+const WORLD_ZONE_OVERRIDES = {
+    1: {
+        profile: 'valley',
+        settlementName: 'Thornhaven',
+        settlementNameEstablished: true
+    },
+    2: { profile: 'marsh_edge' },
+    3: {
+        profile: 'marsh',
+        settlementName: 'Peat-Cairn Outpost',
+        settlementNameEstablished: true
+    },
+    4: { profile: 'karst' },
+    5: { profile: 'hills' },
+    6: { profile: 'rising_hills' },
+    7: { profile: 'mountain' }
+};
+
+const WORLD_NAME_ROOTS = [
+    'Ash', 'Silver', 'Amber', 'Hollow', 'Grey', 'Dawn',
+    'Raven', 'Willow', 'Ember', 'Still', 'Storm', 'Moon',
+    'Copper', 'Bright', 'Dusky', 'Whisper', 'Iron', 'Star'
+];
+
+function worldHash(text) {
+    let hash = 2166136261;
+
+    for (let index = 0; index < text.length; index++) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return hash >>> 0;
+}
+
+function worldChoice(world, key, values) {
+    assert(values.length > 0, 'World choice needs options');
+
+    return values[
+        worldHash(`${world.seed}:${key}`) % values.length
+    ];
+}
+
+function createWorldSeed() {
+    const values = new Uint32Array(1);
+
+    if (globalThis.crypto?.getRandomValues) {
+        globalThis.crypto.getRandomValues(values);
+        return values[0] || 1;
+    }
+
+    return worldHash(`${Date.now()}:${Math.random()}`) || 1;
+}
+
+function ensureWorldRecords(state) {
+    let changed = false;
+
+    if (!state.world) {
+        state.world = {
+            version: WORLD_SCHEMA_VERSION,
+            seed: createWorldSeed(),
+            zones: {},
+            settlements: {}
+        };
+        changed = true;
+    }
+
+    const world = state.world;
+
+    assert(
+        world.version === WORLD_SCHEMA_VERSION,
+        'Unsupported saved world version'
+    );
+    assert(
+        Number.isInteger(world.seed) && world.seed > 0,
+        'Saved world seed is invalid'
+    );
+
+    world.zones ||= {};
+    world.settlements ||= {};
+
+    int(state.zone, 'world zone', 1);
+
+    // Generate only through the current zone, plus the original five.
+    const lastZone = Math.max(5, state.zone);
+
+    for (let number = 1; number <= lastZone; number++) {
+        if (world.zones[number]) continue;
+
+        const previous = world.zones[number - 1];
+        const override = WORLD_ZONE_OVERRIDES[number] || {};
+        let profile = override.profile;
+
+        if (!profile) {
+            assert(previous, 'Previous zone geography is missing');
+
+            const previousProfile = previous.geography.profile;
+
+            /*
+             * Later regions last 2–3 progression zones before moving
+             * into a compatible neighboring geographic profile.
+             */
+            const regionLength = 2 + (
+                worldHash(`${world.seed}:region:${previous.regionStart}`) % 2
+            );
+            const regionAge = number - previous.regionStart;
+
+            profile = regionAge < regionLength
+                ? previousProfile
+                : worldChoice(
+                    world,
+                    `transition:${number}`,
+                    WORLD_GEOGRAPHY[previousProfile].next
+                );
+        }
+
+        const geography = WORLD_GEOGRAPHY[profile];
+        assert(geography, `Unknown geography profile: ${profile}`);
+
+        const root = worldChoice(
+            world, `zone-root:${number}`, WORLD_NAME_ROOTS
+        );
+        const zoneName = ZONE_NAMES[number] ||
+            `${root} ${worldChoice(
+                world, `zone-word:${number}`, geography.zoneWords
+            )}`;
+
+        const settlementId = `settlement-z${number}-primary`;
+
+        // Keep existing route IDs so current saves and journeys survive.
+        const locationId = `outpost-z${number}`;
+        const settlementName = override.settlementName ||
+            `${worldChoice(
+                world, `settlement-root:${number}`, WORLD_NAME_ROOTS
+            )}${worldChoice(
+                world, `settlement-word:${number}`, geography.settlementWords
+            )}`;
+
+        world.zones[number] = {
+            id: `zone-${number}`,
+            number,
+            name: zoneName,
+            levelRange: [5 * number - 4, 5 * number],
+            primarySettlementId: settlementId,
+            regionStart:
+                previous?.geography.profile === profile
+                    ? previous.regionStart
+                    : number,
+            geography: {
+                profile,
+                description: geography.label,
+                transitionFrom:
+                    previous?.geography.profile || null,
+                compatibleNext: [...geography.next]
+            }
+        };
+
+        world.settlements[settlementId] = {
+            id: settlementId,
+            zone: number,
+            locationId,
+            label: settlementName,
+            primary: true,
+            nameEstablished:
+                override.settlementNameEstablished === true,
+
+            // Preserve existing reputation keys during migration.
+            reputationKey:
+                override.settlementNameEstablished === true
+                    ? settlementName
+                    : settlementId
+        };
+
+        changed = true;
+    }
+
+    /*
+     * Preserve the known secondary settlement without inventing its
+     * roads, NPC schedules, reputation, or quest history.
+     */
+    const campId = 'settlement-fen-trollkin-stilt-camp';
+
+    if (!world.settlements[campId]) {
+        world.settlements[campId] = {
+            id: campId,
+            zone: 3,
+            locationId: 'settlement-fen-trollkin-stilt-camp',
+            label: 'Fen-Trollkin Stilt-Camp',
+            primary: false,
+            nameEstablished: true,
+            reputationKey: campId
+        };
+        changed = true;
+    }
+
+    return changed;
+}
+
+function savedZoneRecord(state, zone = state.zone) {
+    const record = state.world?.zones?.[zone];
+    assert(record, `Zone ${zone} has no saved world record`);
+    return record;
+}
+
+function savedPrimarySettlement(state, zone = state.zone) {
+    const zoneRecord = savedZoneRecord(state, zone);
+    const settlement =
+        state.world.settlements[zoneRecord.primarySettlementId];
+
+    assert(settlement, `Zone ${zone} has no primary settlement`);
+    return settlement;
+}
 
 function zoneNumber(key) {
     if (typeof key !== 'string') return null;
@@ -9652,7 +10005,40 @@ async function runStoredMechanic(args) {
             'Open a chat with metadata saving available'
         );
 
-        const stored = metadata[AETHERMOOR_METADATA_KEY];
+        let stored = metadata[AETHERMOOR_METADATA_KEY];
+
+        /*
+         * World migration uses the same serialized save path as mechanics.
+         * Preserve the full stored wrapper, including queued handoffs.
+         * Never alter the original state until the save succeeds.
+         */
+        if (stored?.state) {
+            const migratedState = clone(stored.state);
+
+            if (ensureWorldRecords(migratedState)) {
+                const previousStored = stored;
+
+                assert(
+                    getContext().chatMetadata === metadata,
+                    'Chat changed during world initialization'
+                );
+
+                metadata[AETHERMOOR_METADATA_KEY] = {
+                    ...stored,
+                    revision: stored.revision + 1,
+                    state: migratedState
+                };
+
+                try {
+                    await context.saveMetadata();
+                } catch (error) {
+                    metadata[AETHERMOOR_METADATA_KEY] = previousStored;
+                    throw error;
+                }
+
+                stored = metadata[AETHERMOOR_METADATA_KEY];
+            }
+        }
 
         /*
          * Batch cases were independent test fixtures before persistence.
@@ -9692,8 +10078,8 @@ async function runStoredMechanic(args) {
                 'State action must be import, status, or export');
             assert(!stored,
                 'This chat already has saved state; import will not overwrite it');
-
             const imported = clone(oneCase.state);
+            ensureWorldRecords(imported);
             checkImportedState(imported);
 
             assert(getContext().chatMetadata === metadata,
@@ -10951,8 +11337,26 @@ function formatWorldStatus(state) {
     }
 
     const leads = Object.values(state.leads || {});
+    const zoneRecord = state.world?.zones?.[state.zone];
+    const settlement = zoneRecord
+        ? state.world.settlements[zoneRecord.primarySettlementId]
+        : null;
+
     const lines = [
+        `Region: ${zoneRecord?.name || ZONES[state.zone].name} ` +
+            `(Zone ${state.zone})`,
+        `Geography: ${zoneRecord?.geography.description || 'not recorded'}`,
+        `Approach from: ${
+            zoneRecord?.geography.transitionFrom
+                ? WORLD_GEOGRAPHY[
+                    zoneRecord.geography.transitionFrom
+                  ]?.label || zoneRecord.geography.transitionFrom
+                : 'starting region'
+        }`,
+        `Primary settlement: ${settlement?.label || 'not recorded'}`,
+        '',
         'Known places',
+
         places.size
             ? [...places.values()].map((place, index) =>
                 `${index + 1}. ${place.label} ` +

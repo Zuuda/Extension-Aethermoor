@@ -9400,6 +9400,22 @@ function questActionNarrationPacket(result, questAction) {
         ].join('\n');
     }
 
+        if (questAction === 'complete') {
+        const rewards = result.rewards;
+
+        return [
+            `The crew returned the quest cargo to ${quest.turnIn?.recipient || quest.facts?.sponsor || quest.town}.`,
+            `Quest completed: ${quest.title}.`,
+            `Rewards paid: ${rewards.xp} XP, ${rewards.silver} silver, ` +
+                `${rewards.repSteps} reputation steps.`,
+            ...rewards.loot.map(item =>
+                `Salvage received: ${item.name} (${item.rarity}).`
+            ),
+            'The company cargo was delivered; its contents were not added to the crew purse.',
+            'Narrate the handover naturally without mentioning software, event tags, or state management.'
+        ].join('\n');
+    }
+
     return null;
 }
 
@@ -9794,7 +9810,8 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-            ['accept', 'decline', 'abandon'].includes(oneCase.action)
+               ['accept', 'decline', 'abandon', 'complete'].includes(oneCase.action)
+
                 ? questActionNarrationPacket(
                     {
                         ...caseResult,

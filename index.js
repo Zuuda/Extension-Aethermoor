@@ -8716,7 +8716,16 @@ function resolveBatch(args) {
                     result.action = 'debug_create_quest_offer';
                     break;
                 }
+
+                case 'quest':
+                    if (test.action) {
+                        result = resolveQuestAction(test);
+                    } else {
+                        result = resolveQuestSeed(test);
+                    }
+                    break;
             }
+
             if (test.expectError) {
                 results.push({
                     name,

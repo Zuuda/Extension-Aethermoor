@@ -13303,7 +13303,7 @@ async function processAethermoorAssistantEvents(data) {
             );
         }
     }
-
+}
 function findLastUserMessage(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         if (chat[index]?.is_user) return index;

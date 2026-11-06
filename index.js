@@ -11003,10 +11003,8 @@ async function openQuestPanel() {
         const snapshot = await readStoredCombatState();
         const state = snapshot.state;
         const quest = state.activeQuest;
-
         const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
 
-        if (!quest) {
         const questIsTerminal =
             !quest ||
             ['abandoned', 'declined', 'complete', 'retired_test']
@@ -11031,7 +11029,6 @@ async function openQuestPanel() {
             );
 
             const choice = await popup.show();
-
             if (choice !== POPUP_RESULT.CUSTOM1) return;
 
             const output = await runStoredMechanic({
@@ -11058,8 +11055,7 @@ async function openQuestPanel() {
 
         const canRevealTerminal =
             quest.status === 'in_progress' &&
-            quest.currentGate?.mode ===
-                'combat_twist_showdown' &&
+            quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
             quest.destinationId === state.currentLocationId &&
             !['active', 'spotted'].includes(
@@ -11086,7 +11082,7 @@ async function openQuestPanel() {
             );
         }
 
-       if (quest.status === 'in_progress') {
+        if (quest.status === 'in_progress') {
             buttons.push({
                 text: 'Abandon Quest',
                 result: POPUP_RESULT.CUSTOM3
@@ -11105,10 +11101,7 @@ async function openQuestPanel() {
 
         const choice = await popup.show();
 
-        if (
-            canRevealTerminal &&
-            choice === POPUP_RESULT.CUSTOM1
-        ) {
+        if (canRevealTerminal && choice === POPUP_RESULT.CUSTOM1) {
             const output = await runStoredMechanic({
                 cases: [{
                     name: 'reveal_quest_terminal',
@@ -11141,9 +11134,7 @@ async function openQuestPanel() {
             choice === POPUP_RESULT.CUSTOM2
         ) {
             action = 'decline';
-        }
-
-        if (
+        } else if (
             quest.status === 'in_progress' &&
             choice === POPUP_RESULT.CUSTOM3
         ) {
@@ -11160,15 +11151,14 @@ async function openQuestPanel() {
             }]
         });
 
-toastr.info(
-    action === 'accept'
-        ? 'Quest accepted. Generate the next scene to narrate the acceptance.'
-        : action === 'abandon'
-            ? 'Quest abandoned. No rewards or reputation were granted.'
-            : 'Quest declined.',
-    'Aethermoor'
-);
-
+        toastr.info(
+            action === 'accept'
+                ? 'Quest accepted. Generate the next scene to narrate the acceptance.'
+                : action === 'abandon'
+                    ? 'Quest abandoned. No rewards or reputation were granted.'
+                    : 'Quest declined.',
+            'Aethermoor'
+        );
     } catch (error) {
         toastr.error(
             error instanceof Error ? error.message : String(error),
@@ -11176,7 +11166,6 @@ toastr.info(
         );
     }
 }
-
 
 function createQuestController() {
     if (document.getElementById('aethermoor_quest_button')) return;

@@ -11007,8 +11007,18 @@ async function openQuestPanel() {
         const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
 
         if (!quest) {
+        const questIsTerminal =
+            !quest ||
+            ['abandoned', 'declined', 'complete', 'retired_test']
+                .includes(quest.status);
+
+        if (questIsTerminal) {
+            const previousQuestText = quest
+                ? `Previous quest: ${formatQuestStatus(quest)}\n\n`
+                : '';
+
             const popup = new Popup(
-                'No active quest offer.',
+                `${previousQuestText}No offered or in-progress quest.`,
                 POPUP_TYPE.TEXT,
                 '',
                 {

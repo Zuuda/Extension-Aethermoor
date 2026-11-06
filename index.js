@@ -8716,7 +8716,7 @@ function resolveBatch(args) {
                     result.action = 'debug_create_quest_offer';
                     break;
                 }
-
+            }
             if (test.expectError) {
                 results.push({
                     name,

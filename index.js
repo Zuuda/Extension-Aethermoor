@@ -5060,8 +5060,8 @@ function resolveQuestSeed(test) {
     registerQuestDestination(state, quest);
     state.activeQuest = quest;
     prepareMissingCargoDiscovery(state);
+    prepareSunkenSalvageDiscovery(state);
     trigger.questSeedConsumed = true;
-
 
     return {
         ok: true,
@@ -5147,6 +5147,208 @@ function prepareMissingCargoDiscovery(state) {
     }
 
     return docket;
+}
+
+function prepareSunkenSalvageDiscovery(state) {
+    const quest = state.activeQuest;
+
+    if (
+        quest?.archetype?.id !== 'sunken_salvage' ||
+        !quest.destinationId ||
+        !Array.isArray(quest.gatesData)
+    ) {
+        return null;
+    }
+
+    /*
+     * This first implementation supports the two-gate salvage plan:
+     * arrive and identify the wreck, then recover its cargo.
+     *
+     * Longer salvage plans retain their existing behavior until their
+     * individual gates have authored recovery requirements.
+     */
+    if (quest.gates !== 2) return null;
+
+    const profiles = {
+        1: {
+            contents: [
+                'Company-stamped payroll packets inside an oilskin liner.',
+                'A matching wage ledger identifying the intended workers.'
+            ],
+            description:
+                'The packets remain bundled for company payroll. ' +
+                'The ledger identifies the shipment as the missing pay-chest.',
+            requiredAction:
+                'Free the pay-chest from its root-bound brackets, ' +
+                'bring it onto secure ground, and inspect its contents.'
+        },
+        2: {
+            contents: [
+                'Waxed navigation charts bearing the ferry crew stamp.',
+                'A brass sounding instrument secured in a fitted wooden cradle.'
+            ],
+            description:
+                'The markings identify the case as the ferry crew navigation cargo.',
+            requiredAction:
+                'Recover the navigation case from beneath the wreck ' +
+                'and inspect its identifying contents.'
+        }
+    };
+
+    const profile = profiles[quest.seed?.scenarioRoll];
+    assert(profile, 'No authored contents for this salvage scenario');
+
+    quest.discoveries ||= [];
+
+    const id = `${quest.id}-salvage-cargo`;
+    let discovery = quest.discoveries.find(item => item.id === id);
+
+    if (!discovery) {
+        discovery = {
+            id,
+            kind: 'quest_item',
+            name: quest.facts.cargo,
+            locationId: quest.destinationId,
+            state: 'hidden',
+            requiredAction: profile.requiredAction,
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace:
+                `${quest.facts.cargo} at ${quest.facts.wreck}, ` +
+                `obstructed by ${quest.facts.obstacle}`,
+            significance: profile.description,
+            contents: clone(profile.contents),
+            questCargo: true
+        };
+
+        quest.discoveries.push(discovery);
+    }
+
+    const gate = quest.gatesData[1];
+    gate.requiredDiscoveryId = id;
+    gate.requiredDiscoveryState = 'acquired';
+
+    if (quest.currentGate?.step === 2) {
+        quest.currentGate.requiredDiscoveryId = id;
+        quest.currentGate.requiredDiscoveryState = 'acquired';
+    }
+
+    const locationId = routeNodeId(quest.seed.zone, 'outpost');
+
+    state.places ||= {};
+    state.places[locationId] ||= {
+        id: locationId,
+        label: quest.town || 'Peat-Cairn Outpost',
+        zone: quest.seed.zone,
+        kind: 'settlement'
+    };
+
+    quest.turnIn ||= {
+        locationId,
+        recipient: quest.facts.sponsor,
+        discoveryId: id
+    };
+
+    return discovery;
+}
+
+function advanceQuestFromDiscovery(state, discovery) {
+    const quest = state.activeQuest;
+    const gate = quest?.currentGate;
+
+    const requiredState = gate?.requiredDiscoveryState || 'acquired';
+
+    const satisfied =
+        gate?.requiredDiscoveryId === discovery.id &&
+        (
+            discovery.state === requiredState ||
+            (
+                requiredState === 'found' &&
+                discovery.state === 'acquired'
+            )
+        );
+
+    if (!satisfied) {
+        return { state, questGate: null };
+    }
+
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the encounter before completing this gate'
+    );
+
+    const evidence =
+        `Secured ${discovery.name} at ` +
+        `${state.places?.[discovery.locationId]?.label ||
+            discovery.locationId}.`;
+
+    if (gate.step < quest.gates) {
+        const progression = resolveQuestAction({
+            state,
+            action: 'clear_gate',
+            objectiveCompleted: true,
+            completionEvidence: evidence
+        });
+
+        return {
+            state: progression.state,
+            questGate: {
+                completed: progression.completedGate,
+                next: progression.nextGate
+            }
+        };
+    }
+
+    if (quest.objectiveResolution) {
+        return { state, questGate: null };
+    }
+
+    const progression = resolveQuestAction({
+        state,
+        action: 'resolve_objective',
+        objectiveCompleted: true,
+        objectiveRoute:
+            gate.mode === 'combat_twist_showdown'
+                ? 'combat'
+                : gate.mode === 'brain_social_heist'
+                    ? 'heist'
+                    : 'other',
+        completionEvidence: evidence
+    });
+
+    const updatedQuest = progression.state.activeQuest;
+    updatedQuest.completedGates ||= [];
+
+    if (!updatedQuest.completedGates.some(item => item.step === gate.step)) {
+        updatedQuest.completedGates.push({
+            ...gate,
+            completionEvidence: evidence
+        });
+    }
+
+    if (updatedQuest.turnIn) {
+        progression.state.leads ||= {};
+
+        const leadId = `quest-return-${updatedQuest.id}`;
+
+        progression.state.leads[leadId] ||= {
+            id: leadId,
+            kind: 'quest_return',
+            label: `Return cargo to ${updatedQuest.turnIn.recipient}`,
+            claim: 'The recovered quest cargo is ready to return.',
+            targetType: 'place',
+            targetId: updatedQuest.turnIn.locationId,
+            status: 'known'
+        };
+    }
+
+    return {
+        state: progression.state,
+        questGate: {
+            completed: clone(gate),
+            next: null,
+            objectiveSecured: true
+        }
+    };
 }
 
 function reconcileQuestDiscovery(test) {
@@ -5235,30 +5437,35 @@ function resolveQuestEvent(test) {
         quest?.status === 'in_progress',
         'Quest event requires an in-progress quest'
     );
-
     assert(
         ['searched', 'found'].includes(test.event),
         `Unsupported quest discovery event: ${test.event}`
-    );
-
-    assert(
-        typeof test.questItemId === 'string' &&
-        test.questItemId.trim().length > 0,
-        'Quest discovery event requires questItemId'
     );
 
     const discovery = (quest.discoveries || []).find(
         item => item.id === test.questItemId
     );
 
-    assert(
-        discovery,
-        `Unknown authored quest discovery: ${test.questItemId}`
-    );
+    assert(discovery, 'Unknown authored quest discovery');
     assert(
         state.currentLocationId === discovery.locationId,
         'Quest discovery is at the wrong location'
     );
+
+    // Repeated message/render events must not acquire or advance twice.
+    if (
+        discovery.state === 'acquired' ||
+        (test.event === 'searched' && discovery.state === 'searched')
+    ) {
+        return {
+            ok: true,
+            created: false,
+            action: 'quest_event',
+            event: test.event,
+            discovery: clone(discovery),
+            state
+        };
+    }
 
     const gate = quest.currentGate;
     const allowedIds = [
@@ -5270,30 +5477,14 @@ function resolveQuestEvent(test) {
 
     assert(
         allowedIds.includes(discovery.id),
-        `Discovery ${discovery.id} is not required by the current gate`
+        'Discovery is not authorized for the current gate'
     );
 
     if (test.event === 'searched') {
-        assert(
-            typeof discovery.requiredAction === 'string',
-            'This discovery has no search prerequisite'
-        );
-
-        if (discovery.state === 'searched') {
-            return {
-                ok: true,
-                created: false,
-                action: 'quest_event',
-                event: 'searched',
-                questItemId: discovery.id,
-                discovery: clone(discovery),
-                state
-            };
-        }
-
+        assert(discovery.requiredAction, 'No search prerequisite exists');
         assert(
             discovery.state === 'hidden',
-            `Cannot search discovery from state ${discovery.state}`
+            `Cannot search from state ${discovery.state}`
         );
 
         discovery.state = 'searched';
@@ -5303,7 +5494,6 @@ function resolveQuestEvent(test) {
             created: true,
             action: 'quest_event',
             event: 'searched',
-            questItemId: discovery.id,
             discovery: clone(discovery),
             state
         };
@@ -5311,87 +5501,29 @@ function resolveQuestEvent(test) {
 
     assert(
         ['hidden', 'searched', 'found'].includes(discovery.state),
-        `Quest discovery cannot be found from state ${discovery.state}`
+        `Cannot find discovery from state ${discovery.state}`
     );
-
-    if (discovery.state === 'found') {
-        return {
-            ok: true,
-            created: false,
-            action: 'quest_event',
-            event: 'found',
-            questItemId: discovery.id,
-            discovery: clone(discovery),
-            state
-        };
-    }
-
     assert(
-        !discovery.requiredAction ||
-        discovery.state === 'searched',
-        `Search for ${discovery.name} before it can be found`
+        !discovery.requiredAction || discovery.state === 'searched',
+        'The authored search/recovery action must occur first'
     );
 
-    discovery.state = 'found';
+    discovery.state = discovery.acquisitionPolicy === 'auto_on_reveal'
+        ? 'acquired'
+        : 'found';
 
-    if (discovery.acquisitionPolicy === 'auto_on_reveal') {
-        discovery.state = 'acquired';
-    }
-
-    const satisfiesCurrentGate =
-        gate.requiredDiscoveryId === discovery.id &&
-        (
-            discovery.state === 'acquired' ||
-            (
-                gate.requiredDiscoveryState === 'found' &&
-                discovery.state === 'found'
-            )
-        );
-
-    if (satisfiesCurrentGate) {
-        assert(
-            state.encounter?.status !== 'active' &&
-            state.encounter?.status !== 'spotted',
-            'Resolve or avoid the encounter before completing this gate'
-        );
-
-        const progression = resolveQuestAction({
-            state,
-            action: 'clear_gate',
-            objectiveCompleted: true,
-            completionEvidence:
-                `The crew found ${discovery.name} at ` +
-                `${state.places?.[discovery.locationId]?.label ||
-                    discovery.locationId}.`
-        });
-
-        return {
-            ok: true,
-            created: true,
-            action: 'quest_event',
-            event: 'found',
-            questItemId: discovery.id,
-            discovery: clone(discovery),
-            questGate: {
-                completed: progression.completedGate,
-                next: progression.nextGate
-            },
-            state: progression.state
-        };
-    }
+    const progression = advanceQuestFromDiscovery(state, discovery);
 
     return {
         ok: true,
         created: true,
         action: 'quest_event',
         event: 'found',
-        questItemId: discovery.id,
         discovery: clone(discovery),
-        questGate: null,
-        state
+        questGate: progression.questGate,
+        state: progression.state
     };
 }
-
 
 function resolveQuestAction(test) {
     assert(
@@ -5613,8 +5745,35 @@ function resolveQuestAction(test) {
         'Quest salvage is missing'
     );
 
+    if (quest.turnIn) {
+        assert(
+            state.currentLocationId === quest.turnIn.locationId,
+            'Return to the quest turn-in location first'
+        );
+
+        const cargo = quest.discoveries?.find(
+            item => item.id === quest.turnIn.discoveryId
+        );
+
+        assert(
+            cargo?.state === 'acquired',
+            'The required quest cargo is not in the crew possession'
+        );
+
+        cargo.state = 'delivered';
+    }
+
     quest.status = 'complete';
     quest.turnInEvidence = test.completionEvidence.trim();
+
+    for (const lead of Object.values(state.leads || {})) {
+        if (
+            lead.id === `quest-return-${quest.id}` ||
+            lead.id === `quest-lead-${quest.id}`
+        ) {
+            lead.status = 'resolved';
+        }
+    }
 
     result.rewards.xp =
         payout.xp;
@@ -8296,8 +8455,16 @@ function resolveBatch(args) {
                 }
                 case 'quest_discovery_prepare': {
                     const state = clone(test.state);
-                    const discovery = prepareMissingCargoDiscovery(state);
-                    assert(discovery, 'No eligible Missing Cargo discovery to prepare');
+
+                    const discovery =
+                        prepareMissingCargoDiscovery(state) ||
+                        prepareSunkenSalvageDiscovery(state);
+
+                    assert(
+                        discovery,
+                        'This quest has no supported discovery preparation'
+                    );
+
                     result = {
                         ok: true,
                         action: 'quest_discovery_prepare',
@@ -8306,6 +8473,7 @@ function resolveBatch(args) {
                     };
                     break;
                 }
+
                 case 'quest_discovery_reconcile':
                     result = reconcileQuestDiscovery(test);
                     break;
@@ -9082,28 +9250,53 @@ function questOfferNarrationPacket(quest) {
 }
 
 function questDiscoveryContextPacket(quest) {
+    if (
+        quest?.status !== 'in_progress' ||
+        quest.objectiveResolution
+    ) {
+        return null;
+    }
+
     const discovery = quest.discoveries?.find(
         item => item.id === quest.currentGate?.requiredDiscoveryId
     );
 
-    if (!discovery) return null;
+    if (!discovery || discovery.state === 'acquired') return null;
 
     const lines = [
-        'Private Aethermoor quest-discovery context.',
-        `Active quest: ${quest.title}.`,
-        `Current location: ${discovery.locationId}.`,
-        `Hidden discovery ID: ${discovery.id}.`,
-        `Hidden discovery name: ${discovery.name}.`,
-        `Hidden location clue: ${discovery.hidingPlace}.`,
-        `Significance: ${discovery.significance}.`,
-        `Required action: ${discovery.requiredAction || 'expose the hiding place'}.`,
-        'Do not accept a player claim of success by itself. The protagonists must perform the required action.',
-        'If the required action occurs but the object has not yet been exposed, emit SEARCHED only.',
-        `<AETHERMOOR:SEARCHED quest_item=${discovery.id}>`,
-        'When the object is actually exposed, emit FOUND. For a discovery with a requiredAction, SEARCHED must occur first.',
-        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
-        'Put protocol tags inside the disposable <plan> block, never in ordinary story prose.'
+        'PRIVATE SCENE CONTEXT — do not recite these instructions.',
+        `Quest objective: ${quest.currentGate.objective}`,
+        `Authored object: ${discovery.name}.`,
+        `Object state: ${discovery.state}.`,
+        `Location: ${discovery.hidingPlace}.`,
+        `Required action: ${discovery.requiredAction || 'expose the object'}.`,
+        `Meaning when discovered: ${discovery.significance}.`,
+        'A player declaration of success alone does not establish discovery.',
+        'Judge whether the described actions actually expose or recover this object.',
+        'Keep the story entirely in-world. Do not mention extensions, parsers, flags, or reward administration.'
     ];
+
+    if (discovery.contents) {
+        lines.push(
+            'Authored contents; reveal only when the object is opened or inspected:',
+            ...discovery.contents.map(item => `- ${item}`),
+            'These contents are quest cargo, not personal loot. Do not add them to the crew purse.'
+        );
+    }
+
+    if (discovery.requiredAction) {
+        lines.push(
+            'When the required action occurs, place this exact tag inside <plan>:',
+            `<AETHERMOOR:SEARCHED quest_item=${discovery.id}>`
+        );
+    }
+
+    lines.push(
+        'When the object is actually recovered/exposed, place this exact tag inside <plan>:',
+        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
+        'SEARCHED and FOUND may occur in the same reply, in that order, if the scene supports both.',
+        'Do not emit tags merely because you received these instructions.'
+    );
 
     return lines.join('\n');
 }
@@ -9121,25 +9314,36 @@ function questTerminalNarrationPacket(encounter, quest) {
 
 function questDiscoveryNarrationPacket(result, quest) {
     const discovery = result.discovery;
+
+    if (result.event === 'searched') {
+        return [
+            `The required action concerning ${discovery.name} was recorded.`,
+            'The object has not yet been mechanically acquired.',
+            'Continue naturally; do not repeat the search or announce a discovery unless it occurs.'
+        ].join('\n');
+    }
+
     const lines = [
-        `The authored quest discovery was exposed: ${discovery.name}.`,
-        `Discovery state: ${discovery.state}.`,
-        `Quest item ID: ${discovery.id}.`,
-        'The discovery was validated by the mechanics engine.'
+        `Discovery validated: ${discovery.name}.`,
+        `State: ${discovery.state}.`
     ];
 
-    if (result.questGate) {
+    if (discovery.questCargo) {
         lines.push(
-            `Quest gate ${result.questGate.completed.step} completed: ` +
-                `${result.questGate.completed.objective}`,
-            `Next gate ${result.questGate.next.step}: ` +
-                `${result.questGate.next.objective}`,
-            'Do not reveal hidden quest truth or claim later gates are complete.'
+            'The recovered object and its contents remain quest cargo, not personal wealth.'
         );
-    } else {
+    }
+
+    if (result.questGate?.objectiveSecured) {
         lines.push(
-            'This discovery did not complete the current quest gate.',
-            'Do not reveal hidden quest truth or complete another gate.'
+            'The final field objective is secured.',
+            `Return the recovered cargo to ${quest.turnIn?.recipient || quest.facts.sponsor}.`,
+            'The quest payout has not been granted.'
+        );
+    } else if (result.questGate?.next) {
+        lines.push(
+            `Gate ${result.questGate.completed.step} completed.`,
+            `Next objective: ${result.questGate.next.objective}`
         );
     }
 
@@ -9583,12 +9787,9 @@ async function runStoredMechanic(args) {
                 batch ? oneCase.actions : args.actions
             )
             : null;
-                const questDiscoveryContext =
-            batch &&
-            oneCase?.kind === 'quest_discovery_prepare' &&
-            caseResult.created !== false
-                ? questDiscoveryContextPacket(nextState.activeQuest)
-                : null;
+        // Private discovery context is supplied dynamically by the
+        // interceptor, not stored as a one-use historical event.
+        const questDiscoveryContext = null;
 
         const questActionPacket =
             batch &&
@@ -11062,7 +11263,20 @@ async function openQuestPanel() {
 
         const buttons = [];
 
+        const canTurnIn =
+            quest.status === 'in_progress' &&
+            Boolean(quest.objectiveResolution) &&
+            quest.turnIn?.locationId === state.currentLocationId;
+
+        if (canTurnIn) {
+            buttons.push({
+                text: 'Return Quest Cargo',
+                result: POPUP_RESULT.CUSTOM2
+            });
+        }
+
         const canRevealTerminal =
+
             quest.status === 'in_progress' &&
             quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
@@ -11127,6 +11341,35 @@ async function openQuestPanel() {
             toastr.info(
                 'Quest threat revealed. Open Combat to resolve it.',
                 'Aethermoor'
+            );
+            return;
+        }
+
+                if (canTurnIn && choice === POPUP_RESULT.CUSTOM2) {
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'turn_in_recovered_cargo',
+                    kind: 'quest',
+                    action: 'complete',
+                    objectiveCompleted: true,
+                    completionEvidence:
+                        `Returned the recovered cargo to ${quest.turnIn.recipient}.`
+                }]
+            });
+
+            assert(output?.ok === true, 'Quest turn-in failed');
+
+            const updated = await readStoredCombatState();
+            const rewards = output.results?.[0]?.result?.rewards;
+
+            await Popup.show.text(
+                'Quest Complete',
+                formatQuestStatus(updated.state.activeQuest) +
+                `\n\nPaid: ${rewards.xp} XP, ${rewards.silver} silver, ` +
+                `${rewards.repSteps} reputation steps.\n` +
+                rewards.loot.map(item =>
+                    `Salvage: ${item.name} (${item.rarity})`
+                ).join('\n')
             );
             return;
         }
@@ -12506,8 +12749,32 @@ globalThis.aethermoorMechanicsInterceptor =
             }
         }
 
-        const { metadata, entries } =
-            getPendingAethermoorHandoffs();
+        const pending = getPendingAethermoorHandoffs();
+        const metadata = pending.metadata;
+
+        // Remove obsolete queued copies of private scene instructions.
+        const entries = pending.entries.filter(
+            entry => entry.type !== 'quest_context'
+        );
+
+        const state = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
+        const quest = state?.activeQuest;
+
+        if (
+            quest &&
+            state.currentLocationId === quest.destinationId &&
+            !['active', 'spotted'].includes(state.encounter?.status)
+        ) {
+            const contextPacket = questDiscoveryContextPacket(quest);
+
+            if (contextPacket) {
+                entries.push({
+                    id: `scene-context-${quest.id}-${quest.currentGate.step}`,
+                    type: 'quest_context',
+                    packet: contextPacket
+                });
+            }
+        }
 
         if (!metadata || entries.length === 0) {
             console.log('[Aethermoor] No handoff queued');

@@ -5252,16 +5252,34 @@ function buildAuthoredQuestGates(archetype, gateCount, facts) {
 function registerQuestDestination(state, quest) {
     state.places ||= {};
     state.leads ||= {};
-    state.routeEdges ||= [];
+    state.routeEdges ||= {};
 
-    const label = quest.facts?.site || quest.facts?.place ||
+    const label =
+        quest.facts?.site ||
+        quest.facts?.place ||
         quest.facts?.wreck;
-    assert(typeof label === 'string' && label.length > 0,
-        'Quest has no named destination');
+
+    assert(
+        typeof label === 'string' && label.length > 0,
+        'Quest has no named destination'
+    );
 
     const placeId = `quest-place-${quest.id}`;
     const leadId = `quest-lead-${quest.id}`;
-    const originId = routeNodeId(quest.seed.zone, 'outpost');
+
+    const originSettlement = quest.originSettlementId
+        ? Object.values(state.world?.settlements || {})
+            .find(entry => entry.id === quest.originSettlementId)
+        : savedPrimarySettlement(state, quest.seed.zone);
+
+    assert(
+        originSettlement,
+        'Quest origin settlement is missing'
+    );
+
+    const originId =
+        quest.originLocationId ||
+        originSettlement.locationId;
 
     state.places[placeId] ||= {
         id: placeId,
@@ -5270,6 +5288,7 @@ function registerQuestDestination(state, quest) {
         kind: 'quest_site',
         visited: false
     };
+
     state.leads[leadId] ||= {
         id: leadId,
         kind: 'quest',
@@ -5280,9 +5299,19 @@ function registerQuestDestination(state, quest) {
         status: 'known'
     };
 
+    if (!Array.isArray(state.routeEdges)) {
+        state.routeEdges = [];
+    }
+
     if (!state.routeEdges.some(edge =>
-        (edge.fromId === originId && edge.toId === placeId) ||
-        (edge.fromId === placeId && edge.toId === originId)
+        (
+            edge.fromId === originId &&
+            edge.toId === placeId
+        ) ||
+        (
+            edge.fromId === placeId &&
+            edge.toId === originId
+        )
     )) {
         state.routeEdges.push({
             fromId: originId,
@@ -5292,8 +5321,18 @@ function registerQuestDestination(state, quest) {
     }
 
     quest.destinationId = placeId;
+
+    quest.turnIn ||= {
+        locationId: originSettlement.locationId,
+        settlementId: originSettlement.id,
+        recipient:
+            quest.facts?.sponsor ||
+            originSettlement.label
+    };
+
     return { placeId, leadId };
 }
+
 
 function resolveQuestSeed(test) {
     assert(
@@ -9148,7 +9187,8 @@ function resolveBatch(args) {
                             inquiryId: lead.id,
                             zone: lead.zone || state.zone,
                             repTier,
-                            town
+                            town: issuer.reputationKey,
+                            settlementId: issuer.id
                         });
 
                         state = offer.state;
@@ -9340,20 +9380,26 @@ function resolveBatch(args) {
                         'Breadcrumb is not from this pack'
                     );
 
-                    const town = test.town || 'Peat-Cairn Outpost';
-                    const repTier = state.reputation?.[town]?.tier;
+                    const issuer =
+                        questIssuerSettlement(state, test);
+
+                    const repTier =
+                        state.reputation?.[issuer.reputationKey]?.tier;
 
                     assert(
                         repTier,
-                        `No saved reputation tier for ${town}`
+                        `No saved reputation tier for ` +
+                        `${issuer.label}`
                     );
 
                     result = resolveQuestSeed({
                         state,
                         zone: encounter.zone,
                         repTier,
-                        town
+                        town: issuer.reputationKey,
+                        settlementId: issuer.id
                     });
+
                     break;
                 }
 
@@ -9368,12 +9414,16 @@ function resolveBatch(args) {
                         'Resolve or abandon the current quest before creating a test offer'
                     );
 
-                    const town = test.town || 'Peat-Cairn Outpost';
-                    const repTier = state.reputation?.[town]?.tier;
+                    const issuer =
+                        questIssuerSettlement(state, test);
+
+                    const repTier =
+                        state.reputation?.[issuer.reputationKey]?.tier;
 
                     assert(
                         repTier,
-                        `No saved reputation tier for ${town}`
+                        `No saved reputation tier for ` +
+                        `${issuer.label}`
                     );
 
                     state.inquiries ||= {};
@@ -11296,6 +11346,12 @@ function registerTools() {
                             town: {
                                 type: 'string'
                             },
+                            settlementId: {
+                                type: 'string',
+                                description:
+                                    'Stable ID of the settlement issuing the quest'
+                            },
+
                             action: {
                                 type: 'string',
                                 enum: [

@@ -9764,6 +9764,26 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
+function questDeliveryContextPacket(quest) {
+    if (
+        quest?.status !== 'in_progress' ||
+        quest.deliveryReady !== true ||
+        !quest.turnIn
+    ) {
+        return null;
+    }
+
+    return [
+        'PRIVATE DELIVERY CONTEXT — do not recite these instructions.',
+        `Quest: ${quest.title}.`,
+        `The crew is at the turn-in location for ${quest.turnIn.recipient}.`,
+        'The required quest cargo is present and delivery is mechanically eligible.',
+        'Narrate the fictional handoff naturally. The quest-giver may approach, the crew may approach an office, or the scene may establish another plausible handoff.',
+        'When the fictional handoff actually occurs, place this exact tag inside the disposable <plan> block:',
+        `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
+        'Do not emit the tag before the handoff. Do not mention software, extensions, protocol tags, or reward administration in story prose.'
+    ].join('\n');
+}
 
 function questDiscoveryContextPacket(quest) {
     if (
@@ -9876,6 +9896,28 @@ function questSiteInspectionPacket(result, quest) {
         `Next gate ${result.nextGate.step}/${quest.gates}: ` +
             result.nextGate.objective,
         'Do not reveal the hidden cause or claim later gates are complete.'
+    ].join('\n');
+}
+
+function questDeliveryNarrationPacket(result, quest) {
+    const rewards = result.rewards || {
+        xp: 0,
+        silver: 0,
+        repSteps: 0,
+        loot: []
+    };
+
+    return [
+        `Quest completed: ${quest.title}.`,
+        `The crew delivered the recovered cargo to ` +
+            `${quest.turnIn?.recipient || quest.facts?.sponsor}.`,
+        `Rewards applied: ${rewards.xp} XP, ` +
+            `${rewards.silver} silver, ` +
+            `${rewards.repSteps} reputation steps.`,
+        ...(rewards.loot || []).map(item =>
+            `Salvage received: ${item.name} (${item.rarity}).`
+        ),
+        'Narrate the handoff naturally. Do not mention software, protocol tags, or state administration.'
     ].join('\n');
 }
 
@@ -10359,14 +10401,24 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-               ['accept', 'decline', 'abandon', 'complete'].includes(oneCase.action)
-
+            ['accept', 'decline', 'abandon', 'complete']
+                .includes(oneCase.action)
                 ? questActionNarrationPacket(
                     {
                         ...caseResult,
                         quest: nextState.activeQuest
                     },
                     oneCase.action
+                )
+                : null;
+
+        const questDeliveryPacket =
+            batch &&
+            oneCase?.kind === 'quest_delivery' &&
+            caseResult.created !== false
+                ? questDeliveryNarrationPacket(
+                    caseResult,
+                    nextState.activeQuest
                 )
                 : null;
 
@@ -10402,8 +10454,12 @@ async function runStoredMechanic(args) {
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
 
+            : questDeliveryPacket
+                ? questDeliveryPacket
+
             : questActionPacket
                 ? questActionPacket
+
 
             : batch &&
               oneCase?.kind === 'quest_discovery_reconcile' &&
@@ -13386,7 +13442,9 @@ globalThis.aethermoorMechanicsInterceptor =
 
         // Remove obsolete queued copies of private scene instructions.
         const entries = pending.entries.filter(
-            entry => entry.type !== 'quest_context'
+            entry =>
+                entry.type !== 'quest_context' &&
+                entry.type !== 'quest_delivery_context'
         );
 
         const state = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
@@ -13394,19 +13452,37 @@ globalThis.aethermoorMechanicsInterceptor =
 
         if (
             quest &&
-            state.currentLocationId === quest.destinationId &&
-            !['active', 'spotted'].includes(state.encounter?.status)
+            !['active', 'spotted'].includes(
+                state.encounter?.status
+            )
         ) {
-            const contextPacket = questDiscoveryContextPacket(quest);
+            const deliveryPacket =
+                questDeliveryContextPacket(quest);
 
-            if (contextPacket) {
+            if (deliveryPacket) {
                 entries.push({
-                    id: `scene-context-${quest.id}-${quest.currentGate.step}`,
-                    type: 'quest_context',
-                    packet: contextPacket
+                    id: `delivery-context-${quest.id}`,
+                    type: 'quest_delivery_context',
+                    packet: deliveryPacket
                 });
+            } else if (
+                state.currentLocationId === quest.destinationId
+            ) {
+                const discoveryPacket =
+                    questDiscoveryContextPacket(quest);
+
+                if (discoveryPacket) {
+                    entries.push({
+                        id:
+                            `scene-context-${quest.id}-` +
+                            `${quest.currentGate?.step || 1}`,
+                        type: 'quest_context',
+                        packet: discoveryPacket
+                    });
+                }
             }
         }
+
 
         if (!metadata || entries.length === 0) {
             console.log('[Aethermoor] No handoff queued');

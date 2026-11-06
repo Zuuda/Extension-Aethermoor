@@ -361,6 +361,39 @@ function savedPrimarySettlement(state, zone = state.zone) {
     return settlement;
 }
 
+function questIssuerSettlement(state, test = {}) {
+    const requestedId =
+        test.settlementId ||
+        test.originSettlementId ||
+        null;
+
+    if (requestedId) {
+        const requested =
+            Object.values(state.world?.settlements || {})
+                .find(settlement => settlement.id === requestedId);
+
+        assert(
+            requested,
+            `Unknown quest settlement: ${requestedId}`
+        );
+
+        return requested;
+    }
+
+    const currentLocation =
+        state.currentLocationId &&
+        Object.values(state.world?.settlements || {})
+            .find(settlement =>
+                settlement.locationId === state.currentLocationId
+            );
+
+    if (currentLocation) {
+        return currentLocation;
+    }
+
+    return savedPrimarySettlement(state, state.zone);
+}
+
 function zoneNumber(key) {
     if (typeof key !== 'string') return null;
 
@@ -5276,14 +5309,34 @@ function resolveQuestSeed(test) {
     const zone =
         test.zone ?? state.zone;
 
-
     assert(
         Number.isInteger(zone) && ZONES[zone],
         `Unknown zone: ${zone}`
     );
 
+    const issuerSettlement =
+        questIssuerSettlement(state, test);
+
+    assert(
+        issuerSettlement.zone === zone,
+        `Quest issuer ${issuerSettlement.label} is not in Zone ${zone}`
+    );
+
+    const reputationKey =
+        issuerSettlement.reputationKey;
+
+    const repRecord =
+        state.reputation?.[reputationKey];
+
+    assert(
+        repRecord,
+        `No reputation record exists for ${issuerSettlement.label}`
+    );
+
     const rep =
-        normalizeQuestRepTier(test.repTier);
+        normalizeQuestRepTier(
+            test.repTier || repRecord.tier
+        );
 
     const inquiryRecord = test.inquiryId === undefined
         ? null
@@ -5492,12 +5545,20 @@ function resolveQuestSeed(test) {
             revealed: false,
             resolved: false
         },
-
-        town: test.town || null,
-        repTierAtOffer: rep.label
+        town: issuerSettlement.reputationKey,
+        originSettlementId: issuerSettlement.id,
+        originLocationId: issuerSettlement.locationId,
+        repTierAtOffer: rep.label,
     };
 
     registerQuestDestination(state, quest);
+        quest.turnIn ||= {
+        locationId: issuerSettlement.locationId,
+        settlementId: issuerSettlement.id,
+        recipient: quest.facts?.sponsor ||
+            issuerSettlement.label
+    };
+
     state.activeQuest = quest;
     prepareMissingCargoDiscovery(state);
     prepareSunkenSalvageDiscovery(state);
@@ -9057,8 +9118,11 @@ function resolveBatch(args) {
                         'Resolve the existing quest offer before investigating another rumor'
                     );
 
-                    const town = test.town || 'Peat-Cairn Outpost';
-                    const repTier = state.reputation?.[town]?.tier;
+                    const issuer =
+                        questIssuerSettlement(state, test);
+
+                    const repTier =
+                        state.reputation?.[issuer.reputationKey]?.tier;
 
                     assert(
                         repTier,
@@ -9345,7 +9409,8 @@ function resolveBatch(args) {
                         inquiryId,
                         zone: state.zone,
                         repTier,
-                        town
+                        town: issuer.reputationKey,
+                        settlementId: issuer.id
                     });
 
                     if (result.quest) {

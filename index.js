@@ -341,14 +341,23 @@ function ensureWorldRecords(state) {
     }
     state.reputation ||= {};
 
+    if (!state.reputation) {
+        state.reputation = {};
+        changed = true;
+    }
+
     for (const settlement of Object.values(world.settlements)) {
-        state.reputation[settlement.reputationKey] ||= {
-            tier: 'Unknown',
-            steps: 0
-        };
+        if (!state.reputation[settlement.reputationKey]) {
+            state.reputation[settlement.reputationKey] = {
+                tier: 'Unknown',
+                steps: 0
+            };
+            changed = true;
+        }
     }
 
     return changed;
+
 }
 
 function savedZoneRecord(state, zone = state.zone) {
@@ -5264,13 +5273,10 @@ function registerQuestDestination(state, quest) {
         quest.facts?.place ||
         quest.facts?.wreck;
 
-        const destinationLabel =
-        label || `Quest destination, Zone ${quest.seed.zone}`;
-
-    assert(
-        typeof label === 'string' && label.length > 0,
-        'Quest has no named destination'
-    );
+    const destinationLabel =
+        typeof label === 'string' && label.trim().length > 0
+            ? label
+            : `Quest destination, Zone ${quest.seed.zone}`;
 
     const placeId = `quest-place-${quest.id}`;
     const leadId = `quest-lead-${quest.id}`;
@@ -5291,7 +5297,7 @@ function registerQuestDestination(state, quest) {
 
     state.places[placeId] ||= {
         id: placeId,
-        label,
+        label: destinationLabel,
         zone: quest.seed.zone,
         kind: 'quest_site',
         visited: false
@@ -5780,19 +5786,36 @@ function prepareSunkenSalvageDiscovery(state) {
         quest.currentGate.requiredDiscoveryState = 'acquired';
     }
 
-    const locationId = routeNodeId(quest.seed.zone, 'outpost');
+    /*
+     * Destination registration may already have established the issuer
+     * and turn-in location. Preserve those and attach the cargo identity;
+     * ||= on the whole record would silently omit discoveryId.
+     */
+    const issuer = quest.originSettlementId
+        ? state.world?.settlements?.[quest.originSettlementId]
+        : savedPrimarySettlement(state, quest.seed.zone);
+
+    assert(issuer, 'Salvage quest issuing settlement is missing');
+
+    const locationId =
+        quest.turnIn?.locationId ||
+        quest.originLocationId ||
+        issuer.locationId;
 
     state.places ||= {};
     state.places[locationId] ||= {
         id: locationId,
-        label: quest.town || 'Peat-Cairn Outpost',
-        zone: quest.seed.zone,
+        label: issuer.label,
+        zone: issuer.zone,
+        settlementId: issuer.id,
         kind: 'settlement'
     };
 
-    quest.turnIn ||= {
+    quest.turnIn = {
+        ...quest.turnIn,
         locationId,
-        recipient: quest.facts.sponsor,
+        settlementId: quest.turnIn?.settlementId || issuer.id,
+        recipient: quest.turnIn?.recipient || quest.facts.sponsor,
         discoveryId: id
     };
 

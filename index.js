@@ -14335,7 +14335,7 @@ async function openCombatPanel(inlineHost = null) {
     resultBox.className = 'aethermoor-combat-result';
     resultBox.hidden = true;
 
-    panel.append(header, status);
+    panel.append(status);
     if (encounter?.status === 'spotted') {
         const message = document.createElement('p');
         message.textContent =

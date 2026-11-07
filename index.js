@@ -12634,14 +12634,21 @@ function addAethermoorPanelStyles() {
     style.textContent = `
         .aethermoor-panel {
             position: fixed;
+            left: auto;
+            top: auto;
             right: 16px;
             bottom: 82px;
             z-index: 10001;
-            width: min(520px, calc(100vw - 24px));
-            max-height: min(78vh, 720px);
+            width: 520px;
+            height: 560px;
+            min-width: 320px;
+            min-height: 240px;
+            max-width: calc(100vw - 24px);
+            max-height: calc(100vh - 24px);
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            resize: both;
             color: #d0d7de;
             background: #12161c;
             border: 1px solid #2b3542;
@@ -12661,6 +12668,9 @@ function addAethermoorPanelStyles() {
             padding: 9px 12px;
             border-bottom: 1px solid #1f2730;
             background: #101419;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
         }
 
         .aethermoor-panel-title {
@@ -12787,7 +12797,9 @@ function addAethermoorPanelStyles() {
                 right: 8px;
                 bottom: 72px;
                 width: calc(100vw - 16px);
-                max-height: 72vh;
+                height: min(70vh, 560px);
+                min-width: 0;
+                resize: both;
             }
 
             .aethermoor-tab {
@@ -12890,6 +12902,179 @@ function renderAethermoorTab(tab) {
     }
 }
 
+const AETHERMOOR_PANEL_GEOMETRY_KEY =
+    'aethermoorMainPanelGeometry';
+
+function restoreAethermoorPanelGeometry(panel) {
+    try {
+        const saved = JSON.parse(
+            localStorage.getItem(
+                AETHERMOOR_PANEL_GEOMETRY_KEY
+            ) || 'null'
+        );
+
+        if (
+            !saved ||
+            !Number.isFinite(saved.left) ||
+            !Number.isFinite(saved.top) ||
+            !Number.isFinite(saved.width) ||
+            !Number.isFinite(saved.height)
+        ) {
+            return;
+        }
+
+        const width = Math.max(
+            320,
+            Math.min(saved.width, window.innerWidth - 24)
+        );
+
+        const height = Math.max(
+            240,
+            Math.min(saved.height, window.innerHeight - 24)
+        );
+
+        panel.style.left = `${Math.max(
+            0,
+            Math.min(saved.left, window.innerWidth - width)
+        )}px`;
+
+        panel.style.top = `${Math.max(
+            0,
+            Math.min(saved.top, window.innerHeight - height)
+        )}px`;
+
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.width = `${width}px`;
+        panel.style.height = `${height}px`;
+    } catch (error) {
+        console.warn(
+            'Aethermoor: Could not restore main panel geometry',
+            error
+        );
+    }
+}
+
+function saveAethermoorPanelGeometry(panel) {
+    const rect = panel.getBoundingClientRect();
+
+    try {
+        localStorage.setItem(
+            AETHERMOOR_PANEL_GEOMETRY_KEY,
+            JSON.stringify({
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            })
+        );
+    } catch (error) {
+        console.warn(
+            'Aethermoor: Could not save main panel geometry',
+            error
+        );
+    }
+}
+
+function enableAethermoorPanelDragging(header, panel) {
+    header.addEventListener('pointerdown', event => {
+        if (
+            event.button !== 0 ||
+            event.target.closest('button')
+        ) {
+            return;
+        }
+
+        event.preventDefault();
+
+        const rect = panel.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+        const pointerId = event.pointerId;
+
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+
+        header.setPointerCapture(pointerId);
+
+        function movePanel(moveEvent) {
+            if (moveEvent.pointerId !== pointerId) return;
+
+            const maxLeft = Math.max(
+                0,
+                window.innerWidth - panel.offsetWidth
+            );
+
+            const maxTop = Math.max(
+                0,
+                window.innerHeight - panel.offsetHeight
+            );
+
+            panel.style.left = `${Math.max(
+                0,
+                Math.min(
+                    maxLeft,
+                    moveEvent.clientX - offsetX
+                )
+            )}px`;
+
+            panel.style.top = `${Math.max(
+                0,
+                Math.min(
+                    maxTop,
+                    moveEvent.clientY - offsetY
+                )
+            )}px`;
+        }
+
+        function stopMoving(stopEvent) {
+            if (stopEvent.pointerId !== pointerId) return;
+
+            header.removeEventListener(
+                'pointermove',
+                movePanel
+            );
+            header.removeEventListener(
+                'pointerup',
+                stopMoving
+            );
+            header.removeEventListener(
+                'pointercancel',
+                stopMoving
+            );
+            header.removeEventListener(
+                'lostpointercapture',
+                stopMoving
+            );
+
+            if (header.hasPointerCapture(pointerId)) {
+                header.releasePointerCapture(pointerId);
+            }
+
+            saveAethermoorPanelGeometry(panel);
+        }
+
+        header.addEventListener(
+            'pointermove',
+            movePanel
+        );
+        header.addEventListener(
+            'pointerup',
+            stopMoving
+        );
+        header.addEventListener(
+            'pointercancel',
+            stopMoving
+        );
+        header.addEventListener(
+            'lostpointercapture',
+            stopMoving
+        );
+    });
+}
+
 function openAethermoorPanel() {
     addAethermoorPanelStyles();
 
@@ -12945,10 +13130,21 @@ function openAethermoorPanel() {
 
         const content = document.createElement('main');
         content.className = 'aethermoor-panel-content';
-
         panel.append(header, tabs, content);
         document.body.appendChild(panel);
+
+        restoreAethermoorPanelGeometry(panel);
+        enableAethermoorPanelDragging(header, panel);
+
+        panel.addEventListener('pointerup', () => {
+            setTimeout(
+                () => saveAethermoorPanelGeometry(panel),
+                0
+            );
+        });
+
         aethermoorPanelElement = panel;
+
     }
 
     aethermoorPanelElement.hidden = false;

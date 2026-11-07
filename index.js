@@ -1973,6 +1973,57 @@ function materializeBossReinforcements(state) {
     return added;
 }
 
+function completeLinkedCombatQuestGate(state) {
+    const quest = state.activeQuest;
+    const encounter = state.encounter;
+    const gate = quest?.currentGate;
+
+    if (
+        quest?.status !== 'in_progress' ||
+        gate?.trigger !== 'linked_combat' ||
+        !encounter?.questTerminal ||
+        encounter.status !== 'cleared' ||
+        encounter.questTerminal.questId !== quest.id ||
+        quest.terminalThreat?.resolved !== true
+    ) {
+        return null;
+    }
+
+    const evidence =
+        `Defeated the linked quest threat ` +
+        `at ${state.places?.[quest.destinationId]?.label ||
+            quest.destinationId}.`;
+
+    if (gate.step < quest.gates) {
+        const progression = resolveQuestAction({
+            state,
+            action: 'clear_gate',
+            objectiveCompleted: true,
+            completionEvidence: evidence
+        });
+
+        return {
+            completed: progression.completedGate,
+            next: progression.nextGate,
+            objectiveSecured: false
+        };
+    }
+
+    const progression = resolveQuestAction({
+        state,
+        action: 'resolve_objective',
+        objectiveCompleted: true,
+        objectiveRoute: 'combat',
+        completionEvidence: evidence
+    });
+
+    return {
+        completed: gate,
+        next: null,
+        objectiveSecured: true
+    };
+}
+
 function resolveTurn({
     state,
     actions,
@@ -3355,12 +3406,13 @@ if (frontliners.length > 0) {
     );
 
     let levelUps = [];
+    let questGate = null;
 
     if (encounterRewards.resolved) {
         levelUps = applyXp(c, encounterRewards.xp);
         c.purse += encounterRewards.silver;
+        questGate = completeLinkedCombatQuestGate(s);
     }
-
 
     encounter.hexStacks = Object.fromEntries(
         Object.entries(encounter.hexStacks)
@@ -3436,6 +3488,7 @@ if (frontliners.length > 0) {
         },
 
         levelUps,
+        questGate,
         packCleared:
             startingCount > 0 && live(s).length === 0,
         state: s,
@@ -6143,10 +6196,19 @@ function resolveQuestSeed(test) {
         authored.facts
     );
 
+    const usesV2Structure =
+        structureV2 &&
+        [
+            'missing_cargo',
+            'sunken_salvage',
+            'territorial_beast',
+            'ruin_clearance'
+        ].includes(archetype.id);
+
     const questGatesData =
-    archetype.id === 'sunken_salvage' && structureV2
-        ? clone(structureV2.gates)
-        : gatesData;
+        usesV2Structure
+            ? clone(structureV2.gates)
+            : gatesData;
 
     const seed = {
         zone,
@@ -11038,6 +11100,26 @@ function combatNarrationPacket(result, actions) {
         );
     } else {
         lines.push('Encounter rewards have not been applied.');
+    }
+
+        if (result.questGate) {
+        lines.push(
+            `Quest gate ${result.questGate.completed.step} completed ` +
+                `through the linked combat encounter.`
+        );
+
+        if (result.questGate.objectiveSecured) {
+            lines.push(
+                'The quest field objective is secured. ' +
+                'The crew must return the required cargo to the quest issuer.'
+            );
+        } else if (result.questGate.next) {
+            lines.push(
+                `Next quest gate: ${result.questGate.next.step}/` +
+                    `${result.questGate.next.total}; ` +
+                    `${result.questGate.next.objective}`
+            );
+        }
     }
 
     if (result.summary) {

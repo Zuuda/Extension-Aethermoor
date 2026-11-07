@@ -6295,6 +6295,7 @@ function resolveQuestSeed(test) {
     state.activeQuest = quest;
     prepareMissingCargoDiscovery(state);
     prepareSunkenSalvageDiscovery(state);
+    prepareV2QuestDiscoveries(state);
     trigger.questSeedConsumed = true;
 
     return {
@@ -6498,6 +6499,67 @@ function prepareSunkenSalvageDiscovery(state) {
         recipient: quest.turnIn?.recipient || quest.facts.sponsor,
         discoveryId: id
     };
+
+    return discovery;
+}
+
+function prepareV2QuestDiscoveries(state) {
+    const quest = state.activeQuest;
+
+    if (
+        quest?.status !== 'in_progress' ||
+        quest.structureV2?.family !== 'defeat_elite' ||
+        !quest.destinationId
+    ) {
+        return null;
+    }
+
+    quest.discoveries ||= [];
+
+    const id = `${quest.id}-target-trail`;
+    let discovery = quest.discoveries.find(
+        item => item.id === id
+    );
+
+    if (!discovery) {
+        discovery = {
+            id,
+            kind: 'evidence',
+            name: 'Fresh signs of the target',
+            locationId: quest.destinationId,
+            state: 'hidden',
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace:
+                quest.facts?.evidence ||
+                'among the recent signs at the quest site',
+            significance:
+                `The signs lead toward the lair of ` +
+                `${quest.facts?.target || 'the quest target'}.`
+        };
+
+        quest.discoveries.push(discovery);
+    }
+
+    const gate = quest.gatesData?.find(
+        item => item.stage === 'track'
+    );
+
+    assert(
+        gate,
+        'V2 Elite quest has no authored tracking gate'
+    );
+
+    gate.discoveryIds ||= [];
+    if (!gate.discoveryIds.includes(id)) {
+        gate.discoveryIds.push(id);
+    }
+
+    if (quest.currentGate?.step === gate.step) {
+        quest.currentGate.discoveryIds ||= [];
+        if (!quest.currentGate.discoveryIds.includes(id)) {
+            quest.currentGate.discoveryIds.push(id);
+        }
+    }
 
     return discovery;
 }
@@ -9778,6 +9840,8 @@ function resolveBatch(args) {
 
                     const discovery =
                         prepareMissingCargoDiscovery(state) ||
+                        prepareSunkenSalvageDiscovery(state) ||
+                        prepareV2QuestDiscoveries(state);
                         prepareSunkenSalvageDiscovery(state);
 
                     assert(

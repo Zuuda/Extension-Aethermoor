@@ -5778,7 +5778,8 @@ function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
     const familyByArchetype = {
         missing_cargo: 'retrieve_item',
         sunken_salvage: 'retrieve_item',
-        territorial_beast: 'defeat_elite'
+        territorial_beast: 'defeat_elite',
+        ruin_clearance: 'defeat_elite'
     };
 
     const family = familyByArchetype[archetype.id];
@@ -5796,13 +5797,20 @@ function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
             item: facts.cargo,
             destination: facts.wreck
         };
-    } else {
+    } else if (archetype.id === 'territorial_beast') {
         v2Facts = {
             target: facts.beast,
             territory: facts.place,
             lair: facts.place
         };
+    } else {
+        v2Facts = {
+            target: facts.threat,
+            territory: facts.site,
+            lair: facts.site
+        };
     }
+
 
     const structure = buildQuestV2Structure(
         family,

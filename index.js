@@ -13433,24 +13433,46 @@ async function renderWorldTab(host) {
         host.appendChild(progress);
     }
 
-    const places = new Map();
-
-    for (const place of Object.values(state.places || {})) {
-        if (place?.id) places.set(place.id, place);
+    function displayKey(label, zone) {
+        return `${zone}:${String(label || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLocaleLowerCase()}`;
     }
 
+    const places = new Map();
+
+    function addPlace(place) {
+        if (!place?.id) return;
+
+        const key = displayKey(place.label, place.zone);
+        const existing = places.get(key);
+
+        if (!existing) {
+            places.set(key, {
+                ...place,
+                references: [place.id]
+            });
+        } else if (!existing.references.includes(place.id)) {
+            existing.references.push(place.id);
+        }
+    }
+
+    for (const place of Object.values(state.places || {})) {
+        addPlace(place);
+    }
+
+    // Include sites discovered before the places collection existed.
     for (const step of Object.values(state.travelSteps || {})) {
         if (step?.event !== 'point_of_interest' || !step.site?.id) {
             continue;
         }
 
-        if (!places.has(step.site.id)) {
-            places.set(step.site.id, {
-                id: step.site.id,
-                label: 'Uncharted point of interest',
-                zone: step.site.zone
-            });
-        }
+        addPlace({
+            id: step.site.id,
+            label: 'Uncharted point of interest',
+            zone: step.site.zone
+        });
     }
 
     host.appendChild(
@@ -13469,14 +13491,37 @@ async function renderWorldTab(host) {
     const rumors = leads.filter(lead => lead?.kind === 'rumor');
     const otherLeads = leads.filter(lead => lead?.kind !== 'rumor');
 
+    function uniqueLeadLines(items) {
+        const seen = new Set();
+        const lines = [];
+
+        for (const lead of items) {
+            const target = state.places?.[lead.targetId];
+            const key = displayKey(
+                lead.claim || lead.label || lead.id,
+                target?.zone ?? state.zone
+            );
+
+            if (seen.has(key)) continue;
+            seen.add(key);
+            lines.push(`• ${lead.claim || lead.label || lead.id}`);
+        }
+
+        return lines.length ? lines.join('\n') : 'None recorded.';
+    }
+
     host.appendChild(
         makeAethermoorSection(
             'RUMORS',
-            rumors.length
-                ? rumors.map(lead =>
-                    `• ${lead.claim || lead.label || lead.id}`
-                ).join('\n')
-                : 'None recorded.',
+            uniqueLeadLines(rumors),
+            'world'
+        )
+    );
+
+    host.appendChild(
+        makeAethermoorSection(
+            'OTHER LEADS',
+            uniqueLeadLines(otherLeads),
             'world'
         )
     );

@@ -5233,6 +5233,18 @@ const QUEST_ARCHETYPES = [
                     evidence: 'recent chisel marks and a hidden haul path',
                     obstacle: 'a narrow approach overlooked from the roof'
                 }
+            },
+            {
+                geographyProfiles: ['karst'],
+                pitch: 'A survey party has stopped reporting from a newly opened karst passage.',
+                truth: 'A cave-in separated the surveyors from their equipment, and something territorial has occupied the narrow route between them.',
+                facts: {
+                    sponsor: 'the Zone 4 survey office',
+                    site: 'the Split Echo passage',
+                    threat: 'a territorial cave-stalker',
+                    evidence: 'fresh survey chalk and a dropped brass plumb weight',
+                    obstacle: 'a narrow flooded fissure beneath unstable limestone'
+                }
             }
         ],
         gates: [
@@ -5385,15 +5397,62 @@ const QUEST_ARCHETYPES = [
     }
 ];
 
-function buildQuestFacts(state, archetype) {
-    assert(
-        Array.isArray(archetype.scenarios) &&
-        archetype.scenarios.length > 0,
-        `Quest archetype ${archetype.id} has no fact scenarios`
+function questGeographyProfile(state, zone = state.zone) {
+    const savedProfile =
+        state.world?.zones?.[zone]?.geography?.profile;
+
+    if (savedProfile) return savedProfile;
+
+    const legacyProfiles = {
+        1: 'valley',
+        2: 'marsh_edge',
+        3: 'marsh',
+        4: 'karst',
+        5: 'hills'
+    };
+
+    return legacyProfiles[zone] || null;
+}
+
+function eligibleQuestScenarios(state, archetype, zone = state.zone) {
+    const profile = questGeographyProfile(state, zone);
+
+    return (archetype.scenarios || []).filter(scenario => {
+        const allowedProfiles =
+            scenario.geographyProfiles ||
+            ['marsh_edge', 'marsh'];
+
+        return allowedProfiles.includes(profile);
+    });
+}
+
+function eligibleQuestArchetypes(state, zone = state.zone) {
+    return QUEST_ARCHETYPES
+        .map(archetype => ({
+            archetype,
+            scenarios: eligibleQuestScenarios(
+                state,
+                archetype,
+                zone
+            )
+        }))
+        .filter(entry => entry.scenarios.length > 0);
+}
+
+function buildQuestFacts(state, archetype, zone = state.zone) {
+    const scenarios = eligibleQuestScenarios(
+        state,
+        archetype,
+        zone
     );
 
-    const scenarioRoll = roll(state, archetype.scenarios.length);
-    const scenario = archetype.scenarios[scenarioRoll - 1];
+    assert(
+        scenarios.length > 0,
+        `Quest archetype ${archetype.id} has no scenario compatible with Zone ${zone}`
+    );
+
+    const scenarioRoll = roll(state, scenarios.length);
+    const scenario = scenarios[scenarioRoll - 1];
 
     assert(
         scenario &&
@@ -5696,9 +5755,21 @@ function resolveQuestSeed(test) {
             row
         );
 
-    const archetypeRoll = roll(state, QUEST_ARCHETYPES.length);
-    const archetype = QUEST_ARCHETYPES[archetypeRoll - 1];
-    const authored = buildQuestFacts(state, archetype);
+    const eligibleArchetypes = eligibleQuestArchetypes(
+        state,
+        zone
+    );
+
+    assert(
+        eligibleArchetypes.length > 0,
+        `No authored quest scenarios are available for Zone ${zone} (${questGeographyProfile(state, zone) || 'unknown geography'})`
+    );
+
+    const archetypeRoll = roll(state, eligibleArchetypes.length);
+    const selectedArchetype =
+        eligibleArchetypes[archetypeRoll - 1];
+    const archetype = selectedArchetype.archetype;
+    const authored = buildQuestFacts(state, archetype, zone);
     const gatesData = buildAuthoredQuestGates(
         archetype,
         gates,
@@ -9678,6 +9749,30 @@ function resolveBatch(args) {
                     break;
                 }
 
+                                    case 'debug_retire_test_quest': {
+                    const state = clone(test.state);
+                    const quest = state.activeQuest;
+
+                    assert(
+                        quest?.status === 'offered' &&
+                        quest.seed?.testOnly === true,
+                        'Debug retirement only applies to an offered test quest'
+                    );
+
+                    quest.status = 'retired_test';
+                    quest.retiredReason =
+                        'Debug quest retired before testing';
+                    quest.retiredAt = Date.now();
+
+                    result = {
+                        ok: true,
+                        action: 'debug_retire_test_quest',
+                        questId: quest.id,
+                        state
+                    };
+                    break;
+                }
+
                 case 'debug_create_quest_offer': {
                     const state = clone(test.state);
 
@@ -11453,6 +11548,7 @@ function registerTools() {
                                     'debug_create_settlement_lead',
                                     'debug_create_quest_offer',
                                     'debug_create_quest_breadcrumb',
+                                    'debug_retire_test_quest',
                                     'follow_breadcrumb',
                                     'quest',
                                     'gear',
@@ -12350,6 +12446,26 @@ async function openQuestPanel() {
                     okButton: 'Close'
                 }
             );
+                    if (
+            quest?.status === 'offered' &&
+            quest.seed?.testOnly === true
+        ) {
+            section.appendChild(
+                makeAethermoorAction(
+                    'Debug: Retire Test Quest',
+                    'quest',
+                    () => runAethermoorPanelCase(
+                        host,
+                        'quests',
+                        {
+                            name: 'debug_retire_test_quest',
+                            kind: 'debug_retire_test_quest'
+                        },
+                        'Test quest retired without rewards.'
+                    )
+                )
+            );
+        }
 
             const choice = await popup.show();
             if (choice !== POPUP_RESULT.CUSTOM1) return;

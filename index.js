@@ -4594,7 +4594,9 @@ function completeQuestArrivalGate(state, outcome) {
     }
 
     const gate = quest?.currentGate;
-    const eligible = gate?.trigger === 'arrival_with_evidence' ||
+        const eligible =
+        gate?.trigger === 'arrival' ||
+        gate?.trigger === 'arrival_with_evidence' ||
         (
             gate?.trigger === undefined &&
             gate?.step === 1 &&
@@ -4614,12 +4616,19 @@ function completeQuestArrivalGate(state, outcome) {
     }
 
     const place = state.places[quest.destinationId];
-    const evidence = quest.facts?.evidence;
+    const evidence =
+        gate.trigger === 'arrival'
+            ? `Arrived at ${place?.label || quest.destinationId}.`
+            : quest.facts?.evidence;
 
-    assert(
-        place && typeof evidence === 'string' && evidence.length > 0,
-        'Arrival gate needs an established place and evidence'
-    );
+    assert(place, 'Arrival gate needs an established destination');
+
+    if (gate.trigger === 'arrival_with_evidence') {
+        assert(
+            typeof evidence === 'string' && evidence.length > 0,
+            'Arrival gate needs established evidence'
+        );
+    }
 
     const cleared = resolveQuestAction({
         state,
@@ -6134,6 +6143,11 @@ function resolveQuestSeed(test) {
         authored.facts
     );
 
+    const questGatesData =
+    archetype.id === 'sunken_salvage' && structureV2
+        ? clone(structureV2.gates)
+        : gatesData;
+
     const seed = {
         zone,
         repTier: rep.label,
@@ -6167,7 +6181,7 @@ function resolveQuestSeed(test) {
             label: archetype.label
         },
         gates,
-        gatesData,
+        gatesData: questGatesData,
         structureV2,
         status: 'offered',
         seed,
@@ -6180,8 +6194,7 @@ function resolveQuestSeed(test) {
         coreTruth: authored.truth,
 
         currentGate: {
-
-            ...gatesData[0]
+            ...questGatesData[0]
         },
         objectiveResolution: null,
 
@@ -6687,6 +6700,43 @@ function resolveQuestEvent(test) {
     discovery.state = discovery.acquisitionPolicy === 'auto_on_reveal'
         ? 'acquired'
         : 'found';
+
+        /*
+     * A final authored discovery objective secures the field objective.
+     * Delivery and payment remain separate, using the locked turn-in path.
+     */
+    if (
+        gate.requiredDiscoveryId === discovery.id &&
+        gate.step === quest.gates &&
+        discovery.state === 'acquired'
+    ) {
+        const objective = resolveQuestAction({
+            state,
+            action: 'resolve_objective',
+            objectiveCompleted: true,
+            objectiveRoute:
+                gate.mode === 'combat_twist_showdown'
+                    ? 'combat'
+                    : gate.mode === 'brain_social_heist'
+                        ? 'heist'
+                        : 'other',
+            completionEvidence:
+                `Recovered ${discovery.name} at ` +
+                `${state.places?.[discovery.locationId]?.label ||
+                    discovery.locationId}.`
+        });
+
+        return {
+            ok: true,
+            created: true,
+            action: 'quest_event',
+            event: 'found',
+            questItemId: discovery.id,
+            discovery: clone(discovery),
+            questObjective: objective.objectiveResolution,
+            state: objective.state
+        };
+    }
 
     const progression = advanceQuestFromDiscovery(state, discovery);
 

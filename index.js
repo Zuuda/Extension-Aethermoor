@@ -13463,7 +13463,25 @@ function addCombatPanelStyles() {
             justify-content: flex-end;
             gap: 8px;
             margin-top: 12px;
-                    .aethermoor-panel-content .aethermoor-combat-panel-inline {
+        }
+
+        .aethermoor-panel-content .aethermoor-combat-panel-inline {
+            position: relative;
+            inset: auto;
+            width: 100%;
+            height: auto;
+            min-width: 0;
+            min-height: 0;
+            max-width: none;
+            max-height: none;
+            resize: none;
+            overflow: visible;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
+        }
             position: relative;
             inset: auto;
             width: 100%;

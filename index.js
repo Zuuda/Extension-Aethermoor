@@ -5690,8 +5690,12 @@ function validateQuestV2Structure(plan) {
     return plan;
 }
 
-function buildQuestV2Structure(family, gateCount) {
+function buildQuestV2Structure(family, gateCount, facts) {
     int(gateCount, 'quest structure gate count', 1);
+    assert(
+        facts && typeof facts === 'object',
+        'Quest structure requires authored facts'
+    );
 
     const sequence = QUEST_V2_STRUCTURES[family]?.[gateCount];
 
@@ -5700,10 +5704,56 @@ function buildQuestV2Structure(family, gateCount) {
         `No complete ${family} structure for ${gateCount} gates`
     );
 
-    const gates = sequence.map((stage, index) => {
-        const definition = QUEST_V2_STAGES[family][stage];
+    function fact(key) {
+        const value = facts[key];
+        assert(
+            typeof value === 'string' && value.trim().length > 0,
+            `Quest family ${family} requires fact '${key}'`
+        );
+        return value;
+    }
 
-        assert(definition, `Missing quest stage definition: ${stage}`);
+    const objectiveFor = {
+        retrieve_item: {
+            approach:
+                () => `Reach ${fact('destination')} safely.`,
+            locate:
+                () => `Find the authored clue identifying where ${fact('item')} is held.`,
+            reach_inner_site:
+                () => `Follow the established clue to the location of ${fact('item')}.`,
+            find_access:
+                () => `Discover the authored means of accessing ${fact('item')}.`,
+            recover:
+                () => `Recover ${fact('item')} from ${fact('destination')}.`
+        },
+
+        defeat_elite: {
+            approach:
+                () => `Reach the reported territory at ${fact('territory')}.`,
+            track:
+                () => `Follow the authored evidence of ${fact('target')}'s route.`,
+            reach_lair:
+                () => `Reach ${fact('target')}'s lair at ${fact('lair')}.`,
+            find_target:
+                () => `Locate ${fact('target')} using the authored signs at ${fact('lair')}.`,
+            defeat:
+                () => `Defeat the linked Elite target: ${fact('target')}.`
+        }
+    }[family];
+
+    assert(
+        objectiveFor,
+        `Unsupported V2 quest family: ${family}`
+    );
+
+    const gates = sequence.map((stage, index) => {
+        const definition = QUEST_V2_STAGES[family]?.[stage];
+        const objectiveBuilder = objectiveFor[stage];
+
+        assert(
+            definition && objectiveBuilder,
+            `Missing authored definition for ${family}.${stage}`
+        );
 
         return {
             step: index + 1,
@@ -5711,7 +5761,7 @@ function buildQuestV2Structure(family, gateCount) {
             stage,
             mode: definition.mode,
             trigger: definition.trigger,
-            objective: definition.objective,
+            objective: objectiveBuilder(),
             decisive: definition.decisive === true
         };
     });

@@ -4993,23 +4993,31 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
 });
 
 const QUEST_PROGRESSION = {
-    F: { minGates: 1, maxGates: 2, xpFraction: 0.05 },
-    E: { minGates: 2, maxGates: 3, xpFraction: 0.08 },
-    D: { minGates: 2, maxGates: 3, xpFraction: 0.14 },
-    C: { minGates: 3, maxGates: 4, xpFraction: 0.22 },
-    B: { minGates: 4, maxGates: 5, xpFraction: 0.32 }
+    F: { minGates: 1, maxGates: 2, packMultiplier: 1.5 },
+    E: { minGates: 2, maxGates: 3, packMultiplier: 2 },
+    D: { minGates: 2, maxGates: 3, packMultiplier: 3 },
+    C: { minGates: 3, maxGates: 4, packMultiplier: 4.5 },
+    B: { minGates: 4, maxGates: 5, packMultiplier: 6 }
 };
 
-const EXTRA_QUEST_GATE_XP_FRACTION = 0.02;
-const MAX_EXTRA_QUEST_GATE_XP_FRACTION = 0.06;
+const EXTRA_QUEST_GATE_PACK_MULTIPLIER = 0.5;
 
-const QUEST_RANK_LABELS = {
-    F: 'Chore',
-    E: 'Local',
-    D: 'Minor',
-    C: 'Regional',
-    B: 'Major'
-};
+function canonicalMixedPackXp(zone, crewLevel) {
+    const zoneData = ZONES[zone];
+    assert(zoneData, `Unknown quest XP zone: ${zone}`);
+
+    const referenceLevel = zoneData.levels[1];
+    const bruteXp = xpForKill(crewLevel, {
+        level: referenceLevel,
+        role: 'brute'
+    });
+    const specialistXp = xpForKill(crewLevel, {
+        level: referenceLevel,
+        role: 'archer'
+    });
+
+    return bruteXp + 2 * specialistXp;
+}
 
 const QUEST_SALVAGE_SLOTS = [
     { owner: 'tansy', slot: 'weapon',     variant: null },
@@ -5725,20 +5733,18 @@ function resolveQuestSeed(test) {
                 : 0
         );
 
-    const nextLevelXp =
-        nextXp(state.crew.level);
-
-    const extraGateFraction = Math.min(
-        MAX_EXTRA_QUEST_GATE_XP_FRACTION,
-        Math.max(
-            0,
-            gates - progression.minGates
-        ) * EXTRA_QUEST_GATE_XP_FRACTION
+    const referencePackXp = canonicalMixedPackXp(
+        zone,
+        state.crew.level
     );
 
+    const questPackMultiplier =
+        progression.packMultiplier +
+        Math.max(0, gates - 1) *
+            EXTRA_QUEST_GATE_PACK_MULTIPLIER;
+
     const questXp = Math.round(
-        nextLevelXp *
-        (progression.xpFraction + extraGateFraction)
+        referencePackXp * questPackMultiplier
     );
 
     const terminalThreat =
@@ -5830,9 +5836,10 @@ function resolveQuestSeed(test) {
             xp: questXp,
             silver: row.silver,
             repSteps: row.repSteps,
-            xpBasis: nextLevelXp,
-            baseXpFraction: progression.xpFraction,
-            extraGateXpFraction: extraGateFraction
+            xpBasis: referencePackXp,
+            xpBasisType: 'canonical_mid_mixed_pack',
+            packMultiplier: questPackMultiplier
+
         },
 
         salvage,

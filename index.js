@@ -14673,27 +14673,12 @@ async function readStoredCombatState() {
 function combatStatusText(state) {
     const encounter = state.encounter;
 
-    if (!encounter) {
-        return 'No saved encounter.';
-    }
-
-    const living = encounter.foes
-        .map((foe, index) => ({
-            foe,
-            label: combatFoeLabel(foe, index)
-        }))
-        .filter(({ foe }) => foe.hp > 0);
-
-    const roster = living.length
-        ? living.map(({ foe, label }) =>
-            `${label} ${foe.hp}/${foe.maxHp} HP`
-        ).join('   •   ')
-        : 'No living foes.';
+    if (!encounter) return 'No encounter.';
 
     return [
-        `${encounter.id} · Turn ${encounter.turn} · ${encounter.status}`,
-        roster
-    ].join('\n');
+        `Turn ${encounter.turn} · ${encounter.status}`,
+        `Weasels: ${state.crew.weasels.active}/${state.crew.weasels.max}`
+    ].join('   •   ');
 }
 
 let combatPanelElement = null;
@@ -14704,6 +14689,113 @@ const combatSelections = {
     tansy: 'visor',
     target: null
 };
+
+/*
+ * UI refresh must never resolve a turn. It only reads saved metadata.
+ * Pause refresh while a user-triggered operation is running, and retain
+ * the latest log when a state change rebuilds the Combat tab.
+ */
+let aethermoorCombatBusy = false;
+let aethermoorCombatRefreshTimer = null;
+let aethermoorCombatViewKey = null;
+let aethermoorLastCombatLog = '';
+let aethermoorLastCombatLogKey = null;
+
+function combatLogKey(state) {
+    return `${state.encounter?.id || 'none'}:${state.encounter?.turn || 0}`;
+}
+
+function markCombatViewRendered(snapshot) {
+    aethermoorCombatViewKey = {
+        metadata: getContext().chatMetadata,
+        revision: snapshot.revision
+    };
+}
+
+function updateCombatAbilityButtons(panel, state) {
+    const used = state.encounter?.used || {};
+
+    if (used.stun && combatSelections.qtik === 'stun') {
+        combatSelections.qtik = 'fire_melee';
+    }
+
+    if (used.icePatch && combatSelections.qtik === 'ice_patch') {
+        combatSelections.qtik = 'fire_melee';
+    }
+
+    if (used.surge && combatSelections.tansy === 'surge') {
+        combatSelections.tansy = 'visor';
+    }
+
+    for (const button of panel.querySelectorAll(
+        '.aethermoor-combat-choice[data-group="qtik"], ' +
+        '.aethermoor-combat-choice[data-group="tansy"]'
+    )) {
+        const group = button.dataset.group;
+        const value = button.dataset.value;
+
+        const exhausted =
+            (group === 'qtik' && value === 'stun' && used.stun) ||
+            (group === 'qtik' && value === 'ice_patch' && used.icePatch) ||
+            (group === 'tansy' && value === 'surge' && used.surge);
+
+        button.disabled = Boolean(exhausted);
+        button.title = exhausted
+            ? 'Already used in this encounter'
+            : '';
+
+        button.setAttribute(
+            'aria-pressed',
+            String(
+                !exhausted &&
+                combatSelections[group] === value
+            )
+        );
+    }
+}
+
+function registerAethermoorCombatAutoRefresh() {
+    if (aethermoorCombatRefreshTimer !== null) return;
+
+    aethermoorCombatRefreshTimer = setInterval(() => {
+        if (
+            !aethermoorPanelOpen ||
+            aethermoorPanelElement?.hidden ||
+            aethermoorActiveTab !== 'combat' ||
+            aethermoorCombatBusy ||
+            !aethermoorTabViews?.combat
+        ) {
+            return;
+        }
+
+        const metadata = getContext().chatMetadata;
+        const stored = metadata?.[AETHERMOOR_METADATA_KEY];
+
+        if (!stored?.state) return;
+
+        if (
+            aethermoorCombatViewKey?.metadata === metadata &&
+            aethermoorCombatViewKey?.revision === stored.revision
+        ) {
+            return;
+        }
+
+        if (
+            aethermoorCombatViewKey &&
+            aethermoorCombatViewKey.metadata !== metadata
+        ) {
+            aethermoorLastCombatLog = '';
+            aethermoorLastCombatLogKey = null;
+        }
+
+        void openCombatPanel(aethermoorTabViews.combat).catch(error => {
+            console.error(
+                '[Aethermoor] Combat refresh failed',
+                error
+            );
+        });
+    }, 500);
+}
 
 function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
     const wrapper = document.createElement('fieldset');
@@ -14930,10 +15022,109 @@ function addCombatPanelStyles() {
         }
     `;
 
+    /*
+     * Combat now lives directly in a tab-view. Do not depend on the old
+     * floating-panel wrapper for button layout or target typography.
+     */
+    style.textContent += `
+        .aethermoor-tab-view[data-tab="combat"] {
+            min-width: 0;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-status {
+            margin: 0;
+            color: #9caab8;
+            font-size: 11px;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-controls {
+            position: static;
+            min-width: 0;
+            background: transparent;
+            padding: 0;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choices {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        button.aethermoor-combat-choice {
+            display: inline-flex;
+            flex: 0 0 auto;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            width: auto;
+            min-width: 90px;
+            max-width: 100%;
+            height: auto;
+            padding: 9px 12px;
+            text-align: center;
+            white-space: normal;
+            word-break: normal;
+            overflow-wrap: normal;
+            line-height: 1.3;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        button.aethermoor-combat-choice[data-group="target"] {
+            flex: 1 1 200px;
+            min-width: min(200px, 100%);
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-title,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-detail {
+            display: block;
+            width: 100%;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-telegraph {
+            display: block;
+            width: 100%;
+            color: #ffd166;
+            white-space: normal;
+            word-break: normal;
+            overflow-wrap: normal;
+            font-size: 11px;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        button.aethermoor-combat-choice:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            filter: none;
+            outline: none;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-result {
+            max-height: 240px;
+            overflow: auto;
+            margin: 10px 0 0;
+        }
+    `;
+
     document.head.appendChild(style);
 }
 
 function enableCombatPanelDragging(header, panel) {
+
     header.addEventListener('pointerdown', event => {
         if (
             event.button !== 0 ||
@@ -15227,7 +15418,10 @@ async function openCombatPanel(inlineHost = null) {
     const state = snapshot.state;
     const encounter = state.encounter;
 
+    markCombatViewRendered(snapshot);
+
     if (!combatSelections.target && encounter) {
+
         combatSelections.target =
             encounter.foes.find(foe => foe.hp > 0)?.id || null;
     }
@@ -15243,7 +15437,15 @@ async function openCombatPanel(inlineHost = null) {
 
     const resultBox = document.createElement('pre');
     resultBox.className = 'aethermoor-combat-result';
-    resultBox.hidden = true;
+
+    const hasRetainedLog =
+        aethermoorLastCombatLogKey === combatLogKey(state) &&
+        aethermoorLastCombatLog.length > 0;
+
+    resultBox.hidden = !hasRetainedLog;
+    resultBox.textContent = hasRetainedLog
+        ? aethermoorLastCombatLog
+        : '';
 
     panel.append(status);
     if (encounter?.status === 'spotted') {
@@ -15339,7 +15541,7 @@ async function openCombatPanel(inlineHost = null) {
     if (encounter?.status === 'cleared') {
         const message = document.createElement('p');
         message.textContent = 'This encounter is cleared.';
-        panel.append(message);
+        panel.append(message, resultBox);
 
         const breadcrumbAvailable =
             encounter.questSeed?.result ===
@@ -15474,11 +15676,12 @@ async function openCombatPanel(inlineHost = null) {
                 ? 'A crew member has fallen. Resolve death/respawn before continuing.'
                 : 'There is no active encounter to resolve.';
 
-        panel.append(message);
+        panel.append(message, resultBox);
         return;
     }
 
     const livingFoes = encounter.foes
+
         .map((foe, index) => ({
             ...foe,
             label: combatFoeLabel(foe, index)
@@ -15525,7 +15728,7 @@ async function openCombatPanel(inlineHost = null) {
         livingFoes.map(foe => ({
             value: foe.id,
             label: foe.name || foe.label,
-            detail: `${foe.hp}/${foe.maxHp} HP`,
+            detail: `(${foe.hp}/${foe.maxHp} HP)`,
             telegraph: foe.nextTelegraph
                 ? telegraphLabel(foe.nextTelegraph)
                 : null
@@ -15545,6 +15748,8 @@ async function openCombatPanel(inlineHost = null) {
     resolveButton.textContent = 'Resolve Turn';
 
     resolveButton.addEventListener('click', async () => {
+        if (aethermoorCombatBusy) return;
+        aethermoorCombatBusy = true;
         resolveButton.disabled = true;
         resolveButton.textContent = 'Resolving…';
         resultBox.hidden = false;
@@ -15564,12 +15769,20 @@ async function openCombatPanel(inlineHost = null) {
                 result?.error || 'Combat turn failed'
             );
 
-            resultBox.textContent = formatCombatTurnResult(result);
-            resultBox.scrollTop = resultBox.scrollHeight;
+            aethermoorLastCombatLog = formatCombatTurnResult(result);
+            aethermoorLastCombatLogKey =
+                `${result.summary.encounter.id}:${result.turn}`;
+
+            resultBox.textContent = aethermoorLastCombatLog;
+            resultBox.scrollTop = 0;
 
             const refreshed = await readStoredCombatState();
+            markCombatViewRendered(refreshed);
+            updateCombatAbilityButtons(panel, refreshed.state);
+
             status.textContent =
                 combatStatusText(refreshed.state);
+
             qtikGroup.querySelector('legend').textContent =
                 `Q'tik (${refreshed.state.crew.qtik.hp}/` +
                 `${derived(refreshed.state.crew).qtikMaxHp} HP)`;
@@ -15616,7 +15829,7 @@ async function openCombatPanel(inlineHost = null) {
                     refreshedLiving.map(foe => ({
                         value: foe.id,
                         label: foe.label,
-                        detail: `${foe.hp}/${foe.maxHp} HP`,
+                        detail: `(${foe.hp}/${foe.maxHp} HP)`,
                         telegraph: foe.nextTelegraph
                             ? telegraphLabel(foe.nextTelegraph)
                             : null
@@ -15634,11 +15847,11 @@ async function openCombatPanel(inlineHost = null) {
                     error instanceof Error ? error.message : String(error)
                 }`;
         } finally {
-            if (!resolveButton.hidden) {
-                resolveButton.disabled = false;
-                resolveButton.textContent = 'Resolve Turn';
-            }
+            aethermoorCombatBusy = false;
+            resolveButton.disabled = false;
+            resolveButton.textContent = 'Resolve Turn';
         }
+
     });
 
     actionsRow.appendChild(resolveButton);
@@ -15648,6 +15861,7 @@ async function openCombatPanel(inlineHost = null) {
     controls.append(choices, actionsRow);
 
     panel.append(controls, resultBox);
+    updateCombatAbilityButtons(panel, state);
 }
 
 const AETHERMOOR_HANDOFF_MARKER =
@@ -16233,12 +16447,14 @@ jQuery(function () {
 
     try {
         createAethermoorController();
+        registerAethermoorCombatAutoRefresh();
     } catch (error) {
         console.error(
             'Aethermoor: Main controller initialization failed',
             error
         );
     }
+
 
 });
 

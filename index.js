@@ -1984,14 +1984,16 @@ function completeLinkedCombatQuestGate(state) {
         !encounter?.questTerminal ||
         encounter.status !== 'cleared' ||
         encounter.questTerminal.questId !== quest.id ||
+        encounter.questTerminal.targetId !== gate.linkedTargetId ||
+        gate.linkedTargetId !== quest.targetId ||
         quest.terminalThreat?.resolved !== true
     ) {
         return null;
     }
 
     const evidence =
-        `Defeated the linked quest threat ` +
-        `at ${state.places?.[quest.destinationId]?.label ||
+        `Defeated the linked quest target at ` +
+        `${state.places?.[quest.destinationId]?.label ||
             quest.destinationId}.`;
 
     if (gate.step < quest.gates) {
@@ -6284,6 +6286,29 @@ function resolveQuestSeed(test) {
         repTierAtOffer: rep.label,
     };
 
+        if (structureV2) {
+        quest.targetId = `quest-target-${quest.id}`;
+
+        for (const gate of quest.gatesData) {
+            if (gate.trigger === 'linked_combat') {
+                gate.linkedTargetId = quest.targetId;
+            }
+        }
+
+        if (quest.currentGate?.trigger === 'linked_combat') {
+            quest.currentGate.linkedTargetId = quest.targetId;
+        }
+
+        // V2 defeat-elite structures require an Elite regardless of rank.
+        if (
+            structureV2.family === 'defeat_elite' &&
+            quest.gatesData.at(-1)?.trigger === 'linked_combat'
+        ) {
+            quest.terminalThreat.kind = 'elite';
+            quest.seed.terminalThreat.kind = 'elite';
+        }
+    }
+
     registerQuestDestination(state, quest);
         quest.turnIn ||= {
         locationId: issuerSettlement.locationId,
@@ -7029,7 +7054,45 @@ function resolveQuestAction(test) {
 
         result.completedGate = completedGate;
         result.nextGate = { ...quest.currentGate };
+
+        if (
+            quest.currentGate.trigger === 'linked_combat' &&
+            quest.structureV2?.family === 'defeat_elite'
+        ) {
+            const spawned = spawnEncounter({
+                state,
+                encounterType: 'quest_terminal',
+                encounterId: `quest-terminal-${quest.id}`
+            });
+
+            state.rngState = spawned.state.rngState;
+            state.encounter = spawned.encounter;
+
+            // The target is revealed, but the player still chooses whether
+            // to engage, avoid, or flee.
+            state.encounter.status = 'spotted';
+            state.encounter.questTerminal.targetId = quest.targetId;
+
+            quest.terminalThreat.revealed = true;
+            quest.terminalThreat.resolved = false;
+            quest.terminalThreat.encounterId =
+                state.encounter.id;
+            quest.terminalThreat.targetId =
+                quest.targetId;
+
+            result.linkedEncounter = {
+                id: state.encounter.id,
+                targetId: quest.targetId,
+                status: 'spotted',
+                role: state.encounter.foes[0]?.role,
+                level: state.encounter.foes[0]?.level,
+                hp: state.encounter.foes[0]?.hp,
+                maxHp: state.encounter.foes[0]?.maxHp
+            };
+        }
+
         return result;
+
     }
 
 
@@ -9906,6 +9969,9 @@ function resolveBatch(args) {
                         encounterId:
                             `quest-terminal-${quest.id}`
                     });
+                                                            result.state.encounter.status = 'spotted';
+                    result.state.encounter.questTerminal.targetId =
+                        quest.targetId;
 
                     result.action = 'quest_reveal_terminal';
                     break;

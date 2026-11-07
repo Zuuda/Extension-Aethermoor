@@ -13988,7 +13988,6 @@ async function renderWorldTab(host) {
     host.replaceChildren();
 
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
@@ -14034,7 +14033,7 @@ async function renderWorldTab(host) {
 
     if (state.currentJourney) {
         const journey = state.currentJourney;
-        const progress = makeAethermoorSection(
+        const section = makeAethermoorSection(
             'CURRENT JOURNEY',
             `Destination: ${journey.destinationLabel}\n` +
             `Progress: ${journey.completedSegments}/` +
@@ -14043,7 +14042,7 @@ async function renderWorldTab(host) {
             'world'
         );
 
-        progress.appendChild(
+        section.appendChild(
             makeAethermoorAction(
                 'Cancel Journey',
                 'world',
@@ -14060,7 +14059,7 @@ async function renderWorldTab(host) {
             )
         );
 
-        host.appendChild(progress);
+        host.appendChild(section);
     }
 
     const places = new Map();
@@ -14068,21 +14067,16 @@ async function renderWorldTab(host) {
     function addPlace(place) {
         if (!place?.id) return;
 
-        const key =
-            `${place.zone}:${String(place.label || '')
-                .trim()
-                .replace(/\s+/g, ' ')
-                .toLocaleLowerCase()}`;
+        const label = String(place.label || place.id)
+            .trim()
+            .replace(/\s+/g, ' ');
 
-        const existing = places.get(key);
-
-        if (!existing) {
+        const key = `${place.zone}:${label.toLocaleLowerCase()}`;
+        if (!places.has(key)) {
             places.set(key, {
-                ...place,
-                references: [place.id]
+                label,
+                zone: place.zone
             });
-        } else if (!existing.references.includes(place.id)) {
-            existing.references.push(place.id);
         }
     }
 
@@ -14090,16 +14084,22 @@ async function renderWorldTab(host) {
         addPlace(place);
     }
 
-    for (const step of Object.values(state.travelSteps || {})) {
-        if (step?.event !== 'point_of_interest' || !step.site?.id) {
-            continue;
-        }
-
+    for (const settlement of Object.values(world.settlements || {})) {
         addPlace({
-            id: step.site.id,
-            label: 'Uncharted point of interest',
-            zone: step.site.zone
+            id: settlement.locationId,
+            label: settlement.label,
+            zone: settlement.zone
         });
+    }
+
+    for (const step of Object.values(state.travelSteps || {})) {
+        if (step?.event === 'point_of_interest' && step.site?.id) {
+            addPlace({
+                id: step.site.id,
+                label: 'Uncharted point of interest',
+                zone: step.site.zone
+            });
+        }
     }
 
     host.appendChild(
@@ -14114,10 +14114,10 @@ async function renderWorldTab(host) {
         )
     );
 
-    const activeQuest = state.activeQuest;
-    const hasLiveQuest =
-        activeQuest &&
-        ['offered', 'in_progress'].includes(activeQuest.status);
+    const quest = state.activeQuest;
+    const questIsLive =
+        quest &&
+        ['offered', 'in_progress'].includes(quest.status);
 
     const leads = Object.values(state.leads || {}).filter(lead => {
         if (!lead || lead.status !== 'known') return false;
@@ -14130,35 +14130,34 @@ async function renderWorldTab(host) {
         }
 
         if (lead.kind === 'quest') {
-            return hasLiveQuest &&
-                lead.id === `quest-lead-${activeQuest.id}`;
+            return questIsLive &&
+                lead.id === `quest-lead-${quest.id}`;
         }
 
         if (lead.kind === 'quest_return') {
-            return hasLiveQuest &&
-                Boolean(activeQuest.objectiveResolution) &&
-                lead.id === `quest-return-${activeQuest.id}`;
+            return questIsLive &&
+                Boolean(quest.objectiveResolution) &&
+                lead.id === `quest-return-${quest.id}`;
         }
 
         return true;
     });
 
-    const rumors = leads.filter(lead => lead.kind === 'rumor');
-    const otherLeads = leads.filter(lead => lead.kind !== 'rumor');
-
-    function leadLines(items) {
+    function formatLeadList(entries) {
         const seen = new Set();
         const lines = [];
 
-        for (const lead of items) {
-            const target = state.places?.[lead.targetId];
-            const zoneNumber = target?.zone ?? state.zone;
-            const text = lead.claim || lead.label || lead.id;
+        for (const lead of entries) {
+            const text = String(
+                lead.claim || lead.label || lead.id
+            ).trim().replace(/\s+/g, ' ');
+
+            const targetZone =
+                state.places?.[lead.targetId]?.zone ??
+                state.zone;
+
             const key =
-                `${zoneNumber}:${String(text)
-                    .trim()
-                    .replace(/\s+/g, ' ')
-                    .toLocaleLowerCase()}`;
+                `${targetZone}:${text.toLocaleLowerCase()}`;
 
             if (seen.has(key)) continue;
             seen.add(key);
@@ -14168,10 +14167,13 @@ async function renderWorldTab(host) {
         return lines.length ? lines.join('\n') : 'None recorded.';
     }
 
+    const rumors = leads.filter(lead => lead.kind === 'rumor');
+    const otherLeads = leads.filter(lead => lead.kind !== 'rumor');
+
     host.appendChild(
         makeAethermoorSection(
             'RUMORS',
-            leadLines(rumors),
+            formatLeadList(rumors),
             'world'
         )
     );
@@ -14179,7 +14181,7 @@ async function renderWorldTab(host) {
     host.appendChild(
         makeAethermoorSection(
             'OTHER LEADS',
-            leadLines(otherLeads),
+            formatLeadList(otherLeads),
             'world'
         )
     );
@@ -14224,7 +14226,6 @@ async function renderWorldTab(host) {
             }
 
             const place = state.places[lead.targetId];
-
             addDestination(
                 place.id,
                 place.label,
@@ -14233,13 +14234,17 @@ async function renderWorldTab(host) {
             );
         }
 
-        for (const settlement of Object.values(world.settlements || {})) {
-            if (settlement.locationId === currentLocationId) continue;
+        for (const destinationSettlement of Object.values(
+            world.settlements || {}
+        )) {
+            if (destinationSettlement.locationId === currentLocationId) {
+                continue;
+            }
 
             addDestination(
-                settlement.locationId,
-                settlement.label,
-                settlement.zone
+                destinationSettlement.locationId,
+                destinationSettlement.label,
+                destinationSettlement.zone
             );
         }
 
@@ -14301,16 +14306,16 @@ async function renderWorldTab(host) {
     }
 
     if (actions.childElementCount > 0) {
-        const actionSection = document.createElement('section');
-        actionSection.className = 'aethermoor-ui-section';
-        actionSection.dataset.accent = 'world';
+        const section = document.createElement('section');
+        section.className = 'aethermoor-ui-section';
+        section.dataset.accent = 'world';
 
         const heading = document.createElement('div');
         heading.className = 'aethermoor-ui-heading';
         heading.textContent = 'DESTINATIONS & ACTIONS';
 
-        actionSection.append(heading, actions);
-        host.appendChild(actionSection);
+        section.append(heading, actions);
+        host.appendChild(section);
     }
 }
 

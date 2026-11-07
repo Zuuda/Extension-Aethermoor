@@ -14582,7 +14582,7 @@ async function openCombatPanel(inlineHost = null) {
     const choices = document.createElement('div');
 
     const qtikGroup = makeChoiceGroup(
-        "Q'tik's Move",
+        `Q'tik (${state.crew.qtik.hp}/${derived(state.crew).qtikMaxHp} HP)`,
         'qtik',
         [
             { value: 'fire_melee', label: 'Fire Melee' },
@@ -14594,9 +14594,9 @@ async function openCombatPanel(inlineHost = null) {
         combatSelections.qtik,
         value => { combatSelections.qtik = value; }
     );
-
+    
     const tansyGroup = makeChoiceGroup(
-        "Tansy's Command",
+        `Tansy (${state.crew.tansy.hp}/${derived(state.crew).tansyMaxHp} HP)`,
         'tansy',
         [
             { value: 'visor', label: 'Visor' },
@@ -14660,6 +14660,14 @@ async function openCombatPanel(inlineHost = null) {
             const refreshed = await readStoredCombatState();
             status.textContent =
                 combatStatusText(refreshed.state);
+            qtikGroup.querySelector('legend').textContent =
+                `Q'tik (${refreshed.state.crew.qtik.hp}/` +
+                `${derived(refreshed.state.crew).qtikMaxHp} HP)`;
+
+            tansyGroup.querySelector('legend').textContent =
+                `Tansy (${refreshed.state.crew.tansy.hp}/` +
+                `${derived(refreshed.state.crew).tansyMaxHp} HP)`;
+
 
             const refreshedEncounter = refreshed.state.encounter;
             const refreshedLiving = (refreshedEncounter?.foes || [])

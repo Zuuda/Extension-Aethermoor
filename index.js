@@ -13771,49 +13771,19 @@ async function readStoredCombatState() {
     return result;
 }
 
-function combatStatusText(state, revision) {
+function combatStatusText(state) {
     const encounter = state.encounter;
     const stats = derived(state.crew);
 
-    const lines = [
-        `Revision ${revision} | Zone ${state.zone}: ${ZONES[state.zone].name}`,
-        `Crew Lv ${state.crew.level} (${state.crew.xp}/${nextXp(state.crew.level)} XP)`,
-        `Q'tik: ${state.crew.qtik.hp}/${stats.qtikMaxHp} HP`,
-        `Tansy: ${state.crew.tansy.hp}/${stats.tansyMaxHp} HP`,
-        `Weasels: ${state.crew.weasels.active}/${state.crew.weasels.max}`,
-        ''
-    ];
-
     if (!encounter) {
-        lines.push('No encounter is saved.');
-        return lines.join('\n');
+        return 'No saved encounter.';
     }
 
-    lines.push(
-        `Encounter: ${encounter.id}`,
-        `Turn: ${encounter.turn} | Status: ${encounter.status}`,
-        ''
-    );
-
-    const livingFoes = encounter.foes
-        .map((foe, index) => ({
-            ...foe,
-            label: combatFoeLabel(foe, index)
-        }))
-        .filter(foe => foe.hp > 0);
-
-    if (livingFoes.length === 0) {
-        lines.push('No living foes.');
-    } else {
-        lines.push('Living foes:');
-        for (const foe of livingFoes) {
-            lines.push(
-                `${foe.label}: ${foe.hp}/${foe.maxHp} HP`
-            );
-        }
-    }
-
-    return lines.join('\n');
+    return [
+        `Turn ${encounter.turn} · ${encounter.status}`,
+        `Q'tik ${state.crew.qtik.hp}/${stats.qtikMaxHp} HP`,
+        `Tansy ${state.crew.tansy.hp}/${stats.tansyMaxHp} HP`
+    ].join('   •   ');
 }
 
 let combatPanelElement = null;
@@ -14020,23 +13990,7 @@ function addCombatPanelStyles() {
         }
 
         .aethermoor-panel-content .aethermoor-combat-panel-inline {
-            position: relative;
-            inset: auto;
-            width: 100%;
-            height: auto;
-            min-width: 0;
-            min-height: 0;
-            max-width: none;
-            max-height: none;
-            resize: none;
-            overflow: visible;
-            padding: 0;
-            border: 0;
-            border-radius: 0;
-            box-shadow: none;
-            background: transparent;
-        }
-            position: relative;
+            position: static;
             inset: auto;
             width: 100%;
             height: auto;
@@ -14343,11 +14297,10 @@ function saveCombatPanelGeometry(panel) {
 async function openCombatPanel(inlineHost = null) {
 
     addCombatPanelStyles();
-    if (!inlineHost && combatPanelElement && combatPanelOpen) {
-        combatPanelElement.hidden = true;
-        combatPanelOpen = false;
-        return;
-    }
+    assert(
+        inlineHost instanceof HTMLElement,
+        'Combat must render inside the Aethermoor Combat tab'
+    );
 
     let snapshot;
 
@@ -14369,70 +14322,20 @@ async function openCombatPanel(inlineHost = null) {
             encounter.foes.find(foe => foe.hp > 0)?.id || null;
     }
 
-    if (!combatPanelElement) {
-        combatPanelElement = document.createElement('section');
-        combatPanelElement.className = inlineHost
-            ? 'aethermoor-combat-panel aethermoor-combat-panel-inline'
-            : 'aethermoor-combat-panel';
-        combatPanelElement.setAttribute('role', 'region');
-        combatPanelElement.setAttribute('aria-label', 'Aethermoor Combat');
-                                (inlineHost || document.body)
-                    .appendChild(combatPanelElement);
-
-        restoreCombatPanelGeometry(combatPanelElement);
-
-        combatPanelElement.addEventListener('pointerup', () => {
-            setTimeout(
-                () => saveCombatPanelGeometry(combatPanelElement),
-                0
-            );
-        });
-    }
-
-    const panel = combatPanelElement;
-        if (inlineHost && panel.parentElement !== inlineHost) {
-        inlineHost.appendChild(panel);
-    }
-
-    if (inlineHost) {
-        panel.hidden = false;
-        combatPanelOpen = false;
-    }
-
+    const panel = inlineHost;
     panel.replaceChildren();
     panel.hidden = false;
     combatPanelOpen = true;
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-combat-header';
-
-    const title = document.createElement('h3');
-    title.textContent = 'Aethermoor Combat';
-
-    const closeButton = document.createElement('button');
-    closeButton.type = 'button';
-    closeButton.className = 'menu_button';
-    closeButton.textContent = 'Hide';
-    closeButton.title = 'Hide the combat panel';
-    closeButton.addEventListener('click', () => {
-        panel.hidden = true;
-        combatPanelOpen = false;
-    });
-
-    header.append(title, closeButton);
-    enableCombatPanelDragging(header, panel);
-
     const status = document.createElement('pre');
 
     status.className = 'aethermoor-combat-status';
-    status.textContent = combatStatusText(state, snapshot.revision);
+    status.textContent = combatStatusText(state);
 
     const resultBox = document.createElement('pre');
     resultBox.className = 'aethermoor-combat-result';
     resultBox.hidden = true;
 
     panel.append(header, status);
-
     if (encounter?.status === 'spotted') {
         const message = document.createElement('p');
         message.textContent =
@@ -14464,8 +14367,7 @@ async function openCombatPanel(inlineHost = null) {
 
                 panel.hidden = true;
                 combatPanelOpen = false;
-                await openCombatPanel();
-
+                await renderAethermoorTab('combat');
             } catch (error) {
                 toastr.error(
                     error instanceof Error ? error.message : String(error),
@@ -14632,7 +14534,7 @@ async function openCombatPanel(inlineHost = null) {
 
                     panel.hidden = true;
                     combatPanelOpen = false;
-                    await openCombatPanel();
+                    await renderAethermoorTab('combat');
                 } catch (error) {
                     toastr.error(
                         error instanceof Error
@@ -14756,10 +14658,8 @@ async function openCombatPanel(inlineHost = null) {
             resultBox.scrollTop = resultBox.scrollHeight;
 
             const refreshed = await readStoredCombatState();
-            status.textContent = combatStatusText(
-                refreshed.state,
-                refreshed.revision
-            );
+            status.textContent =
+                combatStatusText(refreshed.state);
 
             const refreshedEncounter = refreshed.state.encounter;
             const refreshedLiving = (refreshedEncounter?.foes || [])

@@ -4475,7 +4475,20 @@ function applyArrivalLocation(state, locationId, outcome) {
 
     const previousZone = state.zone;
 
+    state.places ||= {};
+    state.places[locationId] ||= {
+        id: locationId,
+        label: settlement.label,
+        zone: settlement.zone,
+        settlementId: settlement.id,
+        kind: 'settlement',
+        visited: false
+    };
+
+    state.places[locationId].visited = true;
+
     state.zone = settlement.zone;
+
     state.currentLocationId = locationId;
     state.currentPosition = { nodeId: locationId };
 

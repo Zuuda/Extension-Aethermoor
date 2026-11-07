@@ -12858,6 +12858,30 @@ function ensureAethermoorTabViews() {
     return aethermoorTabViews;
 }
 
+async function renderQuestTab(host) {
+    host.replaceChildren();
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'Open Quest Panel';
+    button.addEventListener('click', openQuestPanel);
+
+    host.appendChild(button);
+}
+
+async function renderWorldTab(host) {
+    host.replaceChildren();
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'Open World Panel';
+    button.addEventListener('click', openWorldPanel);
+
+    host.appendChild(button);
+}
+
 function renderAethermoorTab(tab) {
     const views = ensureAethermoorTabViews();
 

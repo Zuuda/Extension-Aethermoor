@@ -14923,100 +14923,52 @@ function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
     legend.textContent = label;
     wrapper.appendChild(legend);
 
-     const choices = document.createElement('div');
-    let syncResolveAvailability = () => {};
+    const choices = document.createElement('div');
+    choices.className = 'aethermoor-combat-choices';
 
-    let qtikPotionGroup = makePotionChoiceGroup('qtik', state);
-    let tansyPotionGroup = makePotionChoiceGroup('tansy', state);
+    for (const option of options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'menu_button aethermoor-combat-choice';
+        button.dataset.group = groupName;
+        button.dataset.value = option.value;
+        button.setAttribute(
+            'aria-pressed',
+            String(option.value === selectedValue)
+        );
 
-    const updatePotionGroupVisibility = () => {
-        qtikPotionGroup.hidden =
-            combatSelections.qtik !== 'drink';
-        tansyPotionGroup.hidden =
-            combatSelections.tansy !== 'drink';
+        const title = document.createElement('span');
+        title.className = 'aethermoor-combat-choice-title';
+        title.textContent = option.label;
+        button.appendChild(title);
 
-        syncResolveAvailability();
-    };
+        if (option.detail) {
+            const detail = document.createElement('span');
+            detail.className = 'aethermoor-combat-choice-detail';
+            detail.textContent = option.detail;
+            button.appendChild(detail);
+        }
 
-    const qtikGroup = makeChoiceGroup(
-        `Q'tik (${state.crew.qtik.hp}/` +
-            `${derived(state.crew).qtikMaxHp} HP)`,
-        'qtik',
-        [
-            { value: 'fire_melee', label: 'Fire Melee' },
-            { value: 'ice_melee', label: 'Ice Melee' },
-            { value: 'stun', label: 'Stun' },
-            { value: 'ice_patch', label: 'Ice Patch' },
-            { value: 'frost_stomp', label: 'Frost Stomp' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
-        combatSelections.qtik,
-        value => {
-            combatSelections.qtik = value;
+        if (option.telegraph) {
+            const telegraph = document.createElement('span');
+            telegraph.className =
+                'aethermoor-combat-choice-telegraph';
+            telegraph.textContent = `[${option.telegraph}]`;
+            button.appendChild(telegraph);
+        }
 
-            if (value === 'drink') {
-                ensurePotionSelection('qtik', state);
+        button.addEventListener('click', () => {
+            onSelect(option.value);
+
+            for (const sibling of choices.querySelectorAll('button')) {
+                sibling.setAttribute(
+                    'aria-pressed',
+                    String(sibling === button)
+                );
             }
+        });
 
-            updatePotionGroupVisibility();
-        }
-    );
-
-    const tansyGroup = makeChoiceGroup(
-        `Tansy (${state.crew.tansy.hp}/` +
-            `${derived(state.crew).tansyMaxHp} HP)`,
-        'tansy',
-        [
-            { value: 'visor', label: 'Visor' },
-            { value: 'vitals', label: 'Vitals' },
-            { value: 'hamstring', label: 'Hamstring' },
-            { value: 'recall', label: 'Recall' },
-            { value: 'surge', label: 'Surge' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
-        combatSelections.tansy,
-        value => {
-            combatSelections.tansy = value;
-
-            if (value === 'drink') {
-                ensurePotionSelection('tansy', state);
-            }
-
-            updatePotionGroupVisibility();
-        }
-    );
-
-    const targetGroup = makeChoiceGroup(
-        'Target',
-        'target',
-        livingFoes.map(foe => ({
-            value: foe.id,
-            label: foe.name || combatFoeLabel(
-                foe,
-                encounter.foes.findIndex(item => item.id === foe.id)
-            ),
-            detail: `(${foe.hp}/${foe.maxHp} HP)`,
-            telegraph: foe.nextTelegraph
-                ? telegraphLabel(foe.nextTelegraph)
-                : null
-        })),
-        combatSelections.target,
-        value => {
-            combatSelections.target = value;
-        }
-    );
-
-    choices.append(
-        qtikGroup,
-        qtikPotionGroup,
-        tansyGroup,
-        tansyPotionGroup,
-        targetGroup
-    );
-
-    updatePotionGroupVisibility();
-
-    choices.appendChild(button);
+        choices.appendChild(button);
     }
 
     wrapper.appendChild(choices);

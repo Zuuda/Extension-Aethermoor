@@ -5539,6 +5539,191 @@ function buildQuestFacts(state, archetype, zone = state.zone) {
     };
 }
 
+/*
+ * COMPLETE QUEST STRUCTURES — VERSION 2
+ *
+ * These structures are setting-independent mechanics, not story scripts.
+ * The narrator dresses the current scene but cannot add mandatory stages.
+ *
+ * Each supported gate count has a complete structure ending in the
+ * decisive objective. Delivery follows field completion and is not
+ * counted as an additional field gate.
+ *
+ * Trigger contracts for the forthcoming controller integration:
+ * - arrival: saved travel arrival at this gate's location.
+ * - discovery: validated FOUND event for this gate's authored discovery.
+ * - linked_combat: this gate's engine-created encounter is cleared.
+ *
+ * This builder is deliberately not connected to resolveQuestSeed yet.
+ * Creation and progression must be integrated together before V2 offers
+ * enter normal play. Existing quests retain their original structures.
+ */
+
+const QUEST_V2_STRUCTURES = {
+    retrieve_item: {
+        1: ['recover'],
+        2: ['approach', 'recover'],
+        3: ['approach', 'locate', 'recover'],
+        4: ['approach', 'locate', 'reach_inner_site', 'recover'],
+        5: [
+            'approach',
+            'locate',
+            'reach_inner_site',
+            'find_access',
+            'recover'
+        ]
+    },
+
+    defeat_elite: {
+        1: ['defeat'],
+        2: ['approach', 'defeat'],
+        3: ['approach', 'track', 'defeat'],
+        4: ['approach', 'track', 'reach_lair', 'defeat'],
+        5: ['approach', 'track', 'reach_lair', 'find_target', 'defeat']
+    }
+};
+
+const QUEST_V2_STAGES = {
+    retrieve_item: {
+        approach: {
+            mode: 'traversal_discovery',
+            trigger: 'arrival',
+            objective: 'Reach the designated recovery site.'
+        },
+        locate: {
+            mode: 'brain_social_heist',
+            trigger: 'discovery',
+            objective: 'Find the authored clue identifying where the item is held.'
+        },
+        reach_inner_site: {
+            mode: 'traversal_discovery',
+            trigger: 'arrival',
+            objective: 'Follow the established lead to the item’s location.'
+        },
+        find_access: {
+            mode: 'brain_social_heist',
+            trigger: 'discovery',
+            objective: 'Discover the authored means of accessing the item.'
+        },
+        recover: {
+            mode: 'brain_social_heist',
+            trigger: 'discovery',
+            objective: 'Locate and recover the required item.',
+            decisive: true
+        }
+    },
+
+    defeat_elite: {
+        approach: {
+            mode: 'traversal_discovery',
+            trigger: 'arrival',
+            objective: 'Reach the target’s reported territory.'
+        },
+        track: {
+            mode: 'brain_social_heist',
+            trigger: 'discovery',
+            objective: 'Find the authored evidence of the target’s route.'
+        },
+        reach_lair: {
+            mode: 'traversal_discovery',
+            trigger: 'arrival',
+            objective: 'Follow the established trail to the target’s lair.'
+        },
+        find_target: {
+            mode: 'brain_social_heist',
+            trigger: 'discovery',
+            objective: 'Locate the target using the authored signs at its lair.'
+        },
+        defeat: {
+            mode: 'combat_twist_showdown',
+            trigger: 'linked_combat',
+            objective: 'Defeat the quest’s linked Elite encounter.',
+            decisive: true
+        }
+    }
+};
+
+function validateQuestV2Structure(plan) {
+    assert(plan?.version === 2, 'Expected a V2 quest structure');
+    assert(
+        QUEST_V2_STRUCTURES[plan.family],
+        `Unsupported quest family: ${plan.family}`
+    );
+    int(plan.gateCount, 'quest structure gate count', 1);
+
+    assert(
+        Array.isArray(plan.gates) &&
+        plan.gates.length === plan.gateCount,
+        'Quest structure gate count does not match its stages'
+    );
+
+    const decisiveGates = plan.gates.filter(gate => gate.decisive);
+
+    assert(
+        decisiveGates.length === 1 &&
+        plan.gates.at(-1).decisive === true,
+        'Quest must end with exactly one decisive objective'
+    );
+
+    const expectedSequence =
+        QUEST_V2_STRUCTURES[plan.family][plan.gateCount];
+
+    assert(expectedSequence, 'Unsupported quest structure length');
+
+    for (let index = 0; index < plan.gates.length; index++) {
+        const gate = plan.gates[index];
+
+        assert(
+            gate.stage === expectedSequence[index] &&
+            gate.step === index + 1 &&
+            gate.total === plan.gateCount,
+            'Quest stages do not match the selected complete structure'
+        );
+
+        assert(
+            ['arrival', 'discovery', 'linked_combat']
+                .includes(gate.trigger),
+            `Unsupported quest stage trigger: ${gate.trigger}`
+        );
+    }
+
+    return plan;
+}
+
+function buildQuestV2Structure(family, gateCount) {
+    int(gateCount, 'quest structure gate count', 1);
+
+    const sequence = QUEST_V2_STRUCTURES[family]?.[gateCount];
+
+    assert(
+        sequence,
+        `No complete ${family} structure for ${gateCount} gates`
+    );
+
+    const gates = sequence.map((stage, index) => {
+        const definition = QUEST_V2_STAGES[family][stage];
+
+        assert(definition, `Missing quest stage definition: ${stage}`);
+
+        return {
+            step: index + 1,
+            total: gateCount,
+            stage,
+            mode: definition.mode,
+            trigger: definition.trigger,
+            objective: definition.objective,
+            decisive: definition.decisive === true
+        };
+    });
+
+    return validateQuestV2Structure({
+        version: 2,
+        family,
+        gateCount,
+        gates
+    });
+}
+
 function buildAuthoredQuestGates(archetype, gateCount, facts) {
     assert(
         Array.isArray(archetype.gates) &&

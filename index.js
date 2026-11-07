@@ -4413,10 +4413,22 @@ function shortestRoute(state, destinationId) {
         );
     }
     position ||= {
+    position ||= {
         nodeId: state.currentLocationId || routeNodeId(zone, 'outpost')
     };
 
+    // A position exactly at an edge endpoint is a node, not a partial leg.
+    if (!position.nodeId && position.offset <= 0) {
+        position = { nodeId: position.fromId };
+    } else if (
+        !position.nodeId &&
+        position.offset >= position.length
+    ) {
+        position = { nodeId: position.toId };
+    }
+
     if (position.nodeId) {
+
         const route = fromNode(position.nodeId);
         return route && {
             ...route,
@@ -14102,9 +14114,36 @@ async function renderWorldTab(host) {
         )
     );
 
-    const leads = Object.values(state.leads || {});
-    const rumors = leads.filter(lead => lead?.kind === 'rumor');
-    const otherLeads = leads.filter(lead => lead?.kind !== 'rumor');
+    const activeQuest = state.activeQuest;
+    const hasLiveQuest =
+        activeQuest &&
+        ['offered', 'in_progress'].includes(activeQuest.status);
+
+    const leads = Object.values(state.leads || {}).filter(lead => {
+        if (!lead || lead.status !== 'known') return false;
+        if (
+            lead.testOnly ||
+            lead.id?.startsWith('debug-destination-')
+        ) {
+            return false;
+        }
+
+        if (lead.kind === 'quest') {
+            return hasLiveQuest &&
+                lead.id === `quest-lead-${activeQuest.id}`;
+        }
+
+        if (lead.kind === 'quest_return') {
+            return hasLiveQuest &&
+                activeQuest.objectiveResolution &&
+                lead.id === `quest-return-${activeQuest.id}`;
+        }
+
+        return true;
+    });
+
+    const rumors = leads.filter(lead => lead.kind === 'rumor');
+    const otherLeads = leads.filter(lead => lead.kind !== 'rumor');
 
     function uniqueLeadLines(items) {
         const seen = new Set();
@@ -14137,18 +14176,6 @@ async function renderWorldTab(host) {
         makeAethermoorSection(
             'OTHER LEADS',
             uniqueLeadLines(otherLeads),
-            'world'
-        )
-    );
-
-    host.appendChild(
-        makeAethermoorSection(
-            'OTHER LEADS',
-            otherLeads.length
-                ? otherLeads.map(lead =>
-                    `• ${lead.claim || lead.label || lead.id}`
-                ).join('\n')
-                : 'None recorded.',
             'world'
         )
     );

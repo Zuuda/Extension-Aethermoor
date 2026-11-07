@@ -13011,10 +13011,18 @@ async function renderQuestTab(host) {
     const state = snapshot.state;
     const quest = state.activeQuest;
 
-    if (!quest) {
+    const questIsTerminal =
+        !quest ||
+        ['abandoned', 'declined', 'complete', 'retired_test']
+            .includes(quest.status);
+
+    if (questIsTerminal) {
         const section = makeAethermoorSection(
             'QUESTS',
-            'No active quest offer.',
+            quest
+                ? `Previous quest:\n${formatQuestStatus(quest)}\n\n` +
+                  'No offered or in-progress quest.'
+                : 'No active quest offer.',
             'quest'
         );
 

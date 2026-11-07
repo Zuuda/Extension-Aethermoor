@@ -5774,6 +5774,48 @@ function buildQuestV2Structure(family, gateCount, facts) {
     });
 }
 
+function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
+    const familyByArchetype = {
+        missing_cargo: 'retrieve_item',
+        sunken_salvage: 'retrieve_item',
+        territorial_beast: 'defeat_elite'
+    };
+
+    const family = familyByArchetype[archetype.id];
+    if (!family) return null;
+
+    let v2Facts;
+
+    if (archetype.id === 'missing_cargo') {
+        v2Facts = {
+            item: facts.cargo,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'sunken_salvage') {
+        v2Facts = {
+            item: facts.cargo,
+            destination: facts.wreck
+        };
+    } else {
+        v2Facts = {
+            target: facts.beast,
+            territory: facts.place,
+            lair: facts.place
+        };
+    }
+
+    const structure = buildQuestV2Structure(
+        family,
+        gateCount,
+        v2Facts
+    );
+
+    return {
+        ...structure,
+        facts: clone(v2Facts)
+    };
+}
+
 function buildAuthoredQuestGates(archetype, gateCount, facts) {
     assert(
         Array.isArray(archetype.gates) &&
@@ -6077,6 +6119,12 @@ function resolveQuestSeed(test) {
         gates,
         authored.facts
     );
+        const structureV2 = buildQuestV2PlanForOffer(
+        state,
+        archetype,
+        gates,
+        authored.facts
+    );
 
     const seed = {
         zone,
@@ -6112,6 +6160,7 @@ function resolveQuestSeed(test) {
         },
         gates,
         gatesData,
+        structureV2,
         status: 'offered',
         seed,
 

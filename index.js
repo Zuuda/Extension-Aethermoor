@@ -13135,10 +13135,9 @@ async function openQuestPanel() {
                 result: POPUP_RESULT.CUSTOM2
             });
         }
-
         const canRevealTerminal =
-
             quest.status === 'in_progress' &&
+            quest.structureV2?.version !== 2 &&
             quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
             quest.destinationId === state.currentLocationId &&

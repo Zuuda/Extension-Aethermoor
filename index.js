@@ -6189,7 +6189,8 @@ function resolveQuestSeed(test) {
         gates,
         authored.facts
     );
-        const structureV2 = buildQuestV2PlanForOffer(
+
+    const structureV2 = buildQuestV2PlanForOffer(
         state,
         archetype,
         gates,
@@ -6244,7 +6245,6 @@ function resolveQuestSeed(test) {
         },
         gates,
         gatesData: questGatesData,
-        structureV2,
         status: 'offered',
         seed,
 

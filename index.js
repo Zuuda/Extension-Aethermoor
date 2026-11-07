@@ -4431,19 +4431,56 @@ function resolveJourneyAction(test) {
     assert(!state.currentJourney,
         'Finish or cancel the current journey first');
 
-    const lead = state.leads?.[test.leadId];
-    assert(lead?.status === 'known' && lead.targetType === 'place',
-        'Choose a known place lead');
-    const place = state.places?.[lead.targetId];
-    assert(place, 'Lead destination is not recorded');
+    const lead = test.leadId
+        ? state.leads?.[test.leadId]
+        : null;
+
+    if (test.leadId) {
+        assert(
+            lead?.status === 'known' &&
+            lead.targetType === 'place',
+            'Choose a known place lead'
+        );
+    }
+
+    const destinationId =
+        test.destinationId || lead?.targetId;
+
+    assert(
+        typeof destinationId === 'string',
+        'Journey requires a known lead or settlement destination'
+    );
+
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry => entry.locationId === destinationId);
+
+    const place =
+        state.places?.[destinationId] ||
+        (settlement
+            ? {
+                id: settlement.locationId,
+                label: settlement.label,
+                zone: settlement.zone,
+                settlementId: settlement.id,
+                kind: 'settlement'
+            }
+            : null);
+
+    assert(place, 'Journey destination is not recorded');
+
+    state.places ||= {};
+    state.places[destinationId] ||= place;
 
     const route = shortestRoute(state, place.id);
+
     assert(route, `No known route to ${place.label}`);
     assert(route.totalSegments > 0,
         `Already at ${place.label}; investigate or explore here`);
 
     state.currentJourney = {
-        leadId: lead.id,
+        leadId: lead?.id || null,
+        settlementId: settlement?.id || null,
         destinationId: place.id,
         destinationLabel: place.label,
         originId: route.originId,
@@ -12017,6 +12054,36 @@ async function openWorldPanel() {
             }
         }
 
+                if (!journey) {
+            const settlements = Object.values(
+                state.world?.settlements || {}
+            );
+
+            for (const settlement of settlements) {
+                if (settlement.locationId === state.currentLocationId) {
+                    continue;
+                }
+
+                const route = shortestRoute(
+                    state,
+                    settlement.locationId
+                );
+
+                if (!route || route.totalSegments === 0) {
+                    continue;
+                }
+
+                actions.push({
+                    label:
+                        `Travel to ${settlement.label} ` +
+                        `(Zone ${settlement.zone}; ` +
+                        `${route.totalSegments} segments)`,
+                    action: 'start_settlement_journey',
+                    destinationId: settlement.locationId
+                });
+            }
+        }
+
         for (const lead of leads) {
             if (
                 lead.kind === 'rumor' &&
@@ -12110,21 +12177,46 @@ async function openWorldPanel() {
             return;
         }
 
-        if (selected.action === 'start_journey') {
-            await runStoredMechanic({
-                cases: [{
-                    name: 'start_journey',
-                    kind: 'journey',
-                    action: 'start',
-                    leadId: selected.leadId
-                }]
+        if (
+            selected.action === 'start_journey' ||
+            selected.action === 'start_settlement_journey'
+        ) {
+            const journeyCase = {
+                name: 'start_journey',
+                kind: 'journey',
+                action: 'start'
+            };
+
+            if (selected.action === 'start_journey') {
+                journeyCase.leadId = selected.leadId;
+            } else {
+                journeyCase.destinationId = selected.destinationId;
+            }
+
+            const output = await runStoredMechanic({
+                cases: [journeyCase]
             });
+
+            assert(
+                output?.ok === true,
+                output?.results?.[0]?.error ||
+                    'Could not start journey'
+            );
+
 
             toastr.info(
                 `Journey started toward ${
-                    state.places[
-                        state.leads[selected.leadId].targetId
-                    ].label
+                    selected.action === 'start_journey'
+                        ? state.places[
+                            state.leads[selected.leadId].targetId
+                          ].label
+                        : state.world.settlements[
+                            Object.values(state.world.settlements)
+                                .find(entry =>
+                                    entry.locationId ===
+                                    selected.destinationId
+                                ).id
+                          ].label
                 }. Each [moved] advances one segment.`,
                 'Aethermoor'
             );

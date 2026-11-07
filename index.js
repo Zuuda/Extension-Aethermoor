@@ -12791,6 +12791,78 @@ function addAethermoorPanelStyles() {
         #aethermoor_main_button {
             border-left: 2px solid #4da6ff;
         }
+                .aethermoor-tab-view {
+            display: grid;
+            align-content: start;
+            gap: 10px;
+        }
+
+        .aethermoor-tab-view[hidden] {
+            display: none;
+        }
+
+        .aethermoor-ui-section {
+            display: grid;
+            gap: 7px;
+            padding: 10px;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #4da6ff;
+        }
+
+        .aethermoor-ui-section[data-accent="combat"] {
+            border-left-color: #ef4444;
+        }
+
+        .aethermoor-ui-section[data-accent="quest"] {
+            border-left-color: #d99b26;
+        }
+
+        .aethermoor-ui-section[data-accent="world"] {
+            border-left-color: #4da6ff;
+        }
+
+        .aethermoor-ui-heading {
+            color: #ffffff;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }
+
+        .aethermoor-ui-text {
+            color: #9caab8;
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-ui-actions {
+            display: grid;
+            gap: 6px;
+        }
+
+        .aethermoor-ui-action {
+            width: 100%;
+            padding: 8px 10px;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .aethermoor-ui-action:hover,
+        .aethermoor-ui-action:focus-visible {
+            color: #ffffff;
+            border-color: #4da6ff;
+        }
+
+        .aethermoor-ui-action[data-accent="quest"]:hover,
+        .aethermoor-ui-action[data-accent="quest"]:focus-visible {
+            border-color: #d99b26;
+        }
 
         @media (max-width: 600px) {
             .aethermoor-panel {
@@ -12858,28 +12930,510 @@ function ensureAethermoorTabViews() {
     return aethermoorTabViews;
 }
 
+function makeAethermoorSection(title, text, accent = 'world') {
+    const section = document.createElement('section');
+    section.className = 'aethermoor-ui-section';
+    section.dataset.accent = accent;
+
+    const heading = document.createElement('div');
+    heading.className = 'aethermoor-ui-heading';
+    heading.textContent = title;
+
+    const body = document.createElement('div');
+    body.className = 'aethermoor-ui-text';
+    body.textContent = text;
+
+    section.append(heading, body);
+    return section;
+}
+
+function makeAethermoorAction(label, accent, handler) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'aethermoor-ui-action';
+    button.dataset.accent = accent;
+    button.textContent = label;
+    button.addEventListener('click', handler);
+    return button;
+}
+
+async function runAethermoorPanelCase(host, tab, caseData, successText) {
+    try {
+        const output = await runStoredMechanic({
+            cases: [caseData]
+        });
+
+        assert(
+            output?.ok === true &&
+            output.results?.[0]?.ok !== false,
+            output?.results?.[0]?.error ||
+                'Aethermoor operation failed'
+        );
+
+        if (successText) {
+            toastr.info(successText, 'Aethermoor');
+        }
+
+        if (tab === 'quests') {
+            await renderQuestTab(host);
+        } else {
+            await renderWorldTab(host);
+        }
+
+        return output;
+    } catch (error) {
+        toastr.error(
+            error instanceof Error ? error.message : String(error),
+            'Aethermoor'
+        );
+        return null;
+    }
+}
+
 async function renderQuestTab(host) {
     host.replaceChildren();
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Open Quest Panel';
-    button.addEventListener('click', openQuestPanel);
+    let snapshot;
 
-    host.appendChild(button);
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.appendChild(
+            makeAethermoorSection(
+                'QUESTS',
+                error instanceof Error ? error.message : String(error),
+                'quest'
+            )
+        );
+        return;
+    }
+
+    const state = snapshot.state;
+    const quest = state.activeQuest;
+
+    if (!quest) {
+        const section = makeAethermoorSection(
+            'QUESTS',
+            'No active quest offer.',
+            'quest'
+        );
+
+        section.appendChild(
+            makeAethermoorAction(
+                'Debug: Create Quest Offer',
+                'quest',
+                () => runAethermoorPanelCase(
+                    host,
+                    'quests',
+                    {
+                        name: 'debug_create_authored_quest_offer',
+                        kind: 'debug_create_quest_offer'
+                    },
+                    'Debug quest offer created.'
+                )
+            )
+        );
+
+        host.appendChild(section);
+        return;
+    }
+
+    const summary = makeAethermoorSection(
+        quest.status === 'offered'
+            ? 'QUEST OFFER'
+            : 'ACTIVE QUEST',
+        formatQuestStatus(quest),
+        'quest'
+    );
+
+    const actions = document.createElement('div');
+    actions.className = 'aethermoor-ui-actions';
+
+    if (quest.status === 'offered') {
+        actions.append(
+            makeAethermoorAction(
+                'Accept Quest',
+                'quest',
+                () => runAethermoorPanelCase(
+                    host,
+                    'quests',
+                    {
+                        name: 'accept_quest',
+                        kind: 'quest',
+                        action: 'accept'
+                    },
+                    'Quest accepted.'
+                )
+            ),
+            makeAethermoorAction(
+                'Decline Quest',
+                'quest',
+                () => runAethermoorPanelCase(
+                    host,
+                    'quests',
+                    {
+                        name: 'decline_quest',
+                        kind: 'quest',
+                        action: 'decline'
+                    },
+                    'Quest declined.'
+                )
+            )
+        );
+    }
+
+    if (quest.status === 'in_progress') {
+        const canRevealTerminal =
+            quest.currentGate?.mode === 'combat_twist_showdown' &&
+            quest.terminalThreat?.resolved !== true &&
+            quest.destinationId === state.currentLocationId &&
+            !['active', 'spotted'].includes(
+                state.encounter?.status
+            );
+
+        if (canRevealTerminal) {
+            actions.appendChild(
+                makeAethermoorAction(
+                    'Reveal Quest Threat',
+                    'combat',
+                    () => runAethermoorPanelCase(
+                        host,
+                        'quests',
+                        {
+                            name: 'reveal_quest_terminal',
+                            kind: 'quest_reveal_terminal'
+                        },
+                        'Quest threat revealed. Open Combat to resolve it.'
+                    )
+                )
+            );
+        }
+
+        const canTurnIn =
+            quest.objectiveResolution &&
+            quest.deliveryReady === true &&
+            quest.turnIn?.locationId === state.currentLocationId;
+
+        if (canTurnIn) {
+            actions.appendChild(
+                makeAethermoorAction(
+                    'Return Quest Cargo',
+                    'quest',
+                    async () => {
+                        const output = await runAethermoorPanelCase(
+                            host,
+                            'quests',
+                            {
+                                name: 'turn_in_recovered_cargo',
+                                kind: 'quest',
+                                action: 'complete',
+                                objectiveCompleted: true,
+                                completionEvidence:
+                                    `Returned the recovered cargo to ` +
+                                    `${quest.turnIn.recipient}.`
+                            },
+                            null
+                        );
+
+                        if (!output) return;
+
+                        const result =
+                            output.results?.[0]?.result;
+                        const rewards = result?.rewards;
+
+                        if (rewards) {
+                            host.prepend(
+                                makeAethermoorSection(
+                                    'QUEST REWARDS',
+                                    `Paid ${rewards.xp} XP, ` +
+                                    `${rewards.silver} silver, and ` +
+                                    `${rewards.repSteps} reputation steps.` +
+                                    (rewards.loot?.length
+                                        ? '\n' + rewards.loot.map(item =>
+                                            `Salvage: ${item.name} ` +
+                                            `(${item.rarity}).`
+                                        ).join('\n')
+                                        : ''),
+                                    'quest'
+                                )
+                            );
+                        }
+                    }
+                )
+            );
+        }
+
+        actions.appendChild(
+            makeAethermoorAction(
+                'Abandon Quest',
+                'quest',
+                () => runAethermoorPanelCase(
+                    host,
+                    'quests',
+                    {
+                        name: 'abandon_quest',
+                        kind: 'quest',
+                        action: 'abandon'
+                    },
+                    'Quest abandoned. No rewards were granted.'
+                )
+            )
+        );
+    }
+
+    host.appendChild(summary);
+
+    if (actions.childElementCount > 0) {
+        const actionSection = document.createElement('section');
+        actionSection.className = 'aethermoor-ui-section';
+        actionSection.dataset.accent = 'quest';
+
+        const heading = document.createElement('div');
+        heading.className = 'aethermoor-ui-heading';
+        heading.textContent = 'AVAILABLE ACTIONS';
+
+        actionSection.append(heading, actions);
+        host.appendChild(actionSection);
+    }
 }
 
 async function renderWorldTab(host) {
     host.replaceChildren();
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Open World Panel';
-    button.addEventListener('click', openWorldPanel);
+    let snapshot;
 
-    host.appendChild(button);
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.appendChild(
+            makeAethermoorSection(
+                'WORLD',
+                error instanceof Error ? error.message : String(error),
+                'world'
+            )
+        );
+        return;
+    }
+
+    const state = snapshot.state;
+    const world = state.world || {};
+    const zone = world.zones?.[state.zone];
+    const settlement = zone
+        ? world.settlements?.[zone.primarySettlementId]
+        : null;
+    const currentLocationId =
+        state.currentLocationId ||
+        settlement?.locationId ||
+        routeNodeId(state.zone, 'outpost');
+    const currentPlace =
+        state.places?.[currentLocationId] ||
+        Object.values(world.settlements || {}).find(
+            item => item.locationId === currentLocationId
+        );
+
+    host.appendChild(
+        makeAethermoorSection(
+            'CURRENT REGION',
+            `${zone?.name || `Zone ${state.zone}`} ` +
+            `(Zone ${state.zone})\n` +
+            `Geography: ${zone?.geography?.description || 'not recorded'}\n` +
+            `Primary settlement: ${settlement?.label || 'not recorded'}\n` +
+            `Current location: ${currentPlace?.label || currentLocationId}`,
+            'world'
+        )
+    );
+
+    if (state.currentJourney) {
+        const journey = state.currentJourney;
+        const progress = makeAethermoorSection(
+            'CURRENT JOURNEY',
+            `Destination: ${journey.destinationLabel}\n` +
+            `Progress: ${journey.completedSegments}/` +
+            `${journey.totalSegments} segments\n` +
+            `Status: ${journey.status}`,
+            'world'
+        );
+
+        const cancelButton = makeAethermoorAction(
+            'Cancel Journey',
+            'world',
+            () => runAethermoorPanelCase(
+                host,
+                'world',
+                {
+                    name: 'cancel_journey',
+                    kind: 'journey',
+                    action: 'cancel'
+                },
+                'Journey cancelled.'
+            )
+        );
+
+        progress.appendChild(cancelButton);
+        host.appendChild(progress);
+    }
+
+    const places = new Map();
+
+    for (const place of Object.values(state.places || {})) {
+        if (place?.id) places.set(place.id, place);
+    }
+
+    for (const step of Object.values(state.travelSteps || {})) {
+        if (step?.event !== 'point_of_interest' || !step.site?.id) {
+            continue;
+        }
+
+        if (!places.has(step.site.id)) {
+            places.set(step.site.id, {
+                id: step.site.id,
+                label: 'Uncharted point of interest',
+                zone: step.site.zone
+            });
+        }
+    }
+
+    host.appendChild(
+        makeAethermoorSection(
+            'KNOWN PLACES',
+            places.size
+                ? [...places.values()].map(place =>
+                    `• ${place.label} (Zone ${place.zone})`
+                ).join('\n')
+                : 'None recorded.',
+            'world'
+        )
+    );
+
+    const leads = Object.values(state.leads || {});
+    const rumors = leads.filter(lead => lead?.kind === 'rumor');
+    const otherLeads = leads.filter(lead => lead?.kind !== 'rumor');
+
+    host.appendChild(
+        makeAethermoorSection(
+            'RUMORS',
+            rumors.length
+                ? rumors.map(lead =>
+                    `• ${lead.claim || lead.label || lead.id}`
+                ).join('\n')
+                : 'None recorded.',
+            'world'
+        )
+    );
+
+    host.appendChild(
+        makeAethermoorSection(
+            'OTHER LEADS',
+            otherLeads.length
+                ? otherLeads.map(lead =>
+                    `• ${lead.claim || lead.label || lead.id}`
+                ).join('\n')
+                : 'None recorded.',
+            'world'
+        )
+    );
+
+    const actions = document.createElement('div');
+    actions.className = 'aethermoor-ui-actions';
+
+    if (!state.currentJourney) {
+        const destinations = new Map();
+
+        for (const lead of leads) {
+            if (
+                lead?.status === 'known' &&
+                lead.targetType === 'place' &&
+                state.places?.[lead.targetId]
+            ) {
+                destinations.set(lead.targetId, {
+                    label: state.places[lead.targetId].label,
+                    leadId: lead.id
+                });
+            }
+        }
+
+        for (const item of Object.values(world.settlements || {})) {
+            if (item.locationId === currentLocationId) continue;
+
+            destinations.set(item.locationId, {
+                label: item.label,
+                destinationId: item.locationId
+            });
+        }
+
+        for (const [destinationId, destination] of destinations) {
+            const route = shortestRoute(state, destinationId);
+            if (!route || route.totalSegments <= 0) continue;
+
+            actions.appendChild(
+                makeAethermoorAction(
+                    `Travel to ${destination.label} ` +
+                    `(${route.totalSegments} segments)`,
+                    'world',
+                    () => {
+                        const journeyCase = {
+                            name: 'start_world_journey',
+                            kind: 'journey',
+                            action: 'start'
+                        };
+
+                        if (destination.leadId) {
+                            journeyCase.leadId = destination.leadId;
+                        } else {
+                            journeyCase.destinationId = destinationId;
+                        }
+
+                        return runAethermoorPanelCase(
+                            host,
+                            'world',
+                            journeyCase,
+                            `Journey started toward ${destination.label}.`
+                        );
+                    }
+                )
+            );
+        }
+    }
+
+    for (const lead of rumors) {
+        if (
+            lead.status === 'known' &&
+            lead.targetId === currentLocationId
+        ) {
+            actions.appendChild(
+                makeAethermoorAction(
+                    `Investigate: ${
+                        state.places[lead.targetId]?.label ||
+                        lead.targetId
+                    }`,
+                    'world',
+                    () => runAethermoorPanelCase(
+                        host,
+                        'world',
+                        {
+                            name: 'investigate_world_rumor',
+                            kind: 'investigate_lead',
+                            leadId: lead.id
+                        },
+                        'Rumor investigated.'
+                    )
+                )
+            );
+        }
+    }
+
+    if (actions.childElementCount > 0) {
+        const actionSection = document.createElement('section');
+        actionSection.className = 'aethermoor-ui-section';
+        actionSection.dataset.accent = 'world';
+
+        const heading = document.createElement('div');
+        heading.className = 'aethermoor-ui-heading';
+        heading.textContent = 'DESTINATIONS & ACTIONS';
+
+        actionSection.append(heading, actions);
+        host.appendChild(actionSection);
+    }
 }
 
 function renderAethermoorTab(tab) {

@@ -267,24 +267,17 @@ function ensureWorldRecords(state) {
         const geography = WORLD_GEOGRAPHY[profile];
         assert(geography, `Unknown geography profile: ${profile}`);
 
-        const root = worldChoice(
-            world, `zone-root:${number}`, WORLD_NAME_ROOTS
-        );
-        const zoneName = ZONE_NAMES[number] ||
-            `${root} ${worldChoice(
-                world, `zone-word:${number}`, geography.zoneWords
-            )}`;
-
+        // Existing campaign names remain presentation labels.
+        // New regions use neutral labels; the narrator may name them.
+        const zoneName = ZONE_NAMES[number] || `Zone ${number}`;
         const settlementId = `settlement-z${number}-primary`;
 
-        // Keep existing route IDs so current saves and journeys survive.
+        // Keep route IDs stable for existing saves and journeys.
         const locationId = `outpost-z${number}`;
-        const settlementName = override.settlementName ||
-            `${worldChoice(
-                world, `settlement-root:${number}`, WORLD_NAME_ROOTS
-            )}${worldChoice(
-                world, `settlement-word:${number}`, geography.settlementWords
-            )}`;
+        const settlementName =
+            override.settlementName ||
+            `Primary settlement, Zone ${number}`;
+
 
         world.zones[number] = {
             id: `zone-${number}`,
@@ -292,7 +285,11 @@ function ensureWorldRecords(state) {
             name: zoneName,
             levelRange: [5 * number - 4, 5 * number],
             primarySettlementId: settlementId,
+            nameSource: override.settlementNameEstablished
+                ? 'established'
+                : 'mechanical_label',
             regionStart:
+
                 previous?.geography.profile === profile
                     ? previous.regionStart
                     : number,
@@ -341,6 +338,14 @@ function ensureWorldRecords(state) {
             reputationKey: campId
         };
         changed = true;
+    }
+    state.reputation ||= {};
+
+    for (const settlement of Object.values(world.settlements)) {
+        state.reputation[settlement.reputationKey] ||= {
+            tier: 'Unknown',
+            steps: 0
+        };
     }
 
     return changed;
@@ -5259,6 +5264,9 @@ function registerQuestDestination(state, quest) {
         quest.facts?.place ||
         quest.facts?.wreck;
 
+        const destinationLabel =
+        label || `Quest destination, Zone ${quest.seed.zone}`;
+
     assert(
         typeof label === 'string' && label.length > 0,
         'Quest has no named destination'
@@ -5292,7 +5300,7 @@ function registerQuestDestination(state, quest) {
     state.leads[leadId] ||= {
         id: leadId,
         kind: 'quest',
-        label: `${quest.title}: ${label}`,
+        label: `${quest.title}: ${destinationLabel}`,
         claim: quest.pitch,
         targetType: 'place',
         targetId: placeId,
@@ -9165,7 +9173,7 @@ function resolveBatch(args) {
 
                     assert(
                         repTier,
-                        `No saved reputation tier for ${town}`
+                        `No saved reputation tier for ${issuer.label}`
                     );
 
                     const inquiry = resolveWorldSeeds({

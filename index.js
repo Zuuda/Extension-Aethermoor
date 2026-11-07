@@ -14008,10 +14008,12 @@ async function renderWorldTab(host) {
     const settlement = zone
         ? world.settlements?.[zone.primarySettlementId]
         : null;
+
     const currentLocationId =
         state.currentLocationId ||
         settlement?.locationId ||
         routeNodeId(state.zone, 'outpost');
+
     const currentPlace =
         state.places?.[currentLocationId] ||
         Object.values(world.settlements || {}).find(
@@ -14041,30 +14043,24 @@ async function renderWorldTab(host) {
             'world'
         );
 
-        const cancelButton = makeAethermoorAction(
-            'Cancel Journey',
-            'world',
-            () => runAethermoorPanelCase(
-                host,
+        progress.appendChild(
+            makeAethermoorAction(
+                'Cancel Journey',
                 'world',
-                {
-                    name: 'cancel_journey',
-                    kind: 'journey',
-                    action: 'cancel'
-                },
-                'Journey cancelled.'
+                () => runAethermoorPanelCase(
+                    host,
+                    'world',
+                    {
+                        name: 'cancel_journey',
+                        kind: 'journey',
+                        action: 'cancel'
+                    },
+                    'Journey cancelled.'
+                )
             )
         );
 
-        progress.appendChild(cancelButton);
         host.appendChild(progress);
-    }
-
-    function displayKey(label, zone) {
-        return `${zone}:${String(label || '')
-            .trim()
-            .replace(/\s+/g, ' ')
-            .toLocaleLowerCase()}`;
     }
 
     const places = new Map();
@@ -14072,7 +14068,12 @@ async function renderWorldTab(host) {
     function addPlace(place) {
         if (!place?.id) return;
 
-        const key = displayKey(place.label, place.zone);
+        const key =
+            `${place.zone}:${String(place.label || '')
+                .trim()
+                .replace(/\s+/g, ' ')
+                .toLocaleLowerCase()}`;
+
         const existing = places.get(key);
 
         if (!existing) {
@@ -14089,7 +14090,6 @@ async function renderWorldTab(host) {
         addPlace(place);
     }
 
-    // Include sites discovered before the places collection existed.
     for (const step of Object.values(state.travelSteps || {})) {
         if (step?.event !== 'point_of_interest' || !step.site?.id) {
             continue;
@@ -14121,6 +14121,7 @@ async function renderWorldTab(host) {
 
     const leads = Object.values(state.leads || {}).filter(lead => {
         if (!lead || lead.status !== 'known') return false;
+
         if (
             lead.testOnly ||
             lead.id?.startsWith('debug-destination-')
@@ -14135,7 +14136,7 @@ async function renderWorldTab(host) {
 
         if (lead.kind === 'quest_return') {
             return hasLiveQuest &&
-                activeQuest.objectiveResolution &&
+                Boolean(activeQuest.objectiveResolution) &&
                 lead.id === `quest-return-${activeQuest.id}`;
         }
 
@@ -14145,20 +14146,23 @@ async function renderWorldTab(host) {
     const rumors = leads.filter(lead => lead.kind === 'rumor');
     const otherLeads = leads.filter(lead => lead.kind !== 'rumor');
 
-    function uniqueLeadLines(items) {
+    function leadLines(items) {
         const seen = new Set();
         const lines = [];
 
         for (const lead of items) {
             const target = state.places?.[lead.targetId];
-            const key = displayKey(
-                lead.claim || lead.label || lead.id,
-                target?.zone ?? state.zone
-            );
+            const zoneNumber = target?.zone ?? state.zone;
+            const text = lead.claim || lead.label || lead.id;
+            const key =
+                `${zoneNumber}:${String(text)
+                    .trim()
+                    .replace(/\s+/g, ' ')
+                    .toLocaleLowerCase()}`;
 
             if (seen.has(key)) continue;
             seen.add(key);
-            lines.push(`• ${lead.claim || lead.label || lead.id}`);
+            lines.push(`• ${text}`);
         }
 
         return lines.length ? lines.join('\n') : 'None recorded.';
@@ -14167,7 +14171,7 @@ async function renderWorldTab(host) {
     host.appendChild(
         makeAethermoorSection(
             'RUMORS',
-            uniqueLeadLines(rumors),
+            leadLines(rumors),
             'world'
         )
     );
@@ -14175,7 +14179,7 @@ async function renderWorldTab(host) {
     host.appendChild(
         makeAethermoorSection(
             'OTHER LEADS',
-            uniqueLeadLines(otherLeads),
+            leadLines(otherLeads),
             'world'
         )
     );
@@ -14186,12 +14190,15 @@ async function renderWorldTab(host) {
     if (!state.currentJourney) {
         const destinations = new Map();
 
-        function addDestination(locationId, label, zone, leadId = null) {
+        function addDestination(locationId, label, destinationZone, leadId = null) {
             const route = shortestRoute(state, locationId);
             if (!route || route.totalSegments <= 0) return;
 
-            // Different quest records can point to the same named site.
-            const key = `${zone}:${String(label).trim().toLocaleLowerCase()}`;
+            const key =
+                `${destinationZone}:${String(label)
+                    .trim()
+                    .toLocaleLowerCase()}`;
+
             const previous = destinations.get(key);
 
             if (
@@ -14201,7 +14208,7 @@ async function renderWorldTab(host) {
                 destinations.set(key, {
                     locationId,
                     label,
-                    zone,
+                    zone: destinationZone,
                     leadId,
                     route
                 });
@@ -14210,14 +14217,13 @@ async function renderWorldTab(host) {
 
         for (const lead of leads) {
             if (
-                lead?.status !== 'known' ||
-                lead.targetType !== 'place'
+                lead.targetType !== 'place' ||
+                !state.places?.[lead.targetId]
             ) {
                 continue;
             }
 
-            const place = state.places?.[lead.targetId];
-            if (!place) continue;
+            const place = state.places[lead.targetId];
 
             addDestination(
                 place.id,
@@ -14233,12 +14239,11 @@ async function renderWorldTab(host) {
             addDestination(
                 settlement.locationId,
                 settlement.label,
-                settlement.zone,
-                null
+                settlement.zone
             );
         }
 
-              for (const destination of destinations.values()) {
+        for (const destination of destinations.values()) {
             actions.appendChild(
                 makeAethermoorAction(
                     `Travel to ${destination.label} ` +
@@ -14273,15 +14278,12 @@ async function renderWorldTab(host) {
 
     for (const lead of rumors) {
         if (
-            lead.status === 'known' &&
-            lead.targetId === currentLocationId
+            lead.targetId === currentLocationId &&
+            state.places?.[lead.targetId]
         ) {
             actions.appendChild(
                 makeAethermoorAction(
-                    `Investigate: ${
-                        state.places[lead.targetId]?.label ||
-                        lead.targetId
-                    }`,
+                    `Investigate: ${state.places[lead.targetId].label}`,
                     'world',
                     () => runAethermoorPanelCase(
                         host,

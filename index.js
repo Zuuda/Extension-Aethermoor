@@ -12577,6 +12577,408 @@ function createWorldController() {
     composer.insertBefore(button, composer.firstChild);
 }
 
+/*
+ * AETHERMOOR UI DESIGN TEMPLATE
+ *
+ * The future unified panel should preserve this visual language:
+ *
+ * <section class="aethermoor-panel">
+ *   <header class="aethermoor-panel-header">
+ *     <b>AETHERMOOR</b>
+ *     <button title="Close">×</button>
+ *   </header>
+ *
+ *   <nav class="aethermoor-tabs">
+ *     <button class="active">Combat</button>
+ *     <button>Quests</button>
+ *     <button>World</button>
+ *   </nav>
+ *
+ *   <main class="aethermoor-panel-content">
+ *     <section class="aethermoor-section">
+ *       <header class="aethermoor-section-header">
+ *         <b>System Log // Combat Telemetry</b>
+ *       </header>
+ *       <div class="aethermoor-section-body"></div>
+ *     </section>
+ *   </main>
+ * </section>
+ *
+ * Palette:
+ * - Panel background: #12161c
+ * - Panel border: #2b3542
+ * - Inner divider: #1f2730
+ * - Primary text: #d0d7de
+ * - Muted text: #9caab8
+ * - Combat: #ef4444
+ * - Quest: #d99b26
+ * - Discovery / World: #4da6ff
+ * - Success: #4ade80
+ * - Rare / diagnostics: #c084fc
+ * - Attention / telegraph: #ffd166
+ *
+ * Keep page surfaces unframed. Use framed sections only for the actual
+ * tool surface, repeated logs, and modal-like interaction areas.
+ */
+
+let aethermoorPanelElement = null;
+let aethermoorPanelOpen = false;
+let aethermoorActiveTab = 'combat';
+
+function addAethermoorPanelStyles() {
+    if (document.getElementById('aethermoor_panel_styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'aethermoor_panel_styles';
+
+    style.textContent = `
+        .aethermoor-panel {
+            position: fixed;
+            right: 16px;
+            bottom: 82px;
+            z-index: 10001;
+            width: min(520px, calc(100vw - 24px));
+            max-height: min(78vh, 720px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            color: #d0d7de;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-radius: 3px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+        }
+
+        .aethermoor-panel[hidden] {
+            display: none;
+        }
+
+        .aethermoor-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 12px;
+            border-bottom: 1px solid #1f2730;
+            background: #101419;
+        }
+
+        .aethermoor-panel-title {
+            color: #4da6ff;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .aethermoor-panel-close {
+            min-width: 28px;
+            padding: 3px 8px;
+            color: #9caab8;
+            background: transparent;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+        }
+
+        .aethermoor-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 7px 8px 0;
+            background: #101419;
+            border-bottom: 1px solid #1f2730;
+        }
+
+        .aethermoor-tab {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 7px 8px;
+            color: #9caab8;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            border-bottom: 0;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .aethermoor-tab[data-tab="combat"].active {
+            color: #ffffff;
+            border-top: 2px solid #ef4444;
+        }
+
+        .aethermoor-tab[data-tab="quests"].active {
+            color: #ffffff;
+            border-top: 2px solid #d99b26;
+        }
+
+        .aethermoor-tab[data-tab="world"].active {
+            color: #ffffff;
+            border-top: 2px solid #4da6ff;
+        }
+
+        .aethermoor-panel-content {
+            min-height: 150px;
+            overflow: auto;
+            padding: 12px;
+        }
+
+        .aethermoor-tab-content {
+            display: grid;
+            gap: 10px;
+        }
+
+        .aethermoor-panel-card {
+            padding: 12px;
+            color: #d0d7de;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #4da6ff;
+        }
+
+        .aethermoor-panel-card[data-accent="combat"] {
+            border-left-color: #ef4444;
+        }
+
+        .aethermoor-panel-card[data-accent="quest"] {
+            border-left-color: #d99b26;
+        }
+
+        .aethermoor-panel-card[data-accent="world"] {
+            border-left-color: #4da6ff;
+        }
+
+        .aethermoor-panel-card-title {
+            margin-bottom: 6px;
+            color: #ffffff;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+        }
+
+        .aethermoor-panel-card-text {
+            color: #9caab8;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .aethermoor-panel-action {
+            width: 100%;
+            padding: 8px 10px;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .aethermoor-panel-action:hover,
+        .aethermoor-panel-action:focus-visible {
+            border-color: #4da6ff;
+            color: #ffffff;
+        }
+
+        #aethermoor_main_button {
+            border-left: 2px solid #4da6ff;
+        }
+
+        @media (max-width: 600px) {
+            .aethermoor-panel {
+                right: 8px;
+                bottom: 72px;
+                width: calc(100vw - 16px);
+                max-height: 72vh;
+            }
+
+            .aethermoor-tab {
+                padding-inline: 4px;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+}
+
+function makeAethermoorTabCard(accent, title, text, actionLabel, action) {
+    const card = document.createElement('section');
+    card.className = 'aethermoor-panel-card';
+    card.dataset.accent = accent;
+
+    const heading = document.createElement('div');
+    heading.className = 'aethermoor-panel-card-title';
+    heading.textContent = title;
+
+    const description = document.createElement('div');
+    description.className = 'aethermoor-panel-card-text';
+    description.textContent = text;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'aethermoor-panel-action';
+    button.textContent = actionLabel;
+    button.addEventListener('click', action);
+
+    card.append(heading, description, button);
+    return card;
+}
+
+function renderAethermoorTab(tab) {
+    const content =
+        aethermoorPanelElement.querySelector('.aethermoor-panel-content');
+
+    content.replaceChildren();
+
+    const tabContent = document.createElement('div');
+    tabContent.className = 'aethermoor-tab-content';
+
+    if (tab === 'combat') {
+        tabContent.appendChild(
+            makeAethermoorTabCard(
+                'combat',
+                'COMBAT CONTROLLER',
+                'Choose actions and resolve the saved encounter.',
+                'Open Combat Controls',
+                () => {
+                    aethermoorPanelElement.hidden = true;
+                    aethermoorPanelOpen = false;
+                    openCombatPanel();
+                }
+            )
+        );
+    }
+
+    if (tab === 'quests') {
+        tabContent.appendChild(
+            makeAethermoorTabCard(
+                'quest',
+                'QUEST CONTROL',
+                'View the active quest, current gate, delivery state, and available quest actions.',
+                'Open Quest Panel',
+                () => {
+                    aethermoorPanelElement.hidden = true;
+                    aethermoorPanelOpen = false;
+                    openQuestPanel();
+                }
+            )
+        );
+    }
+
+    if (tab === 'world') {
+        tabContent.appendChild(
+            makeAethermoorTabCard(
+                'world',
+                'WORLD CONTROL',
+                'View regions, known places, leads, rumors, and journeys.',
+                'Open World Panel',
+                () => {
+                    aethermoorPanelElement.hidden = true;
+                    aethermoorPanelOpen = false;
+                    openWorldPanel();
+                }
+            )
+        );
+    }
+
+    content.appendChild(tabContent);
+
+    for (const button of aethermoorPanelElement
+        .querySelectorAll('.aethermoor-tab')) {
+        button.classList.toggle(
+            'active',
+            button.dataset.tab === tab
+        );
+    }
+}
+
+function openAethermoorPanel() {
+    addAethermoorPanelStyles();
+
+    if (aethermoorPanelElement && aethermoorPanelOpen) {
+        aethermoorPanelElement.hidden = true;
+        aethermoorPanelOpen = false;
+        return;
+    }
+
+    if (!aethermoorPanelElement) {
+        const panel = document.createElement('section');
+        panel.className = 'aethermoor-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-label', 'Aethermoor');
+
+        const header = document.createElement('header');
+        header.className = 'aethermoor-panel-header';
+
+        const title = document.createElement('div');
+        title.className = 'aethermoor-panel-title';
+        title.textContent = 'AETHERMOOR';
+
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'aethermoor-panel-close';
+        close.textContent = 'Close';
+        close.addEventListener('click', () => {
+            panel.hidden = true;
+            aethermoorPanelOpen = false;
+        });
+
+        header.append(title, close);
+
+        const tabs = document.createElement('nav');
+        tabs.className = 'aethermoor-tabs';
+
+        for (const [tab, label] of [
+            ['combat', 'Combat'],
+            ['quests', 'Quests'],
+            ['world', 'World']
+        ]) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'aethermoor-tab';
+            button.dataset.tab = tab;
+            button.textContent = label;
+            button.addEventListener('click', () => {
+                aethermoorActiveTab = tab;
+                renderAethermoorTab(tab);
+            });
+            tabs.appendChild(button);
+        }
+
+        const content = document.createElement('main');
+        content.className = 'aethermoor-panel-content';
+
+        panel.append(header, tabs, content);
+        document.body.appendChild(panel);
+        aethermoorPanelElement = panel;
+    }
+
+    aethermoorPanelElement.hidden = false;
+    aethermoorPanelOpen = true;
+    renderAethermoorTab(aethermoorActiveTab);
+}
+
+function createAethermoorController() {
+    if (document.getElementById('aethermoor_main_button')) return;
+
+    const composer = document.querySelector('#send_form');
+
+    if (!composer) {
+        console.warn(
+            'Aethermoor: chat composer not found; main button not added'
+        );
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.id = 'aethermoor_main_button';
+    button.type = 'button';
+    button.className = 'menu_button';
+    button.textContent = 'Aethermoor';
+    button.title = 'Open Aethermoor controls';
+    button.addEventListener('click', openAethermoorPanel);
+
+    composer.insertBefore(button, composer.firstChild);
+}
+
 function createCombatController() {
     const button = document.createElement('button');
     button.id = 'aethermoor_combat_button';
@@ -14209,26 +14611,10 @@ jQuery(function () {
     }
 
     try {
-        createCombatController();
+        createAethermoorController();
     } catch (error) {
         console.error(
-            'Aethermoor: Combat controller initialization failed',
-            error
-        );
-    }
-        try {
-        createWorldController();
-    } catch (error) {
-        console.error(
-            'Aethermoor: World controller initialization failed',
-            error
-        );
-    }
-        try {
-        createQuestController();
-    } catch (error) {
-        console.error(
-            'Aethermoor: Quest controller initialization failed',
+            'Aethermoor: Main controller initialization failed',
             error
         );
     }

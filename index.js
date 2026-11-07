@@ -12834,64 +12834,36 @@ function makeAethermoorTabCard(accent, title, text, actionLabel, action) {
     return card;
 }
 
-function renderAethermoorTab(tab) {
+let aethermoorTabViews = null;
+
+function ensureAethermoorTabViews() {
+    if (aethermoorTabViews) return aethermoorTabViews;
+
     const content =
         aethermoorPanelElement.querySelector('.aethermoor-panel-content');
 
     content.replaceChildren();
 
-    const tabContent = document.createElement('div');
-    tabContent.className = 'aethermoor-tab-content';
+    aethermoorTabViews = {};
 
-    if (tab === 'combat') {
-        tabContent.appendChild(
-            makeAethermoorTabCard(
-                'combat',
-                'COMBAT CONTROLLER',
-                'Choose actions and resolve the saved encounter.',
-                'Open Combat Controls',
-                () => {
-                    aethermoorPanelElement.hidden = true;
-                    aethermoorPanelOpen = false;
-                    openCombatPanel();
-                }
-            )
-        );
+    for (const tab of ['combat', 'quests', 'world']) {
+        const view = document.createElement('section');
+        view.className = 'aethermoor-tab-view';
+        view.dataset.tab = tab;
+        view.hidden = true;
+        content.appendChild(view);
+        aethermoorTabViews[tab] = view;
     }
 
-    if (tab === 'quests') {
-        tabContent.appendChild(
-            makeAethermoorTabCard(
-                'quest',
-                'QUEST CONTROL',
-                'View the active quest, current gate, delivery state, and available quest actions.',
-                'Open Quest Panel',
-                () => {
-                    aethermoorPanelElement.hidden = true;
-                    aethermoorPanelOpen = false;
-                    openQuestPanel();
-                }
-            )
-        );
-    }
+    return aethermoorTabViews;
+}
 
-    if (tab === 'world') {
-        tabContent.appendChild(
-            makeAethermoorTabCard(
-                'world',
-                'WORLD CONTROL',
-                'View regions, known places, leads, rumors, and journeys.',
-                'Open World Panel',
-                () => {
-                    aethermoorPanelElement.hidden = true;
-                    aethermoorPanelOpen = false;
-                    openWorldPanel();
-                }
-            )
-        );
-    }
+function renderAethermoorTab(tab) {
+    const views = ensureAethermoorTabViews();
 
-    content.appendChild(tabContent);
+    for (const [name, view] of Object.entries(views)) {
+        view.hidden = name !== tab;
+    }
 
     for (const button of aethermoorPanelElement
         .querySelectorAll('.aethermoor-tab')) {
@@ -12900,7 +12872,16 @@ function renderAethermoorTab(tab) {
             button.dataset.tab === tab
         );
     }
+
+    if (tab === 'combat') {
+        openCombatPanel(views.combat);
+    } else if (tab === 'quests') {
+        renderQuestTab(views.quests);
+    } else if (tab === 'world') {
+        renderWorldTab(views.world);
+    }
 }
+
 
 const AETHERMOOR_PANEL_GEOMETRY_KEY =
     'aethermoorMainPanelGeometry';
@@ -13458,6 +13439,24 @@ function addCombatPanelStyles() {
             justify-content: flex-end;
             gap: 8px;
             margin-top: 12px;
+                    .aethermoor-panel-content .aethermoor-combat-panel-inline {
+            position: relative;
+            inset: auto;
+            width: 100%;
+            height: auto;
+            min-width: 0;
+            min-height: 0;
+            max-width: none;
+            max-height: none;
+            resize: none;
+            overflow: visible;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
+        }
+
         }
         @media (max-width: 600px) {
             .aethermoor-combat-panel {
@@ -13745,10 +13744,10 @@ function saveCombatPanelGeometry(panel) {
     }
 }
 
-async function openCombatPanel() {
-    addCombatPanelStyles();
+async function openCombatPanel(inlineHost = null) {
 
-    if (combatPanelElement && combatPanelOpen) {
+    addCombatPanelStyles();
+    if (!inlineHost && combatPanelElement && combatPanelOpen) {
         combatPanelElement.hidden = true;
         combatPanelOpen = false;
         return;
@@ -13776,10 +13775,14 @@ async function openCombatPanel() {
 
     if (!combatPanelElement) {
         combatPanelElement = document.createElement('section');
-        combatPanelElement.className = 'aethermoor-combat-panel';
+        combatPanelElement.className = inlineHost
+            ? 'aethermoor-combat-panel aethermoor-combat-panel-inline'
+            : 'aethermoor-combat-panel';
         combatPanelElement.setAttribute('role', 'region');
         combatPanelElement.setAttribute('aria-label', 'Aethermoor Combat');
-                document.body.appendChild(combatPanelElement);
+                                (inlineHost || document.body)
+                    .appendChild(combatPanelElement);
+
         restoreCombatPanelGeometry(combatPanelElement);
 
         combatPanelElement.addEventListener('pointerup', () => {
@@ -13791,6 +13794,15 @@ async function openCombatPanel() {
     }
 
     const panel = combatPanelElement;
+        if (inlineHost && panel.parentElement !== inlineHost) {
+        inlineHost.appendChild(panel);
+    }
+
+    if (inlineHost) {
+        panel.hidden = false;
+        combatPanelOpen = false;
+    }
+
     panel.replaceChildren();
     panel.hidden = false;
     combatPanelOpen = true;

@@ -6247,9 +6247,9 @@ function resolveQuestSeed(test) {
         },
         gates,
         gatesData: questGatesData,
+        structureV2,
         status: 'offered',
         seed,
-
         pitch: authored.pitch,
         facts: authored.facts,
 

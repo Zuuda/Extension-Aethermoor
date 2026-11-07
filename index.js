@@ -13162,6 +13162,35 @@ async function renderQuestTab(host) {
         return;
     }
 
+    if (
+        quest.status === 'offered' &&
+        quest.seed?.testOnly === true
+    ) {
+        host.appendChild(
+            makeAethermoorSection(
+                'TEST QUEST',
+                'This debug offer can be retired without accepting it or granting rewards.',
+                'quest'
+            )
+        );
+
+        host.appendChild(
+            makeAethermoorAction(
+                'Debug: Retire Test Quest',
+                'quest',
+                () => runAethermoorPanelCase(
+                    host,
+                    'quests',
+                    {
+                        name: 'debug_retire_test_quest',
+                        kind: 'debug_retire_test_quest'
+                    },
+                    'Test quest retired without rewards.'
+                )
+            )
+        );
+    }
+
     const summary = makeAethermoorSection(
         quest.status === 'offered'
             ? 'QUEST OFFER'

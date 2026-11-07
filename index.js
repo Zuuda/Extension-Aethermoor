@@ -13499,36 +13499,64 @@ async function renderWorldTab(host) {
     if (!state.currentJourney) {
         const destinations = new Map();
 
-        for (const lead of leads) {
+        function addDestination(locationId, label, zone, leadId = null) {
+            const route = shortestRoute(state, locationId);
+            if (!route || route.totalSegments <= 0) return;
+
+            // Different quest records can point to the same named site.
+            const key = `${zone}:${String(label).trim().toLocaleLowerCase()}`;
+            const previous = destinations.get(key);
+
             if (
-                lead?.status === 'known' &&
-                lead.targetType === 'place' &&
-                state.places?.[lead.targetId]
+                !previous ||
+                route.totalSegments < previous.route.totalSegments
             ) {
-                destinations.set(lead.targetId, {
-                    label: state.places[lead.targetId].label,
-                    leadId: lead.id
+                destinations.set(key, {
+                    locationId,
+                    label,
+                    zone,
+                    leadId,
+                    route
                 });
             }
         }
 
-        for (const item of Object.values(world.settlements || {})) {
-            if (item.locationId === currentLocationId) continue;
+        for (const lead of leads) {
+            if (
+                lead?.status !== 'known' ||
+                lead.targetType !== 'place'
+            ) {
+                continue;
+            }
 
-            destinations.set(item.locationId, {
-                label: item.label,
-                destinationId: item.locationId
-            });
+            const place = state.places?.[lead.targetId];
+            if (!place) continue;
+
+            addDestination(
+                place.id,
+                place.label,
+                place.zone,
+                lead.id
+            );
         }
 
-        for (const [destinationId, destination] of destinations) {
-            const route = shortestRoute(state, destinationId);
-            if (!route || route.totalSegments <= 0) continue;
+        for (const settlement of Object.values(world.settlements || {})) {
+            if (settlement.locationId === currentLocationId) continue;
 
+            addDestination(
+                settlement.locationId,
+                settlement.label,
+                settlement.zone,
+                null
+            );
+        }
+
+              for (const destination of destinations.values()) {
             actions.appendChild(
                 makeAethermoorAction(
                     `Travel to ${destination.label} ` +
-                    `(${route.totalSegments} segments)`,
+                    `(Zone ${destination.zone}; ` +
+                    `${destination.route.totalSegments} segments)`,
                     'world',
                     () => {
                         const journeyCase = {
@@ -13540,7 +13568,8 @@ async function renderWorldTab(host) {
                         if (destination.leadId) {
                             journeyCase.leadId = destination.leadId;
                         } else {
-                            journeyCase.destinationId = destinationId;
+                            journeyCase.destinationId =
+                                destination.locationId;
                         }
 
                         return runAethermoorPanelCase(

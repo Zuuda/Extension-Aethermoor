@@ -4413,7 +4413,6 @@ function shortestRoute(state, destinationId) {
         );
     }
     position ||= {
-    position ||= {
         nodeId: state.currentLocationId || routeNodeId(zone, 'outpost')
     };
 

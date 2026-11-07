@@ -231,8 +231,12 @@ function ensureWorldRecords(state) {
 
     int(state.zone, 'world zone', 1);
 
-    // Generate only through the current zone, plus the original five.
-    const lastZone = Math.max(5, state.zone);
+    /*
+     * Keep the current zone plus one upcoming zone available so the
+     * next primary-settlement route exists before the crew reaches it.
+     * The extra zone is world metadata only; it does not move the crew.
+     */
+    const lastZone = Math.max(5, state.zone + 1);
 
     for (let number = 1; number <= lastZone; number++) {
         if (world.zones[number]) continue;
@@ -352,6 +356,64 @@ function ensureWorldRecords(state) {
                 tier: 'Unknown',
                 steps: 0
             };
+            changed = true;
+        }
+    }
+
+        /*
+     * Connect neighboring primary settlements. These are abstract travel
+     * segments, not time estimates. Existing edges are never replaced.
+     */
+    state.routeEdges ||= [];
+
+    assert(
+        Array.isArray(state.routeEdges),
+        'state.routeEdges must be an array'
+    );
+
+    const generatedZoneNumbers =
+        Object.keys(world.zones)
+            .map(Number)
+            .filter(Number.isInteger)
+            .sort((a, b) => a - b);
+
+    for (const number of generatedZoneNumbers) {
+        const nextNumber = number + 1;
+
+        if (!world.zones[nextNumber]) continue;
+
+        const fromSettlement =
+            world.settlements[
+                world.zones[number].primarySettlementId
+            ];
+
+        const toSettlement =
+            world.settlements[
+                world.zones[nextNumber].primarySettlementId
+            ];
+
+        if (!fromSettlement || !toSettlement) continue;
+
+        const exists = state.routeEdges.some(edge =>
+            (
+                edge.fromId === fromSettlement.locationId &&
+                edge.toId === toSettlement.locationId
+            ) ||
+            (
+                edge.fromId === toSettlement.locationId &&
+                edge.toId === fromSettlement.locationId
+            )
+        );
+
+        if (!exists) {
+            state.routeEdges.push({
+                fromId: fromSettlement.locationId,
+                toId: toSettlement.locationId,
+                length: 3,
+                kind: 'zone_transition',
+                fromZone: number,
+                toZone: nextNumber
+            });
             changed = true;
         }
     }
@@ -4399,6 +4461,55 @@ function resolveJourneyAction(test) {
     };
 }
 
+function applyArrivalLocation(state, locationId, outcome) {
+    state.world ||= {};
+    state.world.settlements ||= {};
+
+    const settlement = Object.values(
+        state.world.settlements
+    ).find(entry => entry.locationId === locationId);
+
+    if (!settlement) {
+        return state;
+    }
+
+    const previousZone = state.zone;
+
+    state.zone = settlement.zone;
+    state.currentLocationId = locationId;
+    state.currentPosition = { nodeId: locationId };
+
+    if (previousZone !== settlement.zone) {
+        const previousZoneRecord =
+            state.world.zones?.[previousZone];
+
+        const nextZoneRecord =
+            state.world.zones?.[settlement.zone];
+
+        outcome.zoneTransition = {
+            fromZone: previousZone,
+            toZone: settlement.zone,
+            fromRegion:
+                previousZoneRecord?.name ||
+                `Zone ${previousZone}`,
+            toRegion:
+                nextZoneRecord?.name ||
+                `Zone ${settlement.zone}`,
+            fromGeography:
+                previousZoneRecord?.geography?.description ||
+                null,
+            toGeography:
+                nextZoneRecord?.geography?.description ||
+                null,
+            transitionFrom:
+                nextZoneRecord?.geography?.transitionFrom ||
+                null
+        };
+    }
+
+    return state;
+}
+
 function completeQuestArrivalGate(state, outcome) {
     const quest = state.activeQuest;
 
@@ -4574,6 +4685,13 @@ function resolveTravelStep(test) {
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
         state.currentPosition = { nodeId: journey.destinationId };
+
+        state = applyArrivalLocation(
+            state,
+            journey.destinationId,
+            arrival
+        );
+
         state = completeQuestArrivalGate(state, arrival);
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
@@ -4761,6 +4879,12 @@ function resolveTravelStep(test) {
             outcome.arrived = true;
             state.currentJourney = null;
             journey.status = 'arrived';
+
+            state = applyArrivalLocation(
+                state,
+                journey.destinationId,
+                outcome
+            );
         }
 
         outcome.journey = clone(journey);
@@ -9835,6 +9959,17 @@ function travelNarrationPacket(result) {
             `The quest is eligible for delivery to ` +
                 `${result.deliveryReady.recipient}.`,
             'Do not complete the quest mechanically until the fictional handoff occurs.'
+        );
+    }
+        if (result.zoneTransition) {
+        const transition = result.zoneTransition;
+
+        lines.push(
+            `The crew entered Zone ${transition.toZone}: ` +
+                `${transition.toRegion}.`,
+            `The terrain changed from ${transition.fromGeography || 'the previous region'} ` +
+                `toward ${transition.toGeography || 'the next region'}.`,
+            'Describe the geographic transition gradually. Do not treat the zone change as a teleport.'
         );
     }
 

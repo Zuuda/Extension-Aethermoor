@@ -13773,17 +13773,28 @@ async function readStoredCombatState() {
 
 function combatStatusText(state) {
     const encounter = state.encounter;
-    const stats = derived(state.crew);
 
     if (!encounter) {
         return 'No saved encounter.';
     }
 
+    const living = encounter.foes
+        .map((foe, index) => ({
+            foe,
+            label: combatFoeLabel(foe, index)
+        }))
+        .filter(({ foe }) => foe.hp > 0);
+
+    const roster = living.length
+        ? living.map(({ foe, label }) =>
+            `${label} ${foe.hp}/${foe.maxHp} HP`
+        ).join('   •   ')
+        : 'No living foes.';
+
     return [
-        `Turn ${encounter.turn} · ${encounter.status}`,
-        `Q'tik ${state.crew.qtik.hp}/${stats.qtikMaxHp} HP`,
-        `Tansy ${state.crew.tansy.hp}/${stats.tansyMaxHp} HP`
-    ].join('   •   ');
+        `${encounter.id} · Turn ${encounter.turn} · ${encounter.status}`,
+        roster
+    ].join('\n');
 }
 
 let combatPanelElement = null;
@@ -14667,7 +14678,6 @@ async function openCombatPanel(inlineHost = null) {
             tansyGroup.querySelector('legend').textContent =
                 `Tansy (${refreshed.state.crew.tansy.hp}/` +
                 `${derived(refreshed.state.crew).tansyMaxHp} HP)`;
-
 
             const refreshedEncounter = refreshed.state.encounter;
             const refreshedLiving = (refreshedEncounter?.foes || [])

@@ -9916,7 +9916,6 @@ function resolveBatch(args) {
                         prepareMissingCargoDiscovery(state) ||
                         prepareSunkenSalvageDiscovery(state) ||
                         prepareV2QuestDiscoveries(state);
-                        prepareSunkenSalvageDiscovery(state);
 
                     assert(
                         discovery,

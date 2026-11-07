@@ -9299,6 +9299,76 @@ function resolveBatch(args) {
                     break;
                 }
 
+                                    case 'debug_create_settlement_lead': {
+                    const state = clone(test.state);
+                    const settlementId = test.settlementId;
+
+                    assert(
+                        typeof settlementId === 'string',
+                        'Settlement lead requires settlementId'
+                    );
+
+                    const settlement = Object.values(
+                        state.world?.settlements || {}
+                    ).find(item => item.id === settlementId);
+
+                    assert(
+                        settlement,
+                        `Unknown settlement: ${settlementId}`
+                    );
+
+                    assert(
+                        settlement.locationId !== state.currentLocationId,
+                        'Crew is already at that settlement'
+                    );
+
+                    const targetZone = state.world.zones?.[settlement.zone];
+
+                    assert(
+                        targetZone,
+                        `Settlement ${settlement.label} has no saved zone`
+                    );
+
+                    state.places ||= {};
+                    state.leads ||= {};
+
+                    state.places[settlement.locationId] ||= {
+                        id: settlement.locationId,
+                        label: settlement.label,
+                        zone: settlement.zone,
+                        settlementId: settlement.id,
+                        kind: 'settlement',
+                        visited: false
+                    };
+
+                    const leadId =
+                        `debug-destination-${settlement.id}`;
+
+                    state.leads[leadId] ||= {
+                        id: leadId,
+                        kind: 'destination',
+                        label: `Debug route: ${settlement.label}`,
+                        claim:
+                            `Test route to the primary settlement of ` +
+                            `${targetZone.name}.`,
+                        targetType: 'place',
+                        targetId: settlement.locationId,
+                        status: 'known',
+                        testOnly: true
+                    };
+
+                    result = {
+                        ok: true,
+                        action: 'debug_create_settlement_lead',
+                        leadId,
+                        settlementId: settlement.id,
+                        settlementLabel: settlement.label,
+                        zone: settlement.zone,
+                        state
+                    };
+                    break;
+                }
+
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
@@ -11343,6 +11413,7 @@ function registerTools() {
                                     'social',
                                     'loot',
                                     'cleanup_test_data',
+                                    'debug_create_settlement_lead',
                                     'debug_create_quest_offer',
                                     'debug_create_quest_breadcrumb',
                                     'follow_breadcrumb',

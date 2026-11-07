@@ -5180,6 +5180,67 @@ function rollQuestTerminalThreat(state, rank, zone) {
     };
 }
 
+/*
+ * QUEST ARCHITECTURE — AGREED DIRECTION
+ *
+ * The extension exists because narrator LLMs have invented mechanics,
+ * ignored supplied stats, and introduced unauthorized encounters.
+ * Preserve the boundary below when extending the quest system.
+ *
+ * ENGINE RESPONSIBILITY
+ * - Decide whether a quest exists, its rank, gate count, objective family,
+ *   travel segments, rewards, target IDs, and completion requirements.
+ * - Select a COMPLETE, compatible quest structure for that gate count.
+ * - Every structure must include its decisive objective. Never shorten
+ *   a quest by slicing off its final steps: a two-gate retrieval quest
+ *   must still require retrieving its target.
+ * - Own all encounters, stats, abilities, telegraphs, RNG, and payouts.
+ * - Spawn quest-linked encounters from engine progression, not from
+ *   narrator invention.
+ * - Lock quest structure and mechanical facts when generated.
+ *
+ * NARRATOR RESPONSIBILITY
+ * - Dress the current engine-established scene using the world context:
+ *   creature appearance, architecture, dialogue, atmosphere, and action.
+ * - Do not author additional mandatory gates, items, NPC requirements,
+ *   encounters, abilities, rewards, or success conditions.
+ * - Creature appearance is not a mechanical ability grant.
+ * - Receive concise instructions for the CURRENT stage rather than an
+ *   invitation to design the intermediate quest.
+ *
+ * LIMITED NARRATIVE HANDSHAKE
+ * - The narrator may interpret natural-language actions and report an
+ *   eligible authored discovery or delivery using exact protocol tags.
+ * - The engine validates IDs, location, prerequisites, current gate, and
+ *   state transitions. Tags do not supply numbers, rewards, or objectives.
+ * - This is a deliberate, limited trust boundary, not proof that the LLM
+ *   adjudicated the fiction correctly.
+ * - Keep existing gameplay/debug mechanics available, but avoid exposing
+ *   unrestricted state-mutating tools to the ordinary narrator when a
+ *   UI/controller can perform those operations directly.
+ *
+ * VARIETY WITHOUT AN EXHAUSTIVE BIOME MATRIX
+ * - Prefer reusable objective families and compatible stage structures:
+ *   arrival, discovery, linked combat, and delivery.
+ * - Let the narrator supply setting-appropriate presentation without
+ *   requiring a catalog of every castle, cave, church, or floating city.
+ * - Authored hidden objects and discovery conditions must still exist in
+ *   engine data; the narrator must not invent mandatory puzzles mid-quest.
+ *
+ * IMPLEMENTATION STATUS
+ * - This comment records the agreed design, not a completed refactor.
+ * - The catalog below still contains setting-specific scenarios.
+ * - buildAuthoredQuestGates() still uses slice(0, gateCount); replace that
+ *   behavior with complete structures in a subsequent implementation.
+ * - Begin the refactor with retrieve-item and defeat-elite objectives,
+ *   reusing the existing travel, discovery, combat, and delivery systems.
+ *
+ * BETA POLICY
+ * Use this division for now. During beta testing, tighten specific failure
+ * points based on observed behavior instead of adding speculative protocol
+ * complexity or handing quest design back to the narrator.
+ */
+
 const QUEST_ARCHETYPES = [
     {
         id: 'missing_cargo',

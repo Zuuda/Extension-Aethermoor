@@ -14949,960 +14949,103 @@ function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
     wrapper.appendChild(legend);
 
     const choices = document.createElement('div');
-    choices.className = 'aethermoor-combat-choices';
+    let syncResolveAvailability = () => {};
 
-    for (const option of options) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'menu_button aethermoor-combat-choice';
-        button.dataset.group = groupName;
-        button.dataset.value = option.value;
-        button.setAttribute(
-            'aria-pressed',
-            String(option.value === selectedValue)
-        );
+    let qtikPotionGroup =
+        makePotionChoiceGroup('qtik', state);
 
-        const title = document.createElement('span');
-        title.className = 'aethermoor-combat-choice-title';
-        title.textContent = option.label;
-        button.appendChild(title);
+    let tansyPotionGroup =
+        makePotionChoiceGroup('tansy', state);
 
-        if (option.detail) {
-            const detail = document.createElement('span');
-            detail.className = 'aethermoor-combat-choice-detail';
-            detail.textContent = option.detail;
-            button.appendChild(detail);
-        }
+    const updatePotionGroupVisibility = () => {
+        qtikPotionGroup.hidden =
+            combatSelections.qtik !== 'drink';
 
-        if (option.telegraph) {
-            const telegraph = document.createElement('span');
-            telegraph.className =
-                'aethermoor-combat-choice-telegraph';
-            telegraph.textContent = `[${option.telegraph}]`;
-            button.appendChild(telegraph);
-        }
+        tansyPotionGroup.hidden =
+            combatSelections.tansy !== 'drink';
 
-        button.addEventListener('click', () => {
-            onSelect(option.value);
-
-            for (const sibling of choices.querySelectorAll('button')) {
-                sibling.setAttribute(
-                    'aria-pressed',
-                    String(sibling === button)
-                );
-            }
-        });
-
-        choices.appendChild(button);
-    }
-
-    wrapper.appendChild(choices);
-    return wrapper;
-}
-
-function addCombatPanelStyles() {
-    if (document.getElementById('aethermoor_combat_styles')) return;
-
-    const style = document.createElement('style');
-    style.id = 'aethermoor_combat_styles';
-    style.textContent = `
-        .aethermoor-combat-panel {
-            position: fixed;
-            left: auto;
-            top: auto;
-            right: 16px;
-            bottom: 82px;
-            z-index: 10000;
-            width: 420px;
-            height: 540px;
-            min-width: 300px;
-            min-height: 300px;
-            max-width: calc(100vw - 24px);
-            max-height: calc(100vh - 24px);
-            overflow: auto;
-            resize: both;
-            padding: 14px;
-            color: var(--SmartThemeBodyColor, #eee);
-            background: var(--SmartThemeBlurTintColor, #20242a);
-            border: 1px solid var(--SmartThemeBorderColor, #666);
-            border-radius: 6px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-        }
-        .aethermoor-combat-panel[hidden] {
-            display: none;
-        }
-        .aethermoor-combat-controls {
-            position: sticky;
-            top: -14px;
-            z-index: 2;
-            padding: 8px 0;
-            background: var(--SmartThemeBlurTintColor, #20242a);
-            border-bottom: 1px solid var(--SmartThemeBorderColor, #666);
-        }
-        .aethermoor-combat-result {
-            max-height: 180px;
-            overflow: auto;
-        }
-
-        .aethermoor-combat-panel h3 {
-            margin: 0;
-        }
-        .aethermoor-combat-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin: -2px -2px 12px;
-            padding: 2px;
-            cursor: move;
-            user-select: none;
-            touch-action: none;
-        }
-        .aethermoor-combat-header button {
-            cursor: pointer;
-        }
-        .aethermoor-combat-status,
-        .aethermoor-combat-result {
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.22);
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.92em;
-        }
-        .aethermoor-combat-choice-group {
-            min-width: 0;
-            margin: 12px 0;
-            padding: 0;
-            border: 0;
-        }
-        .aethermoor-combat-choice-group legend {
-            margin-bottom: 6px;
-            font-weight: 700;
-        }
-        .aethermoor-combat-choices {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        .aethermoor-combat-panel .aethermoor-combat-choice {
-            display: inline-flex;
-            flex: 0 0 auto;
-            width: auto;
-            min-width: 90px;
-            max-width: 100%;
-            height: auto;
-            padding: 8px 12px;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
-            text-align: center;
-            white-space: normal;
-            word-break: normal;
-            overflow-wrap: normal;
-            line-height: 1.25;
-        }
-        .aethermoor-combat-choice-title,
-        .aethermoor-combat-choice-detail {
-            white-space: nowrap;
-        }
-        .aethermoor-combat-choice-telegraph {
-            white-space: normal;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-combat-choice[aria-pressed="true"] {
-            outline: 2px solid var(--SmartThemeQuoteColor, #4ade80);
-            outline-offset: 1px;
-            filter: brightness(1.2);
-        }
-        .aethermoor-combat-choice-detail {
-            font-size: 0.9em;
-            opacity: 0.85;
-        }
-        .aethermoor-combat-choice-telegraph {
-            margin-top: 2px;
-            color: var(--SmartThemeEmColor, #f0c674);
-            font-size: 0.85em;
-            font-weight: 700;
-        }
-        .aethermoor-combat-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-            margin-top: 12px;
-        }
-
-        .aethermoor-panel-content .aethermoor-combat-panel-inline {
-            position: static;
-            inset: auto;
-            width: 100%;
-            height: auto;
-            min-width: 0;
-            min-height: 0;
-            max-width: none;
-            max-height: none;
-            resize: none;
-            overflow: visible;
-            padding: 0;
-            border: 0;
-            border-radius: 0;
-            box-shadow: none;
-            background: transparent;
-        }
-
-        }
-        @media (max-width: 600px) {
-            .aethermoor-combat-panel {
-                right: 8px;
-                bottom: 72px;
-                width: calc(100vw - 16px);
-                height: min(70vh, 540px);
-                min-width: 0;
-                resize: both;
-            }
-        }
-    `;
-
-    /*
-     * Combat now lives directly in a tab-view. Do not depend on the old
-     * floating-panel wrapper for button layout or target typography.
-     */
-    style.textContent += `
-        .aethermoor-tab-view[data-tab="combat"] {
-            min-width: 0;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-status {
-            margin: 0;
-            color: #9caab8;
-            font-size: 11px;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-controls {
-            position: static;
-            min-width: 0;
-            background: transparent;
-            padding: 0;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            min-width: 0;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        button.aethermoor-combat-choice {
-            display: inline-flex;
-            flex: 0 0 auto;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            width: auto;
-            min-width: 90px;
-            max-width: 100%;
-            height: auto;
-            padding: 9px 12px;
-            text-align: center;
-            white-space: normal;
-            word-break: normal;
-            overflow-wrap: normal;
-            line-height: 1.3;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        button.aethermoor-combat-choice[data-group="target"] {
-            flex: 1 1 200px;
-            min-width: min(200px, 100%);
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-title,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-detail {
-            display: block;
-            width: 100%;
-            text-align: center;
-            white-space: nowrap;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-telegraph {
-            display: block;
-            width: 100%;
-            color: #ffd166;
-            white-space: normal;
-            word-break: normal;
-            overflow-wrap: normal;
-            font-size: 11px;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        button.aethermoor-combat-choice:disabled {
-            opacity: 0.35;
-            cursor: not-allowed;
-            filter: none;
-            outline: none;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-result {
-            max-height: 240px;
-            overflow: auto;
-            margin: 10px 0 0;
-        }
-    `;
-
-    document.head.appendChild(style);
-}
-
-function enableCombatPanelDragging(header, panel) {
-
-    header.addEventListener('pointerdown', event => {
-        if (
-            event.button !== 0 ||
-            event.target.closest('button')
-        ) {
-            return;
-        }
-
-        event.preventDefault();
-
-        const rect = panel.getBoundingClientRect();
-        const offsetX = event.clientX - rect.left;
-        const offsetY = event.clientY - rect.top;
-        const pointerId = event.pointerId;
-
-        panel.style.left = `${rect.left}px`;
-        panel.style.top = `${rect.top}px`;
-        panel.style.right = 'auto';
-        panel.style.bottom = 'auto';
-
-        header.setPointerCapture(pointerId);
-
-        function movePanel(moveEvent) {
-            if (moveEvent.pointerId !== pointerId) return;
-
-            const maxLeft = Math.max(
-                0,
-                window.innerWidth - panel.offsetWidth
-            );
-            const maxTop = Math.max(
-                0,
-                window.innerHeight - panel.offsetHeight
-            );
-
-            panel.style.left = `${Math.max(
-                0,
-                Math.min(maxLeft, moveEvent.clientX - offsetX)
-            )}px`;
-
-            panel.style.top = `${Math.max(
-                0,
-                Math.min(maxTop, moveEvent.clientY - offsetY)
-            )}px`;
-        }
-
-        function stopMoving(stopEvent) {
-            if (stopEvent.pointerId !== pointerId) return;
-
-            header.removeEventListener('pointermove', movePanel);
-            header.removeEventListener('pointerup', stopMoving);
-            header.removeEventListener('pointercancel', stopMoving);
-            header.removeEventListener('lostpointercapture', stopMoving);
-
-            if (header.hasPointerCapture(pointerId)) {
-                header.releasePointerCapture(pointerId);
-                saveCombatPanelGeometry(panel);
-            }
-        }
-
-        header.addEventListener('pointermove', movePanel);
-        header.addEventListener('pointerup', stopMoving);
-        header.addEventListener('pointercancel', stopMoving);
-        header.addEventListener('lostpointercapture', stopMoving);
-    });
-}
-
-function formatCombatTurnResult(result) {
-    const roster = result.summary?.encounter?.foes || [];
-    const foeNames = new Map(
-        roster.map((foe, index) => [
-            foe.id,
-            combatFoeLabel(foe, index)
-        ])
-    );
-    const foeName = id => foeNames.get(id) || id;
-
-    const lines = [
-        `Turn ${result.turn} resolved.`,
-        ''
-    ];
-
-        for (const [owner, use] of Object.entries(result.itemUse || {})) {
-        const character =
-            owner === 'qtik' ? "Q'tik" : 'Tansy';
-        const itemName =
-            CONSUMABLE_CATALOG[use.item]?.name ||
-            use.item;
-
-        if (use.effect === 'heal') {
-            lines.push(
-                `${character} used ${itemName}: ` +
-                `healed ${use.healed} HP ` +
-                `(${use.hp}/${use.maxHp} HP).`
-            );
-        } else if (use.effect === 'cleanse') {
-            lines.push(
-                `${character} used ${itemName}: ` +
-                `removed ${use.stacksRemoved} debuff stack(s).`
-            );
-        }
-    }
-
-    for (const exchange of result.exchanges || []) {
-        lines.push(`Exchange ${exchange.exchange}:`);
-
-        if (exchange.hits?.length) {
-            for (const hit of exchange.hits) {
-                lines.push(
-                    `- ${foeName(hit.id)}: ${hit.damage} damage, ` +
-                    `${hit.hp} HP remaining`
-                );
-            }
-        } else {
-            lines.push(`- Crew dealt ${exchange.damage} damage.`);
-        }
-
-        if (exchange.enemyMiss === true) {
-            lines.push('- Enemy attack missed.');
-        }
-
-        if (exchange.frontlineDamage > 0) {
-            lines.push(
-                `- Enemy pack dealt ${exchange.frontlineDamage} ` +
-                `damage to Q'tik.`
-            );
-        }
-
-        if (exchange.backlineDamage > 0) {
-            lines.push(
-                `- Enemies dealt ${exchange.backlineDamage} ` +
-                `damage to Tansy.`
-            );
-        }
-
-        if (exchange.effectiveRegen > 0) {
-            lines.push(
-                `- Q'tik regenerated ${exchange.effectiveRegen} HP.`
-            );
-        }
-
-        for (const effect of exchange.effects || []) {
-            lines.push(`- ${effect}`);
-        }
-
-        lines.push(
-            `- HP: Q'tik ${exchange.qtikHp}; ` +
-            `Tansy ${exchange.tansyHp}.`
-        );
-        lines.push('');
-    }
-
-    for (const kill of result.kills || []) {
-        lines.push(
-            `Slain: ${foeName(kill.id)} ` +
-            `(${kill.role}, Lv ${kill.level}).`
-        );
-    }
-
-    for (const effect of result.turnEffects || []) {
-        lines.push(`Turn effect: ${effect}.`);
-    }
-
-    for (const levelUp of result.levelUps || []) {
-        lines.push(
-            `Level up: crew reached Lv ${levelUp.level} ` +
-            `(${levelUp.xpRemaining}/${levelUp.nextXp} XP).`
-        );
-    }
-
-    if (result.rewards?.applied) {
-        lines.push(
-            `Encounter rewards: ${result.rewards.xp} XP, ` +
-            `${result.rewards.silver}s.`
-        );
-
-        for (const item of result.rewards.loot || []) {
-            lines.push(
-                `Loot: ${item.name} (${item.rarity}).`
-            );
-        }
-
-        const drop = result.rewards.packDrop;
-
-        if (drop?.result === 'auto_salvage_only') {
-            lines.push('Pack drop: no additional loot.');
-        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
-            lines.push(
-                'Pack drop: quest breadcrumb discovered.'
-            );
-        }
-    } else if (result.packCleared) {
-        lines.push(
-            'The encounter was cleared, but no encounter rewards ' +
-            'were applied.'
-        );
-    } else {
-        lines.push('Encounter rewards have not been applied.');
-    }
-
-    if (result.summary) {
-        lines.push(
-            '',
-            `Current state: Lv ${result.summary.level} ` +
-            `(${result.summary.xp}/${result.summary.nextXp} XP), ` +
-            `Q'tik ${result.summary.qtikHp}/` +
-            `${result.summary.qtikMaxHp} HP, ` +
-            `Tansy ${result.summary.tansyHp}/` +
-            `${result.summary.tansyMaxHp} HP, ` +
-            `revision ${result.summary.revision}.`
-        );
-
-        const living = (result.summary.encounter?.foes || [])
-            .filter(foe => foe.hp > 0);
-
-        lines.push(
-            living.length
-                ? `Living foes: ${living.map(foe => {
-                    const originalIndex = roster.findIndex(
-                        entry => entry.id === foe.id
-                    );
-
-                    return (
-                        `${combatFoeLabel(foe, originalIndex)} ` +
-                        `at ${foe.hp}/${foe.maxHp} HP`
-                    );
-                }).join('; ')}.`
-                : 'No foes remain alive.'
-        );
-    }
-
-    return lines.join('\n');
-}
-
-const COMBAT_PANEL_GEOMETRY_KEY = 'aethermoorCombatPanelGeometry';
-
-function restoreCombatPanelGeometry(panel) {
-    try {
-        const saved = JSON.parse(
-            localStorage.getItem(COMBAT_PANEL_GEOMETRY_KEY) || 'null'
-        );
-
-        if (
-            !saved ||
-            !Number.isFinite(saved.left) ||
-            !Number.isFinite(saved.top) ||
-            !Number.isFinite(saved.width) ||
-            !Number.isFinite(saved.height)
-        ) {
-            return;
-        }
-
-        const width = Math.max(
-            300,
-            Math.min(saved.width, window.innerWidth - 24)
-        );
-        const height = Math.max(
-            300,
-            Math.min(saved.height, window.innerHeight - 24)
-        );
-
-        panel.style.left =
-            `${Math.max(0, Math.min(saved.left, window.innerWidth - width))}px`;
-        panel.style.top =
-            `${Math.max(0, Math.min(saved.top, window.innerHeight - height))}px`;
-        panel.style.right = 'auto';
-        panel.style.bottom = 'auto';
-        panel.style.width = `${width}px`;
-        panel.style.height = `${height}px`;
-    } catch (error) {
-        console.warn('Aethermoor: Could not restore combat panel geometry', error);
-    }
-}
-
-function saveCombatPanelGeometry(panel) {
-    const rect = panel.getBoundingClientRect();
-
-    try {
-        localStorage.setItem(
-            COMBAT_PANEL_GEOMETRY_KEY,
-            JSON.stringify({
-                left: rect.left,
-                top: rect.top,
-                width: rect.width,
-                height: rect.height
-            })
-        );
-    } catch (error) {
-        console.warn('Aethermoor: Could not save combat panel geometry', error);
-    }
-}
-
-async function openCombatPanel(inlineHost = null) {
-
-    addCombatPanelStyles();
-    assert(
-        inlineHost instanceof HTMLElement,
-        'Combat must render inside the Aethermoor Combat tab'
-    );
-
-    let snapshot;
-
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        toastr.error(
-            error instanceof Error ? error.message : String(error),
-            'Aethermoor'
-        );
-        return;
-    }
-
-    const state = snapshot.state;
-    const encounter = state.encounter;
-
-    markCombatViewRendered(snapshot);
-
-    if (!combatSelections.target && encounter) {
-
-        combatSelections.target =
-            encounter.foes.find(foe => foe.hp > 0)?.id || null;
-    }
-
-    const panel = inlineHost;
-    panel.replaceChildren();
-    panel.hidden = false;
-    combatPanelOpen = true;
-    const status = document.createElement('pre');
-
-    status.className = 'aethermoor-combat-status';
-    status.textContent = combatStatusText(state);
-
-    const resultBox = document.createElement('pre');
-    resultBox.className = 'aethermoor-combat-result';
-
-    const hasRetainedLog =
-        aethermoorLastCombatLogKey === combatLogKey(state) &&
-        aethermoorLastCombatLog.length > 0;
-
-    resultBox.hidden = !hasRetainedLog;
-    resultBox.textContent = hasRetainedLog
-        ? aethermoorLastCombatLog
-        : '';
-
-    panel.append(status);
-    if (encounter?.status === 'spotted') {
-        const message = document.createElement('p');
-        message.textContent =
-            'The encounter has been spotted. Generate the discovery scene, ' +
-            'then choose whether to engage.';
-        panel.appendChild(message);
-
-        const actionsRow = document.createElement('div');
-        actionsRow.className = 'aethermoor-combat-actions';
-
-        const engageButton = document.createElement('button');
-        engageButton.type = 'button';
-        engageButton.className = 'menu_button';
-        engageButton.textContent = 'Engage';
-
-        engageButton.addEventListener('click', async () => {
-            engageButton.disabled = true;
-
-            try {
-                const result = await runStoredMechanic({
-                    cases: [{
-                        name: 'engage_spotted_encounter',
-                        kind: 'engage'
-                    }]
-                });
-
-                assert(result?.ok === true,
-                    result?.error || 'Could not engage encounter');
-
-                panel.hidden = true;
-                combatPanelOpen = false;
-                await renderAethermoorTab('combat');
-            } catch (error) {
-                toastr.error(
-                    error instanceof Error ? error.message : String(error),
-                    'Aethermoor'
-                );
-                engageButton.disabled = false;
-            }
-        });
-
-        actionsRow.appendChild(engageButton);
-                const avoidButton = document.createElement('button');
-        avoidButton.type = 'button';
-        avoidButton.className = 'menu_button';
-        avoidButton.textContent = 'Avoid';
-
-        avoidButton.addEventListener('click', async () => {
-            avoidButton.disabled = true;
-
-            try {
-                const output = await runStoredMechanic({
-                    cases: [{
-                        name: 'avoid_spotted_encounter',
-                        kind: 'avoid'
-                    }]
-                });
-
-                assert(
-                    output?.ok === true,
-                    output?.results?.[0]?.error ||
-                        'Could not avoid encounter'
-                );
-
-                const updated = await readStoredCombatState();
-                status.textContent = combatStatusText(
-                    updated.state,
-                    updated.revision
-                );
-
-                message.textContent =
-                    'Encounter avoided. Generate the next scene to narrate the escape.';
-                engageButton.remove();
-                avoidButton.remove();
-            } catch (error) {
-                toastr.error(
-                    error instanceof Error
-                        ? error.message
-                        : String(error),
-                    'Aethermoor'
-                );
-                avoidButton.disabled = false;
-            }
-        });
-
-        actionsRow.appendChild(avoidButton);
-        panel.appendChild(actionsRow);
-        return;
-    }
-
-    if (encounter?.status === 'cleared') {
-        const message = document.createElement('p');
-        message.textContent = 'This encounter is cleared.';
-        panel.append(message, resultBox);
-
-        const breadcrumbAvailable =
-            encounter.questSeed?.result ===
-                'diegetic_quest_breadcrumb' &&
-            encounter.questSeedConsumed !== true;
-
-        if (breadcrumbAvailable) {
-            const followButton = document.createElement('button');
-            followButton.type = 'button';
-            followButton.className = 'menu_button';
-            followButton.textContent = 'Follow Breadcrumb';
-
-            followButton.addEventListener('click', async () => {
-                followButton.disabled = true;
-
-                try {
-                    const output = await runStoredMechanic({
-                        cases: [{
-                            name: 'follow_pack_breadcrumb',
-                            kind: 'follow_breadcrumb'
-                        }]
-                    });
-
-                    assert(
-                        output?.ok === true,
-                        output?.results?.[0]?.error ||
-                            'Could not follow breadcrumb'
-                    );
-
-                    const updated = await readStoredCombatState();
-                    status.textContent = combatStatusText(
-                        updated.state,
-                        updated.revision
-                    );
-
-                    message.textContent =
-                        'Quest lead opened. Generate the next scene ' +
-                        'to narrate the offer.';
-
-                    followButton.remove();
-                } catch (error) {
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor'
-                    );
-                    followButton.disabled = false;
-                }
-            });
-
-            panel.append(followButton);
-        }
-        const ordinaryPack =
-            encounter.type === 'normal_pack' ||
-            (
-                encounter.type === 'declared' &&
-                encounter.foes.every(foe =>
-                    ['brute', 'archer', 'mender', 'hexer', 'buffer']
-                        .includes(foe.role)
-                ) &&
-                !encounter.reinforcementLog?.length
-            );
-
-        const noActiveQuest =
-            !state.activeQuest ||
-            !['offered', 'in_progress'].includes(
-                state.activeQuest.status
-            );
-
-        if (
-            ordinaryPack &&
-            !encounter.questSeed &&
-            noActiveQuest
-        ) {
-            const testButton = document.createElement('button');
-            testButton.type = 'button';
-            testButton.className = 'menu_button';
-            testButton.textContent = 'Debug: Seed Test Breadcrumb';
-
-            testButton.addEventListener('click', async () => {
-                testButton.disabled = true;
-
-                try {
-                    const output = await runStoredMechanic({
-                        cases: [{
-                            name: 'debug_create_test_breadcrumb',
-                            kind: 'debug_create_quest_breadcrumb'
-                        }]
-                    });
-
-                    assert(
-                        output?.ok === true,
-                        output?.results?.[0]?.error ||
-                            'Could not seed test breadcrumb'
-                    );
-
-                    toastr.info(
-                        'Test breadcrumb seeded. Follow it to generate the authored quest.',
-                        'Aethermoor Debug'
-                    );
-
-                    panel.hidden = true;
-                    combatPanelOpen = false;
-                    await renderAethermoorTab('combat');
-                } catch (error) {
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor Debug'
-                    );
-                    testButton.disabled = false;
-                }
-            });
-
-            panel.appendChild(testButton);
-        }
-
-        return;
-    }
-    if (
-        !encounter ||
-        encounter.status !== 'active' ||
-        state.crew.qtik.hp <= 0 ||
-        state.crew.tansy.hp <= 0
-    ) {
-
-        const message = document.createElement('p');
-        message.textContent =
-            state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0
-                ? 'A crew member has fallen. Resolve death/respawn before continuing.'
-                : 'There is no active encounter to resolve.';
-
-        panel.append(message, resultBox);
-        return;
-    }
-
-    const livingFoes = encounter.foes
-
-        .map((foe, index) => ({
-            ...foe,
-            label: combatFoeLabel(foe, index)
-        }))
-        .filter(foe => foe.hp > 0);
-
-    if (!livingFoes.some(foe => foe.id === combatSelections.target)) {
-        combatSelections.target = livingFoes[0]?.id || null;
-    }
-
-    const choices = document.createElement('div');
+        syncResolveAvailability();
+    };
 
     const qtikGroup = makeChoiceGroup(
-        `Q'tik (${state.crew.qtik.hp}/${derived(state.crew).qtikMaxHp} HP)`,
+        `Q'tik (${state.crew.qtik.hp}/` +
+            `${derived(state.crew).qtikMaxHp} HP)`,
         'qtik',
         [
             { value: 'fire_melee', label: 'Fire Melee' },
             { value: 'ice_melee', label: 'Ice Melee' },
             { value: 'stun', label: 'Stun' },
             { value: 'ice_patch', label: 'Ice Patch' },
-            { value: 'frost_stomp', label: 'Frost Stomp' }
+            { value: 'frost_stomp', label: 'Frost Stomp' },
+            { value: 'drink', label: 'Drink Potion' }
         ],
         combatSelections.qtik,
-        value => { combatSelections.qtik = value; }
+        value => {
+            combatSelections.qtik = value;
+
+            if (value === 'drink') {
+                ensurePotionSelection('qtik', state);
+            }
+
+            updatePotionGroupVisibility();
+        }
     );
-    
+
     const tansyGroup = makeChoiceGroup(
-        `Tansy (${state.crew.tansy.hp}/${derived(state.crew).tansyMaxHp} HP)`,
+        `Tansy (${state.crew.tansy.hp}/` +
+            `${derived(state.crew).tansyMaxHp} HP)`,
         'tansy',
         [
             { value: 'visor', label: 'Visor' },
             { value: 'vitals', label: 'Vitals' },
             { value: 'hamstring', label: 'Hamstring' },
             { value: 'recall', label: 'Recall' },
-            { value: 'surge', label: 'Surge' }
+            { value: 'surge', label: 'Surge' },
+            { value: 'drink', label: 'Drink Potion' }
         ],
         combatSelections.tansy,
-        value => { combatSelections.tansy = value; }
+        value => {
+            combatSelections.tansy = value;
+
+            if (value === 'drink') {
+                ensurePotionSelection('tansy', state);
+            }
+
+            updatePotionGroupVisibility();
+        }
     );
 
-    let targetGroup = makeChoiceGroup(
+    const targetGroup = makeChoiceGroup(
         'Target',
         'target',
         livingFoes.map(foe => ({
             value: foe.id,
-            label: foe.name || foe.label,
+            label: combatFoeLabel(
+                foe,
+                encounter.foes.findIndex(
+                    item => item.id === foe.id
+                )
+            ),
             detail: `(${foe.hp}/${foe.maxHp} HP)`,
             telegraph: foe.nextTelegraph
                 ? telegraphLabel(foe.nextTelegraph)
                 : null
         })),
         combatSelections.target,
-        value => { combatSelections.target = value; }
+        value => {
+            combatSelections.target = value;
+        }
     );
 
-    choices.append(qtikGroup, tansyGroup, targetGroup);
+    choices.append(
+        qtikGroup,
+        qtikPotionGroup,
+        tansyGroup,
+        tansyPotionGroup,
+        targetGroup
+    );
+
+    updatePotionGroupVisibility();
 
     const actionsRow = document.createElement('div');
     actionsRow.className = 'aethermoor-combat-actions';

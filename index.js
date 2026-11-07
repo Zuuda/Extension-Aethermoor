@@ -769,6 +769,10 @@ function derived(crew) {
     return totals;
 }
 
+function migrateEncounterPotionUsage(encounter) {
+    normalizeEncounterPotionUses(encounter);
+}
+
 function validate(state) {
     assert(
         state &&
@@ -849,14 +853,7 @@ function validate(state) {
 
     state.inventory ||= {};
     normalizeConsumableInventory(state.inventory);
-
-    encounter.potionsUsed ||= 0;
-    int(encounter.potionsUsed, 'encounter.potionsUsed');
-    assert(
-        encounter.potionsUsed <= 4,
-        'At most four potions may be used per encounter'
-    );
-
+    migrateEncounterPotionUsage(encounter);
     assert(
         typeof encounter.id === 'string' &&
         encounter.id.length > 0,
@@ -1606,10 +1603,12 @@ function applyConsumableItem(state, item, recipient) {
 
     normalizeConsumableInventory(state.inventory);
 
-    encounter.potionsUsed ||= 0;
+    const potionUses =
+        normalizeEncounterPotionUses(encounter);
+
     assert(
-        encounter.potionsUsed < 4,
-        'Four potions have already been used this encounter'
+        potionUses[recipient] < 4,
+        `${recipient} has already used four potions this encounter`
     );
 
     const entry = state.inventory.consumables.find(
@@ -1627,7 +1626,10 @@ function applyConsumableItem(state, item, recipient) {
                 entry => entry.id !== item
             );
     }
-    encounter.potionsUsed += 1;
+    potionUses[recipient] += 1;
+    encounter.potionsUsed =
+        potionUses.qtik + potionUses.tansy;
+
 
     if (
         item === 'basic_health_potion' ||
@@ -14712,8 +14714,104 @@ function markCombatViewRendered(snapshot) {
     };
 }
 
+function normalizeEncounterPotionUses(encounter) {
+    if (!encounter.potionUsesByCharacter) {
+        const legacyTotal = Number(encounter.potionsUsed || 0);
+        int(legacyTotal, 'encounter.potionsUsed');
+        assert(
+            legacyTotal <= 4,
+            'Legacy shared potion-use count exceeds its old limit'
+        );
+
+        // Existing saves used one shared limit of four. Preserve that
+        // expenditure conservatively by assigning it to Q'tik.
+        encounter.potionUsesByCharacter = {
+            qtik: legacyTotal,
+            tansy: 0
+        };
+    }
+
+    const uses = encounter.potionUsesByCharacter;
+
+    assert(
+        uses && typeof uses === 'object' && !Array.isArray(uses),
+        'Potion-use counts must be an object'
+    );
+
+    uses.qtik = Number(uses.qtik || 0);
+    uses.tansy = Number(uses.tansy || 0);
+
+    int(uses.qtik, 'Q\'tik potion uses');
+    int(uses.tansy, 'Tansy potion uses');
+
+    assert(uses.qtik <= 4, "Q'tik has exceeded four potion uses");
+    assert(uses.tansy <= 4, 'Tansy has exceeded four potion uses');
+
+    // Keep the old total as a read-compatible summary.
+    encounter.potionsUsed = uses.qtik + uses.tansy;
+
+    return uses;
+}
+
+function potionOptionsFor(state) {
+    return (state.inventory?.consumables || [])
+        .filter(entry =>
+            entry &&
+            entry.quantity > 0 &&
+            CONSUMABLE_CATALOG[entry.id]
+        )
+        .map(entry => ({
+            value: entry.id,
+            label:
+                CONSUMABLE_CATALOG[entry.id].name ||
+                entry.name ||
+                entry.id,
+            detail: `${entry.quantity} in stock`
+        }));
+}
+
+function ensurePotionSelection(owner, state) {
+    const key = owner === 'qtik' ? 'qtikItem' : 'tansyItem';
+    const options = potionOptionsFor(state);
+
+    if (!options.some(option => option.value === combatSelections[key])) {
+        combatSelections[key] = options[0]?.value || null;
+    }
+
+    return options;
+}
+
+function makePotionChoiceGroup(owner, state) {
+    const isQtik = owner === 'qtik';
+    const key = isQtik ? 'qtikItem' : 'tansyItem';
+    const uses = normalizeEncounterPotionUses(state.encounter);
+    const options = ensurePotionSelection(owner, state);
+
+    const group = makeChoiceGroup(
+        `${isQtik ? "Q'tik" : 'Tansy'} potion ` +
+            `(${4 - uses[owner]} uses left)`,
+        key,
+        options,
+        combatSelections[key],
+        value => {
+            combatSelections[key] = value;
+        }
+    );
+
+    if (options.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'aethermoor-combat-choice-detail';
+        empty.textContent = 'No potions available.';
+        group.appendChild(empty);
+    }
+
+    return group;
+}
+
 function updateCombatAbilityButtons(panel, state) {
     const used = state.encounter?.used || {};
+    const potionUses =
+        normalizeEncounterPotionUses(state.encounter);
 
     if (used.stun && combatSelections.qtik === 'stun') {
         combatSelections.qtik = 'fire_melee';
@@ -14727,6 +14825,20 @@ function updateCombatAbilityButtons(panel, state) {
         combatSelections.tansy = 'visor';
     }
 
+    if (
+        potionUses.qtik >= 4 &&
+        combatSelections.qtik === 'drink'
+    ) {
+        combatSelections.qtik = 'fire_melee';
+    }
+
+    if (
+        potionUses.tansy >= 4 &&
+        combatSelections.tansy === 'drink'
+    ) {
+        combatSelections.tansy = 'visor';
+    }
+
     for (const button of panel.querySelectorAll(
         '.aethermoor-combat-choice[data-group="qtik"], ' +
         '.aethermoor-combat-choice[data-group="tansy"]'
@@ -14737,11 +14849,17 @@ function updateCombatAbilityButtons(panel, state) {
         const exhausted =
             (group === 'qtik' && value === 'stun' && used.stun) ||
             (group === 'qtik' && value === 'ice_patch' && used.icePatch) ||
-            (group === 'tansy' && value === 'surge' && used.surge);
+            (group === 'tansy' && value === 'surge' && used.surge) ||
+            (group === 'qtik' && value === 'drink' &&
+                potionUses.qtik >= 4) ||
+            (group === 'tansy' && value === 'drink' &&
+                potionUses.tansy >= 4);
 
         button.disabled = Boolean(exhausted);
         button.title = exhausted
-            ? 'Already used in this encounter'
+            ? value === 'drink'
+                ? 'This character has used four potions this encounter'
+                : 'Already used in this encounter'
             : '';
 
         button.setAttribute(
@@ -14805,51 +14923,100 @@ function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
     legend.textContent = label;
     wrapper.appendChild(legend);
 
-    const choices = document.createElement('div');
-    choices.className = 'aethermoor-combat-choices';
+     const choices = document.createElement('div');
+    let syncResolveAvailability = () => {};
 
-    for (const option of options) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'menu_button aethermoor-combat-choice';
-        button.dataset.group = groupName;
-        button.dataset.value = option.value;
-        button.setAttribute(
-            'aria-pressed',
-            String(option.value === selectedValue)
-        );
+    let qtikPotionGroup = makePotionChoiceGroup('qtik', state);
+    let tansyPotionGroup = makePotionChoiceGroup('tansy', state);
 
-        const title = document.createElement('span');
-        title.className = 'aethermoor-combat-choice-title';
-        title.textContent = option.label;
-        button.appendChild(title);
+    const updatePotionGroupVisibility = () => {
+        qtikPotionGroup.hidden =
+            combatSelections.qtik !== 'drink';
+        tansyPotionGroup.hidden =
+            combatSelections.tansy !== 'drink';
 
-        if (option.detail) {
-            const detail = document.createElement('span');
-            detail.className = 'aethermoor-combat-choice-detail';
-            detail.textContent = option.detail;
-            button.appendChild(detail);
-        }
+        syncResolveAvailability();
+    };
 
-        if (option.telegraph) {
-            const telegraph = document.createElement('span');
-            telegraph.className = 'aethermoor-combat-choice-telegraph';
-            telegraph.textContent = `[${option.telegraph}]`;
-            button.appendChild(telegraph);
-        }
+    const qtikGroup = makeChoiceGroup(
+        `Q'tik (${state.crew.qtik.hp}/` +
+            `${derived(state.crew).qtikMaxHp} HP)`,
+        'qtik',
+        [
+            { value: 'fire_melee', label: 'Fire Melee' },
+            { value: 'ice_melee', label: 'Ice Melee' },
+            { value: 'stun', label: 'Stun' },
+            { value: 'ice_patch', label: 'Ice Patch' },
+            { value: 'frost_stomp', label: 'Frost Stomp' },
+            { value: 'drink', label: 'Drink Potion' }
+        ],
+        combatSelections.qtik,
+        value => {
+            combatSelections.qtik = value;
 
-        button.addEventListener('click', () => {
-            onSelect(option.value);
-
-            for (const sibling of choices.querySelectorAll('button')) {
-                sibling.setAttribute(
-                    'aria-pressed',
-                    String(sibling === button)
-                );
+            if (value === 'drink') {
+                ensurePotionSelection('qtik', state);
             }
-        });
 
-        choices.appendChild(button);
+            updatePotionGroupVisibility();
+        }
+    );
+
+    const tansyGroup = makeChoiceGroup(
+        `Tansy (${state.crew.tansy.hp}/` +
+            `${derived(state.crew).tansyMaxHp} HP)`,
+        'tansy',
+        [
+            { value: 'visor', label: 'Visor' },
+            { value: 'vitals', label: 'Vitals' },
+            { value: 'hamstring', label: 'Hamstring' },
+            { value: 'recall', label: 'Recall' },
+            { value: 'surge', label: 'Surge' },
+            { value: 'drink', label: 'Drink Potion' }
+        ],
+        combatSelections.tansy,
+        value => {
+            combatSelections.tansy = value;
+
+            if (value === 'drink') {
+                ensurePotionSelection('tansy', state);
+            }
+
+            updatePotionGroupVisibility();
+        }
+    );
+
+    const targetGroup = makeChoiceGroup(
+        'Target',
+        'target',
+        livingFoes.map(foe => ({
+            value: foe.id,
+            label: foe.name || combatFoeLabel(
+                foe,
+                encounter.foes.findIndex(item => item.id === foe.id)
+            ),
+            detail: `(${foe.hp}/${foe.maxHp} HP)`,
+            telegraph: foe.nextTelegraph
+                ? telegraphLabel(foe.nextTelegraph)
+                : null
+        })),
+        combatSelections.target,
+        value => {
+            combatSelections.target = value;
+        }
+    );
+
+    choices.append(
+        qtikGroup,
+        qtikPotionGroup,
+        tansyGroup,
+        tansyPotionGroup,
+        targetGroup
+    );
+
+    updatePotionGroupVisibility();
+
+    choices.appendChild(button);
     }
 
     wrapper.appendChild(choices);
@@ -15205,6 +15372,27 @@ function formatCombatTurnResult(result) {
         `Turn ${result.turn} resolved.`,
         ''
     ];
+
+        for (const [owner, use] of Object.entries(result.itemUse || {})) {
+        const character =
+            owner === 'qtik' ? "Q'tik" : 'Tansy';
+        const itemName =
+            CONSUMABLE_CATALOG[use.item]?.name ||
+            use.item;
+
+        if (use.effect === 'heal') {
+            lines.push(
+                `${character} used ${itemName}: ` +
+                `healed ${use.healed} HP ` +
+                `(${use.hp}/${use.maxHp} HP).`
+            );
+        } else if (use.effect === 'cleanse') {
+            lines.push(
+                `${character} used ${itemName}: ` +
+                `removed ${use.stacksRemoved} debuff stack(s).`
+            );
+        }
+    }
 
     for (const exchange of result.exchanges || []) {
         lines.push(`Exchange ${exchange.exchange}:`);
@@ -15747,6 +15935,39 @@ async function openCombatPanel(inlineHost = null) {
     resolveButton.className = 'menu_button';
     resolveButton.textContent = 'Resolve Turn';
 
+        syncResolveAvailability = () => {
+        const inventoryOptions = potionOptionsFor(state);
+        const qtikUses =
+            normalizeEncounterPotionUses(state.encounter).qtik;
+        const tansyUses =
+            normalizeEncounterPotionUses(state.encounter).tansy;
+
+        const qtikDrinkReady =
+            combatSelections.qtik !== 'drink' ||
+            (
+                qtikUses < 4 &&
+                inventoryOptions.some(
+                    option =>
+                        option.value === combatSelections.qtikItem
+                )
+            );
+
+        const tansyDrinkReady =
+            combatSelections.tansy !== 'drink' ||
+            (
+                tansyUses < 4 &&
+                inventoryOptions.some(
+                    option =>
+                        option.value === combatSelections.tansyItem
+                )
+            );
+
+        resolveButton.disabled =
+            !qtikDrinkReady || !tansyDrinkReady;
+    };
+
+    syncResolveAvailability();
+
     resolveButton.addEventListener('click', async () => {
         if (aethermoorCombatBusy) return;
         aethermoorCombatBusy = true;
@@ -15755,14 +15976,21 @@ async function openCombatPanel(inlineHost = null) {
         resultBox.hidden = false;
         resultBox.textContent = 'Resolving combat turn…';
 
-        try {
-            const result = await runStoredMechanic({
-                actions: {
-                    qtik: combatSelections.qtik,
-                    tansy: combatSelections.tansy,
-                    target: combatSelections.target
-                }
-            });
+            const actions = {
+                qtik: combatSelections.qtik,
+                tansy: combatSelections.tansy,
+                target: combatSelections.target
+            };
+
+            if (actions.qtik === 'drink') {
+                actions.qtikItem = combatSelections.qtikItem;
+            }
+
+            if (actions.tansy === 'drink') {
+                actions.tansyItem = combatSelections.tansyItem;
+            }
+
+            const result = await runStoredMechanic({ actions });
 
             assert(
                 result?.ok === true,
@@ -15791,6 +16019,29 @@ async function openCombatPanel(inlineHost = null) {
                 `Tansy (${refreshed.state.crew.tansy.hp}/` +
                 `${derived(refreshed.state.crew).tansyMaxHp} HP)`;
 
+             const refreshedQtikPotionGroup =
+                makePotionChoiceGroup('qtik', refreshed.state);
+            const refreshedTansyPotionGroup =
+                makePotionChoiceGroup('tansy', refreshed.state);
+
+            refreshedQtikPotionGroup.hidden =
+                combatSelections.qtik !== 'drink';
+            refreshedTansyPotionGroup.hidden =
+                combatSelections.tansy !== 'drink';
+
+            qtikPotionGroup.replaceWith(
+                refreshedQtikPotionGroup
+            );
+            tansyPotionGroup.replaceWith(
+                refreshedTansyPotionGroup
+            );
+
+            qtikPotionGroup = refreshedQtikPotionGroup;
+            tansyPotionGroup = refreshedTansyPotionGroup;
+
+            updateCombatAbilityButtons(panel, refreshed.state);
+            syncResolveAvailability();
+       
             const refreshedEncounter = refreshed.state.encounter;
             const refreshedLiving = (refreshedEncounter?.foes || [])
                 .map((foe, index) => ({

@@ -14240,12 +14240,29 @@ async function renderWorldTab(host) {
                 continue;
             }
 
+            const knownPlace =
+                state.places?.[destinationSettlement.locationId];
+
+            const referencedByKnownLead = leads.some(
+                lead =>
+                    lead.status === 'known' &&
+                    lead.targetType === 'place' &&
+                    lead.targetId === destinationSettlement.locationId
+            );
+
+            // A generated settlement record is not, by itself,
+            // proof that the crew knows the place exists.
+            if (!knownPlace && !referencedByKnownLead) {
+                continue;
+            }
+
             addDestination(
                 destinationSettlement.locationId,
-                destinationSettlement.label,
-                destinationSettlement.zone
+                knownPlace?.label || destinationSettlement.label,
+                knownPlace?.zone || destinationSettlement.zone
             );
         }
+
 
         for (const destination of destinations.values()) {
             actions.appendChild(

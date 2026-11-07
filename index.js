@@ -6570,31 +6570,28 @@ function prepareV2QuestDiscoveries(state) {
                 'among the recent signs at the quest site',
             significance:
                 `The signs lead toward the lair of ` +
-                `${quest.facts?.target || 'the quest target'}.`
+                `${quest.structureV2.facts?.target ||
+                    'the quest target'}.`
         };
 
         quest.discoveries.push(discovery);
     }
 
-    const gate = quest.gatesData?.find(
-        item => item.stage === 'track'
+    const trackingGate = quest.gatesData.find(
+        gate => gate.stage === 'track'
     );
 
     assert(
-        gate,
+        trackingGate,
         'V2 Elite quest has no authored tracking gate'
     );
 
-    gate.discoveryIds ||= [];
-    if (!gate.discoveryIds.includes(id)) {
-        gate.discoveryIds.push(id);
-    }
+    trackingGate.requiredDiscoveryId = id;
+    trackingGate.requiredDiscoveryState = 'acquired';
 
-    if (quest.currentGate?.step === gate.step) {
-        quest.currentGate.discoveryIds ||= [];
-        if (!quest.currentGate.discoveryIds.includes(id)) {
-            quest.currentGate.discoveryIds.push(id);
-        }
+    if (quest.currentGate?.step === trackingGate.step) {
+        quest.currentGate.requiredDiscoveryId = id;
+        quest.currentGate.requiredDiscoveryState = 'acquired';
     }
 
     return discovery;
@@ -6992,7 +6989,12 @@ function resolveQuestAction(test) {
         registerQuestDestination(state, quest);
         quest.status = 'in_progress';
 
+        if (quest.structureV2?.family === 'defeat_elite') {
+            prepareV2QuestDiscoveries(state);
+        }
+
         return result;
+
     }
 
     if (test.action === 'decline') {

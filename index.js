@@ -13914,8 +13914,6 @@ function addAethermoorPanelStyles() {
     document.head.appendChild(style);
 }
 
-}
-
 function makeAethermoorTabCard(accent, title, text, actionLabel, action) {
     const card = document.createElement('section');
     card.className = 'aethermoor-panel-card';

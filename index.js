@@ -3464,6 +3464,63 @@ if (frontliners.length > 0) {
         }
     }
 
+        /*
+     * Resolve incapacitation automatically after the turn's exchanges.
+     * If all foes were defeated, normal victory/reward resolution takes
+     * precedence; otherwise the existing death penalty and respawn apply.
+     */
+    const fallenCrewMember =
+        c.qtik.hp <= 0
+            ? 'qtik'
+            : c.tansy.hp <= 0
+                ? 'tansy'
+                : null;
+
+    if (fallenCrewMember && live(s).length > 0) {
+        const deathResult = resolveDeathPenalty({
+            state: s
+        });
+
+        const deathState = deathResult.state;
+
+        return {
+            ok: true,
+            turn: deathState.encounter.turn,
+            rolls: tape,
+            flee: fleeing ? tape.flee : null,
+            itemUse,
+            exchanges: logs,
+            turnEffects: [
+                ...turnEffects,
+                `${fallenCrewMember} fell; death penalty and respawn applied`
+            ],
+            weaselsDestroyed,
+            momentum,
+            fodderBlitz,
+            kills,
+            rewards: {
+                xp: 0,
+                silver: 0,
+                applied: false,
+                resolved: false,
+                loot: [],
+                packDrop: null,
+                trophies: []
+            },
+            levelUps: [],
+            questGate: null,
+            packCleared: false,
+            death: {
+                fallenCrewMember,
+                xpLost: deathResult.xpLost,
+                respawned: deathResult.respawned,
+                encounterAbandoned: deathResult.encounterAbandoned
+            },
+            state: deathState,
+            derived: derived(deathState.crew)
+        };
+    }
+
     const encounterRewards = finalizeEncounterRewards(
         s,
         kills.map(kill => kill.id)
@@ -11286,6 +11343,23 @@ function combatNarrationPacket(result, actions) {
         drink: 'Drink',
         raise_shadow: 'Raise Shadow'
     };
+
+    /*Respawn rules: eventually the respawning should bring the protagonists back to the last 'respawn 
+    stone' which will be the main settlement of the zone. This is not done yet but will have to be 
+    implemented before the extension is considered done*/
+        if (result.death) {
+        lines.push(
+            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : "Tansy"} ` +
+            `fell during combat. The death penalty removed ` +
+            `${result.death.xpLost} XP; the crew respawned at full HP.`
+        );
+
+        if (result.death.encounterAbandoned) {
+            lines.push(
+                'The encounter was abandoned. No encounter rewards were paid.'
+            );
+        }
+    }
 
     const roster = result.summary?.encounter?.foes || [];
     const foeNames = new Map(

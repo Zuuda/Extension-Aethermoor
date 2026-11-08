@@ -13854,11 +13854,12 @@ function addAethermoorPanelStyles() {
         }
     `;
 
-    style.textContent += `
+     style.textContent += `
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices {
             display: flex !important;
-            flex-flow: row wrap;
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
             align-items: stretch;
             gap: 6px;
             min-width: 0;
@@ -13867,7 +13868,8 @@ function addAethermoorPanelStyles() {
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices > button.aethermoor-combat-choice {
             display: inline-flex !important;
-            flex: 0 1 auto;
+            visibility: visible !important;
+            flex: 0 0 auto !important;
             flex-direction: column;
             align-items: center;
             justify-content: center;
@@ -13877,6 +13879,7 @@ function addAethermoorPanelStyles() {
             height: auto !important;
             min-height: 42px;
             padding: 7px 10px;
+            opacity: 1;
             white-space: normal;
             text-align: center;
             line-height: 1.25;
@@ -13903,7 +13906,7 @@ function addAethermoorPanelStyles() {
 
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choice:disabled {
-            opacity: 0.35;
+            opacity: 0.35 !important;
             cursor: not-allowed;
         }
     `;

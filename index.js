@@ -15262,6 +15262,406 @@ function makeChoiceGroup(
     return wrapper;
 }
 
+function decorateAethermoorCombatControls(host, state) {
+    const crew = state.crew;
+    const encounter = state.encounter;
+    const stats = derived(crew);
+    const shadows = shadowMechanics(crew);
+    const summons = crew.weasels.active + shadows.slots;
+    const fire = Math.max(3, Math.floor(stats.atk / 5));
+    const hamstringReduction = Math.floor(summons / 6);
+    const vitalsPierce = Math.floor(summons / 2);
+
+    const descriptions = {
+        qtik: {
+            fire_melee:
+                `Adds ${fire} Fire damage per exchange ` +
+                `(max(3, floor(current derived ATK / 5))). ` +
+                `Recalculated if summons change. ATK debuffs do not ` +
+                `reduce this Fire bonus. Carapace can reflect it.`,
+
+            ice_melee:
+                'Adds +2 frontline DEF for this turn and reduces ' +
+                'Base Bleed by 1, with a minimum Base Bleed of 1.',
+
+            stun:
+                'Once per encounter. The stunned foe loses its first ' +
+                'exchange response and has DEF reduced by 4 × its Tier ' +
+                'for the turn. Cancels its current Elite/Boss telegraph. ' +
+                'A guarding Brute may intercept.',
+
+            ice_patch:
+                'Once per encounter. Enemies miss on rolls 1–3, or 1–4 ' +
+                'with Hamstring, for all three exchanges. Suppresses ' +
+                'Vitals summon-damage amplification.',
+
+            frost_stomp:
+                'Hits all living enemies each exchange. Base damage ' +
+                'is floor((effective Crew ATK − target DEF) / 2), ' +
+                'plus the player roll on successful rolls. Excess ' +
+                'damage spills forward. Interrupts ordinary specialists ' +
+                'in exchange 1 and bypasses Brute Guard.',
+
+            drink:
+                'Choose a stocked potion below. Four potions per ' +
+                'character per encounter, including cleansing tonics. ' +
+                'Healing/cleansing occurs before exchanges. Ordinary ' +
+                'attack rolls continue, but Fire/Ice action bonuses do not.'
+        },
+
+        tansy: {
+            visor:
+                'Bypasses Brute Guard. On enemy rolls 2–4, disrupts ' +
+                'the selected specialist action or Elite/Boss passive ' +
+                'stack application. It does not cancel the telegraph. ' +
+                `Enemy roll 1 grants Exposed: +${stats.luk} damage ` +
+                'on the next successful physical hit.',
+
+            vitals:
+                'Doubles loose-weasel and Shadow-Archer attack ' +
+                'contributions unless Ice Patch is used. Criticals on ' +
+                'player rolls 5–6. On rolls 2–4, adds damage up to ' +
+                `${vitalsPierce} target DEF, based on current summons.`,
+
+            hamstring:
+                'Enemies miss on rolls 1–2, or 1–4 with Ice Patch. ' +
+                `Currently reduces Base Bleed by ${hamstringReduction} ` +
+                '(floor(occupied summon slots / 6)), minimum 1. ' +
+                'Does not by itself bypass Guard on successful enemy rolls.',
+
+            recall:
+                'Removes loose-weasel attack participation and protects ' +
+                'them from Carapace/Cleave destruction. Shadow-Archer ' +
+                'attack remains; Hexer/Warder attack does not contribute. ' +
+                'Q’tik still attacks and can take reflected damage.',
+
+            surge:
+                'Once per encounter. Immediately refills all available ' +
+                'loose-weasel slots, preserving slots occupied by Shadows.',
+
+            drink:
+                'Choose a stocked potion below. Four potions per ' +
+                'character per encounter, including cleansing tonics. ' +
+                'Uses this command instead of Visor/Vitals/Hamstring.'
+        }
+    };
+
+    for (const button of host.querySelectorAll(
+        '.aethermoor-combat-choice[data-group="qtik"], ' +
+        '.aethermoor-combat-choice[data-group="tansy"]'
+    )) {
+        const description =
+            descriptions[button.dataset.group]?.[button.dataset.value];
+
+        if (description) {
+            button.title =
+                (button.disabled ? 'Unavailable: already used to its limit.\n\n' : '') +
+                description;
+        }
+    }
+
+    for (const button of host.querySelectorAll(
+        '.aethermoor-combat-choice[data-group="qtikItem"], ' +
+        '.aethermoor-combat-choice[data-group="tansyItem"]'
+    )) {
+        const item = CONSUMABLE_CATALOG[button.dataset.value];
+        if (!item) continue;
+
+        button.title = item.heal
+            ? `Restores up to ${item.heal} HP, capped at maximum HP.`
+            : 'Removes one shared active debuff stack: Hexer stacks ' +
+              'first, then an active Elite/Boss passive stack. ' +
+              'Consumes a potion even if no debuff exists.';
+    }
+
+    const effects = [
+        {
+            key: 'armor_sunder',
+            label: 'Armor Sunder',
+            describe: stacks =>
+                `−${2 * stacks} frontline DEF (−2 per stack).`
+        },
+        {
+            key: 'grave_chill',
+            label: 'Grave Chill',
+            describe: stacks =>
+                `−${2 * stacks} regeneration per exchange. ` +
+                'Negative regeneration deals internal damage.'
+        },
+        {
+            key: 'withering_lethargy',
+            label: 'Withering Lethargy',
+            describe: stacks =>
+                `−${2 * stacks} Crew ATK (−2 per stack). ` +
+                'Effective attack is clamped to zero. Fire bonus is unaffected.'
+        },
+        {
+            key: 'serrated_bleed',
+            label: 'Serrated Bleed',
+            describe: stacks =>
+                `+${stacks} damage on successful frontline responses.`
+        }
+    ];
+
+    const status = document.createElement('div');
+    status.className = 'aethermoor-ui-text';
+    status.textContent = 'Active debuffs — Q’tik / Crew: ';
+
+    let found = false;
+
+    function appendCounter(label, stacks, description) {
+        if (found) status.append(' · ');
+
+        const counter = document.createElement('span');
+        counter.textContent = `${label} ×${stacks}`;
+        counter.title = description +
+            '\nApplied on eligible successful enemy responses: ' +
+            'normally 1 stack, 2 on enemy roll 6, plus any Wind-Up bonus. ' +
+            'Source-linked effects cease when their source dies.';
+        counter.style.color = '#ffd166';
+
+        status.appendChild(counter);
+        found = true;
+    }
+
+    for (const foe of encounter.foes.filter(foe => foe.hp > 0)) {
+        const definition = effects.find(
+            effect => effect.key === foe.passive
+        );
+        const stacks = Number(foe.passiveStacks || 0);
+
+        if (definition && stacks > 0) {
+            appendCounter(
+                definition.label,
+                stacks,
+                definition.describe(stacks)
+            );
+        }
+
+        const hexStacks = Number(encounter.hexStacks?.[foe.id] || 0);
+
+        if (foe.role === 'hexer' && hexStacks > 0) {
+            const penalty = 2 * enemyTier(foe.level) * hexStacks;
+
+            appendCounter(
+                'Hex',
+                hexStacks,
+                `−${penalty} Crew ATK and frontline DEF from this Hexer.`
+            );
+        }
+    }
+
+    if (!found) status.append('None.');
+
+    const qtikGroup = host.querySelector(
+        '[data-group="qtik"]'
+    )?.closest('fieldset');
+
+    if (qtikGroup) {
+        qtikGroup.insertAdjacentElement('afterend', status);
+    }
+}
+
+function decorateAethermoorCombatControls(host, state) {
+    const crew = state.crew;
+    const encounter = state.encounter;
+    const stats = derived(crew);
+    const shadows = shadowMechanics(crew);
+    const summons = crew.weasels.active + shadows.slots;
+    const fire = Math.max(3, Math.floor(stats.atk / 5));
+    const hamstringReduction = Math.floor(summons / 6);
+    const vitalsPierce = Math.floor(summons / 2);
+
+    const descriptions = {
+        qtik: {
+            fire_melee:
+                `Adds ${fire} Fire damage per exchange ` +
+                `(max(3, floor(current derived ATK / 5))). ` +
+                `Recalculated if summons change. ATK debuffs do not ` +
+                `reduce this Fire bonus. Carapace can reflect it.`,
+
+            ice_melee:
+                'Adds +2 frontline DEF for this turn and reduces ' +
+                'Base Bleed by 1, with a minimum Base Bleed of 1.',
+
+            stun:
+                'Once per encounter. The stunned foe loses its first ' +
+                'exchange response and has DEF reduced by 4 × its Tier ' +
+                'for the turn. Cancels its current Elite/Boss telegraph. ' +
+                'A guarding Brute may intercept.',
+
+            ice_patch:
+                'Once per encounter. Enemies miss on rolls 1–3, or 1–4 ' +
+                'with Hamstring, for all three exchanges. Suppresses ' +
+                'Vitals summon-damage amplification.',
+
+            frost_stomp:
+                'Hits all living enemies each exchange. Base damage ' +
+                'is floor((effective Crew ATK − target DEF) / 2), ' +
+                'plus the player roll on successful rolls. Excess ' +
+                'damage spills forward. Interrupts ordinary specialists ' +
+                'in exchange 1 and bypasses Brute Guard.',
+
+            drink:
+                'Choose a stocked potion below. Four potions per ' +
+                'character per encounter, including cleansing tonics. ' +
+                'Healing/cleansing occurs before exchanges. Ordinary ' +
+                'attack rolls continue, but Fire/Ice action bonuses do not.'
+        },
+
+        tansy: {
+            visor:
+                'Bypasses Brute Guard. On enemy rolls 2–4, disrupts ' +
+                'the selected specialist action or Elite/Boss passive ' +
+                'stack application. It does not cancel the telegraph. ' +
+                `Enemy roll 1 grants Exposed: +${stats.luk} damage ` +
+                'on the next successful physical hit.',
+
+            vitals:
+                'Doubles loose-weasel and Shadow-Archer attack ' +
+                'contributions unless Ice Patch is used. Criticals on ' +
+                'player rolls 5–6. On rolls 2–4, adds damage up to ' +
+                `${vitalsPierce} target DEF, based on current summons.`,
+
+            hamstring:
+                'Enemies miss on rolls 1–2, or 1–4 with Ice Patch. ' +
+                `Currently reduces Base Bleed by ${hamstringReduction} ` +
+                '(floor(occupied summon slots / 6)), minimum 1. ' +
+                'Does not by itself bypass Guard on successful enemy rolls.',
+
+            recall:
+                'Removes loose-weasel attack participation and protects ' +
+                'them from Carapace/Cleave destruction. Shadow-Archer ' +
+                'attack remains; Hexer/Warder attack does not contribute. ' +
+                'Q’tik still attacks and can take reflected damage.',
+
+            surge:
+                'Once per encounter. Immediately refills all available ' +
+                'loose-weasel slots, preserving slots occupied by Shadows.',
+
+            drink:
+                'Choose a stocked potion below. Four potions per ' +
+                'character per encounter, including cleansing tonics. ' +
+                'Uses this command instead of Visor/Vitals/Hamstring.'
+        }
+    };
+
+    for (const button of host.querySelectorAll(
+        '.aethermoor-combat-choice[data-group="qtik"], ' +
+        '.aethermoor-combat-choice[data-group="tansy"]'
+    )) {
+        const description =
+            descriptions[button.dataset.group]?.[button.dataset.value];
+
+        if (description) {
+            button.title =
+                (button.disabled ? 'Unavailable: already used to its limit.\n\n' : '') +
+                description;
+        }
+    }
+
+    for (const button of host.querySelectorAll(
+        '.aethermoor-combat-choice[data-group="qtikItem"], ' +
+        '.aethermoor-combat-choice[data-group="tansyItem"]'
+    )) {
+        const item = CONSUMABLE_CATALOG[button.dataset.value];
+        if (!item) continue;
+
+        button.title = item.heal
+            ? `Restores up to ${item.heal} HP, capped at maximum HP.`
+            : 'Removes one shared active debuff stack: Hexer stacks ' +
+              'first, then an active Elite/Boss passive stack. ' +
+              'Consumes a potion even if no debuff exists.';
+    }
+
+    const effects = [
+        {
+            key: 'armor_sunder',
+            label: 'Armor Sunder',
+            describe: stacks =>
+                `−${2 * stacks} frontline DEF (−2 per stack).`
+        },
+        {
+            key: 'grave_chill',
+            label: 'Grave Chill',
+            describe: stacks =>
+                `−${2 * stacks} regeneration per exchange. ` +
+                'Negative regeneration deals internal damage.'
+        },
+        {
+            key: 'withering_lethargy',
+            label: 'Withering Lethargy',
+            describe: stacks =>
+                `−${2 * stacks} Crew ATK (−2 per stack). ` +
+                'Effective attack is clamped to zero. Fire bonus is unaffected.'
+        },
+        {
+            key: 'serrated_bleed',
+            label: 'Serrated Bleed',
+            describe: stacks =>
+                `+${stacks} damage on successful frontline responses.`
+        }
+    ];
+
+    const status = document.createElement('div');
+    status.className = 'aethermoor-ui-text';
+    status.textContent = 'Active debuffs — Q’tik / Crew: ';
+
+    let found = false;
+
+    function appendCounter(label, stacks, description) {
+        if (found) status.append(' · ');
+
+        const counter = document.createElement('span');
+        counter.textContent = `${label} ×${stacks}`;
+        counter.title = description +
+            '\nApplied on eligible successful enemy responses: ' +
+            'normally 1 stack, 2 on enemy roll 6, plus any Wind-Up bonus. ' +
+            'Source-linked effects cease when their source dies.';
+        counter.style.color = '#ffd166';
+
+        status.appendChild(counter);
+        found = true;
+    }
+
+    for (const foe of encounter.foes.filter(foe => foe.hp > 0)) {
+        const definition = effects.find(
+            effect => effect.key === foe.passive
+        );
+        const stacks = Number(foe.passiveStacks || 0);
+
+        if (definition && stacks > 0) {
+            appendCounter(
+                definition.label,
+                stacks,
+                definition.describe(stacks)
+            );
+        }
+
+        const hexStacks = Number(encounter.hexStacks?.[foe.id] || 0);
+
+        if (foe.role === 'hexer' && hexStacks > 0) {
+            const penalty = 2 * enemyTier(foe.level) * hexStacks;
+
+            appendCounter(
+                'Hex',
+                hexStacks,
+                `−${penalty} Crew ATK and frontline DEF from this Hexer.`
+            );
+        }
+    }
+
+    if (!found) status.append('None.');
+
+    const qtikGroup = host.querySelector(
+        '[data-group="qtik"]'
+    )?.closest('fieldset');
+
+    if (qtikGroup) {
+        qtikGroup.insertAdjacentElement('afterend', status);
+    }
+}
+
 function ensureAethermoorCombatChoiceStyles() {
     if (document.getElementById('aethermoor_combat_choice_styles')) {
         return;
@@ -15361,6 +15761,19 @@ function ensureAethermoorCombatChoiceStyles() {
         .aethermoor-combat-choice-group[hidden] {
             display: none;
         }
+
+        /*
+         * Our combat controls must remain stationary and clickable.
+         * Override theme animations on both the base and hover states.
+         */
+        .aethermoor-tab-view[data-tab="combat"] button,
+        .aethermoor-tab-view[data-tab="combat"] button:hover,
+        .aethermoor-tab-view[data-tab="combat"] button:focus,
+        .aethermoor-tab-view[data-tab="combat"] button:active {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+        }
     `;
 
     document.head.appendChild(style);
@@ -15397,6 +15810,13 @@ async function openCombatPanel(inlineHost) {
 
     const state = snapshot.state;
     const encounter = state.encounter;
+
+    /*
+     * Record the revision actually rendered. Without this, the polling
+     * refresher rebuilds the controls continuously and can replace a
+     * button between pointer-down and click.
+     */
+    markCombatViewRendered(snapshot);
 
     inlineHost.replaceChildren();
 
@@ -15602,7 +16022,8 @@ async function openCombatPanel(inlineHost) {
 
     const resolveButton = document.createElement('button');
     resolveButton.type = 'button';
-    resolveButton.className = 'menu_button';
+    resolveButton.className = 'aethermoor-ui-action';
+    resolveButton.dataset.accent = 'combat';
     resolveButton.textContent = 'Resolve Turn';
 
     const resultBox = document.createElement('pre');
@@ -15687,13 +16108,15 @@ async function openCombatPanel(inlineHost) {
         actions,
         resultBox
     );
-
     inlineHost.appendChild(controls);
 
     updateCombatAbilityButtons(
         inlineHost,
         state
     );
+
+    // Apply descriptions after exhaustion handling, which sets titles.
+    decorateAethermoorCombatControls(inlineHost, state);
 }
 
 const AETHERMOOR_HANDOFF_MARKER =

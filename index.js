@@ -5053,8 +5053,17 @@ function resolveTravelStep(test) {
             event: 'journey_arrival',
             destinationLabel: journey.destinationLabel,
             destinationId: journey.destinationId,
+            movement: {
+                travelStepConsumed: true,
+                journeySegmentConsumed: false,
+                arrivalOnly: true,
+                interrupted: false,
+                completedSegments: journey.completedSegments,
+                totalSegments: journey.totalSegments
+            },
             journey: clone(journey)
         };
+
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
         state.currentPosition = { nodeId: journey.destinationId };
@@ -5095,6 +5104,12 @@ function resolveTravelStep(test) {
         zone: state.zone,
         travelRoll,
         event,
+        movement: {
+            travelStepConsumed: true,
+            journeySegmentConsumed: false,
+            arrivalOnly: false,
+            interrupted: false
+        },
         encounterId: null,
         encounter: null,
         environmentalSign: null,
@@ -5236,7 +5251,7 @@ function resolveTravelStep(test) {
         }
     }
     
-    if (journey) {
+       if (journey) {
         journey.completedSegments += 1;
         state.currentPosition = positionAfterSegments(
             journeyLegs(journey, state.zone),
@@ -5260,8 +5275,20 @@ function resolveTravelStep(test) {
             );
         }
 
-        outcome.journey = clone(journey);
+        outcome.movement = {
+            travelStepConsumed: true,
+            journeySegmentConsumed: true,
+            arrivalOnly: false,
+            interrupted: event === 'wild_encounter',
+            arrivalDeferred:
+                event === 'wild_encounter' &&
+                journey.completedSegments === journey.totalSegments,
+            completedSegments: journey.completedSegments,
+            totalSegments: journey.totalSegments,
+            journeyStatus: journey.status
+        };
 
+        outcome.journey = clone(journey);
     }
 
     if (outcome.arrived) {
@@ -5564,13 +5591,21 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * NEXT FOCUSED WORK
  *
- * NEXT — Travel interruption behavior
- * - Decide and document whether an encounter roll consumes the attempted
- *   travel segment before pausing the journey.
- * - Make the UI and narration state the exact progress after an interruption.
- * - Ensure a resumed journey never adds or removes a segment unexpectedly.
- * - Test quiet travel, environmental signs, points of interest, social events,
- *   and wild encounters at the first, middle, and final segment.
+ * PARTIAL — Travel interruption behavior
+ * - Policy: a [moved] that rolls a travel event consumes one journey segment,
+ *   including when that event discovers a wild encounter.
+ * - Movement while an encounter is spotted or active does not advance travel.
+ * - After an encounter on the final segment, arrival is finalized afterward
+ *   without rolling or consuming another segment.
+ * - Narration and Combat UI report saved journey progress at interruptions.
+ *
+ * NEXT — Travel interruption regression pass
+ * - Test encounters on the first, middle, and final journey segments.
+ * - Verify that [moved] during a spotted or active encounter does not advance.
+ * - Verify that resolving the encounter resumes at the saved progress.
+ * - Verify final-segment interruptions finalize arrival without an extra roll.
+ * - Test quiet travel, environmental signs, points of interest, and social events.
+
  *
  * NEXT — V2 quest completion regression pass
  * - Test a fresh defeat-elite quest from offer through delivery without debug
@@ -11239,16 +11274,40 @@ function travelNarrationPacket(result) {
         );
     }
 
-    if (result.event === 'journey_arrival') {
-        lines.push(`The crew arrived at ${result.destinationLabel}.`);
+    if (result.movement?.arrivalOnly) {
+        lines.push(
+            `Arrival at ${result.destinationLabel} was finalized. ` +
+            'This [moved] did not consume another route segment.'
+        );
     } else if (result.journey) {
         const journey = result.journey;
+
         lines.push(
             `Journey toward ${journey.destinationLabel}: ` +
             `${journey.completedSegments}/${journey.totalSegments} segments.`
         );
+
+        if (result.movement?.journeySegmentConsumed) {
+            lines.push(
+                `This [moved] consumed journey segment ` +
+                `${journey.completedSegments}/${journey.totalSegments}.`
+            );
+        }
+
         if (journey.status === 'paused') {
-            lines.push('Travel is paused by the spotted encounter.');
+            lines.push(
+                `Travel is paused by the spotted encounter at ` +
+                `${journey.completedSegments}/${journey.totalSegments}. ` +
+                'Resolve or avoid the encounter before another journey segment can be attempted.'
+            );
+
+            if (result.movement?.arrivalDeferred) {
+                lines.push(
+                    'The final route segment was already consumed; ' +
+                    'arrival will be finalized after the encounter is resolved, ' +
+                    'without rolling or consuming an additional segment.'
+                );
+            }
         } else if (result.arrived) {
             lines.push(`The crew arrived at ${journey.destinationLabel}.`);
         } else {
@@ -15250,10 +15309,21 @@ function combatStatusText(state) {
 
     if (!encounter) return 'No encounter.';
 
-    return [
+    const lines = [
         `Turn ${encounter.turn} · ${encounter.status}`,
         `Weasels: ${state.crew.weasels.active}/${state.crew.weasels.max}`
-    ].join('   •   ');
+    ];
+
+    const journey = state.currentJourney;
+
+    if (journey) {
+        lines.push(
+            `Journey paused toward ${journey.destinationLabel}: ` +
+            `${journey.completedSegments}/${journey.totalSegments} segments.`
+        );
+    }
+
+    return lines.join('   •   ');
 }
 
 let combatPanelElement = null;
@@ -15942,11 +16012,18 @@ async function openCombatPanel(inlineHost) {
                 `(${foe.hp}/${foe.maxHp} HP)`
             ).join('\n')
             : 'No living foes recorded.';
+        const journey = state.currentJourney;
+        const journeyText = journey
+            ? `\n\nJourney paused toward ${journey.destinationLabel}: ` +
+              `${journey.completedSegments}/${journey.totalSegments} segments. ` +
+              'Resolve or avoid this encounter before attempting another move.'
+            : '';
 
         const section = makeAethermoorSection(
             'ENCOUNTER SPOTTED',
             `${encounter.id}\n${roster}\n\n` +
-            'The enemies have been spotted. Combat has not begun.',
+            'The enemies have been spotted. Combat has not begun.' +
+            journeyText,
             'combat'
         );
 

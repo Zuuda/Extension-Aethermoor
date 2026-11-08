@@ -5630,12 +5630,17 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify that an unrelated cleared Elite cannot advance the quest.
  * - Verify duplicate combat completion, duplicate delivery, and repeated tags.
  *
- * NEXT — Quest delivery hardening
- * - Keep cargo requirements conditional on turnIn.discoveryId.
- * - Reject incomplete retrieval quests whose cargo identity was never locked.
- * - Reject delivery at the wrong location, before deliveryReady, or after completion.
- * - Verify report-only and cargo delivery packets describe the correct handoff.
- *
+ * NEXT — Quest delivery handshake regression pass
+ * - Arrival at the issuer settlement only sets deliveryReady; it never starts
+ *   the sponsor meeting or completes the quest.
+ * - Verify the narrator waits for player direction before staging the handover.
+ * - Verify report-only and cargo handovers emit the exact quest delivery tag
+ *   only after the fictional handover occurs.
+ * - Verify the extension applies the locked payout once and queues the
+ *   authoritative reward contract for the following LLM reply.
+ * - Verify duplicate tags, wrong quest IDs, wrong locations, incomplete cargo,
+ *   and delivery after completion cannot grant rewards again.
+
  * PARTIAL SYSTEMS
  *
  * PARTIAL — V2 retrieve-item quests
@@ -13732,13 +13737,17 @@ async function openQuestPanel() {
             quest.status === 'in_progress' &&
             Boolean(quest.objectiveResolution) &&
             quest.turnIn?.locationId === state.currentLocationId;
-
+        
         if (canTurnIn) {
-            buttons.push({
-                text: 'Return Quest Cargo',
-                result: POPUP_RESULT.CUSTOM2
-            });
+            host.appendChild(
+                makeAethermoorSection(
+                    'TURN-IN ELIGIBLE',
+                    `The field objective is secured. The crew is at the turn-in settlement for ${quest.turnIn.recipient}. The quest remains active until the protagonists choose to meet the sponsor and the handover occurs in the fiction.`,
+                    'quest'
+                )
+            );
         }
+
         const canRevealTerminal =
             quest.status === 'in_progress' &&
             quest.structureV2?.version !== 2 &&

@@ -11375,23 +11375,6 @@ function combatNarrationPacket(result, actions) {
         raise_shadow: 'Raise Shadow'
     };
 
-    /*Respawn rules: eventually the respawning should bring the protagonists back to the last 'respawn 
-    stone' which will be the main settlement of the zone. This is not done yet but will have to be 
-    implemented before the extension is considered done*/
-        if (result.death) {
-        lines.push(
-            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : "Tansy"} ` +
-            `fell during combat. The death penalty removed ` +
-            `${result.death.xpLost} XP; the crew respawned at full HP.`
-        );
-
-        if (result.death.encounterAbandoned) {
-            lines.push(
-                'The encounter was abandoned. No encounter rewards were paid.'
-            );
-        }
-    }
-
     const roster = result.summary?.encounter?.foes || [];
     const foeNames = new Map(
         roster.map((foe, index) => [
@@ -11410,6 +11393,19 @@ function combatNarrationPacket(result, actions) {
             : '',
         'The mechanics results below are authoritative. Do not change actions, damage, HP, effects, kills, or rewards.'
     ].filter(Boolean);
+        if (result.death) {
+        lines.push(
+            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : "Tansy"} ` +
+            `fell during combat. The death penalty removed ` +
+            `${result.death.xpLost} XP; the crew respawned at full HP.`
+        );
+
+        if (result.death.encounterAbandoned) {
+            lines.push(
+                'The encounter was abandoned. No encounter rewards were paid.'
+            );
+        }
+    }
 
     for (const exchange of result.exchanges || []) {
         lines.push(`Exchange ${exchange.exchange}:`);

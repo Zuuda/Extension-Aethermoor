@@ -14614,9 +14614,7 @@ function openAethermoorPanel() {
 
 function createAethermoorController() {
     if (document.getElementById('aethermoor_main_button')) return;
-
     const composer = document.querySelector('#send_form');
-
     if (!composer) {
         console.warn(
             'Aethermoor: chat composer not found; main button not added'
@@ -14631,22 +14629,10 @@ function createAethermoorController() {
     button.textContent = 'Aethermoor';
     button.title = 'Open Aethermoor controls';
     button.addEventListener('click', openAethermoorPanel);
-
     composer.insertBefore(button, composer.firstChild);
 }
 
-    const button = document.createElement('button');
-    button.id = 'aethermoor_main_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Aethermoor';
-    button.title = 'Open Aethermoor controls';
-    button.addEventListener('click', openAethermoorPanel);
-
-    composer.insertBefore(button, composer.firstChild);
-}
-
-function createCombatController() {
+   function createCombatController() {
     const button = document.createElement('button');
     button.id = 'aethermoor_combat_button';
     button.type = 'button';

@@ -11159,10 +11159,10 @@ function questTerminalNarrationPacket(encounter, quest) {
     const foe = encounter.foes?.[0];
 
     return [
-        `The quest threat for ${quest.title} has been revealed.`,
+        `The quest threat for ${quest.title} has been spotted.`,
         `A level ${foe.level} ${foe.role} is guarding the objective.`,
-        'The encounter is active and combat has begun.',
-        'Narrate the threat and its relation to the established quest objective. Do not invent a different enemy level, reward, zone, or quest objective.'
+        'The encounter is spotted but not engaged. Combat has not begun.',
+        'Narrate the threat and its relation to the established quest objective. Leave the decision to engage, avoid, or try another approach to the protagonists.'
     ].join('\n');
 }
 
@@ -15236,6 +15236,85 @@ async function openCombatPanel(inlineHost) {
     const encounter = state.encounter;
 
     inlineHost.replaceChildren();
+
+        if (encounter?.status === 'spotted') {
+        const foes = encounter.foes
+            .map((foe, index) => ({
+                foe,
+                index
+            }))
+            .filter(({ foe }) => foe.hp > 0);
+
+        const roster = foes.length
+            ? foes.map(({ foe, index }) =>
+                `${combatFoeLabel(foe, index)} ` +
+                `(${foe.hp}/${foe.maxHp} HP)`
+            ).join('\n')
+            : 'No living foes recorded.';
+
+        const section = makeAethermoorSection(
+            'ENCOUNTER SPOTTED',
+            `${encounter.id}\n${roster}\n\n` +
+            'The enemies have been spotted. Combat has not begun.',
+            'combat'
+        );
+
+        const actions = document.createElement('div');
+        actions.className = 'aethermoor-ui-actions';
+
+        const decide = async disposition => {
+            const buttons = actions.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.disabled = true;
+            });
+
+            try {
+                const output = await runStoredMechanic({
+                    cases: [{
+                        name: `${disposition}_spotted_encounter`,
+                        kind: disposition
+                    }]
+                });
+
+                assert(
+                    output?.ok === true &&
+                    output.results?.[0]?.ok !== false,
+                    output?.results?.[0]?.error ||
+                        `Could not ${disposition} encounter`
+                );
+
+                await renderAethermoorTab('combat');
+            } catch (error) {
+                toastr.error(
+                    error instanceof Error
+                        ? error.message
+                        : String(error),
+                    'Aethermoor'
+                );
+
+                buttons.forEach(button => {
+                    button.disabled = false;
+                });
+            }
+        };
+
+        actions.append(
+            makeAethermoorAction(
+                'Engage',
+                'combat',
+                () => decide('engage')
+            ),
+            makeAethermoorAction(
+                'Avoid',
+                'world',
+                () => decide('avoid')
+            )
+        );
+
+        section.appendChild(actions);
+        inlineHost.appendChild(section);
+        return;
+    }
 
     if (
         !encounter ||

@@ -1791,7 +1791,11 @@ function chooseNextTelegraph(foe, rollValue) {
         ((Number(rollValue) - 1) % pool.length + pool.length) %
         pool.length;
 
-    const previous = foe.nextTelegraph;
+    const previous =
+        foe.nextTelegraph ||
+        foe.lastCancelledTelegraph ||
+        null;
+
     let selected = pool[rollIndex];
 
     if (selected === previous) {
@@ -1799,7 +1803,6 @@ function chooseNextTelegraph(foe, rollValue) {
     }
 
     return selected;
-}
 
 function telegraphLabel(telegraph) {
     const labels = {
@@ -2371,8 +2374,13 @@ const summonDamageMultiplier =
                 )}`
             );
 
+            // Keep the cancelled telegraph as the anti-repeat reference
+            // when selecting this foe's next telegraph.
+            stunnedEliteBoss.lastCancelledTelegraph =
+                stunnedEliteBoss.nextTelegraph;
             stunnedEliteBoss.nextTelegraph = null;
-                        activeTelegraphs
+
+            activeTelegraphs
                 .filter(
                     entry =>
                         entry.foe.id === stunnedEliteBoss.id
@@ -3602,6 +3610,7 @@ if (frontliners.length > 0) {
                 foe,
                 telegraphRoll
             );
+            delete foe.lastCancelledTelegraph;
         }
     }
 

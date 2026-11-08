@@ -15212,8 +15212,7 @@ function makeChoiceGroup(
     for (const option of options) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className =
-            'menu_button aethermoor-combat-choice';
+        button.className = 'aethermoor-combat-choice';
         button.dataset.group = groupName;
         button.dataset.value = option.value;
         button.setAttribute(
@@ -15268,35 +15267,76 @@ function ensureAethermoorCombatChoiceStyles() {
         return;
     }
 
+    /*
+     * These buttons belong to our tab, not SillyTavern's menu_button
+     * layout. Keep the selector scoped so other ST controls are untouched.
+     * This is the authoritative combat-choice style; do not append
+     * another competing combat-choice block elsewhere.
+     */
     const style = document.createElement('style');
     style.id = 'aethermoor_combat_choice_styles';
     style.textContent = `
         .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-group {
+            min-width: 0;
+            margin: 10px 0;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices {
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: wrap !important;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
             align-items: stretch;
             gap: 6px;
             min-width: 0;
         }
 
         .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices > button.aethermoor-combat-choice {
-            display: inline-flex !important;
-            flex: 0 1 auto !important;
+        .aethermoor-combat-choice {
+            display: inline-flex;
+            flex: 0 0 auto;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            width: auto !important;
             min-width: 82px;
             max-width: 100%;
-            height: auto !important;
             min-height: 42px;
             padding: 7px 10px;
-            white-space: normal;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            border-radius: 2px;
+            cursor: pointer;
+            font: inherit;
             text-align: center;
             line-height: 1.25;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice:hover,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice:focus-visible {
+            color: #ffffff;
+            border-color: #4da6ff;
+            background: #202b36;
+            transform: none;
+            animation: none;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice[aria-pressed="true"] {
+            border-color: #4ade80;
+            outline: 2px solid #4ade80;
+            outline-offset: 1px;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            transform: none;
+            animation: none;
         }
 
         .aethermoor-tab-view[data-tab="combat"]
@@ -15308,20 +15348,18 @@ function ensureAethermoorCombatChoiceStyles() {
             display: block;
             width: 100%;
             text-align: center;
-            white-space: normal;
             overflow-wrap: anywhere;
         }
 
         .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice[aria-pressed="true"] {
-            outline: 2px solid #4ade80;
-            outline-offset: 1px;
+        .aethermoor-combat-choice-telegraph {
+            color: #ffd166;
+            font-size: 11px;
         }
 
         .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:disabled {
-            opacity: 0.35;
-            cursor: not-allowed;
+        .aethermoor-combat-choice-group[hidden] {
+            display: none;
         }
     `;
 
@@ -15493,7 +15531,7 @@ async function openCombatPanel(inlineHost) {
         combatSelections.qtik,
         value => {
             combatSelections.qtik = value;
-            renderAethermoorTab('combat');
+            showSelectedPotionGroups();
         }
     );
 
@@ -15512,7 +15550,7 @@ async function openCombatPanel(inlineHost) {
         combatSelections.tansy,
         value => {
             combatSelections.tansy = value;
-            renderAethermoorTab('combat');
+            showSelectedPotionGroups();
         }
     );
 
@@ -15547,10 +15585,18 @@ async function openCombatPanel(inlineHost) {
         combatSelections.target,
         value => {
             combatSelections.target = value;
-            renderAethermoorTab('combat');
         }
     );
 
+    const qtikPotions = makePotionChoiceGroup('qtik', state);
+    const tansyPotions = makePotionChoiceGroup('tansy', state);
+
+    function showSelectedPotionGroups() {
+        qtikPotions.hidden = combatSelections.qtik !== 'drink';
+        tansyPotions.hidden = combatSelections.tansy !== 'drink';
+    }
+
+    showSelectedPotionGroups();
     const actions = document.createElement('div');
     actions.className = 'aethermoor-combat-actions';
 
@@ -15634,7 +15680,9 @@ async function openCombatPanel(inlineHost) {
     controls.append(
         status,
         qtikGroup,
+        qtikPotions,
         tansyGroup,
+        tansyPotions,
         targetGroup,
         actions,
         resultBox

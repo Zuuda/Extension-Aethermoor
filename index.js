@@ -2056,29 +2056,6 @@ function completeLinkedCombatQuestGate(state) {
         `${state.places?.[quest.destinationId]?.label ||
             quest.destinationId}.`;
 
-   function completeLinkedCombatQuestGate(state) {
-    const quest = state.activeQuest;
-    const encounter = state.encounter;
-    const gate = quest?.currentGate;
-
-    if (
-        quest?.status !== 'in_progress' ||
-        gate?.trigger !== 'linked_combat' ||
-        !encounter?.questTerminal ||
-        encounter.status !== 'cleared' ||
-        encounter.questTerminal.questId !== quest.id ||
-        encounter.questTerminal.targetId !== gate.linkedTargetId ||
-        gate.linkedTargetId !== quest.targetId ||
-        quest.terminalThreat?.resolved !== true
-    ) {
-        return null;
-    }
-
-    const evidence =
-        `Defeated the linked quest target at ` +
-        `${state.places?.[quest.destinationId]?.label ||
-            quest.destinationId}.`;
-
     const progression = gate.step < quest.gates
         ? resolveQuestAction({
             state,
@@ -2099,22 +2076,20 @@ function completeLinkedCombatQuestGate(state) {
      * back into the combat state; otherwise the fight can clear and pay
      * rewards while the saved quest remains on its old gate.
      *
-     * This path only changes the active quest and, where applicable, the
-     * return lead. Keep the existing encounter object in place because
-     * resolveTurn still updates it after this function returns.
+     * Keep the current encounter object in place because resolveTurn still
+     * updates it after this function returns.
      */
     state.activeQuest = progression.state.activeQuest;
     state.leads = progression.state.leads;
 
-    const objectiveSecured =
-        Boolean(state.activeQuest.objectiveResolution);
-
     return {
         completed: progression.completedGate,
         next: progression.nextGate || null,
-        objectiveSecured
+        objectiveSecured:
+            Boolean(state.activeQuest.objectiveResolution)
     };
 }
+
 
 function resolveTurn({
     state,

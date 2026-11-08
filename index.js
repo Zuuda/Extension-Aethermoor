@@ -15265,8 +15265,76 @@ function makeChoiceGroup(
     return wrapper;
 }
 
+function ensureAethermoorCombatChoiceStyles() {
+    if (document.getElementById('aethermoor_combat_choice_styles')) {
+        return;
+    }
+
+    const style = document.createElement('style');
+    style.id = 'aethermoor_combat_choice_styles';
+    style.textContent = `
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choices {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            align-items: stretch;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choices > button.aethermoor-combat-choice {
+            display: inline-flex !important;
+            flex: 0 1 auto !important;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: auto !important;
+            min-width: 82px;
+            max-width: 100%;
+            height: auto !important;
+            min-height: 42px;
+            padding: 7px 10px;
+            white-space: normal;
+            text-align: center;
+            line-height: 1.25;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-title,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-detail,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-telegraph {
+            display: block;
+            width: 100%;
+            text-align: center;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice[aria-pressed="true"] {
+            outline: 2px solid #4ade80;
+            outline-offset: 1px;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+    `;
+
+    document.head.appendChild(style);
+}
+
 async function openCombatPanel(inlineHost) {
+    ensureAethermoorCombatChoiceStyles();
+
     assert(
+
         inlineHost instanceof HTMLElement,
         'Combat must render inside the Aethermoor Combat tab'
     );

@@ -14940,7 +14940,13 @@ function registerAethermoorCombatAutoRefresh() {
     }, 500);
 }
 
-function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
+function makeChoiceGroup(
+    label,
+    groupName,
+    options,
+    selectedValue,
+    onSelect
+) {
     const wrapper = document.createElement('fieldset');
     wrapper.className = 'aethermoor-combat-choice-group';
 
@@ -14949,290 +14955,57 @@ function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
     wrapper.appendChild(legend);
 
     const choices = document.createElement('div');
-    let syncResolveAvailability = () => {};
+    choices.className = 'aethermoor-combat-choices';
 
-    let qtikPotionGroup =
-        makePotionChoiceGroup('qtik', state);
+    for (const option of options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'menu_button aethermoor-combat-choice';
+        button.dataset.group = groupName;
+        button.dataset.value = option.value;
+        button.setAttribute(
+            'aria-pressed',
+            String(option.value === selectedValue)
+        );
 
-    let tansyPotionGroup =
-        makePotionChoiceGroup('tansy', state);
+        const title = document.createElement('span');
+        title.className = 'aethermoor-combat-choice-title';
+        title.textContent = option.label;
+        button.appendChild(title);
 
-    const updatePotionGroupVisibility = () => {
-        qtikPotionGroup.hidden =
-            combatSelections.qtik !== 'drink';
-
-        tansyPotionGroup.hidden =
-            combatSelections.tansy !== 'drink';
-
-        syncResolveAvailability();
-    };
-
-    const qtikGroup = makeChoiceGroup(
-        `Q'tik (${state.crew.qtik.hp}/` +
-            `${derived(state.crew).qtikMaxHp} HP)`,
-        'qtik',
-        [
-            { value: 'fire_melee', label: 'Fire Melee' },
-            { value: 'ice_melee', label: 'Ice Melee' },
-            { value: 'stun', label: 'Stun' },
-            { value: 'ice_patch', label: 'Ice Patch' },
-            { value: 'frost_stomp', label: 'Frost Stomp' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
-        combatSelections.qtik,
-        value => {
-            combatSelections.qtik = value;
-
-            if (value === 'drink') {
-                ensurePotionSelection('qtik', state);
-            }
-
-            updatePotionGroupVisibility();
+        if (option.detail) {
+            const detail = document.createElement('span');
+            detail.className = 'aethermoor-combat-choice-detail';
+            detail.textContent = option.detail;
+            button.appendChild(detail);
         }
-    );
 
-    const tansyGroup = makeChoiceGroup(
-        `Tansy (${state.crew.tansy.hp}/` +
-            `${derived(state.crew).tansyMaxHp} HP)`,
-        'tansy',
-        [
-            { value: 'visor', label: 'Visor' },
-            { value: 'vitals', label: 'Vitals' },
-            { value: 'hamstring', label: 'Hamstring' },
-            { value: 'recall', label: 'Recall' },
-            { value: 'surge', label: 'Surge' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
-        combatSelections.tansy,
-        value => {
-            combatSelections.tansy = value;
-
-            if (value === 'drink') {
-                ensurePotionSelection('tansy', state);
-            }
-
-            updatePotionGroupVisibility();
+        if (option.telegraph) {
+            const telegraph = document.createElement('span');
+            telegraph.className =
+                'aethermoor-combat-choice-telegraph';
+            telegraph.textContent = `[${option.telegraph}]`;
+            button.appendChild(telegraph);
         }
-    );
 
-    const targetGroup = makeChoiceGroup(
-        'Target',
-        'target',
-        livingFoes.map(foe => ({
-            value: foe.id,
-            label: combatFoeLabel(
-                foe,
-                encounter.foes.findIndex(
-                    item => item.id === foe.id
-                )
-            ),
-            detail: `(${foe.hp}/${foe.maxHp} HP)`,
-            telegraph: foe.nextTelegraph
-                ? telegraphLabel(foe.nextTelegraph)
-                : null
-        })),
-        combatSelections.target,
-        value => {
-            combatSelections.target = value;
-        }
-    );
+        button.addEventListener('click', () => {
+            onSelect(option.value);
 
-    choices.append(
-        qtikGroup,
-        qtikPotionGroup,
-        tansyGroup,
-        tansyPotionGroup,
-        targetGroup
-    );
-
-    updatePotionGroupVisibility();
-
-    const actionsRow = document.createElement('div');
-    actionsRow.className = 'aethermoor-combat-actions';
-
-    const resolveButton = document.createElement('button');
-    resolveButton.type = 'button';
-    resolveButton.className = 'menu_button';
-    resolveButton.textContent = 'Resolve Turn';
-
-        syncResolveAvailability = () => {
-        const inventoryOptions = potionOptionsFor(state);
-        const qtikUses =
-            normalizeEncounterPotionUses(state.encounter).qtik;
-        const tansyUses =
-            normalizeEncounterPotionUses(state.encounter).tansy;
-
-        const qtikDrinkReady =
-            combatSelections.qtik !== 'drink' ||
-            (
-                qtikUses < 4 &&
-                inventoryOptions.some(
-                    option =>
-                        option.value === combatSelections.qtikItem
-                )
-            );
-
-        const tansyDrinkReady =
-            combatSelections.tansy !== 'drink' ||
-            (
-                tansyUses < 4 &&
-                inventoryOptions.some(
-                    option =>
-                        option.value === combatSelections.tansyItem
-                )
-            );
-
-        resolveButton.disabled =
-            !qtikDrinkReady || !tansyDrinkReady;
-    };
-
-    syncResolveAvailability();
-
-    resolveButton.addEventListener('click', async () => {
-        if (aethermoorCombatBusy) return;
-        aethermoorCombatBusy = true;
-        resolveButton.disabled = true;
-        resolveButton.textContent = 'Resolving…';
-        resultBox.hidden = false;
-        resultBox.textContent = 'Resolving combat turn…';
-
-            const actions = {
-                qtik: combatSelections.qtik,
-                tansy: combatSelections.tansy,
-                target: combatSelections.target
-            };
-
-            if (actions.qtik === 'drink') {
-                actions.qtikItem = combatSelections.qtikItem;
-            }
-
-            if (actions.tansy === 'drink') {
-                actions.tansyItem = combatSelections.tansyItem;
-            }
-
-            const result = await runStoredMechanic({ actions });
-
-            assert(
-                result?.ok === true,
-                result?.error || 'Combat turn failed'
-            );
-
-            aethermoorLastCombatLog = formatCombatTurnResult(result);
-            aethermoorLastCombatLogKey =
-                `${result.summary.encounter.id}:${result.turn}`;
-
-            resultBox.textContent = aethermoorLastCombatLog;
-            resultBox.scrollTop = 0;
-
-            const refreshed = await readStoredCombatState();
-            markCombatViewRendered(refreshed);
-            updateCombatAbilityButtons(panel, refreshed.state);
-
-            status.textContent =
-                combatStatusText(refreshed.state);
-
-            qtikGroup.querySelector('legend').textContent =
-                `Q'tik (${refreshed.state.crew.qtik.hp}/` +
-                `${derived(refreshed.state.crew).qtikMaxHp} HP)`;
-
-            tansyGroup.querySelector('legend').textContent =
-                `Tansy (${refreshed.state.crew.tansy.hp}/` +
-                `${derived(refreshed.state.crew).tansyMaxHp} HP)`;
-
-             const refreshedQtikPotionGroup =
-                makePotionChoiceGroup('qtik', refreshed.state);
-            const refreshedTansyPotionGroup =
-                makePotionChoiceGroup('tansy', refreshed.state);
-
-            refreshedQtikPotionGroup.hidden =
-                combatSelections.qtik !== 'drink';
-            refreshedTansyPotionGroup.hidden =
-                combatSelections.tansy !== 'drink';
-
-            qtikPotionGroup.replaceWith(
-                refreshedQtikPotionGroup
-            );
-            tansyPotionGroup.replaceWith(
-                refreshedTansyPotionGroup
-            );
-
-            qtikPotionGroup = refreshedQtikPotionGroup;
-            tansyPotionGroup = refreshedTansyPotionGroup;
-
-            updateCombatAbilityButtons(panel, refreshed.state);
-            syncResolveAvailability();
-       
-            const refreshedEncounter = refreshed.state.encounter;
-            const refreshedLiving = (refreshedEncounter?.foes || [])
-                .map((foe, index) => ({
-                    ...foe,
-                    label: combatFoeLabel(foe, index)
-                }))
-                .filter(foe => foe.hp > 0);
-
-            if (
-                refreshedEncounter?.status !== 'active' ||
-                refreshedLiving.length === 0 ||
-                refreshed.state.crew.qtik.hp <= 0 ||
-                refreshed.state.crew.tansy.hp <= 0
-            ) {
-                choices.hidden = true;
-                resolveButton.hidden = true;
-
-                if (
-                    refreshed.state.crew.qtik.hp <= 0 ||
-                    refreshed.state.crew.tansy.hp <= 0
-                ) {
-                    resultBox.textContent +=
-                        '\n\nA crew member has fallen. Resolve the death/respawn state before continuing.';
-                }
-
-            } else {
-                if (!refreshedLiving.some(
-                    foe => foe.id === combatSelections.target
-                )) {
-                    combatSelections.target = refreshedLiving[0].id;
-                }
-
-                const newTargetGroup = makeChoiceGroup(
-                    'Target',
-                    'target',
-                    refreshedLiving.map(foe => ({
-                        value: foe.id,
-                        label: foe.label,
-                        detail: `(${foe.hp}/${foe.maxHp} HP)`,
-                        telegraph: foe.nextTelegraph
-                            ? telegraphLabel(foe.nextTelegraph)
-                            : null
-                    })),
-                    combatSelections.target,
-                    value => { combatSelections.target = value; }
+            for (const sibling of choices.querySelectorAll(
+                'button'
+            )) {
+                sibling.setAttribute(
+                    'aria-pressed',
+                    String(sibling === button)
                 );
-
-                targetGroup.replaceWith(newTargetGroup);
-                targetGroup = newTargetGroup;
             }
-        } catch (error) {
-            resultBox.textContent =
-                `Turn was not resolved: ${
-                    error instanceof Error ? error.message : String(error)
-                }`;
-        } finally {
-            aethermoorCombatBusy = false;
-            resolveButton.disabled = false;
-            resolveButton.textContent = 'Resolve Turn';
-        }
+        });
 
-    });
+        choices.appendChild(button);
+    }
 
-    actionsRow.appendChild(resolveButton);
-
-    const controls = document.createElement('div');
-    controls.className = 'aethermoor-combat-controls';
-    controls.append(choices, actionsRow);
-
-    panel.append(controls, resultBox);
-    updateCombatAbilityButtons(panel, state);
+    wrapper.appendChild(choices);
+    return wrapper;
 }
 
 const AETHERMOOR_HANDOFF_MARKER =

@@ -1975,6 +1975,66 @@ function materializeBossReinforcements(state) {
     return added;
 }
 
+function spawnLinkedQuestEncounter(state) {
+    const quest = state.activeQuest;
+    const gate = quest?.currentGate;
+
+    assert(
+        quest?.status === 'in_progress' &&
+        quest.structureV2?.family === 'defeat_elite' &&
+        gate?.trigger === 'linked_combat',
+        'There is no V2 linked-combat gate to spawn'
+    );
+
+    assert(
+        typeof quest.targetId === 'string' &&
+        gate.linkedTargetId === quest.targetId,
+        'Linked-combat gate has no matching authored target'
+    );
+
+    assert(
+        quest.terminalThreat?.resolved !== true,
+        'Linked quest threat has already been defeated'
+    );
+
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the current encounter before spawning the quest threat'
+    );
+
+    const spawned = spawnEncounter({
+        state,
+        encounterType: 'quest_terminal',
+        encounterId: `quest-terminal-${quest.id}`
+    });
+
+    const nextState = spawned.state;
+    const encounter = nextState.encounter;
+    const activeQuest = nextState.activeQuest;
+
+    encounter.status = 'spotted';
+    encounter.questTerminal ||= {
+        questId: activeQuest.id,
+        kind: encounter.type,
+        zone: encounter.zone
+    };
+    encounter.questTerminal.targetId = activeQuest.targetId;
+
+    activeQuest.terminalThreat.revealed = true;
+    activeQuest.terminalThreat.resolved = false;
+    activeQuest.terminalThreat.encounterId = encounter.id;
+    activeQuest.terminalThreat.targetId = activeQuest.targetId;
+
+    if (activeQuest.seed?.terminalThreat) {
+        activeQuest.seed.terminalThreat.encounterId = encounter.id;
+    }
+
+    return {
+        state: nextState,
+        encounter
+    };
+}
+
 function completeLinkedCombatQuestGate(state) {
     const quest = state.activeQuest;
     const encounter = state.encounter;
@@ -4629,13 +4689,16 @@ function applyArrivalLocation(state, locationId, outcome) {
 }
 
 function completeQuestArrivalGate(state, outcome) {
-    const quest = state.activeQuest;
+    let nextState = state;
+    let quest = nextState.activeQuest;
 
+    // Returning to the locked issuer location makes delivery eligible.
+    // It does not pay rewards until the narrator reports the handoff.
     if (
         quest?.status === 'in_progress' &&
         quest.objectiveResolution &&
         quest.turnIn &&
-        state.currentLocationId === quest.turnIn.locationId &&
+        nextState.currentLocationId === quest.turnIn.locationId &&
         !quest.deliveryReady
     ) {
         const cargo = quest.discoveries?.find(
@@ -4649,69 +4712,155 @@ function completeQuestArrivalGate(state, outcome) {
         );
 
         quest.deliveryReady = true;
-        quest.deliveryReadyAt = state.currentLocationId;
+        quest.deliveryReadyAt = nextState.currentLocationId;
 
         outcome.deliveryReady = {
             questId: quest.id,
             title: quest.title,
             recipient: quest.turnIn.recipient,
-            cargoName: cargo?.name || quest.facts?.cargo || 'quest cargo'
+            cargoName:
+                cargo?.name ||
+                quest.facts?.cargo ||
+                'quest cargo'
         };
 
-        return state;
+        return nextState;
     }
 
+    quest = nextState.activeQuest;
     const gate = quest?.currentGate;
-        const eligible =
-        gate?.trigger === 'arrival' ||
-        gate?.trigger === 'arrival_with_evidence' ||
-        (
-            gate?.trigger === undefined &&
-            gate?.step === 1 &&
-            ['missing_cargo', 'ruin_clearance', 'sunken_salvage']
-                .includes(quest?.archetype?.id)
-        );
 
     if (
         quest?.status !== 'in_progress' ||
-        !eligible ||
-        gate.step !== 1 ||
-        gate.step >= quest.gates ||
-        state.currentLocationId !== quest.destinationId ||
-        ['active', 'spotted'].includes(state.encounter?.status)
+        nextState.currentLocationId !==
+            (gate?.destinationId || quest.destinationId) ||
+        ['active', 'spotted'].includes(nextState.encounter?.status)
     ) {
-        return state;
+        return nextState;
     }
 
-    const place = state.places[quest.destinationId];
-    const evidence =
-        gate.trigger === 'arrival'
-            ? `Arrived at ${place?.label || quest.destinationId}.`
-            : quest.facts?.evidence;
+    /*
+     * A short V2 Elite structure may start directly with its linked
+     * combat gate. Arrival spots the engine-authored threat; the player
+     * still chooses Engage or Avoid.
+     */
+    if (
+        quest.structureV2?.family === 'defeat_elite' &&
+        gate.trigger === 'linked_combat'
+    ) {
+        const spawned = spawnLinkedQuestEncounter(nextState);
+        nextState = spawned.state;
 
-    assert(place, 'Arrival gate needs an established destination');
+        outcome.questEncounter = {
+            id: spawned.encounter.id,
+            targetId: quest.targetId,
+            status: 'spotted',
+            foe: spawned.encounter.foes[0]
+        };
 
-    if (gate.trigger === 'arrival_with_evidence') {
-        assert(
-            typeof evidence === 'string' && evidence.length > 0,
-            'Arrival gate needs established evidence'
+        return nextState;
+    }
+
+    const eligibleArrival =
+        gate.trigger === 'arrival' ||
+        gate.trigger === 'arrival_with_evidence' ||
+        (
+            gate.trigger === undefined &&
+            gate.step === 1 &&
+            [
+                'missing_cargo',
+                'ruin_clearance',
+                'sunken_salvage'
+            ].includes(quest.archetype?.id)
         );
+
+    if (!eligibleArrival) {
+        return nextState;
     }
 
-    const cleared = resolveQuestAction({
-        state,
-        action: 'clear_gate',
+    const place = nextState.places?.[quest.destinationId];
+    assert(
+        place,
+        'Arrival gate needs an established destination'
+    );
+
+    const evidence =
+        gate.trigger === 'arrival_with_evidence'
+            ? quest.facts?.evidence
+            : `Arrived at ${place.label}.`;
+
+    assert(
+        typeof evidence === 'string' &&
+        evidence.length > 0,
+        'Arrival gate needs established evidence'
+    );
+
+    if (gate.step < quest.gates) {
+        const progression = resolveQuestAction({
+            state: nextState,
+            action: 'clear_gate',
+            objectiveCompleted: true,
+            completionEvidence:
+                gate.trigger === 'arrival_with_evidence'
+                    ? `Found ${evidence} at ${place.label}.`
+                    : evidence
+        });
+
+        nextState = progression.state;
+        outcome.questGate = {
+            completed: progression.completedGate,
+            next: progression.nextGate,
+            evidence: gate.trigger === 'arrival_with_evidence'
+                ? evidence
+                : null,
+            linkedEncounter: progression.linkedEncounter || null
+        };
+
+        return nextState;
+    }
+
+    const progression = resolveQuestAction({
+        state: nextState,
+        action: 'resolve_objective',
         objectiveCompleted: true,
-        completionEvidence: `Found ${evidence} at ${place.label}.`
+        objectiveRoute: 'other',
+        completionEvidence: evidence
     });
 
-    outcome.questGate = {
-        completed: cleared.completedGate,
-        next: cleared.nextGate,
+    nextState = progression.state;
+    quest = nextState.activeQuest;
+    quest.completedGates ||= [];
+
+    if (!quest.completedGates.some(
+        completed => completed.step === gate.step
+    )) {
+        quest.completedGates.push({
+            ...gate,
+            completionEvidence: evidence
+        });
+    }
+
+    if (quest.turnIn) {
+        nextState.leads ||= {};
+        const returnLeadId = `quest-return-${quest.id}`;
+
+        nextState.leads[returnLeadId] ||= {
+            id: returnLeadId,
+            kind: 'quest_return',
+            label: `Return cargo to ${quest.turnIn.recipient}`,
+            claim: 'The recovered quest cargo is ready to return.',
+            targetType: 'place',
+            targetId: quest.turnIn.locationId,
+            status: 'known'
+        };
+    }
+
+    outcome.questObjectiveSecured = {
+        questId: quest.id,
         evidence
     };
 
-    return cleared.state;
+    return nextState;
 }
 
 function resolveTravelStep(test) {
@@ -6580,13 +6729,13 @@ function prepareV2QuestDiscoveries(state) {
     }
 
     const trackingGate = quest.gatesData.find(
-        gate => gate.stage === 'track'
+        gate =>
+            gate.stage === 'track' &&
+            gate.trigger === 'discovery'
     );
 
-    assert(
-        trackingGate,
-        'V2 Elite quest has no authored tracking gate'
-    );
+    // Short V2 structures may proceed directly from approach to combat.
+    if (!trackingGate) return null;
 
     trackingGate.requiredDiscoveryId = id;
     trackingGate.requiredDiscoveryState = 'acquired';

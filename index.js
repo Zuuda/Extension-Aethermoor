@@ -1803,7 +1803,7 @@ function chooseNextTelegraph(foe, rollValue) {
     }
 
     return selected;
-
+}
 function telegraphLabel(telegraph) {
     const labels = {
         berserk_heavy_windup: 'Berserk / Heavy Wind-Up',

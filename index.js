@@ -11459,18 +11459,18 @@ function questDeliveryContextPacket(quest) {
     if (cargoId && cargo?.state !== 'acquired') return null;
 
     return [
-        'PRIVATE DELIVERY CONTEXT — do not recite these instructions.',
+        'PRIVATE QUEST TURN-IN CONTEXT — do not recite these instructions.',
         `Quest: ${quest.title}.`,
-        `The crew is at the turn-in location for ${quest.turnIn.recipient}.`,
+        `The crew is at the turn-in settlement for ${quest.turnIn.recipient}.`,
         cargoId
-            ? `The required cargo, ${cargo.name}, is acquired and eligible for delivery.`
-            : 'The field objective is secured. Turn-in requires reporting its completion to the issuer; no physical cargo is required.',
-        cargoId
-            ? 'Narrate the crew handing over the recovered cargo naturally.'
-            : 'Narrate the crew reporting the completed objective and the issuer acknowledging the report naturally.',
-        'When this turn-in actually occurs, place this exact tag inside the disposable <plan> block:',
+            ? `The required cargo, ${cargo.name}, is acquired.`
+            : 'The field objective is secured. This is a report-only turn-in; no physical cargo is required.',
+        'The quest is eligible for delivery, but arrival in town is not a handover.',
+        'Do not start a sponsor meeting, deliver cargo, complete the quest, or emit a delivery tag unless the user directs the protagonists to meet or speak with the sponsor and the handover actually occurs in the fiction.',
+        'When the handover actually occurs, place this exact tag inside the disposable <plan> block:',
         `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
-        'Do not emit the tag before turn-in. Do not mention software, extensions, protocol tags, or reward administration in story prose.'
+        'The tag only confirms the fictional handover. The extension determines and applies all rewards.',
+        'Do not mention software, extensions, protocol tags, or reward administration in story prose.'
     ].join('\n');
 }
 
@@ -11597,19 +11597,19 @@ function questDeliveryNarrationPacket(result, quest) {
     };
 
     return [
+        'AUTHORITATIVE QUEST COMPLETION CONTRACT — use these values exactly.',
         `Quest completed: ${quest.title}.`,
-        quest.turnIn?.discoveryId
-            ? `The crew delivered the recovered cargo to ` +
-                `${quest.turnIn.recipient}.`
-            : `The crew reported the completed objective to ` +
-                `${quest.turnIn?.recipient || quest.facts?.sponsor}.`,
-        `Rewards applied: ${rewards.xp} XP, ` +
-            `${rewards.silver} silver, ` +
-            `${rewards.repSteps} reputation steps.`,
+        `Handover recipient: ${quest.turnIn?.recipient || quest.facts?.sponsor || quest.town}.`,
+        `Rewards applied by the extension: ${rewards.xp} XP, ` +
+            `${rewards.silver} silver, ${rewards.repSteps} reputation step(s).`,
         ...(rewards.loot || []).map(item =>
-            `Salvage received: ${item.name} (${item.rarity}).`
+            `Salvage granted: ${item.name} (${item.rarity}), ` +
+            `Stat ${item.rawStat}.`
         ),
-        'Narrate the handoff naturally. Do not mention software, protocol tags, or state administration.'
+        'In the next reply, continue from the already-described handover and report these exact rewards naturally.',
+        'Do not calculate, alter, repeat, or grant any additional rewards.',
+        'Do not claim the crew delivered physical cargo unless this quest has a locked turnIn.discoveryId.',
+        'Do not mention software, extensions, protocol tags, or reward administration in story prose.'
     ].join('\n');
 }
 

@@ -1657,45 +1657,40 @@ function applyConsumableItem(state, item, recipient) {
         };
     }
 
-    const hexEntry = Object.entries(encounter.hexStacks || {})
-        .find(([, stacks]) => Number(stacks) > 0);
+        /*
+     * Stacking debuffs currently affect shared Crew mechanics rather
+     * than separate character status lists. Either protagonist can
+     * cleanse them, spending their own potion allowance.
+     *
+     * Stamp immunity with the current encounter turn instead of a
+     * decrementing duration. This covers all three exchanges and expires
+     * automatically when resolveTurn increments encounter.turn again.
+     * Repeated UI reads cannot extend the protection.
+     */
+    let stacksRemoved = Object.values(encounter.hexStacks || {})
+        .reduce((total, stacks) => total + Number(stacks), 0);
 
-    if (hexEntry) {
-        const [hexerId, stacks] = hexEntry;
-        if (Number(stacks) === 1) {
-            delete encounter.hexStacks[hexerId];
-        } else {
-            encounter.hexStacks[hexerId] = Number(stacks) - 1;
-        }
-        return {
-            item, recipient, effect: 'cleanse',
-            stacksRemoved: 1, sourceType: 'hexer',
-            source: hexerId, potionsUsed: encounter.potionsUsed
-        };
+    encounter.hexStacks = {};
+
+    for (const foe of encounter.foes) {
+        if (!['elite', 'boss'].includes(foe.role)) continue;
+
+        stacksRemoved += Number(foe.passiveStacks || 0);
+        foe.passiveStacks = 0;
     }
 
-    const passiveFoe = encounter.foes.find(
-        foe =>
-            foe.hp > 0 &&
-            ['elite', 'boss'].includes(foe.role) &&
-            Number(foe.passiveStacks || 0) > 0
-    );
-
-    if (passiveFoe) {
-        passiveFoe.passiveStacks -= 1;
-        return {
-            item, recipient, effect: 'cleanse',
-            stacksRemoved: 1,
-            sourceType: 'elite_boss_passive',
-            source: passiveFoe.id,
-            potionsUsed: encounter.potionsUsed
-        };
-    }
+    encounter.debuffImmunityTurn = encounter.turn;
 
     return {
-        item, recipient, effect: 'cleanse',
-        stacksRemoved: 0,
-        note: 'No active debuff stack to remove',
+        item,
+        recipient,
+        effect: 'cleanse',
+        scope: 'crew',
+        stacksRemoved,
+        immunityTurn: encounter.turn,
+        note:
+            'All Hex and Elite/Boss passive stacks cleared; ' +
+            'new applications blocked for this turn.',
         potionsUsed: encounter.potionsUsed
     };
 }
@@ -2432,6 +2427,20 @@ const summonDamageMultiplier =
         );
         encounter.used.icePatch = true;
     }
+    /*
+     * Crew-wide immunity does not stack. Reject a redundant pair before
+     * either potion is consumed; the stored operation remains unchanged.
+     */
+    assert(
+        !(
+            actions.qtik === 'drink' &&
+            actions.qtikItem === 'cleansing_tonic' &&
+            actions.tansy === 'drink' &&
+            actions.tansyItem === 'cleansing_tonic'
+        ),
+        'One cleansing tonic protects the whole crew for this turn; ' +
+        'choose a different action or potion for the other character'
+    );
 
     if (actions.qtik === 'drink') {
         assert(
@@ -2624,12 +2633,21 @@ function visorDisrupts(foe, enemyRoll) {
             passiveAttackPenalty(encounter)
         );
 
+        /*
+         * Like Fire, the stance bonus scales from derived stats before
+         * encounter debuffs. Debuffs still reduce the resulting DEF.
+         * The separate -1 Base Bleed benefit remains unchanged.
+         */
+        const iceDefenseBonus = actions.qtik === 'ice_melee'
+            ? Math.max(2, Math.floor(crewStats.def / 3))
+            : 0;
+
         const effectiveDefense = Math.max(
             0,
             crewStats.def -
             hexPenalty -
             passiveDefensePenalty(encounter) +
-            (actions.qtik === 'ice_melee' ? 2 : 0)
+            iceDefenseBonus
         );
 
         let target = live(s).find(
@@ -3268,7 +3286,15 @@ const castingBuffer = live(s).find(
                 }
 
                 if (foe.role === 'hexer') {
+                    if (encounter.debuffImmunityTurn === encounter.turn) {
+                        effects.push(
+                            `Cleansing immunity blocked ${foe.id}'s Hex`
+                        );
+                        continue;
+                    }
+
                     const stacks =
+
                         (e === 6 ? 2 : 1) +
                         telegraphExtraDebuffStacks;
 
@@ -3295,6 +3321,12 @@ if (frontliners.length > 0) {
             foe.id === stunnedFoeId ||
             !foe.passive
         ) {
+            continue;
+        }
+        if (encounter.debuffImmunityTurn === encounter.turn) {
+            effects.push(
+                `Cleansing immunity blocked ${foe.id}'s passive stacks`
+            );
             continue;
         }
 
@@ -3398,9 +3430,14 @@ if (frontliners.length > 0) {
     }
 
     /*
-     * Swarm Momentum occurs once after a completed three-exchange
-     * turn. Only weasels destroyed during this turn can reform.
+     * Swarm Momentum replenishes missing loose weasels after a full
+     * three-exchange turn while both protagonists and a foe survive.
+     * Recovery uses available loose-weasel capacity, so depletion does
+     * not weaken recovery and losses from earlier turns remain eligible.
+     * Active Shadows retain their occupied slots. Surge remains the
+     * immediate refill before exchanges; Momentum occurs afterward.
      */
+
     let momentum = null;
 
     if (
@@ -3410,18 +3447,12 @@ if (frontliners.length > 0) {
         c.tansy.hp > 0
     ) {
         const activeBefore = c.weasels.active;
-        const quota =
-            1 + Math.floor(activeBefore / 4);
-
-        const restored = Math.min(
-            weaselsDestroyed,
-            quota,
-            maxWeasels - shadowMechanics(c).slots - activeBefore
-
-        );
-
+        const looseCapacity =
+            maxWeasels - shadowMechanics(c).slots;
+        const missing = Math.max(0, looseCapacity - activeBefore);
+        const quota = 1 + Math.floor(looseCapacity / 4);
+        const restored = Math.min(missing, quota);
         c.weasels.active += restored;
-
         momentum = {
             activeBefore,
             destroyedThisTurn: weaselsDestroyed,
@@ -15279,10 +15310,13 @@ function decorateAethermoorCombatControls(host, state) {
                 `(max(3, floor(current derived ATK / 5))). ` +
                 `Recalculated if summons change. ATK debuffs do not ` +
                 `reduce this Fire bonus. Carapace can reflect it.`,
-
+           
             ice_melee:
-                'Adds +2 frontline DEF for this turn and reduces ' +
-                'Base Bleed by 1, with a minimum Base Bleed of 1.',
+                `Adds +${Math.max(2, Math.floor(stats.def / 3))} ` +
+                'frontline DEF this turn ' +
+                '(max(2, floor(derived DEF / 3))). ' +
+                'The bonus is calculated before encounter debuffs. ' +
+                'Also reduces Base Bleed by 1, minimum Base Bleed 1.',
 
             stun:
                 'Once per encounter. The stunned foe loses its first ' +
@@ -15334,10 +15368,16 @@ function decorateAethermoorCombatControls(host, state) {
                 'them from Carapace/Cleave destruction. Shadow-Archer ' +
                 'attack remains; Hexer/Warder attack does not contribute. ' +
                 'Q’tik still attacks and can take reflected damage.',
-
+            
             surge:
                 'Once per encounter. Immediately refills all available ' +
-                'loose-weasel slots, preserving slots occupied by Shadows.',
+                'loose-weasel slots before exchanges, preserving Shadows. ' +
+                `Separately, Swarm Momentum restores up to ${
+                    1 + Math.floor(
+                        (3 + Math.floor(crew.level / 2) - shadows.slots) / 4
+                    )
+                } missing loose weasels after each full three-exchange ` +
+                'turn while both protagonists and a foe survive.',
 
             drink:
                 'Choose a stocked potion below. Four potions per ' +
@@ -15369,9 +15409,12 @@ function decorateAethermoorCombatControls(host, state) {
 
         button.title = item.heal
             ? `Restores up to ${item.heal} HP, capped at maximum HP.`
-            : 'Removes one shared active debuff stack: Hexer stacks ' +
-              'first, then an active Elite/Boss passive stack. ' +
-              'Consumes a potion even if no debuff exists.';
+            : 'Clears all Crew Hex and Elite/Boss passive stacks. ' +
+              'Prevents new stacks throughout this turn’s three exchanges. ' +
+              'Does not prevent attacks or telegraph effects. ' +
+              'Counts against the drinker’s four-potion allowance. ' +
+              'One tonic protects both protagonists; two cannot stack. ' +
+              'Can be used preventively even with no current stacks.';
     }
 
     const effects = [

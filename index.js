@@ -5504,6 +5504,169 @@ function rollQuestTerminalThreat(state, rank, zone) {
 }
 
 /*
+ * AETHERMOOR IMPLEMENTATION ROADMAP
+ *
+ * This is the working feature list for the current beta architecture.
+ * Update the status here when a feature is completed, deliberately changed,
+ * or superseded. Keep this list near the quest architecture notes so future
+ * maintenance does not depend on reconstructing priorities from chat history,
+ * scattered comments, or saved-state incidents.
+ *
+ * Status meanings:
+ * - DONE: implemented and exercised in the current campaign flow.
+ * - PARTIAL: the foundation exists, but important paths or integrations remain.
+ * - NEXT: the next focused implementation target.
+ * - PLANNED: agreed work that has not started.
+ * - DEFERRED: useful work intentionally postponed while another dependency is settled.
+ *
+ * COMPLETED FOUNDATIONS
+ *
+ * DONE — Persistent per-chat state
+ * - Save the complete machine state in chat metadata.
+ * - Serialize concurrent operations through the Aethermoor queue.
+ * - Preserve revisions, RNG state, locked results, and ordered narrator handoffs.
+ *
+ * DONE — Saved world foundation
+ * - Persist the world seed, zones, geography profiles, settlements, reputation,
+ *   primary route edges, current location, and current position.
+ * - Generate missing world records deterministically without advancing combat RNG.
+ * - Preserve stable IDs for places, settlements, routes, quests, and factions.
+ *
+ * DONE — Core campaign loop
+ * - Travel one segment per [moved] event.
+ * - Support journeys, arrival, interruption, encounter discovery, engage/avoid,
+ *   points of interest, rumors, social opportunities, and quest return travel.
+ *
+ * DONE — Combat systems
+ * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
+ *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
+ * - Preserve locked combat outcomes and prevent duplicate reward resolution.
+ *
+ * DONE — Quest delivery foundation
+ * - Lock the quest issuer and return location.
+ * - Separate field-objective completion from delivery and payment.
+ * - Support report-only delivery for defeat objectives.
+ * - Support cargo delivery for retrieval objectives.
+ * - Apply quest rewards exactly once after validated delivery.
+ *
+ * DONE — V2 defeat-elite path
+ * - Use complete V2 structures for the supported defeat-elite gate counts.
+ * - Complete the arrival gate, reveal the linked threat, resolve the linked
+ *   combat gate, return to the issuer, and complete report-only delivery.
+ * - Keep the linked threat and the current encounter identity separate.
+ * - Retain a narrowly scoped reconciliation operation for beta test saves.
+ *
+ * DONE — Current mechanical UI foundation
+ * - Provide Combat, Quests, and World tabs.
+ * - Keep UI refresh read-only.
+ * - Persist panel position and size.
+ * - Expose encounter, journey, quest, destination, and delivery actions.
+ *
+ * NEXT FOCUSED WORK
+ *
+ * NEXT — Travel interruption behavior
+ * - Decide and document whether an encounter roll consumes the attempted
+ *   travel segment before pausing the journey.
+ * - Make the UI and narration state the exact progress after an interruption.
+ * - Ensure a resumed journey never adds or removes a segment unexpectedly.
+ * - Test quiet travel, environmental signs, points of interest, social events,
+ *   and wild encounters at the first, middle, and final segment.
+ *
+ * NEXT — V2 quest completion regression pass
+ * - Test a fresh defeat-elite quest from offer through delivery without debug
+ *   reconciliation.
+ * - Verify that the linked encounter alone advances the quest objective.
+ * - Verify that an unrelated cleared Elite cannot advance the quest.
+ * - Verify duplicate combat completion, duplicate delivery, and repeated tags.
+ *
+ * NEXT — Quest delivery hardening
+ * - Keep cargo requirements conditional on turnIn.discoveryId.
+ * - Reject incomplete retrieval quests whose cargo identity was never locked.
+ * - Reject delivery at the wrong location, before deliveryReady, or after completion.
+ * - Verify report-only and cargo delivery packets describe the correct handoff.
+ *
+ * PARTIAL SYSTEMS
+ *
+ * PARTIAL — V2 retrieve-item quests
+ * - The retrieve_item structure exists.
+ * - Missing Cargo and Sunken Salvage have partial discovery support.
+ * - Author complete discovery requirements for every supported gate count.
+ * - Ensure every retrieval quest locks one cargo discovery before acceptance.
+ * - Test cargo acquisition, cargo preservation during travel, and cargo delivery.
+ *
+ * PARTIAL — Authored quest discoveries
+ * - Some V2 quests have engine-authored discoveries with stable IDs,
+ *   locations, hiding places, required actions, and acquisition states.
+ * - Add authored discoveries for every discovery-triggered gate.
+ * - Remove fallback behavior that lets a narrator imply an unrecorded discovery.
+ *
+ * PARTIAL — Quest family migration
+ * - Missing Cargo, Sunken Salvage, Ruin Clearance, and Territorial Beast have
+ *   V2-compatible foundations.
+ * - Herb Foraging and Missing Person still use the older authored gate path.
+ * - Convert each remaining family to a complete V2 structure or formally mark
+ *   it legacy until its replacement is implemented.
+ *
+ * PARTIAL — World integration
+ * - World records and route edges are saved.
+ * - Some older quest, route, settlement, and UI paths still use legacy IDs,
+ *   labels, or assumptions.
+ * - Replace those paths with stable world records in one migration pass.
+ *
+ * PARTIAL — Migration and validation
+ * - Existing saves receive world, journey, potion, and quest migrations.
+ * - Formalize schema migrations for old journey shapes, old quest structures,
+ *   old encounter records, settlement names, and legacy potion counters.
+ * - Add validation for every migrated shape before it can be saved again.
+ *
+ * PLANNED WORK
+ *
+ * PLANNED — Test-data cleanup
+ * - Mark all historical debug places, leads, quests, encounters, and routes
+ *   with a consistent test-only identity.
+ * - Extend cleanup so obsolete test records cannot appear as normal destinations.
+ * - Preserve campaign records that were actually used for legitimate rewards.
+ *
+ * PLANNED — UI cleanup and consistency
+ * - Remove stale debug controls from ordinary quest and world views.
+ * - Deduplicate destinations and leads by stable identity.
+ * - Show exact journey progress, interruption state, current gate, and delivery
+ *   eligibility from saved state.
+ * - Prevent action-button numbering collisions in legacy popup panels.
+ *
+ * PLANNED — Narration authority
+ * - Build every narration packet from the authoritative saved result.
+ * - Include encounter ID, journey progress, quest gate, objective resolution,
+ *   delivery readiness, and reward status where relevant.
+ * - Prevent prose from implying combat, discovery, arrival, or reward events
+ *   that are absent from the saved result.
+ *
+ * PLANNED — Regression suite
+ * - Maintain assertion-based cases for the complete campaign loop.
+ * - Cover quest offer, acceptance, travel, interruption, arrival, discovery,
+ *   linked combat, return travel, report delivery, cargo delivery, duplicate
+ *   events, flee, death, and migration.
+ * - Run the relevant regression group after every quest, travel, or persistence
+ *   change instead of relying only on the live campaign state.
+ *
+ * DEFERRED UNTIL CORE FLOWS ARE STABLE
+ *
+ * DEFERRED — Additional quest families and biome-specific presentation.
+ * DEFERRED — Expanded food and settlement simulation.
+ * DEFERRED — Rich NPC schedules, faction systems, and detailed local roads.
+ * DEFERRED — A unified HUD that replaces the current tab and popup surfaces.
+ *
+ * MAINTENANCE RULES
+ *
+ * - New mechanics must identify their saved state, stable IDs, RNG behavior,
+ *   narrator handoff, migration needs, and duplicate-event behavior.
+ * - A bug discovered during live testing belongs in this roadmap until it is
+ *   fixed and exercised. Do not let the next incident silently replace it.
+ * - When a feature changes status, update this comment in the same edit as the
+ *   implementation so the roadmap and code remain synchronized.
+ */
+
+/*
  * QUEST ARCHITECTURE — AGREED DIRECTION
  *
  * The extension exists because narrator LLMs have invented mechanics,

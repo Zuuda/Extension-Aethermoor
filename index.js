@@ -2056,33 +2056,63 @@ function completeLinkedCombatQuestGate(state) {
         `${state.places?.[quest.destinationId]?.label ||
             quest.destinationId}.`;
 
-    if (gate.step < quest.gates) {
-        const progression = resolveQuestAction({
+   function completeLinkedCombatQuestGate(state) {
+    const quest = state.activeQuest;
+    const encounter = state.encounter;
+    const gate = quest?.currentGate;
+
+    if (
+        quest?.status !== 'in_progress' ||
+        gate?.trigger !== 'linked_combat' ||
+        !encounter?.questTerminal ||
+        encounter.status !== 'cleared' ||
+        encounter.questTerminal.questId !== quest.id ||
+        encounter.questTerminal.targetId !== gate.linkedTargetId ||
+        gate.linkedTargetId !== quest.targetId ||
+        quest.terminalThreat?.resolved !== true
+    ) {
+        return null;
+    }
+
+    const evidence =
+        `Defeated the linked quest target at ` +
+        `${state.places?.[quest.destinationId]?.label ||
+            quest.destinationId}.`;
+
+    const progression = gate.step < quest.gates
+        ? resolveQuestAction({
             state,
             action: 'clear_gate',
             objectiveCompleted: true,
             completionEvidence: evidence
+        })
+        : resolveQuestAction({
+            state,
+            action: 'resolve_objective',
+            objectiveCompleted: true,
+            objectiveRoute: 'combat',
+            completionEvidence: evidence
         });
 
-        return {
-            completed: progression.completedGate,
-            next: progression.nextGate,
-            objectiveSecured: false
-        };
-    }
+    /*
+     * resolveQuestAction works on a clone. Copy its quest-related changes
+     * back into the combat state; otherwise the fight can clear and pay
+     * rewards while the saved quest remains on its old gate.
+     *
+     * This path only changes the active quest and, where applicable, the
+     * return lead. Keep the existing encounter object in place because
+     * resolveTurn still updates it after this function returns.
+     */
+    state.activeQuest = progression.state.activeQuest;
+    state.leads = progression.state.leads;
 
-    const progression = resolveQuestAction({
-        state,
-        action: 'resolve_objective',
-        objectiveCompleted: true,
-        objectiveRoute: 'combat',
-        completionEvidence: evidence
-    });
+    const objectiveSecured =
+        Boolean(state.activeQuest.objectiveResolution);
 
     return {
-        completed: gate,
-        next: null,
-        objectiveSecured: true
+        completed: progression.completedGate,
+        next: progression.nextGate || null,
+        objectiveSecured
     };
 }
 
@@ -5605,6 +5635,17 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify that resolving the encounter resumes at the saved progress.
  * - Verify final-segment interruptions finalize arrival without an extra roll.
  * - Test quiet travel, environmental signs, points of interest, and social events.
+ *
+ * PLANNED — Out-of-combat recovery
+ * - Q'tik's derived Regen should restore her HP between fights, reflecting
+ *   regeneration continuing outside combat. Define the precise trigger before
+ *   implementing it (for example, after a cleared encounter or when a new
+ *   encounter is engaged); do not silently heal her on every UI refresh.
+ * - Do not add out-of-combat healing for Tansy yet.
+ * - Revisit Tansy's recovery only after she has a Mender in the fiction and
+ *   mechanics; decide then whether that Mender can heal her between fights.
+ * - Test that recovery does not occur during a spotted/active encounter, does
+ *   not exceed maximum HP, and cannot be applied repeatedly by duplicate events.
 
  *
  * NEXT — V2 quest completion regression pass
@@ -11822,8 +11863,14 @@ function combatNarrationPacket(result, actions) {
     } else {
         lines.push('Encounter rewards have not been applied.');
     }
+    if (result.packCleared) {
+        lines.push(
+            `Encounter ${result.summary?.encounter?.id || 'unknown'} is cleared.`,
+            'No enemies remain alive. This combat has ended.'
+        );
+    }
 
-        if (result.questGate) {
+    if (result.questGate) {
         lines.push(
             `Quest gate ${result.questGate.completed.step} completed ` +
                 `through the linked combat encounter.`
@@ -11831,8 +11878,8 @@ function combatNarrationPacket(result, actions) {
 
         if (result.questGate.objectiveSecured) {
             lines.push(
-                'The quest field objective is secured. ' +
-                'The crew must return the required cargo to the quest issuer.'
+                'The quest field objective is secured.',
+                'The quest payout has not been granted; the crew must return to the issuer and report the completed objective.'
             );
         } else if (result.questGate.next) {
             lines.push(

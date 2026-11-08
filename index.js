@@ -14960,7 +14960,8 @@ function makeChoiceGroup(
     for (const option of options) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'menu_button aethermoor-combat-choice';
+        button.className =
+            'menu_button aethermoor-combat-choice';
         button.dataset.group = groupName;
         button.dataset.value = option.value;
         button.setAttribute(
@@ -14975,7 +14976,8 @@ function makeChoiceGroup(
 
         if (option.detail) {
             const detail = document.createElement('span');
-            detail.className = 'aethermoor-combat-choice-detail';
+            detail.className =
+                'aethermoor-combat-choice-detail';
             detail.textContent = option.detail;
             button.appendChild(detail);
         }
@@ -14984,7 +14986,8 @@ function makeChoiceGroup(
             const telegraph = document.createElement('span');
             telegraph.className =
                 'aethermoor-combat-choice-telegraph';
-            telegraph.textContent = `[${option.telegraph}]`;
+            telegraph.textContent =
+                `[${option.telegraph}]`;
             button.appendChild(telegraph);
         }
 
@@ -15006,6 +15009,244 @@ function makeChoiceGroup(
 
     wrapper.appendChild(choices);
     return wrapper;
+}
+
+async function openCombatPanel(inlineHost) {
+    assert(
+        inlineHost instanceof HTMLElement,
+        'Combat must render inside the Aethermoor Combat tab'
+    );
+
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        inlineHost.replaceChildren();
+
+        inlineHost.appendChild(
+            makeAethermoorSection(
+                'COMBAT',
+                error instanceof Error
+                    ? error.message
+                    : String(error),
+                'combat'
+            )
+        );
+
+        return;
+    }
+
+    const state = snapshot.state;
+    const encounter = state.encounter;
+
+    inlineHost.replaceChildren();
+
+    if (
+        !encounter ||
+        encounter.status !== 'active' ||
+        state.crew.qtik.hp <= 0 ||
+        state.crew.tansy.hp <= 0
+    ) {
+        const message =
+            state.crew.qtik.hp <= 0 ||
+            state.crew.tansy.hp <= 0
+                ? 'A crew member has fallen. Resolve death or respawn before continuing.'
+                : encounter?.status === 'cleared'
+                    ? 'This encounter is cleared.'
+                    : encounter?.status === 'spotted'
+                        ? 'Encounter spotted. Engage or avoid it first.'
+                        : 'There is no active encounter.';
+
+        inlineHost.appendChild(
+            makeAethermoorSection(
+                'COMBAT',
+                combatStatusText(state) +
+                    `\n\n${message}`,
+                'combat'
+            )
+        );
+
+        return;
+    }
+
+    const status = document.createElement('pre');
+    status.className = 'aethermoor-combat-status';
+    status.textContent = combatStatusText(state);
+
+    const controls = document.createElement('div');
+    controls.className = 'aethermoor-combat-controls';
+
+    const currentStats = derived(state.crew);
+
+    const qtikGroup = makeChoiceGroup(
+        `Q'tik (${state.crew.qtik.hp}/` +
+            `${currentStats.qtikMaxHp} HP)`,
+        'qtik',
+        [
+            { value: 'fire_melee', label: 'Fire Melee' },
+            { value: 'ice_melee', label: 'Ice Melee' },
+            { value: 'stun', label: 'Stun' },
+            { value: 'ice_patch', label: 'Ice Patch' },
+            { value: 'frost_stomp', label: 'Frost Stomp' },
+            { value: 'drink', label: 'Drink Potion' }
+        ],
+        combatSelections.qtik,
+        value => {
+            combatSelections.qtik = value;
+            renderAethermoorTab('combat');
+        }
+    );
+
+    const tansyGroup = makeChoiceGroup(
+        `Tansy (${state.crew.tansy.hp}/` +
+            `${currentStats.tansyMaxHp} HP)`,
+        'tansy',
+        [
+            { value: 'visor', label: 'Visor' },
+            { value: 'vitals', label: 'Vitals' },
+            { value: 'hamstring', label: 'Hamstring' },
+            { value: 'recall', label: 'Recall' },
+            { value: 'surge', label: 'Surge' },
+            { value: 'drink', label: 'Drink Potion' }
+        ],
+        combatSelections.tansy,
+        value => {
+            combatSelections.tansy = value;
+            renderAethermoorTab('combat');
+        }
+    );
+
+    const target = encounter.foes.find(
+        foe => foe.id === combatSelections.target &&
+            foe.hp > 0
+    );
+
+    if (!target) {
+        combatSelections.target =
+            encounter.foes.find(foe => foe.hp > 0)?.id ||
+            null;
+    }
+
+    const targetGroup = makeChoiceGroup(
+        'Target',
+        'target',
+        encounter.foes
+            .map((foe, index) => ({
+                foe,
+                index
+            }))
+            .filter(({ foe }) => foe.hp > 0)
+            .map(({ foe, index }) => ({
+                value: foe.id,
+                label: combatFoeLabel(foe, index),
+                detail: `(${foe.hp}/${foe.maxHp} HP)`,
+                telegraph: foe.nextTelegraph
+                    ? telegraphLabel(foe.nextTelegraph)
+                    : null
+            })),
+        combatSelections.target,
+        value => {
+            combatSelections.target = value;
+            renderAethermoorTab('combat');
+        }
+    );
+
+    const actions = document.createElement('div');
+    actions.className = 'aethermoor-combat-actions';
+
+    const resolveButton = document.createElement('button');
+    resolveButton.type = 'button';
+    resolveButton.className = 'menu_button';
+    resolveButton.textContent = 'Resolve Turn';
+
+    const resultBox = document.createElement('pre');
+    resultBox.className = 'aethermoor-combat-result';
+
+    if (aethermoorLastCombatLog) {
+        resultBox.textContent = aethermoorLastCombatLog;
+    } else {
+        resultBox.hidden = true;
+    }
+
+    resolveButton.addEventListener('click', async () => {
+        if (aethermoorCombatBusy) return;
+
+        aethermoorCombatBusy = true;
+        resolveButton.disabled = true;
+        resolveButton.textContent = 'Resolving...';
+        resultBox.hidden = false;
+        resultBox.textContent = 'Resolving combat turn...';
+
+        try {
+            const actionsInput = {
+                qtik: combatSelections.qtik,
+                tansy: combatSelections.tansy,
+                target: combatSelections.target
+            };
+
+            if (actionsInput.qtik === 'drink') {
+                actionsInput.qtikItem =
+                    combatSelections.qtikItem;
+            }
+
+            if (actionsInput.tansy === 'drink') {
+                actionsInput.tansyItem =
+                    combatSelections.tansyItem;
+            }
+
+            const result = await runStoredMechanic({
+                actions: actionsInput
+            });
+
+            assert(
+                result?.ok === true,
+                result?.error || 'Combat turn failed'
+            );
+
+            aethermoorLastCombatLog =
+                formatCombatTurnResult(result);
+
+            aethermoorLastCombatLogKey =
+                `${result.summary.encounter.id}:${result.turn}`;
+
+            resultBox.textContent =
+                aethermoorLastCombatLog;
+            resultBox.scrollTop = 0;
+
+            await renderAethermoorTab('combat');
+        } catch (error) {
+            resultBox.hidden = false;
+            resultBox.textContent =
+                `Turn was not resolved: ${
+                    error instanceof Error
+                        ? error.message
+                        : String(error)
+                }`;
+        } finally {
+            aethermoorCombatBusy = false;
+            resolveButton.disabled = false;
+            resolveButton.textContent = 'Resolve Turn';
+        }
+    });
+
+    actions.appendChild(resolveButton);
+
+    controls.append(
+        status,
+        qtikGroup,
+        tansyGroup,
+        targetGroup,
+        actions,
+        resultBox
+    );
+
+    inlineHost.appendChild(controls);
+
+    updateCombatAbilityButtons(
+        inlineHost,
+        state
+    );
 }
 
 const AETHERMOOR_HANDOFF_MARKER =

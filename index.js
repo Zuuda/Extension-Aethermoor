@@ -10611,7 +10611,75 @@ function resolveBatch(args) {
                     break;
                 }
 
-                                    case 'debug_retire_test_quest': {
+                                    case 'debug_reconcile_quest_terminal': {
+                    const state = clone(test.state);
+                    const quest = state.activeQuest;
+                    const gate = quest?.currentGate;
+                    const threat = quest?.terminalThreat;
+
+                    assert(
+                        quest?.status === 'in_progress' &&
+                        quest.seed?.testOnly === true,
+                        'Reconciliation only applies to an in-progress test quest'
+                    );
+
+                    assert(
+                        quest.structureV2?.family === 'defeat_elite' &&
+                        gate?.trigger === 'linked_combat' &&
+                        gate.linkedTargetId === quest.targetId,
+                        'Current gate is not linked to this quest target'
+                    );
+
+                    assert(
+                        threat?.revealed === true &&
+                        threat.resolved !== true &&
+                        threat.targetId === quest.targetId &&
+                        typeof threat.encounterId === 'string',
+                        'Quest does not have a matching revealed, unresolved threat'
+                    );
+
+                    assert(
+                        state.currentLocationId === quest.destinationId,
+                        'Crew must be at the quest destination to reconcile the test'
+                    );
+
+                    assert(
+                        state.encounter?.status === 'cleared' &&
+                        state.encounter.id !== threat.encounterId,
+                        'Expected a cleared encounter separate from the linked quest encounter'
+                    );
+
+                    assert(
+                        !quest.objectiveResolution,
+                        'Quest objective is already resolved'
+                    );
+
+                    assert(
+                        typeof test.completionEvidence === 'string' &&
+                        test.completionEvidence.trim().length > 0,
+                        'Reconciliation requires completionEvidence'
+                    );
+
+                    threat.resolved = true;
+                    quest.objectiveResolution = {
+                        route: 'combat',
+                        evidence: test.completionEvidence.trim()
+                    };
+
+                    result = {
+                        ok: true,
+                        action: 'debug_reconcile_quest_terminal',
+                        questId: quest.id,
+                        targetId: quest.targetId,
+                        linkedEncounterId: threat.encounterId,
+                        observedClearedEncounterId: state.encounter.id,
+                        objectiveResolution: quest.objectiveResolution,
+                        state
+                    };
+                    break;
+                }
+
+                    case 'debug_retire_test_quest': {
                     const state = clone(test.state);
                     const quest = state.activeQuest;
 
@@ -12443,6 +12511,7 @@ function registerTools() {
                                     'debug_create_settlement_lead',
                                     'debug_create_quest_offer',
                                     'debug_create_quest_breadcrumb',
+                                    'debug_reconcile_quest_terminal',
                                     'debug_retire_test_quest',
                                     'follow_breadcrumb',
                                     'quest',

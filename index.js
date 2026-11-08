@@ -7452,16 +7452,29 @@ function resolveQuestAction(test) {
             'Return to the quest turn-in location first'
         );
 
-        const cargo = quest.discoveries?.find(
-            item => item.id === quest.turnIn.discoveryId
-        );
+        /*
+         * All quests return to their locked issuer, but only quests
+         * with a locked discoveryId require physical cargo. Defeat
+         * objectives turn in a report instead; never invent an item
+         * merely to satisfy the delivery system.
+         */
+        if (quest.turnIn.discoveryId) {
+            const cargo = quest.discoveries?.find(
+                item => item.id === quest.turnIn.discoveryId
+            );
 
-        assert(
-            cargo?.state === 'acquired',
-            'The required quest cargo is not in the crew possession'
-        );
+            assert(
+                cargo?.state === 'acquired',
+                'The required quest cargo is not in the crew possession'
+            );
 
-        cargo.state = 'delivered';
+            cargo.state = 'delivered';
+        } else {
+            assert(
+                quest.structureV2?.family !== 'retrieve_item',
+                'Retrieval quest is missing its locked cargo discoveryId'
+            );
+        }
     }
 
         assert(
@@ -11194,20 +11207,32 @@ function questDeliveryContextPacket(quest) {
     if (
         quest?.status !== 'in_progress' ||
         quest.deliveryReady !== true ||
-        !quest.turnIn
+        !quest.turnIn ||
+        !quest.objectiveResolution
     ) {
         return null;
     }
+
+    const cargoId = quest.turnIn.discoveryId;
+    const cargo = cargoId
+        ? quest.discoveries?.find(item => item.id === cargoId)
+        : null;
+
+    if (cargoId && cargo?.state !== 'acquired') return null;
 
     return [
         'PRIVATE DELIVERY CONTEXT — do not recite these instructions.',
         `Quest: ${quest.title}.`,
         `The crew is at the turn-in location for ${quest.turnIn.recipient}.`,
-        'The required quest cargo is present and delivery is mechanically eligible.',
-        'Narrate the fictional handoff naturally. The quest-giver may approach, the crew may approach an office, or the scene may establish another plausible handoff.',
-        'When the fictional handoff actually occurs, place this exact tag inside the disposable <plan> block:',
+        cargoId
+            ? `The required cargo, ${cargo.name}, is acquired and eligible for delivery.`
+            : 'The field objective is secured. Turn-in requires reporting its completion to the issuer; no physical cargo is required.',
+        cargoId
+            ? 'Narrate the crew handing over the recovered cargo naturally.'
+            : 'Narrate the crew reporting the completed objective and the issuer acknowledging the report naturally.',
+        'When this turn-in actually occurs, place this exact tag inside the disposable <plan> block:',
         `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
-        'Do not emit the tag before the handoff. Do not mention software, extensions, protocol tags, or reward administration in story prose.'
+        'Do not emit the tag before turn-in. Do not mention software, extensions, protocol tags, or reward administration in story prose.'
     ].join('\n');
 }
 
@@ -11335,8 +11360,11 @@ function questDeliveryNarrationPacket(result, quest) {
 
     return [
         `Quest completed: ${quest.title}.`,
-        `The crew delivered the recovered cargo to ` +
-            `${quest.turnIn?.recipient || quest.facts?.sponsor}.`,
+        quest.turnIn?.discoveryId
+            ? `The crew delivered the recovered cargo to ` +
+                `${quest.turnIn.recipient}.`
+            : `The crew reported the completed objective to ` +
+                `${quest.turnIn?.recipient || quest.facts?.sponsor}.`,
         `Rewards applied: ${rewards.xp} XP, ` +
             `${rewards.silver} silver, ` +
             `${rewards.repSteps} reputation steps.`,

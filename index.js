@@ -14407,15 +14407,13 @@ async function runAethermoorPanelCase(host, tab, caseData, successText) {
         return null;
     }
 }
-
 async function renderQuestTab(host) {
-    host.replaceChildren();
-
     let snapshot;
 
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
+        host.replaceChildren();
         host.appendChild(
             makeAethermoorSection(
                 'QUESTS',
@@ -14425,6 +14423,14 @@ async function renderQuestTab(host) {
         );
         return;
     }
+
+    /*
+     * Automatic polling and action-triggered refreshes may overlap while
+     * awaiting saved state. Clear only after that await, immediately before
+     * synchronous rendering, so each refresh replaces the previous display
+     * instead of appending a second quest summary and action section.
+     */
+    host.replaceChildren();
 
     const state = snapshot.state;
     const quest = state.activeQuest;

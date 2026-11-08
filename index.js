@@ -13663,6 +13663,7 @@ async function openQuestPanel() {
         const snapshot = await readStoredCombatState();
         const state = snapshot.state;
         const quest = state.activeQuest;
+            markCampaignViewRendered(snapshot);
         const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
 
         const questIsTerminal =
@@ -14669,6 +14670,7 @@ async function renderWorldTab(host) {
     }
 
     const state = snapshot.state;
+        markCampaignViewRendered(snapshot);
     const world = state.world || {};
     const zone = world.zones?.[state.zone];
     const settlement = zone
@@ -15373,6 +15375,9 @@ const combatSelections = {
  */
 let aethermoorCombatBusy = false;
 let aethermoorCombatRefreshTimer = null;
+let aethermoorCampaignRefreshTimer = null;
+let aethermoorCampaignRefreshBusy = false;
+let aethermoorCampaignViewKey = null;
 let aethermoorCombatViewKey = null;
 let aethermoorLastCombatLog = '';
 let aethermoorLastCombatLogKey = null;
@@ -15383,6 +15388,13 @@ function combatLogKey(state) {
 
 function markCombatViewRendered(snapshot) {
     aethermoorCombatViewKey = {
+        metadata: getContext().chatMetadata,
+        revision: snapshot.revision
+    };
+}
+
+function markCampaignViewRendered(snapshot) {
+    aethermoorCampaignViewKey = {
         metadata: getContext().chatMetadata,
         revision: snapshot.revision
     };
@@ -15547,15 +15559,16 @@ function updateCombatAbilityButtons(panel, state) {
 }
 
 function registerAethermoorCombatAutoRefresh() {
-    if (aethermoorCombatRefreshTimer !== null) return;
+function registerAethermoorCampaignAutoRefresh() {
+    if (aethermoorCampaignRefreshTimer !== null) return;
 
-    aethermoorCombatRefreshTimer = setInterval(() => {
+    aethermoorCampaignRefreshTimer = setInterval(() => {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            aethermoorActiveTab !== 'combat' ||
-            aethermoorCombatBusy ||
-            !aethermoorTabViews?.combat
+            !['quests', 'world'].includes(aethermoorActiveTab) ||
+            aethermoorCampaignRefreshBusy ||
+            !aethermoorTabViews
         ) {
             return;
         }
@@ -15566,26 +15579,32 @@ function registerAethermoorCombatAutoRefresh() {
         if (!stored?.state) return;
 
         if (
-            aethermoorCombatViewKey?.metadata === metadata &&
-            aethermoorCombatViewKey?.revision === stored.revision
+            aethermoorCampaignViewKey?.metadata === metadata &&
+            aethermoorCampaignViewKey?.revision === stored.revision
         ) {
             return;
         }
 
-        if (
-            aethermoorCombatViewKey &&
-            aethermoorCombatViewKey.metadata !== metadata
-        ) {
-            aethermoorLastCombatLog = '';
-            aethermoorLastCombatLogKey = null;
-        }
+        aethermoorCampaignRefreshBusy = true;
 
-        void openCombatPanel(aethermoorTabViews.combat).catch(error => {
-            console.error(
-                '[Aethermoor] Combat refresh failed',
-                error
-            );
-        });
+        const host =
+            aethermoorTabViews[aethermoorActiveTab];
+
+        const refresh =
+            aethermoorActiveTab === 'quests'
+                ? renderQuestTab(host)
+                : renderWorldTab(host);
+
+        Promise.resolve(refresh)
+            .catch(error => {
+                console.error(
+                    '[Aethermoor] Campaign tab refresh failed',
+                    error
+                );
+            })
+            .finally(() => {
+                aethermoorCampaignRefreshBusy = false;
+            });
     }, 500);
 }
 
@@ -16927,6 +16946,8 @@ jQuery(function () {
     try {
         createAethermoorController();
         registerAethermoorCombatAutoRefresh();
+        registerAethermoorCampaignAutoRefresh();
+
     } catch (error) {
         console.error(
             'Aethermoor: Main controller initialization failed',

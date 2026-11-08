@@ -4983,6 +4983,57 @@ function resolveTravelStep(test) {
     state.leads ||= {};
 
         /*
+     * Explicit UI-generated movement takes precedence over automatic
+     * quest-return routing. A new destination can change direction from
+     * an existing journey; canceling preserves the crew's current position
+     * before the replacement route is calculated.
+     */
+    if (test.destinationId) {
+        assert(
+            typeof test.destinationId === 'string' &&
+            test.destinationId.length > 0,
+            'Explicit movement requires destinationId'
+        );
+
+        assert(
+            !['active', 'spotted'].includes(state.encounter?.status),
+            'Resolve or avoid the current encounter before changing destination'
+        );
+
+        const destination =
+            state.places?.[test.destinationId] ||
+            Object.values(state.world?.settlements || {})
+                .find(entry => entry.locationId === test.destinationId);
+
+        assert(
+            destination,
+            `Unknown known destination: ${test.destinationId}`
+        );
+
+        if (
+            state.currentJourney &&
+            state.currentJourney.destinationId !== test.destinationId
+        ) {
+            const cancelled = resolveJourneyAction({
+                state,
+                action: 'cancel'
+            });
+
+            state = cancelled.state;
+        }
+
+        if (!state.currentJourney) {
+            const started = resolveJourneyAction({
+                state,
+                action: 'start',
+                destinationId: test.destinationId
+            });
+
+            state = started.state;
+        }
+    }
+
+        /*
      * Once the field objective is secured, the next movement defaults
      * to the quest's locked turn-in location. An explicitly selected
      * journey already in progress is left untouched.
@@ -5704,6 +5755,30 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   events, flee, death, and migration.
  * - Run the relevant regression group after every quest, travel, or persistence
  *   change instead of relying only on the live campaign state.
+ *
+ * * NEXT — Explicit movement commands and World destinations
+ * - Generate stable-ID movement commands from clickable World entries.
+ * - Support quest destinations, rumor destinations, settlements, and generic
+ *   regional exploration.
+ * - Allow an explicit destination command to change direction mid-journey.
+ * - Keep legacy [moved] parsing for existing chats.
+ * - Make UI clicks clipboard-only; movement resolves only when the command
+ *   is submitted with the player's fiction.
+ *
+ * PLANNED — Local site exploration sessions
+ * - Do not implement fixed room counts in this movement pass.
+ * - Later represent discovered local nodes and exits as saved site-session data.
+ * - Prevent repeated visits to the same local node from rerolling encounters
+ *   or discoveries indefinitely.
+ * - Permit newly discovered areas, such as secret cellars or upper levels,
+ *   to be added when established by authored mechanics.
+ * - Distinguish local exploration from campaign-route travel.
+ *
+ * DEFERRED — Narrator-created local map expansion
+ * - The narrator must not create new mechanically rewarding nodes merely to
+ *   obtain additional encounter or loot rolls.
+ * - Define the validation boundary for newly revealed local exits before
+ *   allowing prose to expand a saved site map.
  *
  * DEFERRED UNTIL CORE FLOWS ARE STABLE
  *
@@ -12915,6 +12990,12 @@ function registerTools() {
                             leadId: {
                                 type: 'string'
                             },
+                            destinationId: {
+                                type: 'string',
+                                description:
+                                    'Stable known destination ID for explicit movement'
+                            },
+
                             questItemId: {
                                 type: 'string',
                                 description:
@@ -14659,6 +14740,32 @@ async function renderQuestTab(host) {
     }
 }
 
+async function copyAethermoorCommand(command) {
+    assert(
+        typeof command === 'string' && command.length > 0,
+        'Clipboard command is empty'
+    );
+
+    try {
+        await navigator.clipboard.writeText(command);
+    } catch (_error) {
+        const input = document.createElement('textarea');
+        input.value = command;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+    }
+
+    toastr.info(
+        'Movement command copied. Add your fiction, paste the command, and send the message.',
+        'Aethermoor'
+    );
+}
+
 async function renderWorldTab(host) {
     host.replaceChildren();
 
@@ -14941,38 +15048,29 @@ async function renderWorldTab(host) {
         }
 
 
-        for (const destination of destinations.values()) {
+               for (const destination of destinations.values()) {
+            const distance =
+                destination.route.totalSegments <= 1
+                    ? 'Nearby'
+                    : destination.route.totalSegments <= 2
+                        ? 'Near'
+                        : destination.route.totalSegments <= 4
+                            ? 'Moderate'
+                            : 'Far';
+
             actions.appendChild(
                 makeAethermoorAction(
-                    `Travel to ${destination.label} ` +
-                    `(Zone ${destination.zone}; ` +
-                    `${destination.route.totalSegments} segments)`,
+                    `Travel to ${destination.label} · ${distance}`,
                     'world',
-                    () => {
-                        const journeyCase = {
-                            name: 'start_world_journey',
-                            kind: 'journey',
-                            action: 'start'
-                        };
-
-                        if (destination.leadId) {
-                            journeyCase.leadId = destination.leadId;
-                        } else {
-                            journeyCase.destinationId =
-                                destination.locationId;
-                        }
-
-                        return runAethermoorPanelCase(
-                            host,
-                            'world',
-                            journeyCase,
-                            `Journey started toward ${destination.label}.`
-                        );
-                    }
+                    () => copyAethermoorCommand(
+                        destinationCommand(
+                            destination.locationId
+                        )
+                    )
                 )
             );
         }
-    }
+   }
 
     for (const lead of rumors) {
         if (
@@ -14983,15 +15081,8 @@ async function renderWorldTab(host) {
                 makeAethermoorAction(
                     `Investigate: ${state.places[lead.targetId].label}`,
                     'world',
-                    () => runAethermoorPanelCase(
-                        host,
-                        'world',
-                        {
-                            name: 'investigate_world_rumor',
-                            kind: 'investigate_lead',
-                            leadId: lead.id
-                        },
-                        'Rumor investigated.'
+                    () => copyAethermoorCommand(
+                        destinationCommand(lead.targetId)
                     )
                 )
             );
@@ -16628,30 +16719,75 @@ function removeAethermoorHandoffFromChat(chat, message) {
     }
 }
 
-function findLatestUserMove(chat) {
+const AETHERMOOR_MOVE_COMMAND =
+    /\[\s*AETHERMOOR:MOVE\s+destination="([^"]+)"\s*\]/i;
+
+const AETHERMOOR_EXPLORE_COMMAND =
+    /\[\s*AETHERMOOR:EXPLORE_REGION\s*\]/i;
+
+function findLatestUserMovement(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         const message = chat[index];
 
-        if (message?.is_user !== true) {
-            continue;
-        }
+        if (message?.is_user !== true) continue;
 
         if (typeof message.mes !== 'string') {
             return null;
         }
 
         const prose = message.mes
-            // Ignore fenced code blocks.
             .replace(/```[\s\S]*?```/g, '')
-            // Ignore inline code containing the marker.
             .replace(/`[^`]*`/g, '');
 
-        return /\[\s*moved\s*\]/i.test(prose)
-            ? { index, text: prose }
-            : null;
+        const explicitMove =
+            prose.match(AETHERMOOR_MOVE_COMMAND);
+
+        if (explicitMove) {
+            return {
+                index,
+                text: prose,
+                destinationId: explicitMove[1],
+                explicit: true
+            };
+        }
+
+        if (AETHERMOOR_EXPLORE_COMMAND.test(prose)) {
+            return {
+                index,
+                text: prose,
+                destinationId: null,
+                explicit: true
+            };
+        }
+
+        // Preserve old chats using [moved].
+        if (/\[\s*moved\s*\]/i.test(prose)) {
+            return {
+                index,
+                text: prose,
+                destinationId: null,
+                explicit: false
+            };
+        }
+
+        return null;
     }
 
     return null;
+}
+
+function destinationCommand(destinationId) {
+    assert(
+        typeof destinationId === 'string' &&
+        destinationId.length > 0,
+        'Movement command requires a destination ID'
+    );
+
+    return `[AETHERMOOR:MOVE destination="${destinationId}"]`;
+}
+
+function exploreRegionCommand() {
+    return '[AETHERMOOR:EXPLORE_REGION]';
 }
 
 function travelStepId(message) {
@@ -16669,15 +16805,15 @@ globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
         if (!Array.isArray(chat)) return;
 
-        const movement = findLatestUserMove(chat);
-
+        const movement = findLatestUserMovement(chat);
         if (movement) {
             try {
                 await runStoredMechanic({
                     cases: [{
-                        name: 'resolve_moved_travel_step',
+                        name: 'resolve_movement_command',
                         kind: 'travel',
-                        stepId: travelStepId(movement)
+                        stepId: travelStepId(movement),
+                        destinationId: movement.destinationId || undefined
                     }]
                 });
             } catch (error) {

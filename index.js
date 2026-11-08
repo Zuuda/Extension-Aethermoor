@@ -14428,8 +14428,9 @@ async function renderQuestTab(host) {
 
     const state = snapshot.state;
     const quest = state.activeQuest;
-
+    markCampaignViewRendered(snapshot);
     const questIsTerminal =
+
         !quest ||
         ['abandoned', 'declined', 'complete', 'retired_test']
             .includes(quest.status);
@@ -15559,7 +15560,53 @@ function updateCombatAbilityButtons(panel, state) {
 }
 
 function registerAethermoorCombatAutoRefresh() {
+    if (aethermoorCombatRefreshTimer !== null) return;
+
+    aethermoorCombatRefreshTimer = setInterval(() => {
+        if (
+            !aethermoorPanelOpen ||
+            aethermoorPanelElement?.hidden ||
+            aethermoorActiveTab !== 'combat' ||
+            aethermoorCombatBusy ||
+            !aethermoorTabViews?.combat
+        ) {
+            return;
+        }
+
+        const metadata = getContext().chatMetadata;
+        const stored = metadata?.[AETHERMOOR_METADATA_KEY];
+
+        if (!stored?.state) return;
+
+        if (
+            aethermoorCombatViewKey?.metadata === metadata &&
+            aethermoorCombatViewKey?.revision === stored.revision
+        ) {
+            return;
+        }
+
+        /*
+         * Polling only renders saved state. Share the busy flag with
+         * user-triggered combat operations so controls cannot be rebuilt
+         * while a turn is being resolved.
+         */
+        aethermoorCombatBusy = true;
+
+        Promise.resolve(openCombatPanel(aethermoorTabViews.combat))
+            .catch(error => {
+                console.error(
+                    '[Aethermoor] Combat tab refresh failed',
+                    error
+                );
+            })
+            .finally(() => {
+                aethermoorCombatBusy = false;
+            });
+    }, 500);
+}
+
 function registerAethermoorCampaignAutoRefresh() {
+
     if (aethermoorCampaignRefreshTimer !== null) return;
 
     aethermoorCampaignRefreshTimer = setInterval(() => {

@@ -5413,10 +5413,34 @@ function resolveTravelStep(test) {
     if (journey?.status === 'paused') {
         journey.status = 'traveling';
     }
+    /*
+     * Destination content supplies the arrival scene. Consume the final
+     * route segment here, before the random travel-event roll below.
+     * Quest and rumor arrival resolution still run in this branch.
+     *
+     * Older saves may already have consumed the final segment during an
+     * encounter. Preserve that progress and finalize their arrival without
+     * consuming another segment. The encounter guard above still applies.
+     */
+    if (
+        journey &&
+        journey.completedSegments >= journey.totalSegments - 1
+    ) {
+        int(journey.totalSegments, 'journey.totalSegments', 1);
+        int(journey.completedSegments, 'journey.completedSegments');
 
-    // An interruption on the final segment delays arrival until the
-    // situation is resolved; resuming does not roll an extra encounter.
-    if (journey && journey.completedSegments === journey.totalSegments) {
+        assert(
+            journey.completedSegments <= journey.totalSegments,
+            'Journey progress exceeds its route'
+        );
+
+        const finalSegmentConsumed =
+            journey.completedSegments < journey.totalSegments;
+
+        if (finalSegmentConsumed) {
+            journey.completedSegments += 1;
+        }
+
         state.places[journey.destinationId].visited = true;
         journey.status = 'arrived';
        
@@ -5429,7 +5453,7 @@ function resolveTravelStep(test) {
             destinationId: journey.destinationId,
             movement: {
                 travelStepConsumed: true,
-                journeySegmentConsumed: false,
+                journeySegmentConsumed: finalSegmentConsumed,
                 arrivalOnly: true,
                 interrupted: false,
                 completedSegments: journey.completedSegments,
@@ -6005,12 +6029,19 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * NEXT FOCUSED WORK
  *
  * PARTIAL — Travel interruption behavior
- * - Policy: a [moved] that rolls a travel event consumes one journey segment,
- *   including when that event discovers a wild encounter.
+ * - Destination journeys roll random travel events only before the final
+ *   segment. An event consumes one segment, including wild encounters.
+ * - The final segment consumes distance and confirms arrival without a
+ *   random travel-event roll. One-segment journeys arrive directly.
+ * - Quest and rumor arrival mechanics still run and may reveal their own
+ *   opportunities or spotted threats, without automatically engaging combat.
+ * - Regional exploration without a destination retains normal event rolls.
  * - Movement while an encounter is spotted or active does not advance travel.
- * - After an encounter on the final segment, arrival is finalized afterward
- *   without rolling or consuming another segment.
+ * - Older final-segment interruptions remain supported: after resolution or
+ *   avoidance, finalize arrival without another segment or travel-event roll.
  * - Narration and Combat UI report saved journey progress at interruptions.
+ * - Final-segment policy implemented; fresh one-segment and multi-segment
+ *   arrival verification pending. Earlier test arrivals still rolled events.
  *
  * NEXT — Travel interruption regression pass
  * - Test encounters on the first, middle, and final journey segments.
@@ -12193,11 +12224,16 @@ function travelNarrationPacket(result) {
             'The travel roll produced a rare-event opportunity, but no specific event has been mechanically established yet.'
         );
     }
-
     if (result.movement?.arrivalOnly) {
         lines.push(
-            `Arrival at ${result.destinationLabel} was finalized. ` +
-            'This [moved] did not consume another route segment.'
+            result.movement.journeySegmentConsumed
+                ? `The crew completed the final route segment and ` +
+                  `arrived at ${result.destinationLabel}.`
+                : `Arrival at ${result.destinationLabel} was finalized ` +
+                  'without consuming another route segment.',
+            'No random travel event was rolled for this arrival.',
+            'Any destination opportunity or threat must come from the ' +
+                'established quest, rumor, or site mechanics.'
         );
     } else if (result.journey) {
         const journey = result.journey;

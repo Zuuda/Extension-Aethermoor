@@ -5380,8 +5380,16 @@ function resolveTravelStep(test) {
         );
 
         state = completeQuestArrivalGate(state, arrival);
+
+        const rumorArrival = resolveArrivedRumors(state);
+        state = rumorArrival.state;
+
+        arrival.rumorArrivals = rumorArrival.resolutions;
+        arrival.rumorArrivalPackets = rumorArrival.packets;
+
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
+
     }
 
     const travelRoll = roll(state, 100);
@@ -5605,11 +5613,18 @@ function resolveTravelStep(test) {
 
         outcome.journey = clone(journey);
     }
-
     if (outcome.arrived) {
         state = completeQuestArrivalGate(state, outcome);
+
+        const rumorArrival = resolveArrivedRumors(state);
+        state = rumorArrival.state;
+
+        outcome.rumorArrivals = rumorArrival.resolutions;
+        outcome.rumorArrivalPackets = rumorArrival.packets;
     }
+
     state.travelSteps[test.stepId] = clone(outcome);
+
     return {
         ok: true,
         created: true,
@@ -12693,7 +12708,12 @@ async function runStoredMechanic(args) {
                 revision
             );
         }
-                for (const packet of arrivedRumors.packets) {
+        const rumorPackets = [
+            ...(caseResult.rumorArrivalPackets || []),
+            ...arrivedRumors.packets
+        ];
+
+        for (const packet of rumorPackets) {
             appendAethermoorHandoff(
                 handoffQueue,
                 {
@@ -12703,6 +12723,7 @@ async function runStoredMechanic(args) {
                 revision
             );
         }
+
 
         metadata[AETHERMOOR_METADATA_KEY] = {
             revision,

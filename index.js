@@ -15545,8 +15545,7 @@ async function renderQuestTab(host) {
         makeAethermoorSection(
             'QUEST JOURNAL',
             `${accepted.length} in progress · ${offered.length} offered\n` +
-                'Offers remain available while another quest is in progress. ' +
-                'Currently, only one quest can be accepted at a time.',
+            'Accepted quests remain in the journal alongside new offers.',
             'quest'
         )
     );
@@ -15579,13 +15578,6 @@ async function renderQuestTab(host) {
                 }
             }
         );
-
-        if (action === 'accept' && accepted.length > 0) {
-            button.disabled = true;
-            button.title =
-                'Finish or abandon the in-progress quest before accepting another. ' +
-                'This offer remains saved.';
-        }
 
         section.appendChild(button);
     }

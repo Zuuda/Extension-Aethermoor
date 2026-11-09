@@ -5627,6 +5627,20 @@ function resolveTravelStep(test) {
                 status: 'known'
             };
 
+            recordCrewKnowledge(state, {
+                id: `knowledge-testimony-${leadId}`,
+                kind: 'testimony',
+                knowledgeType: 'testimony',
+                certainty: 'unverified_claim',
+                summary: template.claim,
+                source: {
+                    id: socialId,
+                    type: 'traveler'
+                },
+                learnedAtLocationId: state.currentLocationId,
+                learnedAtZone: state.zone
+            });
+
             outcome.rumor = {
                 id: leadId,
                 claim: template.claim,

@@ -15192,7 +15192,7 @@ function addAethermoorPanelStyles() {
         #aethermoor_main_button {
             border-left: 2px solid #4da6ff;
         }
-                .aethermoor-tab-view {
+        .aethermoor-tab-view {
             display: grid;
             align-content: start;
             gap: 10px;
@@ -15351,7 +15351,6 @@ function addAethermoorPanelStyles() {
             overflow-wrap: anywhere;
         }
 
-
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices > button.aethermoor-combat-choice {
             display: inline-flex !important;
@@ -15396,6 +15395,20 @@ function addAethermoorPanelStyles() {
             opacity: 0.35 !important;
             cursor: not-allowed;
         }
+        .aethermoor-debug-records {
+            display: grid;
+            gap: 8px;
+        }
+
+        .aethermoor-debug-record {
+            display: grid;
+            gap: 6px;
+            padding: 8px;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #c084fc;
+        }
+
     `;
 
     document.head.appendChild(style);
@@ -17682,23 +17695,110 @@ function openNarrationDebug() {
     status.className = 'aethermoor-ui-text';
     const controls = document.createElement('div');
     controls.className = 'aethermoor-ui-actions';
-    const output = document.createElement('pre');
-    output.style.whiteSpace = 'pre-wrap';
-    output.style.overflowWrap = 'anywhere';
+    const output = document.createElement('div');
+    output.className = 'aethermoor-debug-records';
+
+        async function copyDebugText(text, label) {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (_error) {
+            const input = document.createElement('textarea');
+            input.value = text;
+            input.style.position = 'fixed';
+            input.style.opacity = '0';
+            document.body.appendChild(input);
+            input.focus();
+            input.select();
+            document.execCommand('copy');
+            input.remove();
+        }
+
+        toastr.info(`${label} copied to clipboard.`, 'Narration Debug');
+    }
+
+    function recordCopyText(entry) {
+        const details = entry.details || {};
+
+        if (typeof details.text === 'string') {
+            return details.text;
+        }
+
+        return JSON.stringify(details, null, 2);
+    }
 
     function refresh() {
         const debug = metadata[AETHERMOOR_DEBUG_KEY];
+        const entries = debug?.entries || [];
+
         status.textContent =
             `Recording: ${debug?.enabled ? 'ON' : 'OFF'} · ` +
-            `${debug?.entries?.length || 0}/${AETHERMOOR_DEBUG_LIMIT} events\n` +
-            'Private engine context may include hidden quest information.\n' +
-            'Each reply notification is retained separately for comparison.';
+            `${entries.length}/${AETHERMOOR_DEBUG_LIMIT} events\n` +
+            'Private engine context may contain hidden quest information.\n' +
+            'Each event has its own clipboard action.';
         toggle.textContent = debug?.enabled
             ? 'Disable recording'
             : 'Enable recording';
 
-        // Plain text only. Never render captured tags as HTML or chat messages.
-        output.textContent = JSON.stringify(debug?.entries || [], null, 2);
+        output.replaceChildren();
+
+        if (entries.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'aethermoor-ui-text';
+            empty.textContent = 'No diagnostic records.';
+            output.appendChild(empty);
+            return;
+        }
+
+        entries.forEach((entry, index) => {
+            const details = entry.details || {};
+            const record = document.createElement('section');
+            record.className = 'aethermoor-debug-record';
+
+            const heading = document.createElement('div');
+            heading.className = 'aethermoor-ui-heading';
+            heading.textContent =
+                `${index + 1}. ${entry.type} · ` +
+                `${entry.time}`;
+
+            const metadataLine = document.createElement('div');
+            metadataLine.className = 'aethermoor-ui-text';
+            metadataLine.textContent =
+                `Revision: ${entry.revision ?? 'none'}` +
+                (
+                    details.eventType
+                        ? ` · Event: ${details.eventType}`
+                        : ''
+                ) +
+                (
+                    details.messageId !== undefined &&
+                    details.messageId !== null
+                        ? ` · Message: ${details.messageId}`
+                        : ''
+                );
+
+            const copyButton = makeAethermoorAction(
+                entry.type === 'assistant_notification'
+                    ? 'Copy observed message'
+                    : entry.type === 'handoff_injected'
+                        ? 'Copy injected handoff'
+                        : 'Copy record',
+                'world',
+                () => {
+                    void copyDebugText(
+                        recordCopyText(entry),
+                        'Diagnostic text'
+                    );
+                }
+            );
+
+            record.append(
+                heading,
+                metadataLine,
+                copyButton
+            );
+
+            output.appendChild(record);
+        });
     }
 
     async function changeDebug(change) {

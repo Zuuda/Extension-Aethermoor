@@ -4843,30 +4843,27 @@ function resolveArrivedRumors(stateInput) {
         let offeredQuest = null;
         let offerDeferred = false;
 
-        if (isQuestHook) {
-            const questSlotOccupied =
-                ['offered', 'in_progress'].includes(
-                    state.activeQuest?.status
-                );
+               if (isQuestHook) {
+            /*
+             * An existing offer or accepted quest no longer defers this
+             * opportunity. Quest generation saves the new offer in the
+             * journal while preserving the compatibility-selected quest.
+             * The locked inquiry remains the one-off creation boundary.
+             */
+            const offered = resolveQuestSeed({
+                state,
+                inquiryId: leadId,
+                zone: arrival.zone,
+                settlementId: arrival.settlementId
+            });
 
-            if (questSlotOccupied) {
-                offerDeferred = true;
-            } else {
-                const offered = resolveQuestSeed({
-                    state,
-                    inquiryId: leadId,
-                    zone: arrival.zone,
-                    settlementId: arrival.settlementId
-                });
+            state = offered.state;
+            offeredQuest = offered.created
+                ? offered.quest
+                : null;
 
-                state = offered.state;
-                offeredQuest = offered.created
-                    ? offered.quest
-                    : null;
-
-                lead = state.leads[leadId];
-                arrival = lead.arrivalResolution;
-            }
+            lead = state.leads[leadId];
+            arrival = lead.arrivalResolution;
         }
 
         if (!offerDeferred) {
@@ -6189,8 +6186,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Explicit unknown quest IDs must fail without falling back to another quest.
  * - Offer preparation targets the newly generated quest while preserving
  *   the selected quest. Preparation helpers still need explicit quest arguments.
- * - Next: render all journal offers and bind each action to its quest ID;
- *   then remove rumor offer deferral without replacing the selected quest.
+ * - Quests tab renders all journal offers with ID-bound acceptance/decline.
+ * - Rumor arrivals create journal offers immediately, preserving selection.
+ * - Restore shared identity between activeQuest and its journal entry after
+ *   JSON loading; legacy progression remains authoritative during migration.
+ * - Journal delivery uses the fictional handover handshake, not a payout button.
+ * - Regression pending: two offers, reload, decline one without changing the
+ *   other, accept one, and verify another offer remains available.
+ * - Concurrent accepted-quest progression remains unsupported.
  * - Do not implement quest abandonment or completion by relying only on a
  *   global activeQuest pointer.
  *
@@ -7054,6 +7057,29 @@ function ensureQuestJournal(state) {
         if (bucket) {
             state.quests[bucket].push(active);
         }
+    }
+    /*
+     * JSON persistence does not preserve shared object references.
+     * Legacy progression still updates activeQuest, so use that selected
+     * record as authoritative during this migration and reconnect the
+     * journal to the same object before any quest action runs.
+     * Journal-only offers remain independent and are never selected here.
+     */
+    if (
+        active &&
+        typeof active.id === 'string' &&
+        questJournalBucketForStatus(active.status)
+    ) {
+        for (const bucket of Object.values(state.quests)) {
+            for (let index = bucket.length - 1; index >= 0; index--) {
+                if (bucket[index]?.id === active.id) {
+                    bucket.splice(index, 1);
+                }
+            }
+        }
+
+        state.quests[questJournalBucketForStatus(active.status)]
+            .push(active);
     }
 
     return state.quests;
@@ -15334,8 +15360,7 @@ async function renderQuestTab(host) {
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
+        host.replaceChildren(
             makeAethermoorSection(
                 'QUESTS',
                 error instanceof Error ? error.message : String(error),
@@ -15345,137 +15370,90 @@ async function renderQuestTab(host) {
         return;
     }
 
-    /*
-     * Automatic polling and action-triggered refreshes may overlap while
-     * awaiting saved state. Clear only after that await, immediately before
-     * synchronous rendering, so each refresh replaces the previous display
-     * instead of appending a second quest summary and action section.
-     */
-    host.replaceChildren();
-
     const state = snapshot.state;
-    const quest = state.activeQuest;
+
+    /*
+     * This snapshot is a detached export. Normalize legacy journal data
+     * for display without saving or advancing mechanics during UI refresh.
+     * Actions always address a stable quest ID, never a card's position.
+     */
+    const journal = ensureQuestJournal(state);
+    const accepted = journal.accepted.filter(
+        quest => quest.status === 'in_progress'
+    );
+    const offered = journal.offered.filter(
+        quest => quest.status === 'offered'
+    );
+
+    host.replaceChildren();
     markCampaignViewRendered(snapshot);
-    const questIsTerminal =
 
-        !quest ||
-        ['abandoned', 'declined', 'complete', 'retired_test']
-            .includes(quest.status);
+    host.appendChild(
+        makeAethermoorSection(
+            'QUEST JOURNAL',
+            `${accepted.length} in progress · ${offered.length} offered\n` +
+                'Offers remain available while another quest is in progress. ' +
+                'Currently, only one quest can be accepted at a time.',
+            'quest'
+        )
+    );
 
-    if (questIsTerminal) {
+    function addQuestAction(section, quest, label, action) {
+        const button = makeAethermoorAction(
+            label,
+            'quest',
+            async () => {
+                button.disabled = true;
+
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'quests',
+                        {
+                            name: `journal_quest_${action}`,
+                            kind: 'quest',
+                            action,
+                            questId: quest.id
+                        },
+                        action === 'accept'
+                            ? 'Quest accepted.'
+                            : action === 'decline'
+                                ? 'Quest declined.'
+                                : 'Quest abandoned. No rewards were granted.'
+                    );
+                } finally {
+                    button.disabled = false;
+                }
+            }
+        );
+
+        if (action === 'accept' && accepted.length > 0) {
+            button.disabled = true;
+            button.title =
+                'Finish or abandon the in-progress quest before accepting another. ' +
+                'This offer remains saved.';
+        }
+
+        section.appendChild(button);
+    }
+
+    for (const quest of accepted) {
         const section = makeAethermoorSection(
-            'QUESTS',
-            quest
-                ? `Previous quest:\n${formatQuestStatus(quest)}\n\n` +
-                  'No offered or in-progress quest.'
-                : 'No active quest offer.',
+            'IN PROGRESS',
+            formatQuestStatus(quest),
             'quest'
         );
 
-        section.appendChild(
-            makeAethermoorAction(
-                'Debug: Create Quest Offer',
-                'quest',
-                () => runAethermoorPanelCase(
-                    host,
-                    'quests',
-                    {
-                        name: 'debug_create_authored_quest_offer',
-                        kind: 'debug_create_quest_offer'
-                    },
-                    'Debug quest offer created.'
-                )
-            )
-        );
-
-        host.appendChild(section);
-        return;
-    }
-
-    if (
-        quest.status === 'offered' &&
-        quest.seed?.testOnly === true
-    ) {
-        host.appendChild(
-            makeAethermoorSection(
-                'TEST QUEST',
-                'This debug offer can be retired without accepting it or granting rewards.',
-                'quest'
-            )
-        );
-
-        host.appendChild(
-            makeAethermoorAction(
-                'Debug: Retire Test Quest',
-                'quest',
-                () => runAethermoorPanelCase(
-                    host,
-                    'quests',
-                    {
-                        name: 'debug_retire_test_quest',
-                        kind: 'debug_retire_test_quest'
-                    },
-                    'Test quest retired without rewards.'
-                )
-            )
-        );
-    }
-
-    const summary = makeAethermoorSection(
-        quest.status === 'offered'
-            ? 'QUEST OFFER'
-            : 'ACTIVE QUEST',
-        formatQuestStatus(quest),
-        'quest'
-    );
-
-    const actions = document.createElement('div');
-    actions.className = 'aethermoor-ui-actions';
-
-    if (quest.status === 'offered') {
-        actions.append(
-            makeAethermoorAction(
-                'Accept Quest',
-                'quest',
-                () => runAethermoorPanelCase(
-                    host,
-                    'quests',
-                    {
-                        name: 'accept_quest',
-                        kind: 'quest',
-                        action: 'accept'
-                    },
-                    'Quest accepted.'
-                )
-            ),
-            makeAethermoorAction(
-                'Decline Quest',
-                'quest',
-                () => runAethermoorPanelCase(
-                    host,
-                    'quests',
-                    {
-                        name: 'decline_quest',
-                        kind: 'quest',
-                        action: 'decline'
-                    },
-                    'Quest declined.'
-                )
-            )
-        );
-    }
-
-    if (quest.status === 'in_progress') {
         const canRevealTerminal =
+            quest.structureV2?.version !== 2 &&
             quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
             quest.destinationId === state.currentLocationId &&
-            !['active', 'spotted'].includes(
-                state.encounter?.status
-            );
+            state.activeQuest?.id === quest.id &&
+            !['active', 'spotted'].includes(state.encounter?.status);
 
         if (canRevealTerminal) {
-            actions.appendChild(
+            section.appendChild(
                 makeAethermoorAction(
                     'Reveal Quest Threat',
                     'combat',
@@ -15492,92 +15470,68 @@ async function renderQuestTab(host) {
             );
         }
 
-        const canTurnIn =
+        /*
+         * Arrival makes delivery eligible. The fictional handover and
+         * validated delivery tag still authorize payment; viewing the
+         * journal must not substitute for that handshake.
+         */
+        if (
             quest.objectiveResolution &&
             quest.deliveryReady === true &&
-            quest.turnIn?.locationId === state.currentLocationId;
-
-        if (canTurnIn) {
-            actions.appendChild(
-                makeAethermoorAction(
-                    'Return Quest Cargo',
-                    'quest',
-                    async () => {
-                        const output = await runAethermoorPanelCase(
-                            host,
-                            'quests',
-                            {
-                                name: 'turn_in_recovered_cargo',
-                                kind: 'quest',
-                                action: 'complete',
-                                objectiveCompleted: true,
-                                completionEvidence:
-                                    `Returned the recovered cargo to ` +
-                                    `${quest.turnIn.recipient}.`
-                            },
-                            null
-                        );
-
-                        if (!output) return;
-
-                        const result =
-                            output.results?.[0]?.result;
-                        const rewards = result?.rewards;
-
-                        if (rewards) {
-                            host.prepend(
-                                makeAethermoorSection(
-                                    'QUEST REWARDS',
-                                    `Paid ${rewards.xp} XP, ` +
-                                    `${rewards.silver} silver, and ` +
-                                    `${rewards.repSteps} reputation steps.` +
-                                    (rewards.loot?.length
-                                        ? '\n' + rewards.loot.map(item =>
-                                            `Salvage: ${item.name} ` +
-                                            `(${item.rarity}).`
-                                        ).join('\n')
-                                        : ''),
-                                    'quest'
-                                )
-                            );
-                        }
-                    }
+            quest.turnIn?.locationId === state.currentLocationId
+        ) {
+            section.appendChild(
+                makeAethermoorSection(
+                    'TURN-IN ELIGIBLE',
+                    `The crew can meet ${quest.turnIn.recipient} to ` +
+                        'hand over the cargo or report the completed objective. ' +
+                        'Rewards follow the handover in the fiction.',
+                    'quest'
                 )
             );
         }
 
-        actions.appendChild(
-            makeAethermoorAction(
-                'Abandon Quest',
-                'quest',
-                () => runAethermoorPanelCase(
-                    host,
-                    'quests',
-                    {
-                        name: 'abandon_quest',
-                        kind: 'quest',
-                        action: 'abandon'
-                    },
-                    'Quest abandoned. No rewards were granted.'
-                )
+        addQuestAction(section, quest, 'Abandon Quest', 'abandon');
+        host.appendChild(section);
+    }
+
+    for (const quest of offered) {
+        const section = makeAethermoorSection(
+            'QUEST OFFER',
+            formatQuestStatus(quest) + '\n\n' + (quest.pitch || ''),
+            'quest'
+        );
+
+        addQuestAction(section, quest, 'Accept Quest', 'accept');
+        addQuestAction(section, quest, 'Decline Quest', 'decline');
+        host.appendChild(section);
+    }
+
+    if (accepted.length === 0 && offered.length === 0) {
+        host.appendChild(
+            makeAethermoorSection(
+                'NO CURRENT QUESTS',
+                'No offered or in-progress quests. Explore or follow rumors ' +
+                    'to discover new opportunities.',
+                'quest'
             )
         );
     }
 
-    host.appendChild(summary);
+    const historyCounts = [
+        ['Completed', journal.completed.length],
+        ['Declined', journal.declined.length],
+        ['Abandoned', journal.abandoned.length]
+    ];
 
-    if (actions.childElementCount > 0) {
-        const actionSection = document.createElement('section');
-        actionSection.className = 'aethermoor-ui-section';
-        actionSection.dataset.accent = 'quest';
-
-        const heading = document.createElement('div');
-        heading.className = 'aethermoor-ui-heading';
-        heading.textContent = 'AVAILABLE ACTIONS';
-
-        actionSection.append(heading, actions);
-        host.appendChild(actionSection);
-    }
+    host.appendChild(
+        makeAethermoorSection(
+            'QUEST HISTORY',
+            historyCounts.map(([label, count]) => `${label}: ${count}`)
+                .join(' · '),
+            'quest'
+        )
+    );
 }
 
 async function copyAethermoorCommand(command) {

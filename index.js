@@ -12521,39 +12521,32 @@ function travelNarrationPacket(result) {
             'Any destination opportunity or threat must come from the ' +
                 'established quest, rumor, or site mechanics.'
         );
-    } else if (result.journey) {
+       } else if (result.journey) {
         const journey = result.journey;
-
-        lines.push(
-            `Journey toward ${journey.destinationLabel}: ` +
-            `${journey.completedSegments}/${journey.totalSegments} segments.`
-        );
-
-        if (result.movement?.journeySegmentConsumed) {
-            lines.push(
-                `This [moved] consumed journey segment ` +
-                `${journey.completedSegments}/${journey.totalSegments}.`
-            );
-        }
 
         if (journey.status === 'paused') {
             lines.push(
-                `Travel is paused by the spotted encounter at ` +
-                `${journey.completedSegments}/${journey.totalSegments}. ` +
-                'Resolve or avoid the encounter before another journey segment can be attempted.'
+                `The journey toward ${journey.destinationLabel} is paused ` +
+                'by a spotted encounter. The crew has not reached the destination.',
+                'Do not narrate arrival. The crew must resolve or avoid the encounter before travel continues.'
             );
 
             if (result.movement?.arrivalDeferred) {
                 lines.push(
-                    'The final route segment was already consumed; ' +
-                    'arrival will be finalized after the encounter is resolved, ' +
-                    'without rolling or consuming an additional segment.'
+                    'The crew has covered the route to the destination, but arrival ' +
+                    'is deferred until the encounter is resolved. No travel event ' +
+                    'will be rolled when that arrival is finalized.'
                 );
             }
         } else if (result.arrived) {
-            lines.push(`The crew arrived at ${journey.destinationLabel}.`);
+            lines.push(
+                `The crew arrived at ${journey.destinationLabel}.`
+            );
         } else {
-            lines.push('The crew has not reached the destination yet.');
+            lines.push(
+                `The crew is still traveling toward ${journey.destinationLabel}.`,
+                'Describe the journey naturally. Do not mention numeric segment counters.'
+            );
         }
     }
 
@@ -12950,9 +12943,9 @@ function combatNarrationPacket(result, actions) {
     };
 
     const tansyActions = {
-        visor: 'Point: Visor',
-        vitals: 'Point: Vitals',
-        hamstring: 'Point: Hamstring',
+        visor: 'Visor',
+        vitals: 'Vitals',
+        hamstring: 'Hamstring',
         recall: 'Recall',
         surge: 'Surge',
         drink: 'Drink',
@@ -12969,171 +12962,145 @@ function combatNarrationPacket(result, actions) {
     const foeName = id => foeNames.get(id) || id;
 
     const lines = [
-        `Aethermoor combat turn ${result.turn} has resolved.`,
+        'COMBAT SCENE RESULT.',
         `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
         `Tansy used ${tansyActions[actions?.tansy] || actions?.tansy || 'a command'}.`,
-        actions?.target
-            ? `The selected target was ${foeName(actions.target)}.`
-            : '',
-        'The mechanics results below are authoritative. Do not change actions, damage, HP, effects, kills, or rewards.'
-    ].filter(Boolean);
-        if (result.death) {
-        lines.push(
-            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : "Tansy"} ` +
-            `fell during combat. The death penalty removed ` +
-            `${result.death.xpLost} XP; the crew respawned at full HP.`
-        );
+        'Dramatize the established events as a coherent scene. ' +
+            'Add atmosphere and physical description, but do not add attacks, ' +
+            'injuries, actions, enemy behavior, or outcomes absent from this summary.'
+    ];
 
-        if (result.death.encounterAbandoned) {
-            lines.push(
-                'The encounter was abandoned. No encounter rewards were paid.'
-            );
-        }
+    if (actions?.target) {
+        lines.push(`The selected target was ${foeName(actions.target)}.`);
+    }
+
+    if (result.death) {
+        lines.push(
+            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : 'Tansy'} fell. ` +
+            'The crew respawned; the encounter was abandoned without rewards.'
+        );
     }
 
     for (const exchange of result.exchanges || []) {
-        lines.push(`Exchange ${exchange.exchange}:`);
+        const exchangeBeats = [];
+        const damageByFoe = new Map();
 
         for (const hit of exchange.hits || []) {
-            lines.push(
-                `The crew dealt ${hit.damage} damage to ${foeName(hit.id)}; ` +
-                `it now has ${hit.hp} HP.`
+            damageByFoe.set(
+                hit.id,
+                (damageByFoe.get(hit.id) || 0) + hit.damage
+            );
+        }
+
+        for (const [id, damage] of damageByFoe) {
+            const slain = (result.kills || []).some(
+                kill => kill.id === id &&
+                    (exchange.hits || []).some(hit =>
+                        hit.id === id && hit.hp === 0
+                    )
+            );
+
+            exchangeBeats.push(
+                `${foeName(id)} took ${damage} damage` +
+                (slain ? ' and was slain' : '')
             );
         }
 
         if (exchange.enemyMiss === true) {
-            lines.push('The enemy attack missed.');
-        }
-
-        if (exchange.frontlineDamage > 0) {
-            lines.push(
-                `The enemy pack dealt ${exchange.frontlineDamage} ` +
-                `damage to Q'tik.`
-            );
-        }
-
-        if (exchange.backlineDamage > 0) {
-            lines.push(
-                `Enemies dealt ${exchange.backlineDamage} damage to Tansy.`
-            );
-        }
-
-        if (exchange.effectiveRegen > 0) {
-            lines.push(
-                `Q'tik regenerated ${exchange.effectiveRegen} HP.`
-            );
+            exchangeBeats.push('the enemy attack missed');
         }
 
         for (const effect of exchange.effects || []) {
-            lines.push(`Effect: ${effect}.`);
+            exchangeBeats.push(effect);
         }
 
-        lines.push(
-            `After this exchange: Q'tik ${exchange.qtikHp} HP; ` +
-            `Tansy ${exchange.tansyHp} HP.`
-        );
+        if (exchangeBeats.length > 0) {
+            lines.push(
+                `Exchange ${exchange.exchange}: ` +
+                `${exchangeBeats.join('; ')}.`
+            );
+        }
     }
 
     for (const kill of result.kills || []) {
-        lines.push(`${foeName(kill.id)} was slain.`);
+        if (
+            !(result.exchanges || []).some(exchange =>
+                (exchange.hits || []).some(hit =>
+                    hit.id === kill.id && hit.hp === 0
+                )
+            )
+        ) {
+            lines.push(`${foeName(kill.id)} was slain.`);
+        }
     }
 
     for (const effect of result.turnEffects || []) {
-        lines.push(`Turn effect: ${effect}.`);
+        lines.push(`Battle effect: ${effect}.`);
     }
 
-    for (const levelUp of result.levelUps || []) {
+    if (result.rewards?.applied) {
         lines.push(
-            `The crew reached level ${levelUp.level}. ` +
-            `They have ${levelUp.xpRemaining}/${levelUp.nextXp} XP ` +
-            `toward the next level.`
-        );
-    }
-
-       if (result.rewards?.applied) {
-        lines.push(
-            `Encounter rewards: ${result.rewards.xp} XP, ` +
-            `${result.rewards.silver}s.`
+            `The encounter was cleared. Rewards applied: ` +
+            `${result.rewards.xp} XP and ${result.rewards.silver} silver.`
         );
 
         for (const item of result.rewards.loot || []) {
-            lines.push(
-                `Loot: ${item.name} (${item.rarity}).`
-            );
+            lines.push(`Loot received: ${item.name} (${item.rarity}).`);
         }
 
         const drop = result.rewards.packDrop;
-
-        if (drop?.result === 'auto_salvage_only') {
-            lines.push('Pack drop: no additional loot.');
-        } else if (drop?.result === 'diegetic_quest_breadcrumb') {
-            lines.push(
-                'Pack drop: quest breadcrumb discovered.'
-            );
+        if (drop?.result === 'diegetic_quest_breadcrumb') {
+            lines.push('A quest breadcrumb was found.');
         }
     } else if (result.packCleared) {
+        lines.push('The encounter was cleared; no rewards were applied.');
+    } else if (!result.death) {
+        const living = (result.summary?.encounter?.foes || [])
+            .filter(foe => foe.hp > 0)
+            .map(foe => foeName(foe.id));
+
         lines.push(
-            'The encounter was cleared, but no encounter rewards ' +
-            'were applied.'
+            living.length
+                ? `Enemies still standing: ${living.join(', ')}.`
+                : 'No enemies remain standing.'
         );
-    } else {
-        lines.push('Encounter rewards have not been applied.');
     }
-    if (result.packCleared) {
+
+    if (result.summary) {
         lines.push(
-            `Encounter ${result.summary?.encounter?.id || 'unknown'} is cleared.`,
-            'No enemies remain alive. This combat has ended.'
+            `After the fight: Q'tik ${result.summary.qtikHp}/` +
+            `${result.summary.qtikMaxHp} HP; Tansy ` +
+            `${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP; ` +
+            `crew level ${result.summary.level}, ` +
+            `${result.summary.xp}/${result.summary.nextXp} XP.`
         );
     }
 
     if (result.questGate) {
         lines.push(
-            `Quest gate ${result.questGate.completed.step} completed ` +
-                `through the linked combat encounter.`
+            `Quest gate ${result.questGate.completed.step} was completed.`
         );
 
         if (result.questGate.objectiveSecured) {
             lines.push(
-                'The quest field objective is secured.',
-                'The quest payout has not been granted; the crew must return to the issuer and report the completed objective.'
+                'The quest field objective is secured. The crew must still ' +
+                'return and report it; no quest payout has been granted.'
             );
         } else if (result.questGate.next) {
             lines.push(
-                `Next quest gate: ${result.questGate.next.step}/` +
-                    `${result.questGate.next.total}; ` +
-                    `${result.questGate.next.objective}`
+                `Next quest objective: ${result.questGate.next.objective}`
             );
         }
     }
 
-    if (result.summary) {
-        lines.push(
-            `Current crew state: level ${result.summary.level}, ` +
-            `${result.summary.xp}/${result.summary.nextXp} XP; ` +
-            `Q'tik ${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP; ` +
-            `Tansy ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP.`
-        );
-
-        const living = (result.summary.encounter?.foes || [])
-            .filter(foe => foe.hp > 0);
-
-        lines.push(
-            living.length
-                ? `Living foes: ${living.map((foe, index) => {
-                    const originalIndex = roster.findIndex(
-                        entry => entry.id === foe.id
-                    );
-                    return (
-                        `${combatFoeLabel(foe, originalIndex)} ` +
-                        `at ${foe.hp}/${foe.maxHp} HP`
-                    );
-                }).join('; ')}.`
-                : 'No foes remain alive.'
-        );
-    }
+    lines.push(
+        'Use natural story language. Do not narrate the extension’s counters ' +
+        'or repeat the mechanics report as a log.'
+    );
 
     return lines.join('\n');
 }
+
 
 function migrateAethermoorHandoffs(stored) {
     if (Array.isArray(stored?.handoffQueue)) {
@@ -18144,9 +18111,10 @@ function makeAethermoorHandoffMessage(entries) {
             'engaged. Arrival is not a search or a delivery.\n' +
             '- A concluded rumor has no further objective attached to that ' +
             'lead unless the engine explicitly establishes one.\n' +
-            '- You may report player-facing mechanical values, such as HP, ' +
-            'journey progress, quest status, and rewards, accurately and ' +
-            'concisely. Do not reproduce the surrounding instructions.\n' +
+            '- Report only useful player-facing results, such as final HP, ' +
+            'rewards, quest changes, and whether the crew arrived. Do not ' +
+            'narrate internal counters such as travel segments or repeat ' +
+            'per-exchange HP bookkeeping.\n' +
             '- Emit protocol tags only when the corresponding private scene ' +
             'instructions authorize them and the event actually occurs in ' +
             'the fiction. Put those tags inside the disposable <plan> block.\n\n' +

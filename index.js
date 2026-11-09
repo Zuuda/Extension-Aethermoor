@@ -11059,6 +11059,29 @@ function resolveBatch(args) {
                     };
 
 
+                    /*
+                     * The fixture establishes a test claim without inventing
+                     * a traveler encounter. Record it through the same knowledge
+                     * helper used by ordinary traveler rumors.
+                     *
+                     * Arrival records a separate observation; it must never
+                     * overwrite this testimony or make the original claim true.
+                     * Fixture creation consumes no RNG.
+                     */
+                    recordCrewKnowledge(state, {
+                        id: `knowledge-testimony-${leadId}`,
+                        kind: 'testimony',
+                        knowledgeType: 'testimony',
+                        certainty: 'unverified_claim',
+                        summary: state.leads[leadId].claim,
+                        source: {
+                            id: leadId,
+                            type: 'debug_rumor_fixture'
+                        },
+                        learnedAtLocationId: state.currentLocationId,
+                        learnedAtZone: state.zone
+                    });
+
                     if (!state.routeEdges.some(edge =>
                         (
                             edge.fromId === state.currentLocationId &&
@@ -11069,6 +11092,7 @@ function resolveBatch(args) {
                             edge.toId === state.currentLocationId
                         )
                     )) {
+
                         state.routeEdges.push({
                             fromId: state.currentLocationId,
                             toId: placeId,

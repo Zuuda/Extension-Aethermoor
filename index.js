@@ -6110,7 +6110,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   eligibility from saved state.
  * - Prevent action-button numbering collisions in legacy popup panels.
  *
- * PLANNED — Narration authority
+ * PARTIAL — Narration authority
+ * - Engine handoffs explicitly separate private instructions from output.
+ * - Detect recognizable private-context and contract-header leakage.
+ * - Warn without modifying story text, consuming RNG, or saving a revision.
+ * - Reject assistant discovery/delivery events from visibly leaked replies.
+ * - Do not automatically regenerate replies or undo resolved mechanics.
+ * - Leak detection is narrow: it does not validate arbitrary narrative claims.
+ * - Regression pending: ordinary reply, leaked packet containing an example
+ *   tag, and duplicate received/rendered notifications.
  * - Build every narration packet from the authoritative saved result.
  * - Include encounter ID, journey progress, quest gate, objective resolution,
  *   delivery readiness, and reward status where relevant.
@@ -6191,8 +6199,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Restore shared identity between activeQuest and its journal entry after
  *   JSON loading; legacy progression remains authoritative during migration.
  * - Journal delivery uses the fictional handover handshake, not a payout button.
- * - Regression pending: two offers, reload, decline one without changing the
- *   other, accept one, and verify another offer remains available.
+ * - Verified in live testing: two offers survived reload; declining the
+ *   Rank D test offer preserved the original Rank B offer after reload.
+ * - Pending: isolated tests for unknown quest IDs, repeated decline,
+ *   preserving an in-progress quest when another offer is created, and
+ *   accepting one offer while another remains available.
  * - Concurrent accepted-quest progression remains unsupported.
  * - Do not implement quest abandonment or completion by relying only on a
  *   global activeQuest pointer.
@@ -17320,11 +17331,33 @@ function makeAethermoorHandoffMessage(entries) {
         send_date: Date.now(),
         mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
+            'PRIVATE ENGINE CONTEXT — instructions and reference data, ' +
+            'not text to reproduce in the assistant reply.\n\n' +
+            'OUTPUT RULES:\n' +
+            '- Write the scene or answer the player’s question using the ' +
+            'established results below.\n' +
+            '- Never quote or reproduce this message, its packet headings, ' +
+            'instruction lists, private context, or handoff markers.\n' +
+            '- Do not expose hidden facts or internal truth merely because ' +
+            'they appear in engine context.\n' +
+            '- Do not invent attacks, encounters, discoveries, travel events, ' +
+            'quest acceptance, item acquisition, or rewards.\n' +
+            '- An offered quest is not accepted. A spotted encounter is not ' +
+            'engaged. Arrival is not a search or a delivery.\n' +
+            '- A concluded rumor has no further objective attached to that ' +
+            'lead unless the engine explicitly establishes one.\n' +
+            '- You may report player-facing mechanical values, such as HP, ' +
+            'journey progress, quest status, and rewards, accurately and ' +
+            'concisely. Do not reproduce the surrounding instructions.\n' +
+            '- Emit protocol tags only when the corresponding private scene ' +
+            'instructions authorize them and the event actually occurs in ' +
+            'the fiction. Put those tags inside the disposable <plan> block.\n\n' +
             'The following mechanics events occurred in this order. ' +
-            'Use them to write the next scene. Do not alter established ' +
-            'actions, damage, HP, kills, rewards, or discovery outcomes.\n\n' +
+            'Do not alter established actions, damage, HP, kills, rewards, ' +
+            'or discovery outcomes.\n\n' +
             packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
+
     };
 }
 
@@ -17424,9 +17457,115 @@ function extractAethermoorQuestEvents(text) {
     );
 }
 
+/*
+ * Narration validation is separate from mechanics resolution.
+ * Detect recognizable private packet leakage without attempting to
+ * judge all prose or silently rewriting the assistant's message.
+ *
+ * This is a narrow safeguard, not proof of narrative correctness.
+ * An LLM can still invent unsupported content without copying a header.
+ */
+const aethermoorNarrationWarnings = new WeakMap();
+
+function leakedAethermoorContext(text) {
+    if (typeof text !== 'string') return [];
+
+    const signatures = [
+        {
+            label: 'engine handoff marker',
+            pattern: /<\/?aethermoor-mechanics-handoff>/i
+        },
+        {
+            label: 'private engine context',
+            pattern: /^\s*PRIVATE ENGINE CONTEXT\b/im
+        },
+        {
+            label: 'private scene context',
+            pattern: /^\s*PRIVATE SCENE CONTEXT\b/im
+        },
+        {
+            label: 'private delivery context',
+            pattern: /^\s*PRIVATE QUEST TURN-IN CONTEXT\b/im
+        },
+        {
+            label: 'internal rumor contract',
+            pattern: /^\s*AUTHORITATIVE RUMOR ARRIVAL RESULT\b/im
+        },
+        {
+            label: 'internal completion contract',
+            pattern: /^\s*AUTHORITATIVE QUEST COMPLETION CONTRACT\b/im
+        }
+    ];
+
+    return signatures
+        .filter(signature => signature.pattern.test(text))
+        .map(signature => signature.label);
+}
+
+function warnAethermoorNarrationLeak(message, leaks) {
+    const metadata = getContext().chatMetadata;
+
+    /*
+     * SillyTavern may report the same reply through both received and
+     * rendered events. Deduplicate warnings in memory, never by saving
+     * a mechanics revision or consuming RNG.
+     */
+    if (metadata && typeof metadata === 'object') {
+        let warned = aethermoorNarrationWarnings.get(metadata);
+
+        if (!warned) {
+            warned = new Set();
+            aethermoorNarrationWarnings.set(metadata, warned);
+        }
+
+        const signature =
+            `${message.messageId ?? 'unknown'}:` +
+            worldHash(message.text);
+
+        if (warned.has(signature)) return;
+
+        warned.add(signature);
+
+        if (warned.size > 100) {
+            warned.delete(warned.values().next().value);
+        }
+    }
+
+    console.warn(
+        '[Aethermoor] Private engine context leaked into assistant reply',
+        {
+            messageId: message.messageId,
+            detected: leaks,
+            questEventsRejected: true
+        }
+    );
+
+    toastr.warning(
+        'The reply exposed private engine instructions. ' +
+        'Discovery and delivery tags from this reply were ignored. ' +
+        'Existing saved mechanics were not undone or rerolled.',
+        'Aethermoor: Narration warning'
+    );
+}
+
 async function processAethermoorAssistantEvents(data) {
     const message = getAssistantMessageText(data);
     if (!message) return;
+
+    /*
+     * Check before extracting protocol events. A copied instruction
+     * packet can contain example delivery/discovery tags; those must
+     * not become gameplay events merely because the narrator echoed it.
+     *
+     * Already-resolved travel, combat, and rewards remain authoritative.
+     * This only rejects new assistant-reported events from this reply.
+     */
+    const leaks = leakedAethermoorContext(message.text);
+
+    if (leaks.length > 0) {
+        warnAethermoorNarrationLeak(message, leaks);
+        return;
+    }
 
     const events = extractAethermoorQuestEvents(message.text);
     if (events.length === 0) return;

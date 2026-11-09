@@ -15469,6 +15469,31 @@ async function renderWorldTab(host) {
     }
 
     host.appendChild(rumorSection);
+        /*
+     * Beta-only fixture control. This creates test data but does not resolve
+     * the rumor; arrival still uses the ordinary saved rumor resolver.
+     * Keep it beside Rumors so regression setup does not require raw tool calls.
+     */
+    host.appendChild(
+        makeAethermoorAction(
+            'Debug: Create Test Rumor',
+            'world',
+            () => runAethermoorPanelCase(
+                host,
+                'world',
+                {
+                    name: 'debug_create_rumor',
+                    kind: 'debug_create_rumor',
+                    inquiryId: `watchtower-test-${Date.now()}`,
+                    reason: 'Test Rumor Site',
+                    completionEvidence:
+                        'A debug rumor points to a test destination.'
+                },
+                'Test rumor created.'
+            )
+        )
+    );
+
 
     const settlements = Object.values(world.settlements || {})
         .filter(settlement => {

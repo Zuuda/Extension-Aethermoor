@@ -6172,6 +6172,21 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   unimplemented. Define their saved records and arrival contracts before
  *   adding them to the outcome table.
  *
+ * * PARTIAL — Quest journal and multiple simultaneous opportunities
+ * - Current state stores one activeQuest, which causes later genuine rumor
+ *   hooks to defer or discard their offer while another quest occupies the slot.
+ * - Preserve every engine-created quest offer with a stable quest ID.
+ * - Support multiple offered quests without rerolling or replacing them.
+ * - Separate quest selection from quest existence; an offered quest can remain
+ *   available while another quest is accepted or in progress.
+ * - Migrate legacy activeQuest data without duplicating or losing a quest.
+ * - Update acceptance, progression, delivery, UI, narration, and duplicate
+ *   protection to address an explicit quest ID.
+ * - Define whether multiple quests may be in progress simultaneously before
+ *   enabling concurrent field progression.
+ * - Do not implement quest abandonment or completion by relying only on a
+ *   global activeQuest pointer.
+ *
  * - Resolve a known rumor once on confirmed arrival, including arrival after
  *   a final-segment encounter; do not require a generic Investigate button.
  * - Separate the locked outcome from what is observable on arrival.

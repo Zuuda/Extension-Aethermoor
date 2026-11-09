@@ -6148,6 +6148,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Reject assistant discovery/delivery events from visibly leaked replies.
  * - Do not automatically regenerate replies or undo resolved mechanics.
  * - Leak detection is narrow: it does not validate arbitrary narrative claims.
+ * - Optional per-chat narration recorder retains the last 30 diagnostic events
+ *   outside machine state and gameplay revisions; recording starts disabled.
+ * - Capture engine handoffs, assistant notification text, leakage rejection,
+ *   generation end, and handoff consumption. Viewer uses plain text only.
+ * - Diagnostics may contain hidden quest context. Disabling preserves records;
+ *   clearing removes them. Recording consumes no RNG and uses the save queue.
+ * - Recorder regression pending: enable, capture a normal generation, reload,
+ *   inspect retained records, disable, and verify further replies add none.
  * - Regression pending: ordinary reply, leaked packet containing an example
  *   tag, and duplicate received/rendered notifications.
  * - Build every narration packet from the authoritative saved result.
@@ -16094,6 +16102,13 @@ async function renderWorldTab(host) {
 
     host.appendChild(settlementSection);
     host.appendChild(renderCrewKnowledge(state));
+    host.appendChild(
+        makeAethermoorAction(
+            'Debug: Narration Recorder',
+            'world',
+            openNarrationDebug
+        )
+    );
 
     if (!journey) {
         const exploreSection = makeAethermoorSection(
@@ -17537,6 +17552,141 @@ async function openCombatPanel(inlineHost) {
     }
 }
 
+/*
+ * Diagnostics live outside the machine state and gameplay revision.
+ * Use the same queue as mechanics so diagnostic saves cannot race a
+ * mechanics save. Records are bounded and never interpreted as events.
+ * Disabling recording preserves existing evidence; Clear removes it.
+ */
+const AETHERMOOR_DEBUG_KEY = 'aethermoorNarrationDebug';
+const AETHERMOOR_DEBUG_LIMIT = 30;
+
+function saveNarrationDebugChange(metadata, change) {
+    return queueAethermoor(async () => {
+        const context = getContext();
+        if (context.chatMetadata !== metadata) return;
+
+        const previous = metadata[AETHERMOOR_DEBUG_KEY];
+        const next = previous
+            ? clone(previous)
+            : { enabled: false, entries: [] };
+
+        change(next);
+        next.entries = next.entries.slice(-AETHERMOOR_DEBUG_LIMIT);
+        metadata[AETHERMOOR_DEBUG_KEY] = next;
+
+        try {
+            await context.saveMetadata();
+        } catch (error) {
+            if (previous === undefined) {
+                delete metadata[AETHERMOOR_DEBUG_KEY];
+            } else {
+                metadata[AETHERMOOR_DEBUG_KEY] = previous;
+            }
+            throw error;
+        }
+    });
+}
+
+function recordNarrationDebug(type, details) {
+    const metadata = getContext().chatMetadata;
+    if (metadata?.[AETHERMOOR_DEBUG_KEY]?.enabled !== true) return;
+
+    // Capture values now, before queued work or message rendering changes them.
+    const entry = {
+        time: new Date().toISOString(),
+        type,
+        revision: metadata[AETHERMOOR_METADATA_KEY]?.revision ?? null,
+        details: clone(details)
+    };
+
+    void saveNarrationDebugChange(metadata, debug => {
+        debug.entries.push(entry);
+    }).catch(error => {
+        console.warn('[Aethermoor] Diagnostic save failed', error);
+    });
+}
+
+function openNarrationDebug() {
+    const context = getContext();
+    const metadata = context.chatMetadata;
+    assert(metadata, 'Open a chat before viewing narration diagnostics');
+
+    document.getElementById('aethermoor_narration_debug')?.remove();
+
+    const panel = document.createElement('section');
+    panel.id = 'aethermoor_narration_debug';
+    panel.className = 'aethermoor-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Narration Debug');
+
+    const header = document.createElement('header');
+    header.className = 'aethermoor-panel-header';
+    const title = document.createElement('b');
+    title.textContent = 'NARRATION DEBUG';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => panel.remove());
+    header.append(title, close);
+
+    const body = document.createElement('main');
+    body.className = 'aethermoor-panel-content';
+    const status = document.createElement('div');
+    status.className = 'aethermoor-ui-text';
+    const controls = document.createElement('div');
+    controls.className = 'aethermoor-ui-actions';
+    const output = document.createElement('pre');
+    output.style.whiteSpace = 'pre-wrap';
+    output.style.overflowWrap = 'anywhere';
+
+    function refresh() {
+        const debug = metadata[AETHERMOOR_DEBUG_KEY];
+        status.textContent =
+            `Recording: ${debug?.enabled ? 'ON' : 'OFF'} · ` +
+            `${debug?.entries?.length || 0}/${AETHERMOOR_DEBUG_LIMIT} events\n` +
+            'Private engine context may include hidden quest information.\n' +
+            'Each reply notification is retained separately for comparison.';
+        toggle.textContent = debug?.enabled
+            ? 'Disable recording'
+            : 'Enable recording';
+
+        // Plain text only. Never render captured tags as HTML or chat messages.
+        output.textContent = JSON.stringify(debug?.entries || [], null, 2);
+    }
+
+    async function changeDebug(change) {
+        try {
+            assert(
+                getContext().chatMetadata === metadata,
+                'Chat changed; reopen Narration Debug in the current chat'
+            );
+            await saveNarrationDebugChange(metadata, change);
+            refresh();
+        } catch (error) {
+            toastr.error(error.message || String(error), 'Narration Debug');
+        }
+    }
+
+    const toggle = makeAethermoorAction('Enable recording', 'world', () => {
+        void changeDebug(debug => {
+            debug.enabled = !debug.enabled;
+        });
+    });
+    const refreshButton = makeAethermoorAction('Refresh records', 'world', refresh);
+    const clear = makeAethermoorAction('Clear records', 'world', () => {
+        void changeDebug(debug => {
+            debug.entries = [];
+        });
+    });
+
+    controls.append(toggle, refreshButton, clear);
+    body.append(status, controls, output);
+    panel.append(header, body);
+    document.body.appendChild(panel);
+    refresh();
+}
+
 const AETHERMOOR_HANDOFF_MARKER =
     '<aethermoor-mechanics-handoff>';
 
@@ -17806,6 +17956,14 @@ async function processAethermoorAssistantEvents(data) {
     const leaks = leakedAethermoorContext(message.text);
 
     if (leaks.length > 0) {
+        recordNarrationDebug('leak_detected', {
+            messageId: message.messageId,
+            signatures: leaks,
+            questEventsRejected: true,
+            rejectedEvents: extractAethermoorQuestEvents(message.text),
+            text: message.text
+        });
+
         warnAethermoorNarrationLeak(message, leaks);
         return;
     }
@@ -18038,6 +18196,12 @@ globalThis.aethermoorMechanicsInterceptor =
         // The handoff is inserted for generation. Retain its exact object
         // and metadata reference so cleanup cannot affect another chat.
         const message = makeAethermoorHandoffMessage(entries);
+
+        recordNarrationDebug('handoff_injected', {
+            handoffIds: entries.map(entry => entry.id),
+            text: message.mes
+        });
+
         const lastUserIndex = findLastUserMessage(chat);
 
         chat.splice(
@@ -18105,6 +18269,10 @@ async function consumeAethermoorHandoff(injected) {
         }
 
         injected.consumed = true;
+
+        recordNarrationDebug('handoff_consumed', {
+            handoffIds: injected.ids
+        });
 
         console.log(
             '[Aethermoor] Consumed ordered mechanics handoff',
@@ -18193,10 +18361,24 @@ function registerAethermoorGenerationCleanup() {
 
     for (const eventType of new Set(successEvents)) {
         eventSource.on(eventType, data => {
+            const observed = getAssistantMessageText(data);
+
+            recordNarrationDebug('assistant_notification', {
+                eventType,
+                messageId: observed?.messageId ?? null,
+                text: observed?.text ?? null,
+                textOrigin:
+                    typeof data === 'string' ||
+                    typeof data?.mes === 'string' ||
+                    typeof data?.message === 'string' ||
+                    typeof data?.message?.mes === 'string'
+                        ? 'event_payload'
+                        : 'chat_lookup',
+                handoffIds: aethermoorInjectedHandoff?.ids || []
+            });
+
             void processAethermoorAssistantEvents(data);
-
             const injected = aethermoorInjectedHandoff;
-
             if (!injected) {
                 return;
             }
@@ -18218,6 +18400,14 @@ function registerAethermoorGenerationCleanup() {
 
     eventSource.on(endedEvent, () => {
         const injected = aethermoorInjectedHandoff;
+
+        recordNarrationDebug('generation_ended', {
+            handoffIds: injected?.ids || [],
+            replyReceived: Boolean(injected?.replyReceived),
+            temporaryHandoffPresent: Boolean(
+                injected?.chat?.includes(injected.message)
+            )
+        });
 
         if (!injected) {
             return;

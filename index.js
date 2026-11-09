@@ -418,6 +418,65 @@ function ensureWorldRecords(state) {
         }
     }
 
+        /*
+     * A known rumor destination must be reachable through the route graph,
+     * otherwise World can show the rumor but cannot offer a travel command.
+     * Keep this as saved route data—not a UI-side route guess—so explicit
+     * travel and route previews use the same connection.
+     */
+    for (const lead of Object.values(state.leads || {})) {
+        if (
+            lead?.kind !== 'rumor' ||
+            lead.status !== 'known' ||
+            lead.targetType !== 'place' ||
+            lead.testOnly === true
+        ) {
+            continue;
+        }
+
+        const place = state.places?.[lead.targetId];
+        const zone = Number(place?.zone);
+        const zoneRecord = world.zones[zone];
+
+        if (
+            !place ||
+            !Number.isInteger(zone) ||
+            !zoneRecord
+        ) {
+            continue;
+        }
+
+        const settlement =
+            world.settlements[zoneRecord.primarySettlementId];
+
+        if (
+            !settlement?.locationId ||
+            settlement.locationId === place.id
+        ) {
+            continue;
+        }
+
+        const alreadyConnected = state.routeEdges.some(edge =>
+            edge.fromId === place.id ||
+            edge.toId === place.id
+        );
+
+        if (alreadyConnected) {
+            continue;
+        }
+
+        state.routeEdges.push({
+            fromId: settlement.locationId,
+            toId: place.id,
+            length: 2,
+            kind: 'rumor_site_access',
+            fromZone: zone,
+            toZone: zone
+        });
+
+        changed = true;
+    }
+
     return changed;
 
 }

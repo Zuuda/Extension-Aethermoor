@@ -5729,6 +5729,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify that [moved] during a spotted or active encounter does not advance.
  * - Verify that resolving the encounter resumes at the saved progress.
  * - Verify final-segment interruptions finalize arrival without an extra roll.
+ * - World must retain a clipboard-only Continue/Finish journey entry after
+ *   an interruption, including when shortestRoute() reports zero distance.
+ * - Watchtower regression: clearing a final-segment encounter left arrival
+ *   pending but hid its movement entry. Explicit journey control added;
+ *   verify after reload before marking this case complete.
+
   * - Test quiet travel, environmental signs, points of interest, and social events.
  * - Traveler events return cloned state: refresh the journey reference before
  *   advancing progress so saved progress matches the narrated outcome.
@@ -14949,18 +14955,48 @@ async function renderWorldTab(host) {
     const journey = state.currentJourney;
 
     if (journey) {
-        host.appendChild(
-            makeAethermoorSection(
-                'CURRENT JOURNEY',
-                `Destination: ${journey.destinationLabel}\n` +
-                    `Progress: ${journey.completedSegments}/` +
-                    `${journey.totalSegments} segments\n` +
-                    `Status: ${journey.status}\n\n` +
-                    'Choose another destination to change direction. ' +
-                    'The new route will be calculated from the crew’s saved position.',
-                'world'
+        /*
+         * A final-segment encounter consumes the last route segment but
+         * defers arrival. shortestRoute() then reports zero distance,
+         * so ordinary destination entries cannot provide the resume action.
+         *
+         * Keep an explicit journey control independent of route distance.
+         * Clicking only copies a command. Submitting it lets the existing
+         * travel resolver finalize arrival without another segment or roll.
+         */
+        const arrivalPending =
+            journey.completedSegments === journey.totalSegments;
+
+        const section = makeAethermoorSection(
+            'CURRENT JOURNEY',
+            `Destination: ${journey.destinationLabel}\n` +
+                (
+                    arrivalPending
+                        ? 'Route completed; arrival awaiting confirmation.'
+                        : 'Journey underway.'
+                ) +
+                (
+                    movementBlocked
+                        ? '\nResolve or avoid the encounter before continuing.'
+                        : '\nChoose this destination to continue, or another destination to change direction.'
+                ),
+            'world'
+        );
+
+        const continueButton = makeAethermoorAction(
+            arrivalPending
+                ? `Finish journey to ${journey.destinationLabel}`
+                : `Continue to ${journey.destinationLabel}`,
+            'world',
+            () => copyAethermoorCommand(
+                destinationCommand(journey.destinationId)
             )
         );
+
+        continueButton.disabled = movementBlocked;
+
+        section.appendChild(continueButton);
+        host.appendChild(section);
     }
 
     const quest = state.activeQuest;

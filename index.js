@@ -4698,6 +4698,196 @@ function shortestRoute(state, destinationId) {
     )[0] || null;
 }
 
+function resolveArrivedRumors(stateInput) {
+    /*
+     * Arrival establishes a rumor's opening scene, not a complete search.
+     * Reuse the existing locked inquiry and quest-generation mechanics.
+     * This first integration deliberately retains the existing outcome table;
+     * Elite encounters and local exploration need separate outcome contracts.
+     *
+     * A genuine hook can be discovered while another quest occupies the slot.
+     * Preserve its locked inquiry and issuer, then offer it on a later saved
+     * operation while the crew is still here and the quest slot is available.
+     * Never reroll the rumor merely because its offer had to wait.
+     */
+    let state = stateInput;
+    const packets = [];
+    const resolutions = [];
+
+    if (
+        state.currentJourney ||
+        !state.currentLocationId ||
+        ['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        return { state, packets, resolutions };
+    }
+
+    const leadIds = Object.values(state.leads || {})
+        .filter(lead =>
+            lead?.kind === 'rumor' &&
+            lead.status === 'known' &&
+            lead.targetType === 'place' &&
+            lead.targetId === state.currentLocationId &&
+            lead.testOnly !== true
+        )
+        .map(lead => lead.id);
+
+    if (leadIds.length === 0) {
+        return { state, packets, resolutions };
+    }
+
+    state = clone(state);
+
+    for (const leadId of leadIds) {
+        let lead = state.leads[leadId];
+        const place = state.places?.[lead.targetId];
+
+        assert(place, 'Arrived rumor destination is missing');
+
+        let arrival = lead.arrivalResolution;
+
+        if (!arrival) {
+            const issuer = questIssuerSettlement(state);
+            const checked = resolveBatch({
+                cases: [{
+                    name: 'resolve_arrived_rumor_inquiry',
+                    kind: 'world_seeds',
+                    state,
+                    inquiryId: leadId,
+                    investigatedRumor: true
+                }]
+            });
+
+            const inquiryResult = checked.results?.[0]?.result;
+
+            assert(
+                checked.ok === true && inquiryResult?.state,
+                checked.results?.[0]?.error ||
+                    'Could not resolve the arrived rumor'
+            );
+
+            state = inquiryResult.state;
+            lead = state.leads[leadId];
+
+            arrival = {
+                locationId: place.id,
+                zone: state.zone,
+                settlementId: issuer.id,
+                finding: inquiryResult.findings.rumor,
+                announced: false
+            };
+
+            lead.arrivalResolution = arrival;
+        }
+
+        const isQuestHook =
+            arrival.finding ===
+                'genuine_unclaimed_quest_or_dungeon_hook';
+
+        let offeredQuest = null;
+        let offerDeferred = false;
+
+        if (isQuestHook) {
+            const questSlotOccupied =
+                ['offered', 'in_progress'].includes(
+                    state.activeQuest?.status
+                );
+
+            if (questSlotOccupied) {
+                offerDeferred = true;
+            } else {
+                const offered = resolveQuestSeed({
+                    state,
+                    inquiryId: leadId,
+                    zone: arrival.zone,
+                    settlementId: arrival.settlementId
+                });
+
+                state = offered.state;
+                offeredQuest = offered.created
+                    ? offered.quest
+                    : null;
+
+                lead = state.leads[leadId];
+                arrival = lead.arrivalResolution;
+            }
+        }
+
+        if (!offerDeferred) {
+            lead.status = 'investigated';
+            lead.finding = arrival.finding;
+        }
+
+        const shouldAnnounce =
+            arrival.announced !== true ||
+            Boolean(offeredQuest);
+
+        if (!shouldAnnounce) continue;
+
+        const lines = [
+            'AUTHORITATIVE RUMOR ARRIVAL RESULT.',
+            `Destination: ${place.label}.`
+        ];
+
+        if (offeredQuest) {
+            lines.push(
+                questOfferNarrationPacket(offeredQuest),
+                'The offer remains unaccepted. Leave acceptance to the player.'
+            );
+        } else if (offerDeferred) {
+            lines.push(
+                'This rumor has a genuine hook, but its quest offer is pending',
+                'because another quest or offer already occupies the quest slot.',
+                'Do not invent the pending quest, its requirements, or rewards.',
+                'Do not claim that the destination is empty or exhausted.'
+            );
+        } else if (
+            arrival.finding === 'travelogue_flub_benign_oddity'
+        ) {
+            lines.push(
+                'The claim resolves as a mistaken travelogue or benign oddity.',
+                'Give the visit a modest, setting-appropriate explanation or',
+                'point of interest. Do not add encounters, hidden loot, quest',
+                'items, mechanically consequential lore, or another quest.',
+                'Make it clear that this particular rumor is concluded; the',
+                'crew need not keep searching to unlock an undisclosed reward.'
+            );
+        } else if (
+            arrival.finding === 'already_cleared_by_other_immortals'
+        ) {
+            lines.push(
+                'Other immortals have already cleared the subject of this rumor.',
+                'Describe visible evidence consistent with that result.',
+                'This rumor is concluded and has no remaining reward or threat.',
+                'Do not imply that the crew must search harder to find its content.'
+            );
+        } else {
+            throw new Error(
+                `Unsupported arrived rumor finding: ${arrival.finding}`
+            );
+        }
+
+        lines.push(
+            'Arrival does not automatically search hidden areas, enter a site,',
+            'start combat, acquire objects, or grant rewards.',
+            'The protagonists may stay, leave, or interact through the fiction.'
+        );
+
+        arrival.announced = true;
+
+        packets.push(lines.join('\n'));
+        resolutions.push({
+            leadId,
+            destinationId: place.id,
+            finding: arrival.finding,
+            offerDeferred,
+            questId: offeredQuest?.id || null
+        });
+    }
+
+    return { state, packets, resolutions };
+}
+
 function resolveJourneyAction(test) {
     assert(test.state && typeof test.state === 'object',
         'Journey requires saved state');
@@ -5860,6 +6050,67 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   obtain additional encounter or loot rolls.
  * - Define the validation boundary for newly revealed local exits before
  *   allowing prose to expand a saved site map.
+ *
+ * * PLANNED — Persistent discoveries and crew knowledge foundation
+ * - Rumors can conclude with lore, a contact, a settlement discovery, or a
+ *   scenic resolution; XP, loot, combat, and quests are not required payoffs.
+ * - Give consequential discoveries stable IDs and saved source references.
+ * - Distinguish established world facts from what the crew has learned.
+ * - Record testimony as testimony; hearing a claim does not prove it true.
+ * - Preserve discoveries after quests end and after the crew leaves a region.
+ * - Future quests should be able to recognize relevant knowledge acquired
+ *   before acceptance rather than requiring the discovery to happen again.
+ * - Keep discovery records separate from inventory: learning a fact does not
+ *   grant an item, currency, or a reward.
+ * - Narration may elaborate presentation, but consequential facts and their
+ *   acquisition conditions must be engine-authored and validated.
+ * - This is an architectural direction, not authorization to migrate every
+ *   incidental detail in historical chat prose into authoritative world data.
+ *
+ * PARTIAL — Rumor arrival and closure contracts
+ * - Automatic confirmed-arrival resolution implemented for the existing
+ *   benign, already-cleared, and genuine-hook outcomes; regression pending.
+ * - Preserve locked inquiries and defer offers while the quest slot is busy.
+ * - World no longer requires a generic Investigate action after arrival.
+ * - Elite, contact, settlement-discovery, and explorable-site outcomes remain
+ *   unimplemented. Define their saved records and arrival contracts before
+ *   adding them to the outcome table.
+ *
+ * - Resolve a known rumor once on confirmed arrival, including arrival after
+ *   a final-segment encounter; do not require a generic Investigate button.
+ * - Separate the locked outcome from what is observable on arrival.
+ * - Arrival may reveal a landmark, contact, entrance, clue, or spotted threat;
+ *   it must not automatically engage combat, accept quests, or acquire items.
+ * - Make remaining authored opportunities legible through established clues.
+ * - Give concluded rumors clear closure so players need not search endlessly
+ *   to distinguish an exhausted lead from an undiscovered hidden objective.
+ * - Revisiting a resolved rumor does not reroll its outcome or rewards.
+ * - Do not enable spawn-rich explorable-site outcomes until persistent local
+ *   exploration can prevent repeated visits from generating unlimited rolls.
+ *
+ * TENTATIVE — Conditional connections between world systems
+ * - Later allow authored quests and events to reference saved discoveries,
+ *   contacts, routes, and world changes through stable IDs.
+ * - Prefer explicit prerequisite checks over a general simulation framework.
+ * - Keep conditions separate from narration and reward application; a newly
+ *   eligible opportunity is not automatically completed or paid.
+ * - Any triggered event needs a saved identity and duplicate-event protection.
+ * - A changed condition may justify new content at an explored site; ordinary
+ *   revisits alone must not refresh its encounters or discoveries.
+ * - Implement only when a concrete quest or event needs this integration.
+ *
+ * DEFERRED — Larger rumor threads and regional mysteries
+ * - Potentially connect distinct clues to an authored conclusion, such as a
+ *   historical answer, newly accessible location, or boss destination.
+ * - Author the conclusion and prerequisites before treating clues as pieces
+ *   of a mechanically supported larger thread.
+ * - Do not assume the crew will remain in one region or finish every thread.
+ * - Preserve unfinished threads without blocking progression or imposing a
+ *   return journey; cross-region continuations require authored connections.
+ * - Avoid endless referrals from one rumor to another without a satisfying
+ *   scene, discovery, or clear conclusion along the way.
+ * - Defer implementation until ordinary rumor arrival, persistent knowledge,
+ *   and local exploration are exercised and stable.
  *
  * DEFERRED UNTIL CORE FLOWS ARE STABLE
  *
@@ -12264,8 +12515,23 @@ async function runStoredMechanic(args) {
             };
         }
 
-        const nextState = caseResult.state;
+        /*
+         * Resolve known rumors only at a confirmed location: an unfinished
+         * journey, including deferred final-segment arrival, blocks this.
+         * Running here also allows a deferred hook to become an offer after
+         * the quest slot becomes available while the crew remains at the site.
+         *
+         * State reads return earlier and never run this integration.
+         * Rumor state and its narration packets share the operation's save,
+         * so a failed save cannot leave an independently committed outcome.
+         */
+        const arrivedRumors = resolveArrivedRumors(caseResult.state);
+        const nextState = arrivedRumors.state;
+        caseResult.state = nextState;
 
+        if (arrivedRumors.resolutions.length > 0) {
+            caseResult.rumorArrivals = arrivedRumors.resolutions;
+        }
 
         assert(getContext().chatMetadata === metadata,
             'Chat changed during operation; nothing was saved');
@@ -12423,6 +12689,16 @@ async function runStoredMechanic(args) {
                 {
                     type: 'combat',
                     packet: narrationPacket
+                },
+                revision
+            );
+        }
+                for (const packet of arrivedRumors.packets) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'rumor_arrival',
+                    packet
                 },
                 revision
             );
@@ -15069,23 +15345,14 @@ async function renderWorldTab(host) {
             `${place.label}\n${lead.claim || lead.label || lead.id}`;
         rumorSection.appendChild(entry);
 
-               if (lead.targetId === currentLocationId) {
-            rumorSection.appendChild(
-                makeAethermoorAction(
-                    `Investigate: ${place.label}`,
-                    'world',
-                    () => runAethermoorPanelCase(
-                        host,
-                        'world',
-                        {
-                            name: 'investigate_world_rumor',
-                            kind: 'investigate_lead',
-                            leadId: lead.id
-                        },
-                        'Rumor investigated.'
-                    )
-                )
-            );
+        if (lead.targetId === currentLocationId) {
+            const status = document.createElement('div');
+            status.className = 'aethermoor-ui-text';
+            status.textContent = lead.arrivalResolution
+                ? 'A genuine lead is established here. Its quest offer is ' +
+                  'waiting for the current quest or offer to be resolved.'
+                : 'Arrival resolution is pending.';
+            rumorSection.appendChild(status);
         } else {
             addTravelAction(
                 rumorSection,

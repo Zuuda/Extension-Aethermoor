@@ -6994,6 +6994,145 @@ function registerQuestDestination(state, quest) {
     return { placeId, leadId };
 }
 
+function ensureQuestJournal(state) {
+    state.quests ||= {};
+
+    assert(
+        state.quests &&
+        typeof state.quests === 'object' &&
+        !Array.isArray(state.quests),
+        'state.quests must be an object'
+    );
+
+    for (const bucket of [
+        'offered',
+        'accepted',
+        'completed',
+        'declined',
+        'abandoned'
+    ]) {
+        state.quests[bucket] ||= [];
+
+        assert(
+            Array.isArray(state.quests[bucket]),
+            `state.quests.${bucket} must be an array`
+        );
+    }
+
+    function containsQuest(id) {
+        return Object.values(state.quests)
+            .some(bucket =>
+                bucket.some(quest => quest?.id === id)
+            );
+    }
+
+    const active = state.activeQuest;
+
+    if (
+        active &&
+        typeof active === 'object' &&
+        typeof active.id === 'string' &&
+        !containsQuest(active.id)
+    ) {
+        const bucketByStatus = {
+            offered: 'offered',
+            in_progress: 'accepted',
+            complete: 'completed',
+            declined: 'declined',
+            abandoned: 'abandoned'
+        };
+
+        const bucket = bucketByStatus[active.status];
+
+        if (bucket) {
+            state.quests[bucket].push(active);
+        }
+    }
+
+    return state.quests;
+}
+
+function questJournalBucketForStatus(status) {
+    return {
+        offered: 'offered',
+        in_progress: 'accepted',
+        complete: 'completed',
+        declined: 'declined',
+        abandoned: 'abandoned'
+    }[status] || null;
+}
+
+function removeQuestFromJournal(state, questId) {
+    ensureQuestJournal(state);
+
+    for (const bucket of Object.values(state.quests)) {
+        const index = bucket.findIndex(
+            quest => quest?.id === questId
+        );
+
+        if (index >= 0) {
+            bucket.splice(index, 1);
+        }
+    }
+}
+
+function saveQuestToJournal(state, quest) {
+    assert(
+        quest &&
+        typeof quest.id === 'string' &&
+        quest.id.length > 0,
+        'Cannot save a quest without a stable ID'
+    );
+
+    const bucket = questJournalBucketForStatus(quest.status);
+
+    assert(
+        bucket,
+        `Unsupported quest journal status: ${quest.status}`
+    );
+
+    removeQuestFromJournal(state, quest.id);
+    state.quests[bucket].push(quest);
+
+    return quest;
+}
+
+function findQuestById(state, questId) {
+    ensureQuestJournal(state);
+
+    if (questId === undefined || questId === null) {
+        return state.activeQuest || null;
+    }
+
+    assert(
+        typeof questId === 'string' &&
+        questId.length > 0,
+        'Quest ID must be a non-empty string'
+    );
+
+    for (const bucket of Object.values(state.quests)) {
+        const quest = bucket.find(
+            entry => entry?.id === questId
+        );
+
+        if (quest) return quest;
+    }
+
+    return null;
+}
+
+function setActiveQuest(state, quest) {
+    assert(
+        quest &&
+        typeof quest.id === 'string',
+        'Active quest requires a valid quest'
+    );
+
+    state.activeQuest = quest;
+    saveQuestToJournal(state, quest);
+
+    return quest;
+}
 
 function resolveQuestSeed(test) {
     assert(
@@ -7005,6 +7144,7 @@ function resolveQuestSeed(test) {
     const state = clone(test.state);
 
     state.inquiries ||= {};
+    ensureQuestJournal(state);
 
     const zone =
         test.zone ?? state.zone;
@@ -7073,24 +7213,18 @@ function resolveQuestSeed(test) {
         'Quest offer requires a locked quest-trigger seed'
     );
 
+    /*
+     * A saved active quest no longer blocks creation of another offer.
+     * The trigger itself remains the duplicate-protection boundary:
+     * once its quest seed is consumed, that trigger cannot create another
+     * quest. A different rumor or breadcrumb may create another offer.
+     *
+     * Existing in-progress state remains the compatibility-selected quest
+     * for progression. New offers are stored in the journal and do not
+     * silently replace it.
+     */
     const existing =
         state.activeQuest;
-
-    /*
-     * An offered or in-progress quest is already locked. Return it
-     * without consuming RNG or generating a new rank/salvage result.
-     */
-    if (
-        existing &&
-        ['offered', 'in_progress'].includes(existing.status)
-    ) {
-        return {
-            ok: true,
-            created: false,
-            quest: existing,
-            state
-        };
-    }
 
     /*
      * The current encounter's trigger can produce only one offer.
@@ -7313,7 +7447,25 @@ function resolveQuestSeed(test) {
             issuerSettlement.label
     };
 
-    state.activeQuest = quest;
+    /*
+     * Every generated quest is durable journal data. Preserve the current
+     * active quest when it is offered or in progress; a newly discovered
+     * offer must not replace or disappear behind that compatibility pointer.
+     *
+     * If there is no selectable current quest, retain the historical
+     * activeQuest behavior so existing UI and progression continue to work.
+     */
+    saveQuestToJournal(state, quest);
+
+    if (
+        !state.activeQuest ||
+        !['offered', 'in_progress'].includes(
+            state.activeQuest.status
+        )
+    ) {
+        state.activeQuest = quest;
+    }
+
     prepareMissingCargoDiscovery(state);
     prepareSunkenSalvageDiscovery(state);
     prepareV2QuestDiscoveries(state);
@@ -7926,15 +8078,31 @@ function resolveQuestAction(test) {
         typeof test.state === 'object',
         'quest action requires state'
     );
-
     const state = clone(test.state);
-    const quest = state.activeQuest;
+    ensureQuestJournal(state);
+
+    const quest =
+        findQuestById(state, test.questId) ||
+        state.activeQuest;
 
     assert(
         quest &&
         typeof quest === 'object',
-        'No active quest'
+        'No selected quest'
     );
+
+    /*
+     * Selecting an offered quest makes it the compatibility active quest.
+     * Progression remains single-quest for now; the journal already
+     * preserves other offers for later selection.
+     */
+    if (
+        test.action === 'accept' &&
+        quest.status === 'offered'
+    ) {
+        state.activeQuest = quest;
+    }
+
 
     assert(
         [
@@ -7978,6 +8146,8 @@ function resolveQuestAction(test) {
             prepareV2QuestDiscoveries(state);
         }
 
+        saveQuestToJournal(state, quest);
+
         return result;
 
     }
@@ -7989,6 +8159,11 @@ function resolveQuestAction(test) {
         );
 
         quest.status = 'declined';
+        saveQuestToJournal(state, quest);
+
+        if (state.activeQuest?.id === quest.id) {
+            state.activeQuest = null;
+        }
 
         return result;
     }
@@ -8009,8 +8184,14 @@ function resolveQuestAction(test) {
         quest.status = 'abandoned';
         quest.abandonedAtGate = quest.currentGate?.step || null;
         quest.abandonReason = test.reason || null;
+        saveQuestToJournal(state, quest);
+
+        if (state.activeQuest?.id === quest.id) {
+            state.activeQuest = null;
+        }
 
         return result;
+
     }
 
      if (test.action === 'clear_gate') {
@@ -8221,6 +8402,11 @@ function resolveQuestAction(test) {
 
     quest.status = 'complete';
     quest.turnInEvidence = test.completionEvidence.trim();
+    saveQuestToJournal(state, quest);
+
+    if (state.activeQuest?.id === quest.id) {
+        state.activeQuest = null;
+    }
 
     for (const lead of Object.values(state.leads || {})) {
         if (
@@ -13640,6 +13826,11 @@ function registerTools() {
                                 type: 'string',
                                 description:
                                     'Stable ID of the settlement issuing the quest'
+                            },
+                                                        questId: {
+                                type: 'string',
+                                description:
+                                    'Stable ID of the quest to select from the quest journal'
                             },
 
                             action: {

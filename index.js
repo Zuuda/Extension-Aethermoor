@@ -14767,12 +14767,12 @@ async function copyAethermoorCommand(command) {
 }
 
 async function renderWorldTab(host) {
-    host.replaceChildren();
-
     let snapshot;
+
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
+        host.replaceChildren();
         host.appendChild(
             makeAethermoorSection(
                 'WORLD',
@@ -14783,60 +14783,87 @@ async function renderWorldTab(host) {
         return;
     }
 
-    const state = snapshot.state;
-        markCampaignViewRendered(snapshot);
-    const world = state.world || {};
-    const zone = world.zones?.[state.zone];
-    const settlement = zone
-        ? world.settlements?.[zone.primarySettlementId]
-        : null;
+    host.replaceChildren();
 
+    const state = snapshot.state;
+    markCampaignViewRendered(snapshot);
+
+    const world = state.world || {};
     const currentLocationId =
         state.currentLocationId ||
-        settlement?.locationId ||
         routeNodeId(state.zone, 'outpost');
 
-    const currentPlace =
-        state.places?.[currentLocationId] ||
-        Object.values(world.settlements || {}).find(
-            item => item.locationId === currentLocationId
-        );
+    const movementBlocked = [
+        'active',
+        'spotted'
+    ].includes(state.encounter?.status);
 
-    if (state.currentJourney) {
-        const journey = state.currentJourney;
-        const section = makeAethermoorSection(
-            'CURRENT JOURNEY',
-            `Destination: ${journey.destinationLabel}\n` +
-            `Progress: ${journey.completedSegments}/` +
-            `${journey.totalSegments} segments\n` +
-            `Status: ${journey.status}`,
-            'world'
-        );
+    function distanceLabel(destinationId) {
+        const route = shortestRoute(state, destinationId);
 
-        section.appendChild(
-            makeAethermoorAction(
-                'Cancel Journey',
-                'world',
-                () => runAethermoorPanelCase(
-                    host,
-                    'world',
-                    {
-                        name: 'cancel_journey',
-                        kind: 'journey',
-                        action: 'cancel'
-                    },
-                    'Journey cancelled.'
-                )
+        if (!route || route.totalSegments <= 0) {
+            return null;
+        }
+
+        if (route.totalSegments <= 1) return 'Nearby';
+        if (route.totalSegments <= 2) return 'Near';
+        if (route.totalSegments <= 4) return 'Moderate';
+        if (route.totalSegments <= 6) return 'Far';
+
+        return 'Distant';
+    }
+
+    function addTravelAction(container, label, destinationId) {
+        if (
+            movementBlocked ||
+            destinationId === currentLocationId
+        ) {
+            return;
+        }
+
+        const distance = distanceLabel(destinationId);
+
+        if (!distance) return;
+
+        const button = makeAethermoorAction(
+            `${label} · ${distance}`,
+            'world',
+            () => copyAethermoorCommand(
+                destinationCommand(destinationId)
             )
         );
 
-        host.appendChild(section);
+        container.appendChild(button);
+    }
+
+    if (movementBlocked) {
+        host.appendChild(
+            makeAethermoorSection(
+                'TRAVEL PAUSED',
+                'Resolve or avoid the spotted encounter before starting or changing a journey.',
+                'world'
+            )
+        );
+    }
+
+    const journey = state.currentJourney;
+
+    if (journey) {
+        host.appendChild(
+            makeAethermoorSection(
+                'CURRENT JOURNEY',
+                `Destination: ${journey.destinationLabel}\n` +
+                    `Progress: ${journey.completedSegments}/` +
+                    `${journey.totalSegments} segments\n` +
+                    `Status: ${journey.status}\n\n` +
+                    'Choose another destination to change direction. ' +
+                    'The new route will be calculated from the crew’s saved position.',
+                'world'
+            )
+        );
     }
 
     const quest = state.activeQuest;
-    const questIsLive =
-        quest &&
-        ['offered', 'in_progress'].includes(quest.status);
 
     if (quest?.status === 'in_progress') {
         const questDestinationId =
@@ -14847,239 +14874,151 @@ async function renderWorldTab(host) {
         const questDestination =
             state.places?.[questDestinationId] ||
             Object.values(world.settlements || {})
-                .find(item => item.locationId === questDestinationId);
+                .find(item =>
+                    item.locationId === questDestinationId
+                );
 
         if (questDestination) {
-            const route = shortestRoute(state, questDestinationId);
-            const isCurrent = questDestinationId === currentLocationId;
-
             const section = makeAethermoorSection(
                 quest.objectiveResolution
                     ? 'QUEST RETURN'
                     : 'ACTIVE QUEST DESTINATION',
-                `${questDestination.label || questDestinationId}` +
-                    (isCurrent
-                        ? '\nCurrent location'
-                        : route
-                            ? `\n${route.totalSegments <= 1
-                                ? 'Nearby'
-                                : route.totalSegments <= 2
-                                    ? 'Near'
-                                    : route.totalSegments <= 4
-                                        ? 'Moderate'
-                                        : 'Far'}`
-                            : '\nNo known route'),
+                questDestination.label || questDestinationId,
                 'quest'
             );
 
-            if (!isCurrent && route) {
-                section.addEventListener('click', () =>
-                    copyAethermoorCommand(
-                        destinationCommand(questDestinationId)
-                    )
+            if (questDestinationId === currentLocationId) {
+                const atDestination = document.createElement('div');
+                atDestination.className = 'aethermoor-ui-text';
+                atDestination.textContent =
+                    'The crew is at this location.';
+                section.appendChild(atDestination);
+            } else {
+                addTravelAction(
+                    section,
+                    `Travel to ${questDestination.label || questDestinationId}`,
+                    questDestinationId
                 );
-                section.style.cursor = 'pointer';
-                section.title = 'Copy movement command';
             }
 
             host.appendChild(section);
         }
     }
 
-    const leads = Object.values(state.leads || {}).filter(lead => {
-        if (!lead || lead.status !== 'known') return false;
-
-        if (
-            lead.testOnly ||
-            lead.id?.startsWith('debug-destination-')
-        ) {
-            return false;
-        }
-
-        if (lead.kind === 'quest') {
-            return questIsLive &&
-                lead.id === `quest-lead-${quest.id}`;
-        }
-
-        if (lead.kind === 'quest_return') {
-            return questIsLive &&
-                Boolean(quest.objectiveResolution) &&
-                lead.id === `quest-return-${quest.id}`;
-        }
-
-        return true;
-    });
-
-    function formatLeadList(entries) {
-        const seen = new Set();
-        const lines = [];
-
-        for (const lead of entries) {
-            const text = String(
-                lead.claim || lead.label || lead.id
-            ).trim().replace(/\s+/g, ' ');
-
-            const targetZone =
-                state.places?.[lead.targetId]?.zone ??
-                state.zone;
-
-            const key =
-                `${targetZone}:${text.toLocaleLowerCase()}`;
-
-            if (seen.has(key)) continue;
-            seen.add(key);
-            lines.push(`• ${text}`);
-        }
-
-        return lines.length ? lines.join('\n') : 'None recorded.';
-    }
+    const leads = Object.values(state.leads || {})
+        .filter(lead =>
+            lead &&
+            lead.status === 'known' &&
+            lead.targetType === 'place' &&
+            !lead.testOnly &&
+            !lead.id?.startsWith('debug-destination-') &&
+            state.places?.[lead.targetId]
+        );
 
     const rumors = leads.filter(lead => lead.kind === 'rumor');
-    const otherLeads = leads.filter(lead => lead.kind !== 'rumor');
 
-    host.appendChild(
-        makeAethermoorSection(
-            'RUMORS',
-            formatLeadList(rumors),
-            'world'
-        )
+    const rumorSection = makeAethermoorSection(
+        'RUMORS',
+        rumors.length
+            ? 'Known rumors and their destinations.'
+            : 'No known rumors.',
+        'world'
     );
 
-    const actions = document.createElement('div');
-    actions.className = 'aethermoor-ui-actions';
+    for (const lead of rumors) {
+        const place = state.places[lead.targetId];
+        const entry = document.createElement('div');
+        entry.className = 'aethermoor-ui-text';
+        entry.textContent =
+            `${place.label}\n${lead.claim || lead.label || lead.id}`;
+        rumorSection.appendChild(entry);
 
-    if (!state.currentJourney) {
-        const destinations = new Map();
-
-        function addDestination(locationId, label, destinationZone, leadId = null) {
-            const route = shortestRoute(state, locationId);
-            if (!route || route.totalSegments <= 0) return;
-
-            const key =
-                `${destinationZone}:${String(label)
-                    .trim()
-                    .toLocaleLowerCase()}`;
-
-            const previous = destinations.get(key);
-
-            if (
-                !previous ||
-                route.totalSegments < previous.route.totalSegments
-            ) {
-                destinations.set(key, {
-                    locationId,
-                    label,
-                    zone: destinationZone,
-                    leadId,
-                    route
-                });
-            }
-        }
-
-        for (const lead of leads) {
-            if (
-                lead.targetType !== 'place' ||
-                !state.places?.[lead.targetId]
-            ) {
-                continue;
-            }
-
-            const place = state.places[lead.targetId];
-            addDestination(
-                place.id,
-                place.label,
-                place.zone,
-                lead.id
-            );
-        }
-
-        for (const destinationSettlement of Object.values(
-            world.settlements || {}
-        )) {
-            if (destinationSettlement.locationId === currentLocationId) {
-                continue;
-            }
-
-            const knownPlace =
-                state.places?.[destinationSettlement.locationId];
-
-            const referencedByKnownLead = leads.some(
-                lead =>
-                    lead.status === 'known' &&
-                    lead.targetType === 'place' &&
-                    lead.targetId === destinationSettlement.locationId
-            );
-
-            // A generated settlement record is not, by itself,
-            // proof that the crew knows the place exists.
-            if (!knownPlace && !referencedByKnownLead) {
-                continue;
-            }
-
-            addDestination(
-                destinationSettlement.locationId,
-                knownPlace?.label || destinationSettlement.label,
-                knownPlace?.zone || destinationSettlement.zone
-            );
-        }
-
-
-               for (const destination of destinations.values()) {
-            const distance =
-                destination.route.totalSegments <= 1
-                    ? 'Nearby'
-                    : destination.route.totalSegments <= 2
-                        ? 'Near'
-                        : destination.route.totalSegments <= 4
-                            ? 'Moderate'
-                            : 'Far';
-
-            actions.appendChild(
+        if (lead.targetId === currentLocationId) {
+            rumorSection.appendChild(
                 makeAethermoorAction(
-                    `Travel to ${destination.label} · ${distance}`,
+                    `Investigate: ${place.label}`,
                     'world',
-                    () => copyAethermoorCommand(
-                        destinationCommand(
-                            destination.locationId
-                        )
+                    () => runAethermoorPanelCase(
+                        host,
+                        'world',
+                        {
+                            name: 'investigate_world_rumor',
+                            kind: 'investigate_lead',
+                            leadId: lead.id
+                        },
+                        'Rumor investigated.'
                     )
                 )
             );
+        } else {
+            addTravelAction(
+                rumorSection,
+                `Travel to ${place.label}`,
+                lead.targetId
+            );
         }
-   }
-
-    for (const lead of rumors) {
-        if (lead.targetId !== currentLocationId) continue;
-
-        actions.appendChild(
-            makeAethermoorAction(
-                `Investigate: ${state.places[lead.targetId].label}`,
-                'world',
-                () => runAethermoorPanelCase(
-                    host,
-                    'world',
-                    {
-                        name: 'investigate_world_rumor',
-                        kind: 'investigate_lead',
-                        leadId: lead.id
-                    },
-                    'Rumor investigated.'
-                )
-            )
-        );
-      }
     }
 
-    if (actions.childElementCount > 0) {
-        const section = document.createElement('section');
-        section.className = 'aethermoor-ui-section';
-        section.dataset.accent = 'world';
+    host.appendChild(rumorSection);
 
-        const heading = document.createElement('div');
-        heading.className = 'aethermoor-ui-heading';
-        heading.textContent = 'KNOWN DESTINATIONS';
-        section.append(heading, actions);
-        host.appendChild(section);
+    const settlements = Object.values(world.settlements || {})
+        .filter(settlement => {
+            if (!settlement?.locationId) return false;
+            if (settlement.locationId === currentLocationId) return false;
+
+            const hasKnownPlace =
+                Boolean(state.places?.[settlement.locationId]);
+
+            const hasKnownLead = leads.some(
+                lead => lead.targetId === settlement.locationId
+            );
+
+            /*
+             * A generated settlement is not automatically character-known.
+             * It appears here only after the fiction or a known lead establishes it.
+             */
+            return hasKnownPlace || hasKnownLead;
+        });
+
+    const settlementSection = makeAethermoorSection(
+        'KNOWN SETTLEMENTS',
+        settlements.length
+            ? 'Settlements the crew knows about.'
+            : 'No other known settlements.',
+        'world'
+    );
+
+    for (const settlement of settlements) {
+        const place = state.places?.[settlement.locationId];
+        const label = place?.label || settlement.label;
+
+        addTravelAction(
+            settlementSection,
+            `Travel to ${label}`,
+            settlement.locationId
+        );
+    }
+
+    host.appendChild(settlementSection);
+
+    if (!journey) {
+        const exploreSection = makeAethermoorSection(
+            'EXPLORE',
+            'Travel without choosing a destination.',
+            'world'
+        );
+
+        const exploreButton = makeAethermoorAction(
+            'Explore the surrounding region',
+            'world',
+            () => copyAethermoorCommand(
+                exploreRegionCommand()
+            )
+        );
+
+        exploreButton.disabled = movementBlocked;
+        exploreSection.appendChild(exploreButton);
+        host.appendChild(exploreSection);
     }
 }
 

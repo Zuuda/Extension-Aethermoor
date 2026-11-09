@@ -6292,7 +6292,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   with a consistent test-only identity.
  * - Extend cleanup so obsolete test records cannot appear as normal destinations.
  * - Preserve campaign records that were actually used for legitimate rewards.
- *
+ * - Debug rumor fixtures connect to a stable settlement anchor and backfill
+ *   existing test sites, preventing repeated fixtures from forming long
+ *   accidental route chains. Existing interrupted journeys retain their
+ *   saved route until cancelled and restarted.
+
+ * 
  * PLANNED — UI cleanup and consistency
  * - Remove stale debug controls from ordinary quest and world views.
  * - Deduplicate destinations and leads by stable identity.
@@ -11685,22 +11690,51 @@ function resolveBatch(args) {
                         learnedAtZone: state.zone
                     });
 
-                    if (!state.routeEdges.some(edge =>
-                        (
-                            edge.fromId === state.currentLocationId &&
-                            edge.toId === placeId
-                        ) ||
-                        (
-                            edge.fromId === placeId &&
-                            edge.toId === state.currentLocationId
-                        )
-                    )) {
+                    /*
+                     * Debug rumor sites are test fixtures, not a growing
+                     * campaign road network. Anchor them to the zone's
+                     * primary settlement so repeated fixtures cannot form
+                     * an increasingly long chain between old test sites.
+                     *
+                     * Backfill existing test places too. Their old neighbor
+                     * links remain intact, but shortestRoute can now use the
+                     * settlement shortcut. These test-only edges do not
+                     * alter ordinary world routes.
+                     */
+                    state.routeEdges ||= [];
+
+                    const anchorSettlement =
+                        savedPrimarySettlement(state, state.zone);
+
+                    const anchorId =
+                        anchorSettlement.locationId;
+
+                    const testPlaces = Object.values(state.places)
+                        .filter(place =>
+                            place?.testOnly === true &&
+                            Number(place.zone) === state.zone &&
+                            place.id !== anchorId
+                        );
+
+                    for (const testPlace of testPlaces) {
+                        const alreadyAnchored = state.routeEdges.some(edge =>
+                            (
+                                edge.fromId === anchorId &&
+                                edge.toId === testPlace.id
+                            ) ||
+                            (
+                                edge.fromId === testPlace.id &&
+                                edge.toId === anchorId
+                            )
+                        );
+
+                        if (alreadyAnchored) continue;
 
                         state.routeEdges.push({
-                            fromId: state.currentLocationId,
-                            toId: placeId,
+                            fromId: anchorId,
+                            toId: testPlace.id,
                             length: 1,
-                            kind: 'debug_rumor_access',
+                            kind: 'debug_rumor_anchor_access',
                             testOnly: true
                         });
                     }

@@ -5150,7 +5150,7 @@ function resolveTravelStep(test) {
     assert(!['active', 'spotted'].includes(state.encounter?.status),
         'Resolve or avoid the current encounter before moving');
 
-    const journey = state.currentJourney;
+    let journey = state.currentJourney;
     if (journey?.status === 'paused') {
         journey.status = 'traveling';
     }
@@ -5366,7 +5366,17 @@ function resolveTravelStep(test) {
         }
     }
     
-       if (journey) {
+          /*
+     * Event resolvers may return a cloned state, notably the traveler
+     * social seed. Advance the journey belonging to the final state,
+     * not a reference retained from before that clone.
+     *
+     * Otherwise the outcome can report a consumed segment while the
+     * saved journey silently loses that progress.
+     */
+    journey = state.currentJourney;
+
+    if (journey) {
         journey.completedSegments += 1;
         state.currentPosition = positionAfterSegments(
             journeyLegs(journey, state.zone),
@@ -5719,7 +5729,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify that [moved] during a spotted or active encounter does not advance.
  * - Verify that resolving the encounter resumes at the saved progress.
  * - Verify final-segment interruptions finalize arrival without an extra roll.
- * - Test quiet travel, environmental signs, points of interest, and social events.
+  * - Test quiet travel, environmental signs, points of interest, and social events.
+ * - Traveler events return cloned state: refresh the journey reference before
+ *   advancing progress so saved progress matches the narrated outcome.
+ * - Verify a traveler on segment 1 saves 1/N, then a subsequent move saves 2/N.
+ * - Regression incident: the Watchtower journey reported 1/5 after a traveler
+ *   but lost that first segment in saved state. Fix added; retest pending.
+
  *
  * PLANNED — Out-of-combat recovery
  * - Q'tik's derived Regen should restore her HP between fights, reflecting

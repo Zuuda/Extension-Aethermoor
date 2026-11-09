@@ -14933,7 +14933,7 @@ async function renderWorldTab(host) {
             `${place.label}\n${lead.claim || lead.label || lead.id}`;
         rumorSection.appendChild(entry);
 
-        if (lead.targetId === currentLocationId) {
+               if (lead.targetId === currentLocationId) {
             rumorSection.appendChild(
                 makeAethermoorAction(
                     `Investigate: ${place.label}`,

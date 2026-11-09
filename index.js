@@ -4698,6 +4698,58 @@ function shortestRoute(state, destinationId) {
     )[0] || null;
 }
 
+function recordCrewKnowledge(state, entry) {
+    state.discoveries ||= {};
+
+    assert(
+        state.discoveries &&
+        typeof state.discoveries === 'object' &&
+        !Array.isArray(state.discoveries),
+        'state.discoveries must be an object'
+    );
+
+    assert(
+        typeof entry.id === 'string' &&
+        entry.id.length > 0,
+        'Crew knowledge record requires a stable ID'
+    );
+
+    // Arrival may be processed again after reload. Keep its original record.
+    if (state.discoveries[entry.id]) {
+        return state.discoveries[entry.id];
+    }
+
+    const record = {
+        id: entry.id,
+        kind: entry.kind,
+        knowledgeType: entry.knowledgeType,
+        certainty: entry.certainty,
+        summary: entry.summary,
+        source: clone(entry.source),
+        learnedAtLocationId: entry.learnedAtLocationId,
+        learnedAtZone: entry.learnedAtZone
+    };
+
+    assert(
+        typeof record.kind === 'string' &&
+        typeof record.knowledgeType === 'string' &&
+        typeof record.certainty === 'string' &&
+        typeof record.summary === 'string' &&
+        record.summary.length > 0,
+        'Crew knowledge record is incomplete'
+    );
+
+    assert(
+        record.source &&
+        typeof record.source.id === 'string' &&
+        record.source.id.length > 0,
+        'Crew knowledge record requires a stable source reference'
+    );
+
+    state.discoveries[record.id] = record;
+    return record;
+}
+
 function resolveArrivedRumors(stateInput) {
     /*
      * Arrival establishes a rumor's opening scene, not a complete search.
@@ -4820,6 +4872,22 @@ function resolveArrivedRumors(stateInput) {
         if (!offerDeferred) {
             lead.status = 'investigated';
             lead.finding = arrival.finding;
+
+            recordCrewKnowledge(state, {
+                id: `knowledge-rumor-arrival-${lead.id}`,
+                kind: 'rumor_resolution',
+                knowledgeType: 'observation',
+                certainty: 'engine_established',
+                summary:
+                    `The crew learned that this rumor resolved as ` +
+                    `${arrival.finding.replaceAll('_', ' ')}.`,
+                source: {
+                    id: lead.id,
+                    type: 'rumor'
+                },
+                learnedAtLocationId: place.id,
+                learnedAtZone: arrival.zone
+            });
         }
 
         const shouldAnnounce =
@@ -6070,21 +6138,16 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Define the validation boundary for newly revealed local exits before
  *   allowing prose to expand a saved site map.
  *
- * * PLANNED — Persistent discoveries and crew knowledge foundation
- * - Rumors can conclude with lore, a contact, a settlement discovery, or a
- *   scenic resolution; XP, loot, combat, and quests are not required payoffs.
- * - Give consequential discoveries stable IDs and saved source references.
- * - Distinguish established world facts from what the crew has learned.
- * - Record testimony as testimony; hearing a claim does not prove it true.
- * - Preserve discoveries after quests end and after the crew leaves a region.
- * - Future quests should be able to recognize relevant knowledge acquired
- *   before acceptance rather than requiring the discovery to happen again.
- * - Keep discovery records separate from inventory: learning a fact does not
- *   grant an item, currency, or a reward.
- * - Narration may elaborate presentation, but consequential facts and their
- *   acquisition conditions must be engine-authored and validated.
- * - This is an architectural direction, not authorization to migrate every
- *   incidental detail in historical chat prose into authoritative world data.
+ * PARTIAL — Persistent discoveries and crew knowledge foundation
+ * - A saved discoveries registry now records rumor-arrival outcomes as
+ *   source-linked observations with stable IDs and explicit certainty.
+ * - Reprocessing an arrival preserves the original record.
+ * - Original rumor claims remain testimony; resolution does not make the
+ *   claim itself true.
+ * - Add authored testimony and lore records before expanding rumor outcomes.
+ * - Let future quests explicitly recognize relevant prior knowledge.
+ * - Keep discovery records separate from inventory and rewards.
+ * - Do not migrate incidental historical chat prose into authoritative data.
  *
  * PARTIAL — Rumor arrival and closure contracts
  * - Automatic confirmed-arrival resolution implemented for the existing

@@ -5111,13 +5111,22 @@ function applyArrivalLocation(state, locationId, outcome) {
 function questsForArrival(state, locationId) {
     const journal = ensureQuestJournal(state);
 
-    return journal.accepted.filter(quest =>
-        quest?.status === 'in_progress' &&
-        (
-            quest.destinationId === locationId ||
-            quest.turnIn?.locationId === locationId
-        )
-    );
+    /*
+     * An unfinished field objective belongs to its destination.
+     * Only a secured objective makes the issuer location eligible for
+     * return processing. Merely passing through the issuer's settlement
+     * must not attempt to advance an unrelated unfinished quest.
+     */
+    return journal.accepted.filter(quest => {
+        if (quest?.status !== 'in_progress') return false;
+
+        const arrivalLocationId =
+            quest.objectiveResolution && quest.turnIn
+                ? quest.turnIn.locationId
+                : quest.destinationId;
+
+        return arrivalLocationId === locationId;
+    });
 }
 
 function completeQuestArrivalGate(state, outcome, questId) {

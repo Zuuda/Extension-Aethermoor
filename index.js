@@ -8184,7 +8184,77 @@ function reconcileQuestDiscovery(test) {
     };
 }
 
+function findQuestByDiscoveryId(state, discoveryId) {
+    assert(
+        typeof discoveryId === 'string' &&
+        discoveryId.length > 0,
+        'Quest discovery requires a stable discovery ID'
+    );
+
+    const journal = ensureQuestJournal(state);
+    const matches = journal.accepted.filter(
+        quest =>
+            quest?.status === 'in_progress' &&
+            quest.discoveries?.some(
+                discovery => discovery.id === discoveryId
+            )
+    );
+
+    assert(
+        matches.length <= 1,
+        `Discovery ${discoveryId} belongs to multiple quests`
+    );
+
+    return matches[0] || null;
+}
+
 function resolveQuestEvent(test) {
+    assert(
+        test.state &&
+        typeof test.state === 'object',
+        'Quest event requires state'
+    );
+
+    const state = clone(test.state);
+    ensureQuestJournal(state);
+
+    const requestedQuest =
+        test.questId !== undefined
+            ? findQuestById(state, test.questId)
+            : findQuestByDiscoveryId(state, test.questItemId);
+
+    assert(
+        requestedQuest?.status === 'in_progress',
+        test.questId !== undefined
+            ? `Quest ${test.questId} is not in progress`
+            : `No in-progress quest owns discovery ${test.questItemId}`
+    );
+
+    const previousSelectionId =
+        state.activeQuest?.id || null;
+
+    /*
+     * The legacy resolver still reads activeQuest. Scope that pointer to
+     * the quest identified by the authored discovery, then restore the
+     * previous selection after progression.
+     */
+    state.activeQuest = requestedQuest;
+
+    const result = resolveSelectedQuestEvent({
+        ...test,
+        state
+    });
+
+    const resultState = result.state;
+
+    resultState.activeQuest = previousSelectionId
+        ? findQuestById(resultState, previousSelectionId)
+        : null;
+
+    return result;
+}
+
+function resolveSelectedQuestEvent(test) {
     assert(
         test.state && typeof test.state === 'object',
         'Quest event requires state'
@@ -8302,7 +8372,9 @@ function resolveQuestEvent(test) {
             created: true,
             action: 'quest_event',
             event: 'found',
+            questId: quest.id,
             questItemId: discovery.id,
+            quest: clone(quest),
             discovery: clone(discovery),
             questObjective: objective.objectiveResolution,
             state: objective.state
@@ -8316,6 +8388,8 @@ function resolveQuestEvent(test) {
         created: true,
         action: 'quest_event',
         event: 'found',
+        questId: quest.id,
+        quest: clone(quest),
         discovery: clone(discovery),
         questGate: progression.questGate,
         state: progression.state
@@ -13387,7 +13461,11 @@ async function runStoredMechanic(args) {
               caseResult.created
                 ? questDiscoveryNarrationPacket(
                     caseResult,
-                    nextState.activeQuest
+                    caseResult.quest ||
+                        findQuestByDiscoveryId(
+                            nextState,
+                            caseResult.questItemId
+                        )
                 )
 
             : batch &&
@@ -14175,10 +14253,10 @@ function registerTools() {
                                 description:
                                     'Stable ID of the settlement issuing the quest'
                             },
-                                                        questId: {
+                            questId: {
                                 type: 'string',
                                 description:
-                                    'Stable ID of the quest to select from the quest journal'
+                                    'Stable ID of the quest owning the event'
                             },
 
                             action: {
@@ -18479,7 +18557,20 @@ globalThis.aethermoorMechanicsInterceptor =
         );
 
         const state = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
-        const quest = state?.activeQuest;
+
+        const questJournal =
+            state ? ensureQuestJournal(clone(state)) : null;
+
+        const quest =
+            questJournal?.accepted.find(entry =>
+                entry?.status === 'in_progress' &&
+                (
+                    entry.destinationId === state.currentLocationId ||
+                    entry.turnIn?.locationId === state.currentLocationId
+                )
+            ) ||
+            state?.activeQuest;
+
 
         if (
             quest &&

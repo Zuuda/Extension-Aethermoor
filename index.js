@@ -4728,7 +4728,11 @@ function resolveArrivedRumors(stateInput) {
             lead.status === 'known' &&
             lead.targetType === 'place' &&
             lead.targetId === state.currentLocationId &&
-            lead.testOnly !== true
+            (
+                lead.testOnly !== true ||
+                lead.arrivalTest === true
+            )
+
         )
         .map(lead => lead.id);
 
@@ -10973,8 +10977,10 @@ function resolveBatch(args) {
                         targetType: 'place',
                         targetId: placeId,
                         status: 'known',
-                        testOnly: true
+                        testOnly: true,
+                        arrivalTest: true
                     };
+
 
                     if (!state.routeEdges.some(edge =>
                         (
@@ -15428,7 +15434,7 @@ async function renderWorldTab(host) {
             lead &&
             lead.status === 'known' &&
             lead.targetType === 'place' &&
-            !lead.testOnly &&
+            (!lead.testOnly || lead.arrivalTest === true) &&
             !lead.id?.startsWith('debug-destination-') &&
             state.places?.[lead.targetId]
         );

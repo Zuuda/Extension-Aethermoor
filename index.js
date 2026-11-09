@@ -12959,15 +12959,20 @@ function combatNarrationPacket(result, actions) {
             combatFoeLabel(foe, index)
         ])
     );
+
     const foeName = id => foeNames.get(id) || id;
+    const slainIds = new Set(
+        (result.kills || []).map(kill => kill.id)
+    );
 
     const lines = [
         'COMBAT SCENE RESULT.',
         `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
         `Tansy used ${tansyActions[actions?.tansy] || actions?.tansy || 'a command'}.`,
-        'Dramatize the established events as a coherent scene. ' +
-            'Add atmosphere and physical description, but do not add attacks, ' +
-            'injuries, actions, enemy behavior, or outcomes absent from this summary.'
+        'Dramatize these established events as a coherent scene. ' +
+            'Add atmosphere, pacing, dialogue, and physical description, ' +
+            'but do not add attacks, injuries, decisions, enemy behavior, ' +
+            'or outcomes absent from this result.'
     ];
 
     if (actions?.target) {
@@ -12976,67 +12981,51 @@ function combatNarrationPacket(result, actions) {
 
     if (result.death) {
         lines.push(
-            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : 'Tansy'} fell. ` +
-            'The crew respawned; the encounter was abandoned without rewards.'
+            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : 'Tansy'} fell.`,
+            'The crew respawned and the encounter ended without rewards.'
         );
     }
 
+    const notableBeats = [];
+
     for (const exchange of result.exchanges || []) {
-        const exchangeBeats = [];
-        const damageByFoe = new Map();
-
         for (const hit of exchange.hits || []) {
-            damageByFoe.set(
-                hit.id,
-                (damageByFoe.get(hit.id) || 0) + hit.damage
-            );
-        }
-
-        for (const [id, damage] of damageByFoe) {
-            const slain = (result.kills || []).some(
-                kill => kill.id === id &&
-                    (exchange.hits || []).some(hit =>
-                        hit.id === id && hit.hp === 0
-                    )
-            );
-
-            exchangeBeats.push(
-                `${foeName(id)} took ${damage} damage` +
-                (slain ? ' and was slain' : '')
-            );
+            if (hit.hp === 0 && slainIds.has(hit.id)) {
+                notableBeats.push(`${foeName(hit.id)} was slain`);
+            }
         }
 
         if (exchange.enemyMiss === true) {
-            exchangeBeats.push('the enemy attack missed');
+            notableBeats.push('an enemy attack missed');
         }
 
         for (const effect of exchange.effects || []) {
-            exchangeBeats.push(effect);
-        }
-
-        if (exchangeBeats.length > 0) {
-            lines.push(
-                `Exchange ${exchange.exchange}: ` +
-                `${exchangeBeats.join('; ')}.`
-            );
-        }
-    }
-
-    for (const kill of result.kills || []) {
-        if (
-            !(result.exchanges || []).some(exchange =>
-                (exchange.hits || []).some(hit =>
-                    hit.id === kill.id && hit.hp === 0
-                )
-            )
-        ) {
-            lines.push(`${foeName(kill.id)} was slain.`);
+            if (
+                effect.includes('destroyed') ||
+                effect.includes('intercepted') ||
+                effect.includes('sacrificed') ||
+                effect.includes('reflected') ||
+                effect.includes('interrupted') ||
+                effect.includes('disrupted') ||
+                effect.includes('reinforcements') ||
+                effect.includes('telegraph')
+            ) {
+                notableBeats.push(effect);
+            }
         }
     }
 
-    for (const effect of result.turnEffects || []) {
-        lines.push(`Battle effect: ${effect}.`);
+    if (notableBeats.length > 0) {
+        lines.push(
+            'Notable battle beats: ' +
+            notableBeats.join('; ') +
+            '.'
+        );
     }
+
+    const living = (result.summary?.encounter?.foes || [])
+        .filter(foe => foe.hp > 0)
+        .map(foe => foeName(foe.id));
 
     if (result.rewards?.applied) {
         lines.push(
@@ -13045,20 +13034,22 @@ function combatNarrationPacket(result, actions) {
         );
 
         for (const item of result.rewards.loot || []) {
-            lines.push(`Loot received: ${item.name} (${item.rarity}).`);
+            lines.push(
+                `Loot received: ${item.name} (${item.rarity}).`
+            );
         }
 
-        const drop = result.rewards.packDrop;
-        if (drop?.result === 'diegetic_quest_breadcrumb') {
+        if (
+            result.rewards.packDrop?.result ===
+            'diegetic_quest_breadcrumb'
+        ) {
             lines.push('A quest breadcrumb was found.');
         }
     } else if (result.packCleared) {
-        lines.push('The encounter was cleared; no rewards were applied.');
+        lines.push(
+            'The encounter was cleared; no rewards were applied.'
+        );
     } else if (!result.death) {
-        const living = (result.summary?.encounter?.foes || [])
-            .filter(foe => foe.hp > 0)
-            .map(foe => foeName(foe.id));
-
         lines.push(
             living.length
                 ? `Enemies still standing: ${living.join(', ')}.`
@@ -13068,39 +13059,36 @@ function combatNarrationPacket(result, actions) {
 
     if (result.summary) {
         lines.push(
-            `After the fight: Q'tik ${result.summary.qtikHp}/` +
-            `${result.summary.qtikMaxHp} HP; Tansy ` +
-            `${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP; ` +
-            `crew level ${result.summary.level}, ` +
-            `${result.summary.xp}/${result.summary.nextXp} XP.`
+            `After the fight: Q'tik ` +
+                `${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP; ` +
+                `Tansy ${result.summary.tansyHp}/` +
+                `${result.summary.tansyMaxHp} HP.`
         );
     }
 
-    if (result.questGate) {
+    for (const questGate of result.questGates ||
+        (result.questGate ? [result.questGate] : [])) {
         lines.push(
-            `Quest gate ${result.questGate.completed.step} was completed.`
+            `Quest gate ${questGate.completed.step} completed` +
+                (
+                    questGate.questId
+                        ? ` for quest ${questGate.questId}`
+                        : ''
+                ) +
+                '.',
+            questGate.next
+                ? `Next objective: ${questGate.next.objective}`
+                : 'The field objective is secured; delivery remains separate.'
         );
-
-        if (result.questGate.objectiveSecured) {
-            lines.push(
-                'The quest field objective is secured. The crew must still ' +
-                'return and report it; no quest payout has been granted.'
-            );
-        } else if (result.questGate.next) {
-            lines.push(
-                `Next quest objective: ${result.questGate.next.objective}`
-            );
-        }
     }
 
     lines.push(
-        'Use natural story language. Do not narrate the extension’s counters ' +
-        'or repeat the mechanics report as a log.'
+        'Use natural story language. Do not mention extension internals, ' +
+        'numeric travel counters, per-exchange HP bookkeeping, or this result packet.'
     );
 
     return lines.join('\n');
 }
-
 
 function migrateAethermoorHandoffs(stored) {
     if (Array.isArray(stored?.handoffQueue)) {

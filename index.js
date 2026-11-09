@@ -6182,8 +6182,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Migrate legacy activeQuest data without duplicating or losing a quest.
  * - Update acceptance, progression, delivery, UI, narration, and duplicate
  *   protection to address an explicit quest ID.
- * - Define whether multiple quests may be in progress simultaneously before
- *   enabling concurrent field progression.
+ * - Multiple offers are stored; accepting another quest while one is in
+ *   progress is explicitly blocked until concurrent progression is supported.
+ * - Quest actions return the affected quest for narration even when the
+ *   compatibility activeQuest pointer is cleared.
+ * - Explicit unknown quest IDs must fail without falling back to another quest.
+ * - Offer preparation targets the newly generated quest while preserving
+ *   the selected quest. Preparation helpers still need explicit quest arguments.
+ * - Next: render all journal offers and bind each action to its quest ID;
+ *   then remove rumor offer deferral without replacing the selected quest.
  * - Do not implement quest abandonment or completion by relying only on a
  *   global activeQuest pointer.
  *
@@ -7466,11 +7473,24 @@ function resolveQuestSeed(test) {
         state.activeQuest = quest;
     }
 
-    prepareMissingCargoDiscovery(state);
-    prepareSunkenSalvageDiscovery(state);
-    prepareV2QuestDiscoveries(state);
-    trigger.questSeedConsumed = true;
+    /*
+     * Legacy preparation helpers read activeQuest. Temporarily point them
+     * at this newly generated offer, then restore the selected quest.
+     * The journal keeps the same quest object, including prepared discoveries.
+     * V2 defeat discoveries are still prepared on acceptance as before.
+     */
+    const selectedQuest = state.activeQuest;
 
+    try {
+        state.activeQuest = quest;
+        prepareMissingCargoDiscovery(state);
+        prepareSunkenSalvageDiscovery(state);
+        prepareV2QuestDiscoveries(state);
+    } finally {
+        state.activeQuest = selectedQuest;
+    }
+
+    trigger.questSeedConsumed = true;
     return {
         ok: true,
         created: true,
@@ -8081,28 +8101,45 @@ function resolveQuestAction(test) {
     const state = clone(test.state);
     ensureQuestJournal(state);
 
-    const quest =
-        findQuestById(state, test.questId) ||
-        state.activeQuest;
+    const quest = findQuestById(state, test.questId);
 
     assert(
-        quest &&
-        typeof quest === 'object',
-        'No selected quest'
+        quest && typeof quest === 'object',
+        test.questId != null
+            ? `Unknown quest ID: ${test.questId}`
+            : 'No selected quest'
     );
 
     /*
-     * Selecting an offered quest makes it the compatibility active quest.
-     * Progression remains single-quest for now; the journal already
-     * preserves other offers for later selection.
+     * Offers coexist in the journal. Field progression still supports
+     * one in-progress quest until arrival, combat, discovery, and delivery
+     * have all been migrated to explicit quest selection.
+     * Never silently displace an accepted quest when accepting an offer.
      */
-    if (
-        test.action === 'accept' &&
-        quest.status === 'offered'
-    ) {
-        state.activeQuest = quest;
+    if (test.action === 'accept') {
+        const otherAccepted = state.quests.accepted.find(
+            entry =>
+                entry?.status === 'in_progress' &&
+                entry.id !== quest.id
+        );
+
+        assert(
+            !otherAccepted,
+            'Another quest is already in progress; its progression ' +
+            'must be resolved before accepting this offer. ' +
+            'This offer remains saved in the journal.'
+        );
     }
 
+    if (
+        ['clear_gate', 'resolve_objective', 'complete']
+            .includes(test.action)
+    ) {
+        assert(
+            state.activeQuest?.id === quest.id,
+            'Progression currently requires the selected active quest'
+        );
+    }
 
     assert(
         [
@@ -8124,6 +8161,8 @@ function resolveQuestAction(test) {
     const result = {
         ok: true,
         action: test.action,
+        questId: quest.id,
+        quest,
         rewards: {
             xp: 0,
             silver: 0,
@@ -8138,7 +8177,7 @@ function resolveQuestAction(test) {
             quest.status === 'offered',
             `Quest cannot be accepted from status ${quest.status}`
         );
-
+        state.activeQuest = quest;
         registerQuestDestination(state, quest);
         quest.status = 'in_progress';
 
@@ -12971,7 +13010,7 @@ async function runStoredMechanic(args) {
                 ? questActionNarrationPacket(
                     {
                         ...caseResult,
-                        quest: nextState.activeQuest
+                        quest: caseResult.quest
                     },
                     oneCase.action
                 )
@@ -12983,7 +13022,7 @@ async function runStoredMechanic(args) {
             caseResult.created !== false
                 ? questDeliveryNarrationPacket(
                     caseResult,
-                    nextState.activeQuest
+                    caseResult.quest
                 )
                 : null;
 

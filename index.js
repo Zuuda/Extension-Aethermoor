@@ -6163,7 +6163,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Reprocessing an arrival preserves the original record.
  * - Original rumor claims remain testimony; resolution does not make the
  *   claim itself true.
- * - Add authored testimony and lore records before expanding rumor outcomes.
+ * - Traveler rumors record unverified testimony when their claims are heard.
+ * - Verified with a debug fixture: testimony exists before travel; arrival
+ *   adds a separate observation without overwriting the original claim.
+ * - World displays saved knowledge, sources, certainty, and learning locations.
+ * - Knowledge display is read-only and labels identifiable test records.
+ * - Natural traveler testimony integration still awaits live verification.
+ * - Authored lore content and quest prerequisite checks remain unimplemented.
+ *
  * - Let future quests explicitly recognize relevant prior knowledge.
  * - Keep discovery records separate from inventory and rewards.
  * - Do not migrate incidental historical chat prose into authoritative data.
@@ -15570,6 +15577,128 @@ async function copyAethermoorCommand(command) {
         'Aethermoor'
     );
 }
+function renderCrewKnowledge(state) {
+    /*
+     * Display only acquired crew knowledge. Never read quest coreTruth,
+     * hidden quest discoveries, or private social seeds for this view.
+     * Rendering must not create, normalize, or save knowledge records.
+     */
+    const entries = Object.values(state.discoveries || {})
+        .filter(entry =>
+            entry &&
+            typeof entry.id === 'string' &&
+            typeof entry.summary === 'string'
+        );
+
+    const section = makeAethermoorSection(
+        'CREW KNOWLEDGE',
+        entries.length
+            ? 'Claims the crew has heard and observations it has recorded.'
+            : 'No knowledge recorded yet.',
+        'world'
+    );
+
+    function locationLabel(locationId) {
+        if (!locationId) return 'Location not recorded';
+
+        const place = state.places?.[locationId];
+        if (place?.label) return place.label;
+
+        const settlement = Object.values(
+            state.world?.settlements || {}
+        ).find(entry => entry.locationId === locationId);
+
+        return settlement?.label || locationId;
+    }
+
+    const rumorSummaries = {
+        travelogue_flub_benign_oddity:
+            'This rumor concluded as a mistaken claim or benign oddity.',
+        already_cleared_by_other_immortals:
+            'Others had already cleared the subject of this rumor.',
+        genuine_unclaimed_quest_or_dungeon_hook:
+            'Following this rumor revealed a genuine opportunity.'
+    };
+
+    for (const entry of entries) {
+        const sourceId = entry.source?.id;
+        const sourceLead = state.leads?.[sourceId];
+
+        const testRecord =
+            sourceLead?.testOnly === true ||
+            entry.source?.type === 'debug_rumor_fixture' ||
+            state.places?.[
+                entry.learnedAtLocationId
+            ]?.testOnly === true;
+
+        const typeLabel = {
+            testimony: 'Testimony',
+            observation: 'Observation',
+            confirmed_fact: 'Confirmed fact'
+        }[entry.knowledgeType] || 'Recorded knowledge';
+
+        const certaintyLabel = {
+            unverified_claim: 'Unverified claim',
+            engine_established: 'Established result'
+        }[entry.certainty] || 'Certainty not classified';
+
+        const finding =
+            sourceLead?.arrivalResolution?.finding ||
+            sourceLead?.finding;
+
+        const summary =
+            entry.kind === 'rumor_resolution' &&
+            rumorSummaries[finding]
+                ? rumorSummaries[finding]
+                : entry.summary;
+
+        const sourceLabel =
+            entry.source?.type === 'debug_rumor_fixture'
+                ? 'Debug rumor fixture'
+                : entry.source?.type === 'traveler'
+                    ? 'Traveler'
+                    : sourceLead?.label ||
+                      sourceLead?.claim ||
+                      sourceId ||
+                      'Source not recorded';
+
+        const lines = [
+            summary,
+            '',
+            certaintyLabel,
+            `Source: ${sourceLabel}`,
+            `Learned at: ${locationLabel(
+                entry.learnedAtLocationId
+            )}` +
+                (
+                    Number.isInteger(entry.learnedAtZone)
+                        ? ` · Zone ${entry.learnedAtZone}`
+                        : ''
+                )
+        ];
+
+        if (entry.knowledgeType === 'testimony') {
+            lines.push(
+                'This records what was said; the claim itself is not confirmed.'
+            );
+        }
+
+        const card = makeAethermoorSection(
+            `${testRecord ? 'TEST · ' : ''}${typeLabel}`,
+            lines.join('\n'),
+            'world'
+        );
+
+        // Stable references remain inspectable without filling the card
+        // with implementation identifiers.
+        card.title =
+            `Knowledge: ${entry.id}\nSource: ${sourceId || 'unknown'}`;
+
+        section.appendChild(card);
+    }
+
+    return section;
+}
 
 async function renderWorldTab(host) {
     let snapshot;
@@ -15851,6 +15980,7 @@ async function renderWorldTab(host) {
     }
 
     host.appendChild(settlementSection);
+    host.appendChild(renderCrewKnowledge(state));
 
     if (!journey) {
         const exploreSection = makeAethermoorSection(

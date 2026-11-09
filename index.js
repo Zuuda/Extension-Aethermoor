@@ -11817,13 +11817,13 @@ function resolveBatch(args) {
                 case 'debug_create_quest_offer': {
                     const state = clone(test.state);
 
-                    assert(
-                        !state.activeQuest ||
-                        !['offered', 'in_progress'].includes(
-                            state.activeQuest.status
-                        ),
-                        'Resolve or abandon the current quest before creating a test offer'
-                    );
+                    /*
+                     * A debug trigger may create an additional journal offer.
+                     * resolveQuestSeed preserves the selected quest, while
+                     * acceptance separately enforces the current limit of
+                     * one in-progress quest. Fixture creation must not require
+                     * declining an existing offer merely to test coexistence.
+                     */
 
                     const issuer =
                         questIssuerSettlement(state, test);

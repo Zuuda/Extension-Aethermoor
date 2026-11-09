@@ -18224,15 +18224,22 @@ const aethermoorNarrationWarnings = new WeakMap();
 function leakedAethermoorContext(text) {
     if (typeof text !== 'string') return [];
 
+    const leaks = [];
+
+    /*
+     * A marker mention is not sufficient evidence of a leaked handoff.
+     * Require the opening marker, the private-context heading, and the
+     * closing marker in their actual packet positions. This still detects
+     * a reproduced full handoff, including one inside a code fence.
+     */
+    const handoffPattern =
+        /^\s*<aethermoor-mechanics-handoff>\s*\r?\n\s*PRIVATE ENGINE CONTEXT\b[\s\S]*?^\s*<aethermoor-mechanics-handoff>\s*$/im;
+
+    if (handoffPattern.test(text)) {
+        leaks.push('complete engine handoff');
+    }
+
     const signatures = [
-        {
-            label: 'engine handoff marker',
-            pattern: /<\/?aethermoor-mechanics-handoff>/i
-        },
-        {
-            label: 'private engine context',
-            pattern: /^\s*PRIVATE ENGINE CONTEXT\b/im
-        },
         {
             label: 'private scene context',
             pattern: /^\s*PRIVATE SCENE CONTEXT\b/im
@@ -18251,9 +18258,13 @@ function leakedAethermoorContext(text) {
         }
     ];
 
-    return signatures
-        .filter(signature => signature.pattern.test(text))
-        .map(signature => signature.label);
+    for (const signature of signatures) {
+        if (signature.pattern.test(text)) {
+            leaks.push(signature.label);
+        }
+    }
+
+    return leaks;
 }
 
 function warnAethermoorNarrationLeak(message, leaks) {

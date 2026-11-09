@@ -5108,9 +5108,37 @@ function applyArrivalLocation(state, locationId, outcome) {
     return state;
 }
 
-function completeQuestArrivalGate(state, outcome) {
+function questsForArrival(state, locationId) {
+    const journal = ensureQuestJournal(state);
+
+    return journal.accepted.filter(quest =>
+        quest?.status === 'in_progress' &&
+        (
+            quest.destinationId === locationId ||
+            quest.turnIn?.locationId === locationId
+        )
+    );
+}
+
+function completeQuestArrivalGate(state, outcome, questId) {
     let nextState = state;
-    let quest = nextState.activeQuest;
+    ensureQuestJournal(nextState);
+
+    const quest = findQuestById(nextState, questId);
+
+    assert(
+        quest?.status === 'in_progress',
+        `Arrival requires an in-progress quest: ${questId}`
+    );
+    assert(
+        nextState.currentLocationId ===
+            (
+                quest.objectiveResolution && quest.turnIn
+                    ? quest.turnIn.locationId
+                    : quest.destinationId
+            ),
+        `Quest ${quest.id} is not associated with this arrival location`
+    );
 
     // Returning to the locked issuer location makes delivery eligible.
     // It does not pay rewards until the narrator reports the handoff.
@@ -5147,9 +5175,7 @@ function completeQuestArrivalGate(state, outcome) {
         return nextState;
     }
 
-    quest = nextState.activeQuest;
-    const gate = quest?.currentGate;
-
+    const gate = quest.currentGate;
     if (
         quest?.status !== 'in_progress' ||
         nextState.currentLocationId !==
@@ -5472,7 +5498,16 @@ function resolveTravelStep(test) {
             arrival
         );
 
-        state = completeQuestArrivalGate(state, arrival);
+                const arrivalQuests =
+            questsForArrival(state, arrival.destinationId);
+
+        for (const arrivalQuest of arrivalQuests) {
+            state = completeQuestArrivalGate(
+                state,
+                arrival,
+                arrivalQuest.id
+            );
+        }
 
         const rumorArrival = resolveArrivedRumors(state);
         state = rumorArrival.state;
@@ -5721,7 +5756,16 @@ function resolveTravelStep(test) {
         outcome.journey = clone(journey);
     }
     if (outcome.arrived) {
-        state = completeQuestArrivalGate(state, outcome);
+        const arrivalQuests =
+            questsForArrival(state, outcome.destinationId);
+
+        for (const arrivalQuest of arrivalQuests) {
+            state = completeQuestArrivalGate(
+                state,
+                outcome,
+                arrivalQuest.id
+            );
+        }
 
         const rumorArrival = resolveArrivedRumors(state);
         state = rumorArrival.state;

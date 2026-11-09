@@ -5125,11 +5125,16 @@ function completeQuestArrivalGate(state, outcome, questId) {
     ensureQuestJournal(nextState);
 
     const quest = findQuestById(nextState, questId);
-
     assert(
         quest?.status === 'in_progress',
         `Arrival requires an in-progress quest: ${questId}`
     );
+
+    outcome.questGates ||= [];
+    outcome.questEncounters ||= [];
+    outcome.questObjectiveSecuredList ||= [];
+    outcome.deliveryReadyList ||= [];
+
     assert(
         nextState.currentLocationId ===
             (
@@ -5162,7 +5167,7 @@ function completeQuestArrivalGate(state, outcome, questId) {
         quest.deliveryReady = true;
         quest.deliveryReadyAt = nextState.currentLocationId;
 
-        outcome.deliveryReady = {
+        const deliveryReady = {
             questId: quest.id,
             title: quest.title,
             recipient: quest.turnIn.recipient,
@@ -5171,6 +5176,16 @@ function completeQuestArrivalGate(state, outcome, questId) {
                 quest.facts?.cargo ||
                 'quest cargo'
         };
+
+        outcome.deliveryReadyList.push(deliveryReady);
+
+        /*
+         * Preserve the old singular field for existing narration/UI code
+         * while the migration is in progress. It is valid only as a
+         * compatibility convenience; the list is authoritative.
+         */
+        outcome.deliveryReady =
+            outcome.deliveryReady || deliveryReady;
 
         return nextState;
     }
@@ -5197,12 +5212,22 @@ function completeQuestArrivalGate(state, outcome, questId) {
         const spawned = spawnLinkedQuestEncounter(nextState);
         nextState = spawned.state;
 
-        outcome.questEncounter = {
+        const questEncounter = {
+            questId: quest.id,
             id: spawned.encounter.id,
             targetId: quest.targetId,
             status: 'spotted',
             foe: spawned.encounter.foes[0]
         };
+
+        outcome.questEncounters.push(questEncounter);
+
+        /*
+         * Keep the compatibility field for current narration consumers.
+         * Do not use it for new multi-quest logic.
+         */
+        outcome.questEncounter =
+            outcome.questEncounter || questEncounter;
 
         return nextState;
     }
@@ -5253,7 +5278,8 @@ function completeQuestArrivalGate(state, outcome, questId) {
         });
 
         nextState = progression.state;
-        outcome.questGate = {
+        const questGate = {
+            questId: quest.id,
             completed: progression.completedGate,
             next: progression.nextGate,
             evidence: gate.trigger === 'arrival_with_evidence'
@@ -5261,6 +5287,15 @@ function completeQuestArrivalGate(state, outcome, questId) {
                 : null,
             linkedEncounter: progression.linkedEncounter || null
         };
+
+        outcome.questGates.push(questGate);
+
+        /*
+         * Compatibility alias for existing one-quest narration.
+         * New code should read questGates.
+         */
+        outcome.questGate =
+            outcome.questGate || questGate;
 
         return nextState;
     }
@@ -5301,10 +5336,21 @@ function completeQuestArrivalGate(state, outcome, questId) {
         };
     }
 
-    outcome.questObjectiveSecured = {
+    const questObjectiveSecured = {
         questId: quest.id,
         evidence
     };
+
+    outcome.questObjectiveSecuredList.push(
+        questObjectiveSecured
+    );
+
+    /*
+     * Compatibility alias for existing one-quest consumers.
+     */
+    outcome.questObjectiveSecured =
+        outcome.questObjectiveSecured ||
+        questObjectiveSecured;
 
     return nextState;
 }
@@ -12369,26 +12415,34 @@ function travelNarrationPacket(result) {
         );
     }
 
-        if (result.questGate) {
+    for (const questGate of result.questGates || []) {
+        const questLabel = questGate.questId
+            ? ` for quest ${questGate.questId}`
+            : '';
+
         lines.push(
-            `Evidence found at the destination: ${result.questGate.evidence}.`,
-            `Quest gate ${result.questGate.completed.step} completed: ` +
-                result.questGate.completed.objective,
-            `Next gate ${result.questGate.next.step}: ` +
-                result.questGate.next.objective,
-            'No later gate or final quest reward has been completed.'
+            `Evidence found at the destination${questLabel}: ` +
+                `${questGate.evidence || 'established arrival evidence'}.`,
+            `Quest gate ${questGate.completed.step} completed: ` +
+                `${questGate.completed.objective}`,
+            questGate.next
+                ? `Next gate ${questGate.next.step}: ` +
+                    `${questGate.next.objective}`
+                : 'The field objective is now secured; delivery remains separate.',
+            'No quest reward has been granted by this arrival.'
         );
     }
 
-        if (result.deliveryReady) {
+    for (const delivery of result.deliveryReadyList || []) {
         lines.push(
             `The crew returned to the turn-in location with ` +
-                `${result.deliveryReady.cargoName}.`,
-            `The quest is eligible for delivery to ` +
-                `${result.deliveryReady.recipient}.`,
+                `${delivery.cargoName} for ${delivery.title}.`,
+            `That quest is eligible for delivery to ` +
+                `${delivery.recipient}.`,
             'Do not complete the quest mechanically until the fictional handoff occurs.'
         );
     }
+
         if (result.zoneTransition) {
         const transition = result.zoneTransition;
 

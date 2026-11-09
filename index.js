@@ -6168,7 +6168,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   adds a separate observation without overwriting the original claim.
  * - World displays saved knowledge, sources, certainty, and learning locations.
  * - Knowledge display is read-only and labels identifiable test records.
- * - Natural traveler testimony integration still awaits live verification.
+ * - Crew Knowledge starts collapsed, with expandable Unverified and
+ *   Established groups showing record counts.
+  * - Natural traveler testimony integration still awaits live verification.
  * - Authored lore content and quest prerequisite checks remain unimplemented.
  *
  * - Let future quests explicitly recognize relevant prior knowledge.
@@ -15139,6 +15141,41 @@ function addAethermoorPanelStyles() {
             overflow-wrap: anywhere;
         }
 
+        .aethermoor-knowledge {
+            padding: 10px;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #4da6ff;
+        }
+
+        .aethermoor-knowledge > summary,
+        .aethermoor-knowledge-group > summary {
+            cursor: pointer;
+            padding: 4px 0;
+        }
+
+        .aethermoor-knowledge-group {
+            margin-top: 8px;
+            padding-left: 8px;
+            border-left: 1px solid #2b3542;
+        }
+
+        .aethermoor-knowledge-group > summary {
+            color: #d0d7de;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .aethermoor-knowledge-group > .aethermoor-ui-section,
+        .aethermoor-knowledge-group > .aethermoor-ui-text {
+            margin-top: 8px;
+        }
+
+        .aethermoor-knowledge summary:focus-visible {
+            outline: 2px solid #4da6ff;
+            outline-offset: 3px;
+        }
+
         .aethermoor-ui-actions {
             display: grid;
             gap: 6px;
@@ -15590,13 +15627,49 @@ function renderCrewKnowledge(state) {
             typeof entry.summary === 'string'
         );
 
-    const section = makeAethermoorSection(
-        'CREW KNOWLEDGE',
-        entries.length
-            ? 'Claims the crew has heard and observations it has recorded.'
-            : 'No knowledge recorded yet.',
-        'world'
-    );
+    /*
+     * Knowledge can grow throughout the campaign. Native details elements
+     * keep the World view compact without changing saved knowledge or
+     * introducing mechanics operations when a group is opened.
+     */
+    const section = document.createElement('details');
+    section.className = 'aethermoor-knowledge';
+
+    const heading = document.createElement('summary');
+    heading.className = 'aethermoor-ui-heading';
+    heading.textContent = `CREW KNOWLEDGE · ${entries.length}`;
+    section.appendChild(heading);
+
+    const groups = {};
+
+    for (const [key, label] of [
+        ['unverified', 'Unverified'],
+        ['established', 'Established']
+    ]) {
+        const count = entries.filter(entry =>
+            (entry.certainty === 'engine_established'
+                ? 'established'
+                : 'unverified') === key
+        ).length;
+
+        const group = document.createElement('details');
+        group.className = 'aethermoor-knowledge-group';
+
+        const summary = document.createElement('summary');
+        summary.textContent = `${label} · ${count}`;
+        group.appendChild(summary);
+
+        if (count === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'aethermoor-ui-text';
+            empty.textContent = 'No records yet.';
+            group.appendChild(empty);
+        }
+
+        groups[key] = group;
+        section.appendChild(group);
+    }
+
 
     function locationLabel(locationId) {
         if (!locationId) return 'Location not recorded';
@@ -15694,7 +15767,11 @@ function renderCrewKnowledge(state) {
         card.title =
             `Knowledge: ${entry.id}\nSource: ${sourceId || 'unknown'}`;
 
-        section.appendChild(card);
+        const groupKey = entry.certainty === 'engine_established'
+            ? 'established'
+            : 'unverified';
+
+        groups[groupKey].appendChild(card);
     }
 
     return section;

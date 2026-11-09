@@ -2083,7 +2083,7 @@ function completeLinkedCombatQuestGate(state) {
     state.leads = progression.state.leads;
 
     return {
-        completed: progression.completedGate,
+        completed: progression.completedGate || clone(gate),
         next: progression.nextGate || null,
         objectiveSecured:
             Boolean(state.activeQuest.objectiveResolution)

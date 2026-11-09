@@ -6235,11 +6235,16 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Migrate legacy activeQuest data without duplicating or losing a quest.
  * - Update acceptance, progression, delivery, UI, narration, and duplicate
  *   protection to address an explicit quest ID.
- * - Multiple offers are stored; accepting another quest while one is in
- *   progress is explicitly blocked until concurrent progression is supported.
- * - Quest actions return the affected quest for narration even when the
- *   compatibility activeQuest pointer is cleared.
- * - Explicit unknown quest IDs must fail without falling back to another quest.
+ * - Multiple offers are stored and survive reload.
+ * - Multiple quests may be accepted; activeQuest remains a temporary selected
+ *   quest pointer during migration.
+ * - Quest actions address stable quest IDs and never fall back from an explicit
+ *   unknown ID.
+ * - Cancelled quests remain in history and receive no rewards.
+ * - Arrival, discovery, linked combat, return travel, delivery, and narration
+ *   still contain activeQuest assumptions that must be migrated.
+ * - The next integration pass must select quest identity from destination,
+ *   authored discovery, encounter linkage, or delivery quest ID.
  * - Offer preparation targets the newly generated quest while preserving
  *   the selected quest. Preparation helpers still need explicit quest arguments.
  * - Quests tab renders all journal offers with ID-bound acceptance/decline.
@@ -7078,7 +7083,8 @@ function ensureQuestJournal(state) {
         'accepted',
         'completed',
         'declined',
-        'abandoned'
+        'abandoned',
+        'cancelled'
     ]) {
         state.quests[bucket] ||= [];
 
@@ -7108,7 +7114,8 @@ function ensureQuestJournal(state) {
             in_progress: 'accepted',
             complete: 'completed',
             declined: 'declined',
-            abandoned: 'abandoned'
+            abandoned: 'abandoned',
+            cancelled: 'cancelled'
         };
 
         const bucket = bucketByStatus[active.status];
@@ -7150,7 +7157,8 @@ function questJournalBucketForStatus(status) {
         in_progress: 'accepted',
         complete: 'completed',
         declined: 'declined',
-        abandoned: 'abandoned'
+        abandoned: 'abandoned',
+        cancelled: 'cancelled'
     }[status] || null;
 }
 
@@ -8201,18 +8209,16 @@ function resolveQuestAction(test) {
      * have all been migrated to explicit quest selection.
      * Never silently displace an accepted quest when accepting an offer.
      */
+    /*
+     * Multiple accepted quests are part of the campaign model. The journal
+     * owns their independent identity and state. activeQuest remains only
+     * as a compatibility selection while arrival, discovery, combat, and
+     * delivery are migrated to explicit quest lookup.
+     */
     if (test.action === 'accept') {
-        const otherAccepted = state.quests.accepted.find(
-            entry =>
-                entry?.status === 'in_progress' &&
-                entry.id !== quest.id
-        );
-
         assert(
-            !otherAccepted,
-            'Another quest is already in progress; its progression ' +
-            'must be resolved before accepting this offer. ' +
-            'This offer remains saved in the journal.'
+            quest.status === 'offered',
+            `Quest cannot be accepted from status ${quest.status}`
         );
     }
 
@@ -8231,6 +8237,7 @@ function resolveQuestAction(test) {
             'accept',
             'decline',
             'abandon',
+            'cancel',
             'clear_gate',
             'resolve_objective',
             'complete'
@@ -8297,25 +8304,58 @@ function resolveQuestAction(test) {
         `Quest action requires an in-progress quest, got ${quest.status}`
     );
 
-        if (test.action === 'abandon') {
+     if (
+        test.action === 'abandon' ||
+        test.action === 'cancel'
+    ) {
         assert(
             !['active', 'spotted'].includes(
                 state.encounter?.status
             ),
-            'Resolve, avoid, or flee the encounter before abandoning the quest'
+            'Resolve, avoid, or flee the encounter before cancelling the quest'
         );
 
-        quest.status = 'abandoned';
-        quest.abandonedAtGate = quest.currentGate?.step || null;
-        quest.abandonReason = test.reason || null;
+        quest.status =
+            test.action === 'cancel'
+                ? 'cancelled'
+                : 'abandoned';
+
+        quest.cancelledAtGate =
+            test.action === 'cancel'
+                ? quest.currentGate?.step || null
+                : undefined;
+
+        quest.abandonedAtGate =
+            test.action === 'abandon'
+                ? quest.currentGate?.step || null
+                : undefined;
+
+        quest.abandonReason =
+            test.action === 'abandon'
+                ? test.reason || null
+                : undefined;
+
+        quest.cancelReason =
+            test.action === 'cancel'
+                ? test.reason || null
+                : undefined;
+
         saveQuestToJournal(state, quest);
+
+        for (const lead of Object.values(state.leads || {})) {
+            if (
+                lead.id === `quest-return-${quest.id}` ||
+                lead.id === `quest-lead-${quest.id}`
+            ) {
+                lead.status = 'resolved';
+            }
+        }
 
         if (state.activeQuest?.id === quest.id) {
             state.activeQuest = null;
         }
 
         return result;
-
     }
 
      if (test.action === 'clear_gate') {
@@ -12597,6 +12637,13 @@ function questActionNarrationPacket(result, questAction) {
             'The quest was not completed. The crew is free to pursue other plans.'
         ].join('\n');
     }
+        if (questAction === 'cancel') {
+        return [
+            `The crew cancelled the active quest: ${quest.title}.`,
+            'No quest rewards or reputation were granted.',
+            'The quest was not completed and remains recorded in the quest history.'
+        ].join('\n');
+    }
 
         if (questAction === 'complete') {
         const rewards = result.rewards;
@@ -13095,7 +13142,7 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-            ['accept', 'decline', 'abandon', 'complete']
+            ['accept', 'decline', 'abandon', 'cancel', 'complete']
                 .includes(oneCase.action)
                 ? questActionNarrationPacket(
                     {
@@ -13971,6 +14018,7 @@ function registerTools() {
                                     'accept',
                                     'decline',
                                     'abandon',
+                                    'cancel',
                                     'clear_gate',
                                     'resolve_objective',
                                     'complete',
@@ -14615,6 +14663,12 @@ function formatQuestStatus(quest) {
             } else if (quest.status === 'abandoned') {
         lines.push(
             `Abandoned at gate ${quest.abandonedAtGate || 'unknown'}.`,
+            'No quest rewards or reputation were granted.'
+        );
+            
+            } else if (quest.status === 'cancelled') {
+        lines.push(
+            `Cancelled at gate ${quest.cancelledAtGate || 'unknown'}.`,
             'No quest rewards or reputation were granted.'
         );
 
@@ -15518,7 +15572,7 @@ async function renderQuestTab(host) {
                             ? 'Quest accepted.'
                             : action === 'decline'
                                 ? 'Quest declined.'
-                                : 'Quest abandoned. No rewards were granted.'
+                                : 'Quest cancelled. No rewards were granted.'
                     );
                 } finally {
                     button.disabled = false;
@@ -15590,7 +15644,7 @@ async function renderQuestTab(host) {
             );
         }
 
-        addQuestAction(section, quest, 'Abandon Quest', 'abandon');
+        addQuestAction(section, quest, 'Cancel Quest', 'cancel');
         host.appendChild(section);
     }
 

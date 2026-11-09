@@ -14802,18 +14802,6 @@ async function renderWorldTab(host) {
             item => item.locationId === currentLocationId
         );
 
-    host.appendChild(
-        makeAethermoorSection(
-            'CURRENT REGION',
-            `${zone?.name || `Zone ${state.zone}`} ` +
-            `(Zone ${state.zone})\n` +
-            `Geography: ${zone?.geography?.description || 'not recorded'}\n` +
-            `Primary settlement: ${settlement?.label || 'not recorded'}\n` +
-            `Current location: ${currentPlace?.label || currentLocationId}`,
-            'world'
-        )
-    );
-
     if (state.currentJourney) {
         const journey = state.currentJourney;
         const section = makeAethermoorSection(
@@ -14845,62 +14833,58 @@ async function renderWorldTab(host) {
         host.appendChild(section);
     }
 
-    const places = new Map();
-
-    function addPlace(place) {
-        if (!place?.id) return;
-
-        const label = String(place.label || place.id)
-            .trim()
-            .replace(/\s+/g, ' ');
-
-        const key = `${place.zone}:${label.toLocaleLowerCase()}`;
-        if (!places.has(key)) {
-            places.set(key, {
-                label,
-                zone: place.zone
-            });
-        }
-    }
-
-    for (const place of Object.values(state.places || {})) {
-        addPlace(place);
-    }
-
-    for (const settlement of Object.values(world.settlements || {})) {
-        addPlace({
-            id: settlement.locationId,
-            label: settlement.label,
-            zone: settlement.zone
-        });
-    }
-
-    for (const step of Object.values(state.travelSteps || {})) {
-        if (step?.event === 'point_of_interest' && step.site?.id) {
-            addPlace({
-                id: step.site.id,
-                label: 'Uncharted point of interest',
-                zone: step.site.zone
-            });
-        }
-    }
-
-    host.appendChild(
-        makeAethermoorSection(
-            'KNOWN PLACES',
-            places.size
-                ? [...places.values()].map(place =>
-                    `• ${place.label} (Zone ${place.zone})`
-                ).join('\n')
-                : 'None recorded.',
-            'world'
-        )
-    );
-
     const quest = state.activeQuest;
     const questIsLive =
         quest &&
         ['offered', 'in_progress'].includes(quest.status);
+
+    if (quest?.status === 'in_progress') {
+        const questDestinationId =
+            quest.objectiveResolution && quest.turnIn
+                ? quest.turnIn.locationId
+                : quest.destinationId;
+
+        const questDestination =
+            state.places?.[questDestinationId] ||
+            Object.values(world.settlements || {})
+                .find(item => item.locationId === questDestinationId);
+
+        if (questDestination) {
+            const route = shortestRoute(state, questDestinationId);
+            const isCurrent = questDestinationId === currentLocationId;
+
+            const section = makeAethermoorSection(
+                quest.objectiveResolution
+                    ? 'QUEST RETURN'
+                    : 'ACTIVE QUEST DESTINATION',
+                `${questDestination.label || questDestinationId}` +
+                    (isCurrent
+                        ? '\nCurrent location'
+                        : route
+                            ? `\n${route.totalSegments <= 1
+                                ? 'Nearby'
+                                : route.totalSegments <= 2
+                                    ? 'Near'
+                                    : route.totalSegments <= 4
+                                        ? 'Moderate'
+                                        : 'Far'}`
+                            : '\nNo known route'),
+                'quest'
+            );
+
+            if (!isCurrent && route) {
+                section.addEventListener('click', () =>
+                    copyAethermoorCommand(
+                        destinationCommand(questDestinationId)
+                    )
+                );
+                section.style.cursor = 'pointer';
+                section.title = 'Copy movement command';
+            }
+
+            host.appendChild(section);
+        }
+    }
 
     const leads = Object.values(state.leads || {}).filter(lead => {
         if (!lead || lead.status !== 'known') return false;
@@ -14957,14 +14941,6 @@ async function renderWorldTab(host) {
         makeAethermoorSection(
             'RUMORS',
             formatLeadList(rumors),
-            'world'
-        )
-    );
-
-    host.appendChild(
-        makeAethermoorSection(
-            'OTHER LEADS',
-            formatLeadList(otherLeads),
             'world'
         )
     );
@@ -15073,20 +15049,25 @@ async function renderWorldTab(host) {
    }
 
     for (const lead of rumors) {
-        if (
-            lead.targetId === currentLocationId &&
-            state.places?.[lead.targetId]
-        ) {
-            actions.appendChild(
-                makeAethermoorAction(
-                    `Investigate: ${state.places[lead.targetId].label}`,
+        if (lead.targetId !== currentLocationId) continue;
+
+        actions.appendChild(
+            makeAethermoorAction(
+                `Investigate: ${state.places[lead.targetId].label}`,
+                'world',
+                () => runAethermoorPanelCase(
+                    host,
                     'world',
-                    () => copyAethermoorCommand(
-                        destinationCommand(lead.targetId)
-                    )
+                    {
+                        name: 'investigate_world_rumor',
+                        kind: 'investigate_lead',
+                        leadId: lead.id
+                    },
+                    'Rumor investigated.'
                 )
-            );
-        }
+            )
+        );
+      }
     }
 
     if (actions.childElementCount > 0) {
@@ -15096,8 +15077,7 @@ async function renderWorldTab(host) {
 
         const heading = document.createElement('div');
         heading.className = 'aethermoor-ui-heading';
-        heading.textContent = 'DESTINATIONS & ACTIONS';
-
+        heading.textContent = 'KNOWN DESTINATIONS';
         section.append(heading, actions);
         host.appendChild(section);
     }

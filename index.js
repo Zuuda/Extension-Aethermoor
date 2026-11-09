@@ -14399,14 +14399,39 @@ function addAethermoorPanelStyles() {
 
      style.textContent += `
         .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice-group {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0 !important;
+            box-sizing: border-box;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices {
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: wrap !important;
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             align-items: stretch;
             gap: 6px;
+            width: 100%;
+            max-width: 100%;
             min-width: 0;
+            box-sizing: border-box;
         }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choices > button.aethermoor-combat-choice {
+            display: flex !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            box-sizing: border-box;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
 
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choices > button.aethermoor-combat-choice {
@@ -16104,6 +16129,24 @@ function ensureAethermoorCombatChoiceStyles() {
             transform: none;
             animation: none;
         }
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-controls {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-status {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            white-space: pre-wrap !important;
+            overflow-wrap: anywhere;
+        }
+
 
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choice-title,

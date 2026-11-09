@@ -16007,9 +16007,16 @@ async function renderWorldTab(host) {
         host.appendChild(section);
     }
 
-    const quest = state.activeQuest;
+       /*
+     * Render every accepted quest, not only the compatibility-selected
+     * activeQuest. Each destination remains bound to its own quest record.
+     */
+    const journal = ensureQuestJournal(state);
+    const acceptedQuests = journal.accepted.filter(
+        quest => quest?.status === 'in_progress'
+    );
 
-    if (quest?.status === 'in_progress') {
+    for (const quest of acceptedQuests) {
         const questDestinationId =
             quest.objectiveResolution && quest.turnIn
                 ? quest.turnIn.locationId
@@ -16022,31 +16029,33 @@ async function renderWorldTab(host) {
                     item.locationId === questDestinationId
                 );
 
-        if (questDestination) {
-            const section = makeAethermoorSection(
-                quest.objectiveResolution
-                    ? 'QUEST RETURN'
-                    : 'ACTIVE QUEST DESTINATION',
-                questDestination.label || questDestinationId,
-                'quest'
+        if (!questDestination) continue;
+
+        const isReturn =
+            Boolean(quest.objectiveResolution && quest.turnIn);
+
+        const section = makeAethermoorSection(
+            isReturn ? 'QUEST RETURN' : 'ACTIVE QUEST DESTINATION',
+            `${quest.title}\n` +
+                `${questDestination.label || questDestinationId}`,
+            'quest'
+        );
+
+        if (questDestinationId === currentLocationId) {
+            const atDestination = document.createElement('div');
+            atDestination.className = 'aethermoor-ui-text';
+            atDestination.textContent =
+                'The crew is at this location.';
+            section.appendChild(atDestination);
+        } else {
+            addTravelAction(
+                section,
+                `Travel to ${questDestination.label || questDestinationId}`,
+                questDestinationId
             );
-
-            if (questDestinationId === currentLocationId) {
-                const atDestination = document.createElement('div');
-                atDestination.className = 'aethermoor-ui-text';
-                atDestination.textContent =
-                    'The crew is at this location.';
-                section.appendChild(atDestination);
-            } else {
-                addTravelAction(
-                    section,
-                    `Travel to ${questDestination.label || questDestinationId}`,
-                    questDestinationId
-                );
-            }
-
-            host.appendChild(section);
         }
+
+        host.appendChild(section);
     }
 
     const leads = Object.values(state.leads || {})

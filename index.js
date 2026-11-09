@@ -10923,6 +10923,90 @@ function resolveBatch(args) {
                     break;
                 }
 
+                                    case 'debug_create_rumor': {
+                    const state = clone(test.state);
+
+                    assert(
+                        state && typeof state === 'object',
+                        'Debug rumor requires saved state'
+                    );
+                    assert(
+                        !['active', 'spotted'].includes(
+                            state.encounter?.status
+                        ),
+                        'Resolve or avoid the current encounter before creating a test rumor'
+                    );
+
+                    const rumorId = test.inquiryId ||
+                        `debug-rumor-${Date.now()}`;
+
+                    const placeId = `debug-place-${rumorId}`;
+                    const leadId = `debug-lead-${rumorId}`;
+
+                    state.places ||= {};
+                    state.leads ||= {};
+                    state.routeEdges ||= [];
+
+                    assert(
+                        !state.places[placeId] &&
+                        !state.leads[leadId],
+                        `Debug rumor already exists: ${rumorId}`
+                    );
+
+                    state.places[placeId] = {
+                        id: placeId,
+                        label: test.reason || 'Test Rumor Site',
+                        zone: state.zone,
+                        kind: 'test_rumor_site',
+                        knownFrom: 'debug_test',
+                        visited: false,
+                        testOnly: true
+                    };
+
+                    state.leads[leadId] = {
+                        id: leadId,
+                        kind: 'rumor',
+                        label: `Debug rumor: ${state.places[placeId].label}`,
+                        claim: test.completionEvidence ||
+                            'A test rumor points to this destination.',
+                        sourceId: 'debug_test',
+                        targetType: 'place',
+                        targetId: placeId,
+                        status: 'known',
+                        testOnly: true
+                    };
+
+                    if (!state.routeEdges.some(edge =>
+                        (
+                            edge.fromId === state.currentLocationId &&
+                            edge.toId === placeId
+                        ) ||
+                        (
+                            edge.fromId === placeId &&
+                            edge.toId === state.currentLocationId
+                        )
+                    )) {
+                        state.routeEdges.push({
+                            fromId: state.currentLocationId,
+                            toId: placeId,
+                            length: 1,
+                            kind: 'debug_rumor_access',
+                            testOnly: true
+                        });
+                    }
+
+                    result = {
+                        ok: true,
+                        action: 'debug_create_rumor',
+                        created: true,
+                        leadId,
+                        placeId,
+                        label: state.places[placeId].label,
+                        state
+                    };
+                    break;
+                }
+
                                     case 'debug_create_settlement_lead': {
                     const state = clone(test.state);
                     const settlementId = test.settlementId;
@@ -13238,6 +13322,7 @@ function registerTools() {
                                     'social',
                                     'loot',
                                     'cleanup_test_data',
+                                    'debug_create_rumor',
                                     'debug_create_settlement_lead',
                                     'debug_create_quest_offer',
                                     'debug_create_quest_breadcrumb',

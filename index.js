@@ -5121,10 +5121,68 @@ function questsForArrival(state, locationId) {
 }
 
 function completeQuestArrivalGate(state, outcome, questId) {
+    /*
+     * Arrival identity comes from the destination, not UI selection.
+     *
+     * Some progression helpers still read activeQuest. Select the owning
+     * quest only within this detached operation, then restore the previous
+     * selection after saving the updated journal entry.
+     *
+     * This bridge must not become a second source of quest data. The
+     * journal owns both quests; activeQuest is only a compatibility pointer.
+     * No RNG or separate metadata save is performed by this wrapper.
+     */
+    const workingState = clone(state);
+    ensureQuestJournal(workingState);
+
+    assert(
+        typeof questId === 'string' && questId.length > 0,
+        'Quest arrival requires an explicit quest ID'
+    );
+
+    const previousSelectionId =
+        workingState.activeQuest?.id || null;
+
+    const arrivalQuest = findQuestById(workingState, questId);
+
+    assert(
+        arrivalQuest?.status === 'in_progress',
+        `Arrival requires an in-progress quest: ${questId}`
+    );
+
+    workingState.activeQuest = arrivalQuest;
+
+    const nextState = completeSelectedQuestArrivalGate(
+        workingState,
+        outcome,
+        questId
+    );
+
+    const updatedQuest = findQuestById(nextState, questId);
+
+    assert(
+        updatedQuest,
+        `Arrival lost its quest record: ${questId}`
+    );
+
+    saveQuestToJournal(nextState, updatedQuest);
+
+    /*
+     * Resolve the previous selection from the returned journal rather than
+     * retaining an object from before a progression helper cloned state.
+     */
+    nextState.activeQuest = previousSelectionId
+        ? findQuestById(nextState, previousSelectionId)
+        : null;
+
+    return nextState;
+}
+
+function completeSelectedQuestArrivalGate(state, outcome, questId) {
     let nextState = state;
     ensureQuestJournal(nextState);
 
-    const quest = findQuestById(nextState, questId);
+    let quest = findQuestById(nextState, questId);
     assert(
         quest?.status === 'in_progress',
         `Arrival requires an in-progress quest: ${questId}`
@@ -5269,6 +5327,7 @@ function completeQuestArrivalGate(state, outcome, questId) {
     if (gate.step < quest.gates) {
         const progression = resolveQuestAction({
             state: nextState,
+            questId: quest.id,
             action: 'clear_gate',
             objectiveCompleted: true,
             completionEvidence:
@@ -5302,6 +5361,7 @@ function completeQuestArrivalGate(state, outcome, questId) {
 
     const progression = resolveQuestAction({
         state: nextState,
+        questId: quest.id,
         action: 'resolve_objective',
         objectiveCompleted: true,
         objectiveRoute: 'other',
@@ -6331,8 +6391,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Quest actions address stable quest IDs and never fall back from an explicit
  *   unknown ID.
  * - Cancelled quests remain in history and receive no rewards.
- * - Arrival, discovery, linked combat, return travel, delivery, and narration
- *   still contain activeQuest assumptions that must be migrated.
+ * - Arrival selects quest identity from the destination and restores the
+ *   previous selection after journal progression. Legacy arrival helpers
+ *   temporarily use a scoped compatibility pointer.
+ * - Arrival result arrays preserve independently affected quests.
+ * - Discovery, linked combat, return travel, delivery, and narration still
+ *   contain activeQuest assumptions that must be migrated.
+ * - Arrival integration implemented; live verification pending.
  * - The next integration pass must select quest identity from destination,
  *   authored discovery, encounter linkage, or delivery quest ID.
  * - Offer preparation targets the newly generated quest while preserving

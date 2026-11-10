@@ -8338,7 +8338,6 @@ function resolveSelectedQuestEvent(test) {
         allowedIds.includes(discovery.id),
         'Discovery is not authorized for the current gate'
     );
-
     if (test.event === 'searched') {
         assert(discovery.requiredAction, 'No search prerequisite exists');
         assert(
@@ -8353,6 +8352,9 @@ function resolveSelectedQuestEvent(test) {
             created: true,
             action: 'quest_event',
             event: 'searched',
+            questId: quest.id,
+            questItemId: discovery.id,
+            quest: clone(quest),
             discovery: clone(discovery),
             state
         };
@@ -18668,25 +18670,47 @@ globalThis.aethermoorMechanicsInterceptor =
         );
 
         const state = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
+        const contextState = state ? clone(state) : null;
 
-        const questJournal =
-            state ? ensureQuestJournal(clone(state)) : null;
+        const questJournal = contextState
+            ? ensureQuestJournal(contextState)
+            : null;
 
-        const quest =
+        let quest =
             questJournal?.accepted.find(entry =>
                 entry?.status === 'in_progress' &&
                 (
-                    entry.destinationId === state.currentLocationId ||
-                    entry.turnIn?.locationId === state.currentLocationId
+                    entry.destinationId === contextState.currentLocationId ||
+                    entry.turnIn?.locationId === contextState.currentLocationId
                 )
             ) ||
-            state?.activeQuest;
+            contextState?.activeQuest;
 
+        /*
+         * Older accepted Missing Cargo saves can have the authored cargo
+         * discovery but lack its ID on the current recovery gate. Repair a
+         * detached context copy before building the narrator handoff; do not
+         * save or advance game state while preparing a prompt.
+         *
+         * The quest-event resolver performs its own repair on the operation
+         * state, where the event is validated and saved.
+         */
+        if (
+            quest?.status === 'in_progress' &&
+            quest.archetype?.id === 'missing_cargo' &&
+            contextState.currentLocationId === quest.destinationId
+        ) {
+            const previousSelection = contextState.activeQuest;
+            contextState.activeQuest = quest;
+            prepareMissingCargoDiscovery(contextState);
+            quest = contextState.activeQuest;
+            contextState.activeQuest = previousSelection;
+        }
 
         if (
             quest &&
             !['active', 'spotted'].includes(
-                state.encounter?.status
+                contextState.encounter?.status
             )
         ) {
             const deliveryPacket =
@@ -18699,7 +18723,7 @@ globalThis.aethermoorMechanicsInterceptor =
                     packet: deliveryPacket
                 });
             } else if (
-                state.currentLocationId === quest.destinationId
+                contextState.currentLocationId === quest.destinationId
             ) {
                 const discoveryPacket =
                     questDiscoveryContextPacket(quest);
@@ -18715,7 +18739,6 @@ globalThis.aethermoorMechanicsInterceptor =
                 }
             }
         }
-
 
         if (!metadata || entries.length === 0) {
             console.log('[Aethermoor] No handoff queued');

@@ -6281,6 +6281,26 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Convert each remaining family to a complete V2 structure or formally mark
  *   it legacy until its replacement is implemented.
  *
+ * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
+ * - Rank reflects stakes, trust, and consequences, not gate count alone.
+ * - F: routine, low-stakes, menial help (for example, common herbs or vermin).
+ * - E: useful work needing judgment or travel, with limited consequences.
+ * - D: consequential local problems entrusted to a capable crew.
+ * - C: serious threats to a community, essential service, or trade route.
+ * - B: major local or regional problems entrusted to proven crews.
+ * - A/S: reserved for specially authored quests and distinctive rewards.
+ * - Archetypes may appear at different ranks only when their authored
+ *   scenario and stakes fit; more gates alone do not raise a quest’s rank.
+ * - Reputation and rank offers are settlement-specific. Offers should move
+ *   upward with trust; reaching a higher band should not erase the option to
+ *   undertake lower-ranked work.
+ * - Reputation should encourage regional momentum, not require clearing a
+ *   fixed number of quests before the crew can move on.
+ * - Proposed starting pace: three reputation steps per tier. F/E quests grant
+ *   one step; D/C/B quests grant two. Tune during beta.
+ * - Keep A/S offer generation disabled until their special objectives and
+ *   rewards are authored.
+ *
  * PARTIAL — World integration
  * - World records and route edges are saved.
  * - Some older quest, route, settlement, and UI paths still use legacy IDs,

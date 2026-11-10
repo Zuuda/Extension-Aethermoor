@@ -7856,7 +7856,7 @@ function resolveQuestSeed(test) {
         state.activeQuest = quest;
         prepareMissingCargoDiscovery(quest);
         prepareSunkenSalvageDiscovery(quest);
-        prepareV2QuestDiscoveries(state);
+        prepareV2QuestDiscoveries(quest);
         validateRetrievalQuestDiscoveries(quest);
     } finally {
         state.activeQuest = selectedQuest;
@@ -8315,9 +8315,7 @@ function prepareSunkenSalvageDiscovery(quest) {
     return clue;
 }
 
-function prepareV2QuestDiscoveries(state) {
-    const quest = state.activeQuest;
-
+function prepareV2QuestDiscoveries(quest) {
     if (
         quest?.status !== 'in_progress' ||
         quest.structureV2?.family !== 'defeat_elite' ||
@@ -8852,7 +8850,7 @@ function resolveQuestAction(test) {
         quest.status = 'in_progress';
 
         if (quest.structureV2?.family === 'defeat_elite') {
-            prepareV2QuestDiscoveries(state);
+            prepareV2QuestDiscoveries(quest);
         }
 
         saveQuestToJournal(state, quest);
@@ -11891,7 +11889,7 @@ function resolveBatch(args) {
                     const discovery =
                         prepareMissingCargoDiscovery(quest) ||
                         prepareSunkenSalvageDiscovery(quest) ||
-                        prepareV2QuestDiscoveries(state);
+                        prepareV2QuestDiscoveries(quest);
 
                     assert(
                         discovery,

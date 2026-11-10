@@ -18523,28 +18523,13 @@ async function processAethermoorAssistantEvents(data) {
     if (!message) return;
 
     /*
-     * Check before extracting protocol events. A copied instruction
-     * packet can contain example delivery/discovery tags; those must
-     * not become gameplay events merely because the narrator echoed it.
-     *
-     * Already-resolved travel, combat, and rewards remain authoritative.
-     * This only rejects new assistant-reported events from this reply.
+     * Leak detection is intentionally disabled. The handoff contains
+     * authorized scene facts and instructions; matching its wording is
+     * not evidence that secret information was exposed. Keep the detector
+     * helpers below for possible future use. The Narration Recorder is the
+     * diagnostic source when an actual exposure is suspected.
      */
-    const leaks = leakedAethermoorContext(message.text);
-
-    if (leaks.length > 0) {
-        recordNarrationDebug('leak_detected', {
-            messageId: message.messageId,
-            signatures: leaks,
-            questEventsRejected: true,
-            rejectedEvents: extractAethermoorQuestEvents(message.text),
-            text: message.text
-        });
-
-        warnAethermoorNarrationLeak(message, leaks);
-        return;
-    }
-
+    
     const events = extractAethermoorQuestEvents(message.text);
     if (events.length === 0) return;
 

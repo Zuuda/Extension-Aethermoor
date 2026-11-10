@@ -7854,8 +7854,8 @@ function resolveQuestSeed(test) {
 
     try {
         state.activeQuest = quest;
-        prepareMissingCargoDiscovery(state);
-        prepareSunkenSalvageDiscovery(state);
+        prepareMissingCargoDiscovery(quest);
+        prepareSunkenSalvageDiscovery(quest);
         prepareV2QuestDiscoveries(state);
         validateRetrievalQuestDiscoveries(quest);
     } finally {
@@ -7927,8 +7927,7 @@ function validateRetrievalQuestDiscoveries(quest) {
     );
 }
 
-function prepareMissingCargoDiscovery(state) {
-    const quest = state.activeQuest;
+function prepareMissingCargoDiscovery(quest) {
     const isDepotRecovery =
         quest?.archetype?.id === 'missing_cargo' ||
         (
@@ -8126,8 +8125,7 @@ function prepareMissingCargoDiscovery(state) {
     return clue;
 }
 
-function prepareSunkenSalvageDiscovery(state) {
-    const quest = state.activeQuest;
+function prepareSunkenSalvageDiscovery(quest) {
     const isSunkenSalvage =
         quest?.archetype?.id === 'sunken_salvage' ||
         (
@@ -8642,9 +8640,14 @@ function resolveSelectedQuestEvent(test) {
      * idempotent preparation after selecting the owning quest so the
      * search action can be authorized and validated.
      */
-    if (quest.archetype?.id === 'missing_cargo') {
-        prepareMissingCargoDiscovery(state);
+    if (
+        quest.archetype?.id === 'missing_cargo' ||
+        quest.archetype?.id === 'recover_cargo'
+    ) {
+        prepareMissingCargoDiscovery(quest);
+        prepareSunkenSalvageDiscovery(quest);
     }
+
 
     const discovery = (quest.discoveries || []).find(
         item => item.id === test.questItemId
@@ -11872,10 +11875,22 @@ function resolveBatch(args) {
                 }
                 case 'quest_discovery_prepare': {
                     const state = clone(test.state);
+                    ensureQuestJournal(state);
+
+                    const quest = test.questId !== undefined
+                        ? findQuestById(state, test.questId)
+                        : state.activeQuest;
+
+                    assert(
+                        quest,
+                        test.questId !== undefined
+                            ? `Unknown quest ID: ${test.questId}`
+                            : 'No selected quest'
+                    );
 
                     const discovery =
-                        prepareMissingCargoDiscovery(state) ||
-                        prepareSunkenSalvageDiscovery(state) ||
+                        prepareMissingCargoDiscovery(quest) ||
+                        prepareSunkenSalvageDiscovery(quest) ||
                         prepareV2QuestDiscoveries(state);
 
                     assert(
@@ -11886,6 +11901,7 @@ function resolveBatch(args) {
                     result = {
                         ok: true,
                         action: 'quest_discovery_prepare',
+                        questId: quest.id,
                         discoveryId: discovery.id,
                         state
                     };
@@ -12658,10 +12674,13 @@ function resolveBatch(args) {
                      * completion checks run.
                      */
                     state.activeQuest = quest;
-
-                    if (quest.archetype?.id === 'missing_cargo') {
-                        prepareMissingCargoDiscovery(state);
-                    }
+                if (
+                    quest.archetype?.id === 'missing_cargo' ||
+                    quest.archetype?.id === 'recover_cargo'
+                ) {
+                    prepareMissingCargoDiscovery(quest);
+                    prepareSunkenSalvageDiscovery(quest);
+                }
 
                     const previousSelectionId =
                         test.state.activeQuest?.id || null;
@@ -19100,11 +19119,8 @@ globalThis.aethermoorMechanicsInterceptor =
             quest.archetype?.id === 'missing_cargo' &&
             contextState.currentLocationId === quest.destinationId
         ) {
-            const previousSelection = contextState.activeQuest;
-            contextState.activeQuest = quest;
-            prepareMissingCargoDiscovery(contextState);
-            quest = contextState.activeQuest;
-            contextState.activeQuest = previousSelection;
+            prepareMissingCargoDiscovery(quest);
+            prepareSunkenSalvageDiscovery(quest);
         }
 
         if (

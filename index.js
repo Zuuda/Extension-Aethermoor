@@ -6563,6 +6563,7 @@ const QUEST_ARCHETYPES = [
     {
         id: 'missing_cargo',
         label: 'Missing Cargo',
+        variantId: 'depot_recovery',
         scenarios: [
             {
                 pitch: 'A local trading concern reports that a promised shipment never reached its destination.',
@@ -6715,6 +6716,7 @@ const QUEST_ARCHETYPES = [
     {
         id: 'sunken_salvage',
         label: 'Sunken Salvage',
+        variantId: 'sunken_salvage',
         scenarios: [
             {
                 pitch: 'A claimant has identified a sunken company scow and wants its sealed cargo recovered.',
@@ -6851,11 +6853,13 @@ function buildQuestFacts(state, archetype, zone = state.zone) {
 
     return {
         scenarioRoll,
+        variantId: scenario.variantId || archetype.variantId || null,
         pitch: scenario.pitch,
         truth: scenario.truth,
         facts: clone(scenario.facts)
     };
 }
+
 
 /*
  * COMPLETE QUEST STRUCTURES — VERSION 2
@@ -7659,6 +7663,10 @@ function resolveQuestSeed(test) {
         archetype: {
             id: archetype.id,
             label: archetype.label
+        },
+        variant: authored.variantId
+            ? { id: authored.variantId }
+            : null,
         },
         gates,
         gatesData: questGatesData,

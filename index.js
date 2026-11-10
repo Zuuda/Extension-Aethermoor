@@ -7975,25 +7975,33 @@ function prepareSunkenSalvageDiscovery(state) {
         return null;
     }
 
-    /*
-     * Two-gate saves retain their established approach -> cargo-recovery
-     * path. Three-gate plans add an authored wreck clue before recovery.
-     * Longer structures need their own authored access requirements before
-     * they can safely enter ordinary play.
-     */
     assert(
-        quest.gates >= 1 && quest.gates <= 3,
+        quest.gates >= 2 && quest.gates <= 5,
         `Sunken Salvage discovery preparation does not support ${quest.gates} gates`
     );
 
     const profiles = {
         1: {
             clue: {
+                idSuffix: 'wreck-identification',
                 name: 'Stamped barge-lock plate',
-                hidingPlace:
-                    'bolted to the scow’s forward cargo hatch',
+                hidingPlace: 'bolted to the scow’s forward cargo hatch',
                 significance:
                     'The stamp identifies this wreck as the company scow carrying the sealed pay-chest.'
+            },
+            innerSite: {
+                idSuffix: 'inner-hold-mark',
+                name: 'Inner-hold mark',
+                hidingPlace: 'beneath the scow’s forward cargo hatch',
+                significance:
+                    'The mark points to the inner hold containing the sealed pay-chest.'
+            },
+            access: {
+                idSuffix: 'hold-release',
+                name: 'Cargo-hold release pin',
+                hidingPlace: 'wedged behind a loose plate in the forward hatch',
+                significance:
+                    'The release pin disengages the brackets holding the pay-chest.'
             },
             cargo: {
                 contents: [
@@ -8010,11 +8018,25 @@ function prepareSunkenSalvageDiscovery(state) {
         },
         2: {
             clue: {
+                idSuffix: 'wreck-identification',
                 name: 'Painted ferry number',
-                hidingPlace:
-                    'on a floating plank caught beside the split-hull ferry',
+                hidingPlace: 'on a floating plank caught beside the split-hull ferry',
                 significance:
                     'The number identifies the wreck as the ferry carrying the missing navigation case.'
+            },
+            innerSite: {
+                idSuffix: 'inner-hold-mark',
+                name: 'Navigation-hold mark',
+                hidingPlace: 'painted beneath the ferry’s aft deck',
+                significance:
+                    'The mark identifies the hold where the navigation case was secured.'
+            },
+            access: {
+                idSuffix: 'hold-release',
+                name: 'Hatch-clearing lever',
+                hidingPlace: 'jammed beneath a broken deck beam',
+                significance:
+                    'The lever clears the jammed hatch above the navigation case.'
             },
             cargo: {
                 contents: [
@@ -8035,52 +8057,62 @@ function prepareSunkenSalvageDiscovery(state) {
 
     quest.discoveries ||= [];
 
-    const clueId = `${quest.id}-wreck-identification`;
-    let clue = quest.discoveries.find(
-        item => item.id === clueId
-    );
+    function prepareDiscovery(definition, kind) {
+        const id = `${quest.id}-${definition.idSuffix}`;
+        let discovery = quest.discoveries.find(
+            item => item.id === id
+        );
 
-    if (!clue) {
-        clue = {
-            id: clueId,
-            kind: 'evidence',
-            name: profile.clue.name,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: profile.clue.hidingPlace,
-            significance: profile.clue.significance
-        };
+        if (!discovery) {
+            discovery = {
+                id,
+                kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance
+            };
 
-        quest.discoveries.push(clue);
+            quest.discoveries.push(discovery);
+        }
+
+        return discovery;
     }
 
-    if (quest.gates === 3) {
-        const locateGate = quest.gatesData.find(
-            gate => gate.stage === 'locate'
+    function bindGate(stage, discovery) {
+        const gate = quest.gatesData.find(
+            entry => entry.stage === stage
         );
 
-        assert(
-            locateGate,
-            'Three-gate Sunken Salvage needs an authored locate gate'
-        );
+        if (!gate) return;
 
-        locateGate.requiredDiscoveryId = clueId;
-        locateGate.requiredDiscoveryState = 'acquired';
+        gate.requiredDiscoveryId = discovery.id;
+        gate.requiredDiscoveryState = 'acquired';
 
-        if (quest.currentGate?.step === locateGate.step) {
-            quest.currentGate.requiredDiscoveryId = clueId;
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = discovery.id;
             quest.currentGate.requiredDiscoveryState = 'acquired';
         }
     }
 
+    const clue = prepareDiscovery(profile.clue, 'evidence');
+    bindGate('locate', clue);
+
+    const innerSite = prepareDiscovery(profile.innerSite, 'evidence');
+    bindGate('reach_inner_site', innerSite);
+
+    const access = prepareDiscovery(profile.access, 'evidence');
+    bindGate('find_access', access);
+
     const cargoId = `${quest.id}-salvage-cargo`;
-    let discovery = quest.discoveries.find(
+    let cargo = quest.discoveries.find(
         item => item.id === cargoId
     );
 
-    if (!discovery) {
-        discovery = {
+    if (!cargo) {
+        cargo = {
             id: cargoId,
             kind: 'quest_item',
             name: quest.facts.cargo,
@@ -8096,30 +8128,11 @@ function prepareSunkenSalvageDiscovery(state) {
             questCargo: true
         };
 
-        quest.discoveries.push(discovery);
+        quest.discoveries.push(cargo);
     }
 
-    const recoveryGate = quest.gatesData.find(
-        gate => gate.stage === 'recover'
-    );
+    bindGate('recover', cargo);
 
-    assert(
-        recoveryGate,
-        'Sunken Salvage is missing its authored recovery gate'
-    );
-
-    recoveryGate.requiredDiscoveryId = cargoId;
-    recoveryGate.requiredDiscoveryState = 'acquired';
-
-    if (quest.currentGate?.step === recoveryGate.step) {
-        quest.currentGate.requiredDiscoveryId = cargoId;
-        quest.currentGate.requiredDiscoveryState = 'acquired';
-    }
-
-    /*
-     * Retrieval quests must retain the same cargo identity through delivery.
-     * Preserve the issuer and recipient already locked on the quest.
-     */
     assert(
         quest.turnIn && typeof quest.turnIn === 'object',
         'Sunken Salvage quest has no locked turn-in record'
@@ -8133,7 +8146,7 @@ function prepareSunkenSalvageDiscovery(state) {
 
     quest.turnIn.discoveryId = cargoId;
 
-    return discovery;
+    return clue;
 }
 
 function prepareV2QuestDiscoveries(state) {

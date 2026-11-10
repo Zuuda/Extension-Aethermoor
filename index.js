@@ -6250,7 +6250,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   authoritative reward contract for the following LLM reply.
  * - Verify duplicate tags, wrong quest IDs, wrong locations, incomplete cargo,
  *   and delivery after completion cannot grant rewards again.
-
+ * - Cancelling or abandoning a quest stops its field-destination journey
+ *   while preserving route position. Shared destinations and independent
+ *   settlement return travel are preserved. Live verification pending.
+ *
  * PARTIAL SYSTEMS
  *
  * PARTIAL — V2 retrieve-item quests
@@ -8582,6 +8585,42 @@ function resolveQuestAction(test) {
             test.action === 'cancel'
                 ? test.reason || null
                 : undefined;
+
+        /*
+         * Dropping a quest also stops travel undertaken for its field
+         * objective. Preserve the actual position along the saved route.
+         * Shared settlement return travel remains independent, and another
+         * accepted quest at the same destination may still justify the trip.
+         */
+        const journey = state.currentJourney;
+        const anotherQuestUsesDestination =
+            state.quests.accepted.some(entry =>
+                entry.id !== quest.id &&
+                entry.status === 'in_progress' &&
+                !entry.objectiveResolution &&
+                entry.destinationId === journey?.destinationId
+            );
+
+        if (
+            journey &&
+            (
+                journey.questId === quest.id ||
+                (
+                    !journey.questId &&
+                    journey.destinationId === quest.destinationId &&
+                    !anotherQuestUsesDestination
+                )
+            )
+        ) {
+            state.currentPosition = positionAfterSegments(
+                journeyLegs(journey, state.zone),
+                journey.completedSegments
+            ) || state.currentPosition || {
+                nodeId: state.currentLocationId
+            };
+
+            state.currentJourney = null;
+        }
 
         saveQuestToJournal(state, quest);
 

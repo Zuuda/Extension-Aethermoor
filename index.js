@@ -7666,15 +7666,16 @@ function resolveQuestSeed(test) {
             `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
         archetype: {
+        archetype: {
             id: archetype.id,
             label: archetype.label
         },
         variant: authored.variantId
             ? { id: authored.variantId }
             : null,
-        },
         gates,
         gatesData: questGatesData,
+
         structureV2,
         status: 'offered',
         seed,

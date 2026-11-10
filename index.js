@@ -8503,47 +8503,7 @@ function resolveSelectedQuestEvent(test) {
         ? 'acquired'
         : 'found';
 
-        /*
-     * A final authored discovery objective secures the field objective.
-     * Delivery and payment remain separate, using the locked turn-in path.
-     */
-    if (
-        gate.requiredDiscoveryId === discovery.id &&
-        gate.step === quest.gates &&
-        discovery.state === 'acquired'
-    ) {
-        const objective = resolveQuestAction({
-            state,
-            action: 'resolve_objective',
-            objectiveCompleted: true,
-            objectiveRoute:
-                gate.mode === 'combat_twist_showdown'
-                    ? 'combat'
-                    : gate.mode === 'brain_social_heist'
-                        ? 'heist'
-                        : 'other',
-            completionEvidence:
-                `Recovered ${discovery.name} at ` +
-                `${state.places?.[discovery.locationId]?.label ||
-                    discovery.locationId}.`
-        });
-
-        return {
-            ok: true,
-            created: true,
-            action: 'quest_event',
-            event: 'found',
-            questId: quest.id,
-            questItemId: discovery.id,
-            quest: clone(quest),
-            discovery: clone(discovery),
-            questObjective: objective.objectiveResolution,
-            state: objective.state
-        };
-    }
-
     const progression = advanceQuestFromDiscovery(state, discovery);
-
     return {
         ok: true,
         created: true,

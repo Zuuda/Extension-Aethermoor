@@ -7833,13 +7833,17 @@ function prepareMissingCargoDiscovery(state) {
         };
         quest.discoveries.push(shipment);
     }
+    const recoveryGate = quest.gatesData.find(
+        gate =>
+            gate.stage === 'recover' ||
+            gate.step === 3
+    );
 
-    const recoveryGate = quest.gatesData[2];
-    if (recoveryGate?.mode === 'combat_twist_showdown') {
+    if (recoveryGate) {
         recoveryGate.requiredDiscoveryId = shipmentId;
         recoveryGate.requiredDiscoveryState = 'acquired';
 
-        if (quest.currentGate?.step === 3) {
+        if (quest.currentGate?.step === recoveryGate.step) {
             quest.currentGate.requiredDiscoveryId = shipmentId;
             quest.currentGate.requiredDiscoveryState = 'acquired';
         }

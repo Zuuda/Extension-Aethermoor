@@ -6263,11 +6263,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   recovery discovery to match the locked turn-in cargo.
  * - Discovery preparation and validation consume no additional RNG.
  * - Full gameplay verification is deferred to beta.
- * - Planned: group depot recovery and Sunken Salvage beneath Recover Cargo,
- *   with a separate compatible-variant roll and saved variant identity.
- * - Preserve existing quest IDs, authored salvage contents, discoveries,
- *   progress, and delivery records during that restructuring.
-
+ * - New cargo offers use Recover Cargo with a separately rolled, saved
+ *   depot_recovery or sunken_salvage variant.
+ * - Existing missing_cargo and sunken_salvage quest IDs remain supported.
+ * - Beta verification remains pending.
  *
  * PARTIAL — Authored quest discoveries
  * - Some V2 quests have engine-authored discoveries with stable IDs,

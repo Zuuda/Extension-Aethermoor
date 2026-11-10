@@ -6219,19 +6219,19 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify a traveler on segment 1 saves 1/N, then a subsequent move saves 2/N.
  * - Regression incident: the Watchtower journey reported 1/5 after a traveler
  *   but lost that first segment in saved state. Fix added; retest pending.
-
  *
- * PLANNED — Out-of-combat recovery
- * - Q'tik's derived Regen should restore her HP between fights, reflecting
- *   regeneration continuing outside combat. Define the precise trigger before
- *   implementing it (for example, after a cleared encounter or when a new
- *   encounter is engaged); do not silently heal her on every UI refresh.
- * - Do not add out-of-combat healing for Tansy yet.
- * - Revisit Tansy's recovery only after she has a Mender in the fiction and
- *   mechanics; decide then whether that Mender can heal her between fights.
- * - Test that recovery does not occur during a spotted/active encounter, does
- *   not exceed maximum HP, and cannot be applied repeatedly by duplicate events.
-
+ * DONE — Out-of-combat Q'tik recovery
+ * - When a previously active encounter ends, restore Q'tik to derived maximum
+ *   HP if no active or spotted encounter remains in the resulting state.
+ * - Do not tie recovery to travel steps, elapsed time, or UI refreshes.
+ * - A successor encounter revealed by the same operation suppresses recovery.
+ * - Death already restores the crew and is not an additional recovery event.
+ *
+ * PLANNED — Tansy out-of-combat recovery
+ * - Do not heal Tansy between fights yet.
+ * - Revisit after she reaches level 20 and completes the authored Mender quest.
+ * - At that point decide whether established Mender care warrants full
+ *   between-fight recovery; do not track time or invent a cast-rate formula.
  *
  * NEXT — V2 quest completion regression pass
  * - Test a fresh defeat-elite quest from offer through delivery without debug
@@ -12492,11 +12492,53 @@ function resolveBatch(args) {
 }
 
 /*
+ * Between-fight recovery happens on the saved transition out of an active
+ * encounter, not on travel steps or elapsed time. A newly spotted encounter
+ * takes precedence, so a chained fight cannot grant recovery between threats.
+ *
+ * Tansy deliberately receives no out-of-combat healing yet. Revisit that
+ * only after the level-20 Mender and its authored quest are both established;
+ * then decide whether the Mender supports the same full-recovery rule.
+ */
+function applyOutOfCombatRecovery(previousState, nextState) {
+    const wasInCombat =
+        previousState?.encounter?.status === 'active';
+
+    const nextEncounterStatus =
+        nextState?.encounter?.status;
+
+    const anotherEncounterPending =
+        nextEncounterStatus === 'active' ||
+        nextEncounterStatus === 'spotted';
+
+    if (
+        !wasInCombat ||
+        anotherEncounterPending ||
+        nextEncounterStatus === 'dead' ||
+        nextState.crew?.qtik?.hp <= 0
+    ) {
+        return null;
+    }
+
+    const maxHp = derived(nextState.crew).qtikMaxHp;
+    const beforeHp = nextState.crew.qtik.hp;
+
+    nextState.crew.qtik.hp = maxHp;
+
+    return {
+        character: 'qtik',
+        beforeHp,
+        afterHp: maxHp,
+        recovered: maxHp - beforeHp,
+        reason: 'combat_ended_without_another_encounter'
+    };
+}
+
+/*
  * Serialize state operations so two simultaneous tool calls cannot
  * both read the same revision and overwrite each other's changes.
  */
 let aethermoorQueue = Promise.resolve();
-
 function queueAethermoor(task) {
     const pending = aethermoorQueue.then(task);
     aethermoorQueue = pending.catch(() => {});
@@ -13466,6 +13508,16 @@ async function runStoredMechanic(args) {
          */
         const arrivedRumors = resolveArrivedRumors(caseResult.state);
         const nextState = arrivedRumors.state;
+
+        const recovery = applyOutOfCombatRecovery(
+            savedState,
+            nextState
+        );
+
+        if (recovery) {
+            caseResult.outOfCombatRecovery = recovery;
+        }
+
         caseResult.state = nextState;
 
         if (arrivedRumors.resolutions.length > 0) {

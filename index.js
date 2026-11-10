@@ -7666,7 +7666,6 @@ function resolveQuestSeed(test) {
             `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
         archetype: {
-        archetype: {
             id: archetype.id,
             label: archetype.label
         },

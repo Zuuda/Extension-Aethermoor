@@ -7945,7 +7945,7 @@ function prepareMissingCargoDiscovery(state) {
     }
 
     assert(
-        quest.gates >= 2 && quest.gates <= 5,
+        quest.gates >= 1 && quest.gates <= 5,
         `Missing Cargo discovery preparation does not support ${quest.gates} gates`
     );
 
@@ -8144,7 +8144,7 @@ function prepareSunkenSalvageDiscovery(state) {
     }
 
     assert(
-        quest.gates >= 2 && quest.gates <= 5,
+        quest.gates >= 1 && quest.gates <= 5,
         `Sunken Salvage discovery preparation does not support ${quest.gates} gates`
     );
 

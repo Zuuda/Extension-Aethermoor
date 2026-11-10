@@ -6896,7 +6896,7 @@ const QUEST_V2_STRUCTURES = {
 };
 
 const QUEST_V2_STAGES = {
-    retrieve_item: {
+     retrieve_item: {
         approach: {
             mode: 'traversal_discovery',
             trigger: 'arrival',
@@ -6909,13 +6909,13 @@ const QUEST_V2_STAGES = {
         },
         reach_inner_site: {
             mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Follow the established lead to the item’s location.'
+            trigger: 'discovery',
+            objective: 'Find the authored way into the inner recovery area.'
         },
         find_access: {
             mode: 'brain_social_heist',
             trigger: 'discovery',
-            objective: 'Discover the authored means of accessing the item.'
+            objective: 'Find the authored means of accessing the item.'
         },
         recover: {
             mode: 'brain_social_heist',
@@ -6924,6 +6924,7 @@ const QUEST_V2_STAGES = {
             decisive: true
         }
     },
+
 
     defeat_elite: {
         approach: {
@@ -7782,7 +7783,7 @@ function prepareMissingCargoDiscovery(state) {
     }
 
     assert(
-        quest.gates >= 1 && quest.gates <= 3,
+        quest.gates >= 2 && quest.gates <= 5,
         `Missing Cargo discovery preparation does not support ${quest.gates} gates`
     );
 
@@ -7795,6 +7796,22 @@ function prepareMissingCargoDiscovery(state) {
                     'inside the old gravel weir station’s tally drawer',
                 significance:
                     'The tally and fresh drag marks show where the missing payroll strongbox was taken.'
+            },
+            innerSite: {
+                idSuffix: 'storehouse-entry',
+                name: 'Storehouse access mark',
+                hidingPlace:
+                    'on the old gravel weir station’s loading plan',
+                significance:
+                    'The mark identifies the storehouse entrance used for large consignments.'
+            },
+            access: {
+                idSuffix: 'storehouse-key',
+                name: 'Storehouse key',
+                hidingPlace:
+                    'inside the station keeper’s locked desk',
+                significance:
+                    'The key opens the storehouse containing the missing payroll strongbox.'
             },
             cargo: {
                 idSuffix: 'payroll-strongbox',
@@ -7814,6 +7831,22 @@ function prepareMissingCargoDiscovery(state) {
                     'inside the weigh-station scale counterweight housing',
                 significance:
                     'It identifies the subcontractor who diverted the tool shipment.'
+            },
+            innerSite: {
+                idSuffix: 'freight-store-mark',
+                name: 'Freight-store access mark',
+                hidingPlace:
+                    'on the weigh-station’s loading plan',
+                significance:
+                    'The mark identifies the freight store used for diverted shipments.'
+            },
+            access: {
+                idSuffix: 'freight-store-key',
+                name: 'Freight-store key',
+                hidingPlace:
+                    'inside the weigh-station clerk’s locked drawer',
+                significance:
+                    'The key opens the freight store where the missing tool shipment is hidden.'
             },
             cargo: {
                 idSuffix: 'tool-shipment',
@@ -7836,39 +7869,56 @@ function prepareMissingCargoDiscovery(state) {
 
     quest.discoveries ||= [];
 
-    const clueId = `${quest.id}-${profile.clue.idSuffix}`;
-    let clue = quest.discoveries.find(
-        item => item.id === clueId
-    );
+    function prepareDiscovery(definition, kind) {
+        const id = `${quest.id}-${definition.idSuffix}`;
+        let discovery = quest.discoveries.find(
+            item => item.id === id
+        );
 
-    if (!clue) {
-        clue = {
-            id: clueId,
-            kind: 'evidence',
-            name: profile.clue.name,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: profile.clue.hidingPlace,
-            significance: profile.clue.significance
-        };
+        if (!discovery) {
+            discovery = {
+                id,
+                kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance
+            };
 
-        quest.discoveries.push(clue);
+            quest.discoveries.push(discovery);
+        }
+
+        return discovery;
     }
 
-    const locateGate = quest.gatesData.find(
-        gate => gate.stage === 'locate'
-    );
+    function bindGate(stage, discovery) {
+        const gate = quest.gatesData.find(
+            entry => entry.stage === stage
+        );
 
-    if (locateGate) {
-        locateGate.requiredDiscoveryId = clueId;
-        locateGate.requiredDiscoveryState = 'acquired';
+        if (!gate) return;
 
-        if (quest.currentGate?.step === locateGate.step) {
-            quest.currentGate.requiredDiscoveryId = clueId;
+        gate.requiredDiscoveryId = discovery.id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = discovery.id;
             quest.currentGate.requiredDiscoveryState = 'acquired';
         }
     }
+
+    const clue = prepareDiscovery(profile.clue, 'evidence');
+    bindGate('locate', clue);
+
+    const innerSiteDiscovery =
+        prepareDiscovery(profile.innerSite, 'evidence');
+    bindGate('reach_inner_site', innerSiteDiscovery);
+
+    const accessDiscovery =
+        prepareDiscovery(profile.access, 'evidence');
+    bindGate('find_access', accessDiscovery);
 
     const cargoId = `${quest.id}-${profile.cargo.idSuffix}`;
     let cargo = quest.discoveries.find(
@@ -7892,25 +7942,10 @@ function prepareMissingCargoDiscovery(state) {
         quest.discoveries.push(cargo);
     }
 
-    const recoveryGate = quest.gatesData.find(
-        gate => gate.stage === 'recover'
-    );
-
-    assert(
-        recoveryGate,
-        'Missing Cargo is missing its authored recovery gate'
-    );
-
-    recoveryGate.requiredDiscoveryId = cargoId;
-    recoveryGate.requiredDiscoveryState = 'acquired';
-
-    if (quest.currentGate?.step === recoveryGate.step) {
-        quest.currentGate.requiredDiscoveryId = cargoId;
-        quest.currentGate.requiredDiscoveryState = 'acquired';
-    }
+    bindGate('recover', cargo);
 
     /*
-     * Retrieval quests must carry the same authored cargo identity through
+     * Retrieval quests carry the same authored cargo identity through
      * delivery. Preserve the issuer and recipient already locked on the quest.
      */
     assert(

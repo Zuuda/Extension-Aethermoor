@@ -7849,6 +7849,25 @@ function prepareMissingCargoDiscovery(state) {
         }
     }
 
+    /*
+     * Retrieval quests must carry the authored cargo identity through
+     * delivery. Without this link, turn-in can mistake a cargo quest for
+     * a report-only objective and cannot mark the recovered item delivered.
+     * Preserve the issuer and recipient already locked on the quest.
+     */
+    assert(
+        quest.turnIn && typeof quest.turnIn === 'object',
+        'Missing Cargo quest has no locked turn-in record'
+    );
+
+    assert(
+        !quest.turnIn.discoveryId ||
+        quest.turnIn.discoveryId === shipmentId,
+        'Missing Cargo turn-in points to a different cargo discovery'
+    );
+
+    quest.turnIn.discoveryId = shipmentId;
+
     return docket;
 }
 
@@ -12317,34 +12336,74 @@ function resolveBatch(args) {
                 }
 
                 case 'quest_delivery': {
-                    const state = test.state;
-                    const quest = state?.activeQuest;
+                    const state = clone(test.state);
+                    const questId = test.questId;
+
+                    assert(
+                        typeof questId === 'string' &&
+                        questId.length > 0,
+                        'Quest delivery requires an explicit questId'
+                    );
+
+                    ensureQuestJournal(state);
+
+                    const quest = findQuestById(state, questId);
 
                     assert(
                         quest?.status === 'in_progress',
-                        'No in-progress quest can be delivered'
+                        `Quest ${questId} is not in progress`
                     );
+
                     assert(
                         quest.deliveryReady === true,
                         'Quest delivery is not ready'
                     );
+
                     assert(
                         state.currentLocationId ===
                             quest.turnIn?.locationId,
                         'The crew is not at this quest turn-in location'
                     );
 
+                    /*
+                     * Older Missing Cargo saves may lack the turn-in cargo
+                     * link. Repair it on this operation's clone before the
+                     * completion checks run.
+                     */
+                    state.activeQuest = quest;
+
+                    if (quest.archetype?.id === 'missing_cargo') {
+                        prepareMissingCargoDiscovery(state);
+                    }
+
+                    const previousSelectionId =
+                        test.state.activeQuest?.id || null;
+
                     result = resolveQuestAction({
                         state,
+                        questId: quest.id,
                         action: 'complete',
                         objectiveCompleted: true,
                         completionEvidence:
-                            `Delivered ${quest.discoveries?.find(
-                                item =>
-                                    item.id === quest.turnIn.discoveryId
-                            )?.name || quest.facts?.cargo || 'the quest cargo'} ` +
-                            `to ${quest.turnIn.recipient}.`
+                            `Delivered ${
+                                quest.discoveries?.find(
+                                    item =>
+                                        item.id ===
+                                        quest.turnIn.discoveryId
+                                )?.name ||
+                                quest.facts?.cargo ||
+                                'the quest cargo'
+                            } to ${quest.turnIn.recipient}.`
                     });
+
+                    if (previousSelectionId !== quest.id) {
+                        result.state.activeQuest = previousSelectionId
+                            ? findQuestById(
+                                result.state,
+                                previousSelectionId
+                            )
+                            : null;
+                    }
 
                     result.action = 'quest_delivery';
                     break;
@@ -18492,22 +18551,26 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-
             if (event.event === 'delivered') {
                 const stateResult = await readStoredCombatState();
-                const activeQuest = stateResult.state.activeQuest;
+                const quest = findQuestById(
+                    stateResult.state,
+                    event.questId
+                );
 
                 assert(
-                    activeQuest?.id === event.questId,
-                    'Delivery tag does not match the active quest'
+                    quest?.status === 'in_progress',
+                    'Delivery tag does not match an in-progress quest'
                 );
 
                 result = await runStoredMechanic({
                     cases: [{
                         name: 'assistant_quest_delivery',
-                        kind: 'quest_delivery'
+                        kind: 'quest_delivery',
+                        questId: event.questId
                     }]
                 });
+
             } else {
                 result = await runStoredMechanic({
                     cases: [{

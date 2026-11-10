@@ -6786,6 +6786,37 @@ const QUEST_ARCHETYPES = [
     }
 ];
 
+/*
+ * New offers use one cargo-recovery archetype. Preserve the authored
+ * legacy scenarios as selectable variants; existing quest records keep
+ * their original archetype IDs and continue through their legacy helpers.
+ */
+const RECOVER_CARGO_ARCHETYPE = (() => {
+    const depot = QUEST_ARCHETYPES.find(
+        entry => entry.id === 'missing_cargo'
+    );
+    const sunken = QUEST_ARCHETYPES.find(
+        entry => entry.id === 'sunken_salvage'
+    );
+
+    assert(depot && sunken, 'Legacy cargo scenarios are missing');
+
+    return {
+        id: 'recover_cargo',
+        label: 'Recover Cargo',
+        scenarios: [
+            ...depot.scenarios.map(scenario => ({
+                ...scenario,
+                variantId: 'depot_recovery'
+            })),
+            ...sunken.scenarios.map(scenario => ({
+                ...scenario,
+                variantId: 'sunken_salvage'
+            }))
+        ]
+    };
+})();
+
 function questGeographyProfile(state, zone = state.zone) {
     const savedProfile =
         state.world?.zones?.[zone]?.geography?.profile;
@@ -6816,7 +6847,15 @@ function eligibleQuestScenarios(state, archetype, zone = state.zone) {
 }
 
 function eligibleQuestArchetypes(state, zone = state.zone) {
-    return QUEST_ARCHETYPES
+    const newOfferArchetypes = QUEST_ARCHETYPES.filter(
+        archetype =>
+            !['missing_cargo', 'sunken_salvage']
+                .includes(archetype.id)
+    );
+
+    newOfferArchetypes.push(RECOVER_CARGO_ARCHETYPE);
+
+    return newOfferArchetypes
         .map(archetype => ({
             archetype,
             scenarios: eligibleQuestScenarios(
@@ -6828,17 +6867,46 @@ function eligibleQuestArchetypes(state, zone = state.zone) {
         .filter(entry => entry.scenarios.length > 0);
 }
 
+
 function buildQuestFacts(state, archetype, zone = state.zone) {
-    const scenarios = eligibleQuestScenarios(
+    const eligibleScenarios = eligibleQuestScenarios(
         state,
         archetype,
         zone
     );
 
     assert(
-        scenarios.length > 0,
+        eligibleScenarios.length > 0,
         `Quest archetype ${archetype.id} has no scenario compatible with Zone ${zone}`
     );
+
+    let variantRoll = null;
+    let variantId =
+        archetype.variantId ||
+        eligibleScenarios[0].variantId ||
+        null;
+
+    let scenarios = eligibleScenarios;
+
+    if (archetype.id === 'recover_cargo') {
+        const variants = [
+            ...new Set(
+                eligibleScenarios.map(scenario => scenario.variantId)
+            )
+        ];
+
+        assert(
+            variants.every(id => typeof id === 'string' && id.length > 0),
+            'Every Recover Cargo scenario needs an authored variantId'
+        );
+
+        variantRoll = roll(state, variants.length);
+        variantId = variants[variantRoll - 1];
+
+        scenarios = eligibleScenarios.filter(
+            scenario => scenario.variantId === variantId
+        );
+    }
 
     const scenarioRoll = roll(state, scenarios.length);
     const scenario = scenarios[scenarioRoll - 1];
@@ -6852,14 +6920,14 @@ function buildQuestFacts(state, archetype, zone = state.zone) {
     );
 
     return {
+        variantRoll,
+        variantId: scenario.variantId || variantId,
         scenarioRoll,
-        variantId: scenario.variantId || archetype.variantId || null,
         pitch: scenario.pitch,
         truth: scenario.truth,
         facts: clone(scenario.facts)
     };
 }
-
 
 /*
  * COMPLETE QUEST STRUCTURES — VERSION 2
@@ -7097,7 +7165,13 @@ function buildQuestV2Structure(family, gateCount, facts) {
     });
 }
 
-function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
+function buildQuestV2PlanForOffer(
+    state,
+    archetype,
+    gateCount,
+    facts,
+    variantId = null
+) {
     /*
      * Recover Cargo is the canonical V2 family. Keep the legacy IDs as
      * compatibility aliases until existing saved quests are migrated.
@@ -7114,16 +7188,28 @@ function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
     const family = familyByArchetype[archetype.id];
     if (!family) return null;
     let v2Facts;
-    if (archetype.id === 'missing_cargo') {
+    if (
+        archetype.id === 'missing_cargo' ||
+        archetype.id === 'sunken_salvage' ||
+        archetype.id === 'recover_cargo'
+    ) {
+    if (
+        archetype.id === 'missing_cargo' ||
+        archetype.id === 'sunken_salvage' ||
+        archetype.id === 'recover_cargo'
+    ) {
         v2Facts = {
             item: facts.cargo,
-            destination: facts.place
+            destination:
+                archetype.id === 'sunken_salvage' ||
+                (
+                    archetype.id === 'recover_cargo' &&
+                    variantId === 'sunken_salvage'
+                )
+                    ? facts.wreck
+                    : facts.place
         };
-    } else if (archetype.id === 'sunken_salvage') {
-        v2Facts = {
-            item: facts.cargo,
-            destination: facts.wreck
-        };
+
     } else if (archetype.id === 'territorial_beast') {
         v2Facts = {
             target: facts.beast,
@@ -7619,7 +7705,8 @@ function resolveQuestSeed(test) {
         state,
         archetype,
         gates,
-        authored.facts
+        authored.facts,
+        authored.variantId
     );
 
     const usesV2Structure =
@@ -7645,6 +7732,8 @@ function resolveQuestSeed(test) {
         salvageSlotRoll,
         archetypeRoll,
         archetypeId: archetype.id,
+        variantRoll: authored.variantRoll,
+        variantId: authored.variantId,
         scenarioRoll: authored.scenarioRoll,
         source: sourceSeed.source,
         sourceRoll: sourceSeed.roll,
@@ -7849,9 +7938,15 @@ function validateRetrievalQuestDiscoveries(quest) {
 
 function prepareMissingCargoDiscovery(state) {
     const quest = state.activeQuest;
+    const isDepotRecovery =
+        quest?.archetype?.id === 'missing_cargo' ||
+        (
+            quest?.archetype?.id === 'recover_cargo' &&
+            quest.variant?.id === 'depot_recovery'
+        );
 
     if (
-        quest?.archetype?.id !== 'missing_cargo' ||
+        !isDepotRecovery ||
         !Array.isArray(quest.gatesData) ||
         !quest.destinationId
     ) {
@@ -8042,9 +8137,15 @@ function prepareMissingCargoDiscovery(state) {
 
 function prepareSunkenSalvageDiscovery(state) {
     const quest = state.activeQuest;
+    const isSunkenSalvage =
+        quest?.archetype?.id === 'sunken_salvage' ||
+        (
+            quest?.archetype?.id === 'recover_cargo' &&
+            quest.variant?.id === 'sunken_salvage'
+        );
 
     if (
-        quest?.archetype?.id !== 'sunken_salvage' ||
+        !isSunkenSalvage ||
         !quest.destinationId ||
         !Array.isArray(quest.gatesData)
     ) {

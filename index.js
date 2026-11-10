@@ -7883,37 +7883,57 @@ function prepareSunkenSalvageDiscovery(state) {
     }
 
     /*
-     * This first implementation supports the two-gate salvage plan:
-     * arrive and identify the wreck, then recover its cargo.
-     *
-     * Longer salvage plans retain their existing behavior until their
-     * individual gates have authored recovery requirements.
+     * Two-gate saves retain their established approach -> cargo-recovery
+     * path. Three-gate plans add an authored wreck clue before recovery.
+     * Longer structures need their own authored access requirements before
+     * they can safely enter ordinary play.
      */
-    if (quest.gates !== 2) return null;
+    assert(
+        quest.gates === 2 || quest.gates === 3,
+        `Sunken Salvage discovery preparation does not support ${quest.gates} gates`
+    );
 
     const profiles = {
         1: {
-            contents: [
-                'Company-stamped payroll packets inside an oilskin liner.',
-                'A matching wage ledger identifying the intended workers.'
-            ],
-            description:
-                'The packets remain bundled for company payroll. ' +
-                'The ledger identifies the shipment as the missing pay-chest.',
-            requiredAction:
-                'Free the pay-chest from its root-bound brackets, ' +
-                'bring it onto secure ground, and inspect its contents.'
+            clue: {
+                name: 'Stamped barge-lock plate',
+                hidingPlace:
+                    'bolted to the scow’s forward cargo hatch',
+                significance:
+                    'The stamp identifies this wreck as the company scow carrying the sealed pay-chest.'
+            },
+            cargo: {
+                contents: [
+                    'Company-stamped payroll packets inside an oilskin liner.',
+                    'A matching wage ledger identifying the intended workers.'
+                ],
+                description:
+                    'The packets remain bundled for company payroll. ' +
+                    'The ledger identifies the shipment as the missing pay-chest.',
+                requiredAction:
+                    'Free the pay-chest from its root-bound brackets, ' +
+                    'bring it onto secure ground, and inspect its contents.'
+            }
         },
         2: {
-            contents: [
-                'Waxed navigation charts bearing the ferry crew stamp.',
-                'A brass sounding instrument secured in a fitted wooden cradle.'
-            ],
-            description:
-                'The markings identify the case as the ferry crew navigation cargo.',
-            requiredAction:
-                'Recover the navigation case from beneath the wreck ' +
-                'and inspect its identifying contents.'
+            clue: {
+                name: 'Painted ferry number',
+                hidingPlace:
+                    'on a floating plank caught beside the split-hull ferry',
+                significance:
+                    'The number identifies the wreck as the ferry carrying the missing navigation case.'
+            },
+            cargo: {
+                contents: [
+                    'Waxed navigation charts bearing the ferry crew stamp.',
+                    'A brass sounding instrument secured in a fitted wooden cradle.'
+                ],
+                description:
+                    'The markings identify the case as the ferry crew navigation cargo.',
+                requiredAction:
+                    'Recover the navigation case from beneath the wreck ' +
+                    'and inspect its identifying contents.'
+            }
         }
     };
 
@@ -7922,70 +7942,103 @@ function prepareSunkenSalvageDiscovery(state) {
 
     quest.discoveries ||= [];
 
-    const id = `${quest.id}-salvage-cargo`;
-    let discovery = quest.discoveries.find(item => item.id === id);
+    const clueId = `${quest.id}-wreck-identification`;
+    let clue = quest.discoveries.find(
+        item => item.id === clueId
+    );
+
+    if (!clue) {
+        clue = {
+            id: clueId,
+            kind: 'evidence',
+            name: profile.clue.name,
+            locationId: quest.destinationId,
+            state: 'hidden',
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace: profile.clue.hidingPlace,
+            significance: profile.clue.significance
+        };
+
+        quest.discoveries.push(clue);
+    }
+
+    if (quest.gates === 3) {
+        const locateGate = quest.gatesData.find(
+            gate => gate.stage === 'locate'
+        );
+
+        assert(
+            locateGate,
+            'Three-gate Sunken Salvage needs an authored locate gate'
+        );
+
+        locateGate.requiredDiscoveryId = clueId;
+        locateGate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === locateGate.step) {
+            quest.currentGate.requiredDiscoveryId = clueId;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const cargoId = `${quest.id}-salvage-cargo`;
+    let discovery = quest.discoveries.find(
+        item => item.id === cargoId
+    );
 
     if (!discovery) {
         discovery = {
-            id,
+            id: cargoId,
             kind: 'quest_item',
             name: quest.facts.cargo,
             locationId: quest.destinationId,
             state: 'hidden',
-            requiredAction: profile.requiredAction,
+            requiredAction: profile.cargo.requiredAction,
             acquisitionPolicy: 'auto_on_reveal',
             hidingPlace:
                 `${quest.facts.cargo} at ${quest.facts.wreck}, ` +
                 `obstructed by ${quest.facts.obstacle}`,
-            significance: profile.description,
-            contents: clone(profile.contents),
+            significance: profile.cargo.description,
+            contents: clone(profile.cargo.contents),
             questCargo: true
         };
 
         quest.discoveries.push(discovery);
     }
 
-    const gate = quest.gatesData[1];
-    gate.requiredDiscoveryId = id;
-    gate.requiredDiscoveryState = 'acquired';
+    const recoveryGate = quest.gatesData.find(
+        gate => gate.stage === 'recover'
+    );
 
-    if (quest.currentGate?.step === 2) {
-        quest.currentGate.requiredDiscoveryId = id;
+    assert(
+        recoveryGate,
+        'Sunken Salvage is missing its authored recovery gate'
+    );
+
+    recoveryGate.requiredDiscoveryId = cargoId;
+    recoveryGate.requiredDiscoveryState = 'acquired';
+
+    if (quest.currentGate?.step === recoveryGate.step) {
+        quest.currentGate.requiredDiscoveryId = cargoId;
         quest.currentGate.requiredDiscoveryState = 'acquired';
     }
 
     /*
-     * Destination registration may already have established the issuer
-     * and turn-in location. Preserve those and attach the cargo identity;
-     * ||= on the whole record would silently omit discoveryId.
+     * Retrieval quests must retain the same cargo identity through delivery.
+     * Preserve the issuer and recipient already locked on the quest.
      */
-    const issuer = quest.originSettlementId
-        ? state.world?.settlements?.[quest.originSettlementId]
-        : savedPrimarySettlement(state, quest.seed.zone);
+    assert(
+        quest.turnIn && typeof quest.turnIn === 'object',
+        'Sunken Salvage quest has no locked turn-in record'
+    );
 
-    assert(issuer, 'Salvage quest issuing settlement is missing');
+    assert(
+        !quest.turnIn.discoveryId ||
+        quest.turnIn.discoveryId === cargoId,
+        'Sunken Salvage turn-in points to a different cargo discovery'
+    );
 
-    const locationId =
-        quest.turnIn?.locationId ||
-        quest.originLocationId ||
-        issuer.locationId;
-
-    state.places ||= {};
-    state.places[locationId] ||= {
-        id: locationId,
-        label: issuer.label,
-        zone: issuer.zone,
-        settlementId: issuer.id,
-        kind: 'settlement'
-    };
-
-    quest.turnIn = {
-        ...quest.turnIn,
-        locationId,
-        settlementId: quest.turnIn?.settlementId || issuer.id,
-        recipient: quest.turnIn?.recipient || quest.facts.sponsor,
-        discoveryId: id
-    };
+    quest.turnIn.discoveryId = cargoId;
 
     return discovery;
 }

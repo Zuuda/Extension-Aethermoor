@@ -13135,9 +13135,21 @@ function questOfferNarrationPacket(quest) {
         ? 'The crew followed a rumor lead.'
         : 'The crew followed a quest breadcrumb found on a cleared pack.';
 
+    const variantLabels = {
+        depot_recovery: 'Depot Recovery',
+        sunken_salvage: 'Sunken Salvage'
+    };
+
+    const variantLabel =
+        variantLabels[quest.variant?.id] || null;
+
     const factLines = publicQuestFactLines(quest);
     return [
         sourceText,
+        ...(variantLabel
+            ? [`Recover Cargo variant: ${variantLabel}.`]
+            : []),
+
         `Quest offered: ${quest.title}.`,
         quest.pitch || 'A local request has been presented.',
         ...factLines,

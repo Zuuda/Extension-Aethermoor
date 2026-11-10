@@ -2038,7 +2038,8 @@ function spawnLinkedQuestEncounter(state) {
 
     assert(
         quest?.status === 'in_progress' &&
-        quest.structureV2?.family === 'defeat_elite' &&
+        ['defeat_elite', 'rescue_person']
+            .includes(quest.structureV2?.family) &&
         gate?.trigger === 'linked_combat',
         'There is no V2 linked-combat gate to spawn'
     );
@@ -5273,7 +5274,8 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
      * still chooses Engage or Avoid.
      */
     if (
-        quest.structureV2?.family === 'defeat_elite' &&
+        ['defeat_elite', 'rescue_person']
+            .includes(quest.structureV2?.family) &&
         gate.trigger === 'linked_combat'
     ) {
         const spawned = spawnLinkedQuestEncounter(nextState);
@@ -6275,11 +6277,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Remove fallback behavior that lets a narrator imply an unrecorded discovery.
  *
  * PARTIAL — Quest family migration
- * - Missing Cargo, Sunken Salvage, Ruin Clearance, and Territorial Beast have
- *   V2-compatible foundations.
- * - Herb Foraging and Missing Person still use the older authored gate path.
- * - Convert each remaining family to a complete V2 structure or formally mark
- *   it legacy until its replacement is implemented.
+ * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.
+ * - Herb Foraging uses V2 retrieval structures and authored discoveries for
+ *   every supported gate count; gathered herbs remain locked turn-in cargo.
+ * - Missing Person Search uses saved Lost and Abducted variants, not Rank F.
+ *   Lost ends when the person is found; Abducted ends when the linked threat
+ *   is defeated. Returning the person is diegetic; turn-in is report-only.
+ * - Four- and five-gate Missing Person offers use Abducted, because the
+ *   current Lost scenario supports only two or three field gates.
+ * - Full gameplay verification remains for beta.
  *
  * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
  * - Rank reflects stakes, trust, and consequences, not gate count alone.
@@ -6887,11 +6893,20 @@ function eligibleQuestArchetypes(state, zone = state.zone, rank = null) {
         .filter(entry => entry.scenarios.length > 0);
 }
 
-function buildQuestFacts(state, archetype, zone = state.zone) {
+function buildQuestFacts(
+    state,
+    archetype,
+    zone = state.zone,
+    gateCount = null
+) {
     const eligibleScenarios = eligibleQuestScenarios(
         state,
         archetype,
         zone
+    ).filter(scenario =>
+        archetype.id !== 'missing_person' ||
+        gateCount <= 3 ||
+        scenario.variantId === 'abducted'
     );
 
     assert(
@@ -6986,10 +7001,24 @@ const QUEST_V2_STRUCTURES = {
         ]
     },
 
+    rescue_person: {
+        lost: {
+            2: ['approach', 'find_person'],
+            3: ['approach', 'track', 'find_person']
+        },
+        abducted: {
+            2: ['approach', 'defeat'],
+            3: ['approach', 'track', 'defeat'],
+            4: ['approach', 'track', 'reach_lair', 'defeat'],
+            5: ['approach', 'track', 'reach_lair', 'find_person', 'defeat']
+        }
+    },
+
     defeat_elite: {
         1: ['defeat'],
         2: ['approach', 'defeat'],
         3: ['approach', 'track', 'defeat'],
+
         4: ['approach', 'track', 'reach_lair', 'defeat'],
         5: ['approach', 'track', 'reach_lair', 'find_target', 'defeat']
     }
@@ -7037,14 +7066,13 @@ const QUEST_V2_STAGES = {
         },
         reach_lair: {
             mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Reach the abductors’ established location.'
+            trigger: 'discovery',
+            objective: 'Find the authored way to the abductors’ location.'
         },
         find_person: {
             mode: 'brain_social_heist',
             trigger: 'discovery',
-            objective: 'Find the missing person and establish their situation.',
-            decisive: true
+            objective: 'Find the missing person and establish their situation.'
         },
         defeat: {
             mode: 'combat_twist_showdown',
@@ -7107,7 +7135,11 @@ function validateQuestV2Structure(plan) {
     );
 
     const expectedSequence =
-        QUEST_V2_STRUCTURES[plan.family][plan.gateCount];
+        plan.family === 'rescue_person'
+            ? QUEST_V2_STRUCTURES.rescue_person[
+                plan.variantId
+              ]?.[plan.gateCount]
+            : QUEST_V2_STRUCTURES[plan.family][plan.gateCount];
 
     assert(expectedSequence, 'Unsupported quest structure length');
 
@@ -7137,48 +7169,22 @@ function buildQuestV2Structure(family, gateCount, facts) {
         facts && typeof facts === 'object',
         'Quest structure requires authored facts'
     );
-    let sequence = QUEST_V2_STRUCTURES[family]?.[gateCount];
+    const variantId =
+        family === 'rescue_person'
+            ? facts.rescueVariant
+            : null;
 
-    if (family === 'rescue_person') {
-        sequence = QUEST_V2_STRUCTURES.rescue_person[gateCount];
-
-        if (facts.rescueVariant === 'lost') {
-            assert(
-                [2, 3].includes(gateCount),
-                `Lost-person quest does not support ${gateCount} gates`
-            );
-
-            sequence = gateCount === 2
-                ? ['approach', 'find_person']
-                : ['approach', 'track', 'find_person'];
-        } else if (facts.rescueVariant === 'abducted') {
-            assert(
-                [2, 3, 4, 5].includes(gateCount),
-                `Abducted-person quest does not support ${gateCount} gates`
-            );
-
-            sequence = {
-                2: ['approach', 'defeat'],
-                3: ['approach', 'track', 'defeat'],
-                4: ['approach', 'track', 'reach_lair', 'defeat'],
-                5: [
-                    'approach',
-                    'track',
-                    'reach_lair',
-                    'find_person',
-                    'defeat'
-                ]
-            }[gateCount];
-        } else {
-            throw new Error(
-                `Unsupported Missing Person variant: ${facts.rescueVariant}`
-            );
-        }
-    }
+    const sequence =
+        family === 'rescue_person'
+            ? QUEST_V2_STRUCTURES.rescue_person[
+                variantId
+              ]?.[gateCount]
+            : QUEST_V2_STRUCTURES[family]?.[gateCount];
 
     assert(
         sequence,
-        `No complete ${family} structure for ${gateCount} gates`
+        `No complete ${family} structure for ${gateCount} gates` +
+            (variantId ? ` (${variantId})` : '')
     );
 
     function fact(key) {
@@ -7203,20 +7209,30 @@ function buildQuestV2Structure(family, gateCount, facts) {
             recover:
                 () => `Recover ${fact('item')} from ${fact('destination')}.`
         },
-            rescue_person: {
-        2: ['approach', 'find_person'],
-        3: ['approach', 'track', 'find_person'],
-        4: ['approach', 'track', 'reach_lair', 'defeat'],
-        5: ['approach', 'track', 'reach_lair', 'find_person', 'defeat']
-    },
-    defeat_elite: {
-        1: ['defeat'],
-        2: ['approach', 'defeat'],
-        3: ['approach', 'track', 'defeat'],
-        4: ['approach', 'track', 'reach_lair', 'defeat'],
-        5: ['approach', 'track', 'reach_lair', 'find_target', 'defeat']
-    }
-
+        rescue_person: {
+            approach:
+                () => `Reach ${fact('place')} safely.`,
+            track:
+                () => `Follow the established signs of ${fact('person')}'s route.`,
+            reach_lair:
+                () => `Find the way to where ${fact('person')} is held.`,
+            find_person:
+                () => `Find ${fact('person')} and establish their situation.`,
+            defeat:
+                () => `Defeat the threat holding ${fact('person')}.`
+        },
+        defeat_elite: {
+            approach:
+                () => `Reach ${fact('territory')} safely.`,
+            track:
+                () => `Follow the authored evidence of ${fact('target')}'s route.`,
+            reach_lair:
+                () => `Reach ${fact('target')}'s lair at ${fact('lair')}.`,
+            find_target:
+                () => `Locate ${fact('target')} using the authored signs.`,
+            defeat:
+                () => `Defeat the linked Elite target: ${fact('target')}.`
+        }
     }[family];
 
     assert(
@@ -7240,13 +7256,20 @@ function buildQuestV2Structure(family, gateCount, facts) {
             mode: definition.mode,
             trigger: definition.trigger,
             objective: objectiveBuilder(),
-            decisive: definition.decisive === true
+            decisive:
+                definition.decisive === true ||
+                (
+                    family === 'rescue_person' &&
+                    variantId === 'lost' &&
+                    stage === 'find_person'
+                )
         };
     });
 
     return validateQuestV2Structure({
         version: 2,
         family,
+        variantId,
         gateCount,
         gates
     });
@@ -7817,7 +7840,12 @@ function resolveQuestSeed(test) {
     const selectedArchetype =
         eligibleArchetypes[archetypeRoll - 1];
     const archetype = selectedArchetype.archetype;
-      const authored = buildQuestFacts(state, archetype, zone);
+    const authored = buildQuestFacts(
+        state,
+        archetype,
+        zone,
+        gates
+    );
 
     const structureV2 = buildQuestV2PlanForOffer(
         state,
@@ -8444,59 +8472,108 @@ function prepareHerbForagingDiscovery(quest) {
         return null;
     }
 
-    quest.discoveries ||= [];
-
-    const id = `${quest.id}-harvested-herb`;
-    let herb = quest.discoveries.find(
-        item => item.id === id
-    );
-
-    if (!herb) {
-        herb = {
-            id,
-            kind: 'quest_item',
-            name: quest.facts.herb,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            requiredAction: 'gather_herb',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: quest.facts.place,
-            significance:
-                `The gathered herb is required by ${quest.turnIn.recipient}.`,
-            questCargo: true
-        };
-
-        quest.discoveries.push(herb);
-    }
-
-    const recoveryGate = quest.gatesData.find(
-        gate => gate.stage === 'recover'
-    );
-
-    assert(
-        recoveryGate,
-        'Herb Foraging is missing its authored recovery gate'
-    );
-
-    recoveryGate.requiredDiscoveryId = id;
-    recoveryGate.requiredDiscoveryState = 'acquired';
-
-    if (quest.currentGate?.step === recoveryGate.step) {
-        quest.currentGate.requiredDiscoveryId = id;
-        quest.currentGate.requiredDiscoveryState = 'acquired';
-    }
-
     assert(
         quest.turnIn && typeof quest.turnIn === 'object',
         'Herb Foraging has no locked turn-in record'
     );
 
-    quest.turnIn.discoveryId = id;
+    quest.discoveries ||= [];
 
-    return herb;
+    const herbName = quest.facts.herb;
+    const place = quest.facts.place;
+    const obstacle = quest.facts.obstacle;
+
+    const definitions = {
+        locate: {
+            suffix: 'growing-signs',
+            kind: 'evidence',
+            name: `Growing signs of ${herbName}`,
+            hidingPlace: `among the vegetation at ${place}`,
+            significance:
+                `These signs identify the patch where ${herbName} grows.`
+        },
+        reach_inner_site: {
+            suffix: 'safe-approach',
+            kind: 'evidence',
+            name: 'Safe approach to the herb patch',
+            hidingPlace: `at the edge of ${place}`,
+            significance:
+                `The approach avoids ${obstacle} and reaches the patch.`
+        },
+        find_access: {
+            suffix: 'harvest-method',
+            kind: 'evidence',
+            name: `Usable way to harvest ${herbName}`,
+            hidingPlace: `beside the herb patch at ${place}`,
+            significance:
+                `The plant can be gathered without ruining the harvest.`
+        },
+        recover: {
+            suffix: 'harvested-herb',
+            kind: 'quest_item',
+            name: herbName,
+            hidingPlace: place,
+            significance:
+                `The gathered herb is required by ${quest.turnIn.recipient}.`,
+            requiredAction: 'gather_herb',
+            questCargo: true
+        }
+    };
+
+    for (const gate of quest.gatesData) {
+        const definition = definitions[gate.stage];
+        if (!definition || gate.trigger !== 'discovery') continue;
+
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(
+            item => item.id === id
+        );
+
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: definition.kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance,
+                ...(definition.requiredAction
+                    ? { requiredAction: definition.requiredAction }
+                    : {}),
+                ...(definition.questCargo
+                    ? { questCargo: true }
+                    : {})
+            };
+            quest.discoveries.push(discovery);
+        }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const herbId = `${quest.id}-harvested-herb`;
+    assert(
+        quest.discoveries.some(item => item.id === herbId),
+        'Herb Foraging has no final harvest discovery'
+    );
+
+    assert(
+        !quest.turnIn.discoveryId ||
+        quest.turnIn.discoveryId === herbId,
+        'Herb Foraging turn-in points to a different discovery'
+    );
+
+    quest.turnIn.discoveryId = herbId;
+    return quest.discoveries.find(item => item.id === herbId);
 }
 
-    if (
         quest?.status !== 'in_progress' ||
         !['defeat_elite', 'rescue_person'].includes(
             quest.structureV2?.family
@@ -9103,7 +9180,10 @@ function resolveQuestAction(test) {
         registerQuestDestination(state, quest);
         quest.status = 'in_progress';
 
-        if (quest.structureV2?.family === 'defeat_elite') {
+        if (
+            ['defeat_elite', 'rescue_person']
+                .includes(quest.structureV2?.family)
+        ) {
             prepareV2QuestDiscoveries(quest);
         }
 
@@ -9266,8 +9346,10 @@ function resolveQuestAction(test) {
 
         if (
             quest.currentGate.trigger === 'linked_combat' &&
-            quest.structureV2?.family === 'defeat_elite'
+            ['defeat_elite', 'rescue_person']
+                .includes(quest.structureV2?.family)
         ) {
+
             const spawned = spawnEncounter({
                 state,
                 encounterType: 'quest_terminal',
@@ -12143,6 +12225,7 @@ function resolveBatch(args) {
                     const discovery =
                         prepareMissingCargoDiscovery(quest) ||
                         prepareSunkenSalvageDiscovery(quest) ||
+                        prepareHerbForagingDiscovery(quest) ||
                         prepareV2QuestDiscoveries(quest);
 
                     assert(
@@ -13556,9 +13639,12 @@ function questDiscoveryNarrationPacket(result, quest) {
     if (result.questGate?.objectiveSecured) {
         lines.push(
             'The final field objective is secured.',
-            `Return the recovered cargo to ${quest.turnIn?.recipient || quest.facts.sponsor}.`,
+            quest.structureV2?.family === 'rescue_person'
+                ? `Return to ${quest.turnIn?.recipient || quest.facts.sponsor} with the rescued person. The handover is report-only; no person is quest cargo.`
+                : `Return the recovered cargo to ${quest.turnIn?.recipient || quest.facts.sponsor}.`,
             'The quest payout has not been granted.'
         );
+
     } else if (result.questGate?.next) {
         lines.push(
             `Gate ${result.questGate.completed.step} completed.`,

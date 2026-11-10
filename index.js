@@ -7781,79 +7781,137 @@ function prepareMissingCargoDiscovery(state) {
         return null;
     }
 
+    assert(
+        quest.gates === 2 || quest.gates === 3,
+        `Missing Cargo discovery preparation does not support ${quest.gates} gates`
+    );
+
+    const profiles = {
+        1: {
+            clue: {
+                idSuffix: 'cargo-tally',
+                name: 'Counter-signed cargo tally',
+                hidingPlace:
+                    'inside the old gravel weir station’s tally drawer',
+                significance:
+                    'The tally and fresh drag marks show where the missing payroll strongbox was taken.'
+            },
+            cargo: {
+                idSuffix: 'payroll-strongbox',
+                name: 'the sealed payroll strongbox',
+                requiredAction: 'search_storehouse',
+                hidingPlace:
+                    'inside the locked storehouse at the old gravel weir',
+                significance:
+                    'This is the missing payroll strongbox reported by the trading concern.'
+            }
+        },
+        2: {
+            clue: {
+                idSuffix: 'diversion-docket',
+                name: 'Counter-signed diversion docket',
+                hidingPlace:
+                    'inside the weigh-station scale counterweight housing',
+                significance:
+                    'It identifies the subcontractor who diverted the tool shipment.'
+            },
+            cargo: {
+                idSuffix: 'tool-shipment',
+                name: quest.facts?.cargo || 'Missing shipment',
+                requiredAction: 'search_crates',
+                hidingPlace:
+                    'inside the abandoned freight crates',
+                significance:
+                    'This is the missing cargo the North Sluice peat-cutters reported.'
+            }
+        }
+    };
+
+    const profile = profiles[quest.seed?.scenarioRoll];
+
+    assert(
+        profile,
+        `No authored Missing Cargo discovery profile for scenario ${quest.seed?.scenarioRoll}`
+    );
+
     quest.discoveries ||= [];
 
-    const docketId = `${quest.id}-diversion-docket`;
-    let docket = quest.discoveries.find(
-        item => item.id === docketId
+    const clueId = `${quest.id}-${profile.clue.idSuffix}`;
+    let clue = quest.discoveries.find(
+        item => item.id === clueId
     );
 
-    if (!docket) {
-        docket = {
-            id: docketId,
+    if (!clue) {
+        clue = {
+            id: clueId,
             kind: 'evidence',
-            name: 'Counter-signed diversion docket',
+            name: profile.clue.name,
             locationId: quest.destinationId,
             state: 'hidden',
             acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace:
-                'inside the weigh-station scale counterweight housing',
-            significance:
-                'It identifies the subcontractor who diverted the tool shipment.'
+            hidingPlace: profile.clue.hidingPlace,
+            significance: profile.clue.significance
         };
-        quest.discoveries.push(docket);
+
+        quest.discoveries.push(clue);
     }
 
-    const docketGate = quest.gatesData[1];
-    if (docketGate?.mode === 'brain_social_heist') {
-        docketGate.requiredDiscoveryId = docketId;
-
-        if (quest.currentGate?.step === 2) {
-            quest.currentGate.requiredDiscoveryId = docketId;
-        }
-    }
-
-    const shipmentId = `${quest.id}-tool-shipment`;
-    let shipment = quest.discoveries.find(
-        item => item.id === shipmentId
+    const locateGate = quest.gatesData.find(
+        gate => gate.stage === 'locate'
     );
 
-    if (!shipment) {
-        shipment = {
-            id: shipmentId,
-            kind: 'quest_item',
-            name: quest.facts?.cargo || 'Missing shipment',
-            locationId: quest.destinationId,
-            state: 'hidden',
-            requiredAction: 'search_crates',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: 'inside the abandoned freight crates',
-            significance:
-                'This is the missing cargo the North Sluice peat-cutters reported.'
-        };
-        quest.discoveries.push(shipment);
-    }
-    const recoveryGate = quest.gatesData.find(
-        gate =>
-            gate.stage === 'recover' ||
-            gate.step === 3
-    );
+    if (locateGate) {
+        locateGate.requiredDiscoveryId = clueId;
+        locateGate.requiredDiscoveryState = 'acquired';
 
-    if (recoveryGate) {
-        recoveryGate.requiredDiscoveryId = shipmentId;
-        recoveryGate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === recoveryGate.step) {
-            quest.currentGate.requiredDiscoveryId = shipmentId;
+        if (quest.currentGate?.step === locateGate.step) {
+            quest.currentGate.requiredDiscoveryId = clueId;
             quest.currentGate.requiredDiscoveryState = 'acquired';
         }
     }
 
+    const cargoId = `${quest.id}-${profile.cargo.idSuffix}`;
+    let cargo = quest.discoveries.find(
+        item => item.id === cargoId
+    );
+
+    if (!cargo) {
+        cargo = {
+            id: cargoId,
+            kind: 'quest_item',
+            name: profile.cargo.name,
+            locationId: quest.destinationId,
+            state: 'hidden',
+            requiredAction: profile.cargo.requiredAction,
+            acquisitionPolicy: 'auto_on_reveal',
+            hidingPlace: profile.cargo.hidingPlace,
+            significance: profile.cargo.significance,
+            questCargo: true
+        };
+
+        quest.discoveries.push(cargo);
+    }
+
+    const recoveryGate = quest.gatesData.find(
+        gate => gate.stage === 'recover'
+    );
+
+    assert(
+        recoveryGate,
+        'Missing Cargo is missing its authored recovery gate'
+    );
+
+    recoveryGate.requiredDiscoveryId = cargoId;
+    recoveryGate.requiredDiscoveryState = 'acquired';
+
+    if (quest.currentGate?.step === recoveryGate.step) {
+        quest.currentGate.requiredDiscoveryId = cargoId;
+        quest.currentGate.requiredDiscoveryState = 'acquired';
+    }
+
     /*
-     * Retrieval quests must carry the authored cargo identity through
-     * delivery. Without this link, turn-in can mistake a cargo quest for
-     * a report-only objective and cannot mark the recovered item delivered.
-     * Preserve the issuer and recipient already locked on the quest.
+     * Retrieval quests must carry the same authored cargo identity through
+     * delivery. Preserve the issuer and recipient already locked on the quest.
      */
     assert(
         quest.turnIn && typeof quest.turnIn === 'object',
@@ -7862,13 +7920,13 @@ function prepareMissingCargoDiscovery(state) {
 
     assert(
         !quest.turnIn.discoveryId ||
-        quest.turnIn.discoveryId === shipmentId,
+        quest.turnIn.discoveryId === cargoId,
         'Missing Cargo turn-in points to a different cargo discovery'
     );
 
-    quest.turnIn.discoveryId = shipmentId;
+    quest.turnIn.discoveryId = cargoId;
 
-    return docket;
+    return clue;
 }
 
 function prepareSunkenSalvageDiscovery(state) {

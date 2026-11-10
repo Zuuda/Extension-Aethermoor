@@ -6429,8 +6429,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Arrival integration implemented; live verification pending.
  * - The next integration pass must select quest identity from destination,
  *   authored discovery, encounter linkage, or delivery quest ID.
- * - Offer preparation targets the newly generated quest while preserving
- *   the selected quest. Preparation helpers still need explicit quest arguments.
+ * - Offer preparation targets the newly generated quest directly; retrieval
+ *   and V2 discovery preparation helpers take explicit quest arguments.
  * - Quests tab renders all journal offers with ID-bound acceptance/decline.
  * - Rumor arrivals create journal offers immediately, preserving selection.
  * - Restore shared identity between activeQuest and its journal entry after
@@ -7845,22 +7845,14 @@ function resolveQuestSeed(test) {
     }
 
     /*
-     * Legacy preparation helpers read activeQuest. Temporarily point them
-     * at this newly generated offer, then restore the selected quest.
-     * The journal keeps the same quest object, including prepared discoveries.
-     * V2 defeat discoveries are still prepared on acceptance as before.
+     * Preparation targets this newly created quest directly. It must not
+     * change the compatibility selection or depend on activeQuest identity.
+     * Defeat-elite discoveries are prepared after acceptance.
      */
-    const selectedQuest = state.activeQuest;
-
-    try {
-        state.activeQuest = quest;
-        prepareMissingCargoDiscovery(quest);
-        prepareSunkenSalvageDiscovery(quest);
-        prepareV2QuestDiscoveries(quest);
-        validateRetrievalQuestDiscoveries(quest);
-    } finally {
-        state.activeQuest = selectedQuest;
-    }
+    prepareMissingCargoDiscovery(quest);
+    prepareSunkenSalvageDiscovery(quest);
+    prepareV2QuestDiscoveries(quest);
+    validateRetrievalQuestDiscoveries(quest);
 
     trigger.questSeedConsumed = true;
     return {

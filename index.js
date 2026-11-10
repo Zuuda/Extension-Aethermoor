@@ -7782,7 +7782,7 @@ function prepareMissingCargoDiscovery(state) {
     }
 
     assert(
-        quest.gates === 2 || quest.gates === 3,
+        quest.gates >= 1 && quest.gates <= 3,
         `Missing Cargo discovery preparation does not support ${quest.gates} gates`
     );
 
@@ -7947,7 +7947,7 @@ function prepareSunkenSalvageDiscovery(state) {
      * they can safely enter ordinary play.
      */
     assert(
-        quest.gates === 2 || quest.gates === 3,
+        quest.gates >= 1 && quest.gates <= 3,
         `Sunken Salvage discovery preparation does not support ${quest.gates} gates`
     );
 

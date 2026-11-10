@@ -8574,10 +8574,12 @@ function prepareHerbForagingDiscovery(quest) {
     return quest.discoveries.find(item => item.id === herbId);
 }
 
+ function prepareV2QuestDiscoveries(quest) {
+    const family = quest?.structureV2?.family;
+
+    if (
         quest?.status !== 'in_progress' ||
-        !['defeat_elite', 'rescue_person'].includes(
-            quest.structureV2?.family
-        ) ||
+        !['defeat_elite', 'rescue_person'].includes(family) ||
         !quest.destinationId
     ) {
         return null;
@@ -8585,122 +8587,96 @@ function prepareHerbForagingDiscovery(quest) {
 
     quest.discoveries ||= [];
 
-    const id = `${quest.id}-target-trail`;
-    let discovery = quest.discoveries.find(
-        item => item.id === id
-    );
-
-    if (!discovery) {
-        discovery = {
-            id,
-            kind: 'evidence',
-            name: 'Fresh signs of the target',
-            locationId: quest.destinationId,
-            state: 'hidden',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace:
-                quest.facts?.evidence ||
-                'among the recent signs at the quest site',
-            significance:
-                `The signs lead toward the lair of ` +
-                `${quest.structureV2.facts?.target ||
-                    'the quest target'}.`
-        };
-
-        quest.discoveries.push(discovery);
-    }
-
-    const trackingGate = quest.gatesData.find(
-        gate =>
-            gate.stage === 'track' &&
-            gate.trigger === 'discovery'
-    );
-    // Some V2 structures have no tracking gate; their decisive stage may
-    // be an authored person discovery or linked combat.
-    if (!trackingGate) {
-        return quest.structureV2.family === 'rescue_person'
-            ? quest.discoveries.find(
-                item => item.id === `${quest.id}-missing-person`
-            ) || null
-            : null;
-    }
-
-    trackingGate.requiredDiscoveryId = id;
-    trackingGate.requiredDiscoveryState = 'acquired';
-
-    if (quest.currentGate?.step === trackingGate.step) {
-        quest.currentGate.requiredDiscoveryId = id;
-        quest.currentGate.requiredDiscoveryState = 'acquired';
-    }
-
-    if (quest.structureV2.family === 'rescue_person') {
-        const variantId = quest.variant?.id;
-
-        const personDiscovery = {
-            id: `${quest.id}-missing-person`,
-            kind: 'evidence',
-            name: `Found ${quest.facts.person}`,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace:
-                variantId === 'lost'
-                    ? quest.facts.evidence
-                    : `the established holding place at ${quest.facts.place}`,
-            significance:
-                variantId === 'lost'
-                    ? `${quest.facts.person} is alive and can return to ${quest.turnIn.recipient}.`
-                    : `${quest.facts.person} is alive; the linked threat is holding them.`
-        };
-
-        quest.discoveries ||= [];
-
-        const existingPersonDiscovery =
-            quest.discoveries.find(
-                item => item.id === personDiscovery.id
-            );
-
-        if (!existingPersonDiscovery) {
-            quest.discoveries.push(personDiscovery);
-        }
-
-        const personGate = quest.gatesData.find(
-            gate =>
-                gate.stage === 'find_person' &&
-                gate.trigger === 'discovery'
+    function bind(stage, definition) {
+        const gate = quest.gatesData.find(
+            entry =>
+                entry.stage === stage &&
+                entry.trigger === 'discovery'
         );
 
-        if (personGate) {
-            personGate.requiredDiscoveryId = personDiscovery.id;
-            personGate.requiredDiscoveryState = 'acquired';
+        if (!gate) return null;
 
-            if (quest.currentGate?.step === personGate.step) {
-                quest.currentGate.requiredDiscoveryId =
-                    personDiscovery.id;
-                quest.currentGate.requiredDiscoveryState = 'acquired';
-            }
-        }
-
-        const trackingGate = quest.gatesData.find(
-            gate =>
-                gate.stage === 'track' &&
-                gate.trigger === 'discovery'
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(
+            item => item.id === id
         );
 
-        if (trackingGate) {
-            trackingGate.requiredDiscoveryId = discovery.id;
-            trackingGate.requiredDiscoveryState = 'acquired';
-
-            if (quest.currentGate?.step === trackingGate.step) {
-                quest.currentGate.requiredDiscoveryId = discovery.id;
-                quest.currentGate.requiredDiscoveryState = 'acquired';
-            }
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: 'evidence',
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance
+            };
+            quest.discoveries.push(discovery);
         }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+
+        return discovery;
     }
 
-    return discovery;
+    const target =
+        family === 'rescue_person'
+            ? quest.facts.person
+            : quest.structureV2.facts.target;
 
+    const trail = bind('track', {
+        suffix: 'target-trail',
+        name: `Fresh signs of ${target}`,
+        hidingPlace:
+            quest.facts?.evidence ||
+            'among the recent signs at the quest site',
+        significance:
+            `The signs show the route taken by ${target}.`
+    });
+
+    if (family === 'defeat_elite') {
+        // Existing defeat-elite behavior remains limited to its track gate.
+        return trail;
+    }
+
+    const variantId = quest.variant?.id;
+
+    assert(
+        variantId === 'lost' || variantId === 'abducted',
+        'Missing Person requires a saved lost or abducted variant'
+    );
+
+    const lair = bind('reach_lair', {
+        suffix: 'holding-place',
+        name: `Way to ${target}'s holding place`,
+        hidingPlace: `along the trail beyond ${quest.facts.place}`,
+        significance:
+            `The signs establish a way past ${quest.facts.obstacle}.`
+    });
+
+    const person = bind('find_person', {
+        suffix: 'missing-person',
+        name: `Found ${target}`,
+        hidingPlace:
+            variantId === 'lost'
+                ? `beyond ${quest.facts.evidence}`
+                : `at the established holding place beyond ${quest.facts.place}`,
+        significance:
+            variantId === 'lost'
+                ? `${target} is alive and can return to ${quest.turnIn.recipient}.`
+                : `${target} is alive, but the linked threat still holds them.`
+    });
+
+    return person || trail || lair;
 }
+
 
 function advanceQuestFromDiscovery(state, discovery) {
     const quest = state.activeQuest;

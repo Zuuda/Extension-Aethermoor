@@ -6257,11 +6257,17 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * PARTIAL SYSTEMS
  *
  * PARTIAL — V2 retrieve-item quests
- * - The retrieve_item structure exists.
- * - Missing Cargo and Sunken Salvage have partial discovery support.
- * - Author complete discovery requirements for every supported gate count.
- * - Ensure every retrieval quest locks one cargo discovery before acceptance.
- * - Test cargo acquisition, cargo preservation during travel, and cargo delivery.
+ * - Missing Cargo and Sunken Salvage prepare authored discoveries for their
+ *   two- through five-gate structures, including inner-site and access stages.
+ * - New retrieval offers validate every discovery gate and require the final
+ *   recovery discovery to match the locked turn-in cargo.
+ * - Discovery preparation and validation consume no additional RNG.
+ * - Full gameplay verification is deferred to beta.
+ * - Planned: group depot recovery and Sunken Salvage beneath Recover Cargo,
+ *   with a separate compatible-variant roll and saved variant identity.
+ * - Preserve existing quest IDs, authored salvage contents, discoveries,
+ *   progress, and delivery records during that restructuring.
+
  *
  * PARTIAL — Authored quest discoveries
  * - Some V2 quests have engine-authored discoveries with stable IDs,
@@ -7758,6 +7764,7 @@ function resolveQuestSeed(test) {
         prepareMissingCargoDiscovery(state);
         prepareSunkenSalvageDiscovery(state);
         prepareV2QuestDiscoveries(state);
+        validateRetrievalQuestDiscoveries(quest);
     } finally {
         state.activeQuest = selectedQuest;
     }
@@ -7769,6 +7776,62 @@ function resolveQuestSeed(test) {
         quest,
         state
     };
+}
+
+/*
+ * Retrieval offers must be complete when created. Validate their authored
+ * requirements before consuming the trigger or saving the offer.
+ *
+ * This validates new offers only. Existing saved quests retain their locked
+ * records and are not rewritten or rerolled by this check.
+ */
+function validateRetrievalQuestDiscoveries(quest) {
+    if (quest.structureV2?.family !== 'retrieve_item') {
+        return;
+    }
+
+    const discoveries = quest.discoveries || [];
+
+    for (const gate of quest.gatesData) {
+        if (gate.trigger !== 'discovery') continue;
+
+        const discovery = discoveries.find(
+            item => item.id === gate.requiredDiscoveryId
+        );
+
+        assert(
+            discovery,
+            `Retrieval gate ${gate.step} has no authored discovery`
+        );
+
+        assert(
+            discovery.locationId === quest.destinationId &&
+            typeof discovery.hidingPlace === 'string' &&
+            discovery.hidingPlace.trim().length > 0 &&
+            typeof discovery.significance === 'string' &&
+            discovery.significance.trim().length > 0,
+            `Retrieval gate ${gate.step} has incomplete discovery details`
+        );
+
+        assert(
+            gate.requiredDiscoveryState === 'acquired' &&
+            discovery.acquisitionPolicy === 'auto_on_reveal',
+            `Retrieval gate ${gate.step} has incompatible acquisition rules`
+        );
+    }
+
+    const finalGate = quest.gatesData.at(-1);
+    const cargo = discoveries.find(
+        item => item.id === quest.turnIn?.discoveryId
+    );
+
+    assert(
+        finalGate?.stage === 'recover' &&
+        finalGate.decisive === true &&
+        cargo?.kind === 'quest_item' &&
+        finalGate.requiredDiscoveryId === cargo.id,
+        'Retrieval quest must recover and deliver the same authored cargo'
+    );
 }
 
 function prepareMissingCargoDiscovery(state) {

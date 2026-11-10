@@ -12797,7 +12797,6 @@ function resolveBatch(args) {
  * then decide whether the Mender supports the same full-recovery rule.
  */
 function applyOutOfCombatRecovery(previousState, nextState) {
-    const wasInCombat =
     const previousStatus =
         previousState?.encounter?.status;
 

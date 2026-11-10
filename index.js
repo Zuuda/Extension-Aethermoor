@@ -6310,9 +6310,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — Narration authority
  * - Engine handoffs explicitly separate private instructions from output.
- * - Detect recognizable private-context and contract-header leakage.
+ * - Detect recognizable engine-instruction headings outside Markdown code.
+ * - A match is diagnostic evidence, not proof that hidden facts were exposed.
+ * - Ignore fenced and inline code examples in both instruction detection
+ *   and protocol-event extraction so beta explanations cannot submit tags.
  * - Warn without modifying story text, consuming RNG, or saving a revision.
- * - Reject assistant discovery/delivery events from visibly leaked replies.
+ * - Reject assistant discovery/delivery events from replies matching the
+ *   instruction detector outside code. Technical prose can still match;
+ *   inspect the observed reply before diagnosing a narration failure.
+ * - Code-example exclusion implemented; live verification pending.
  * - Do not automatically regenerate replies or undo resolved mechanics.
  * - Leak detection is narrow: it does not validate arbitrary narrative claims.
  * - Optional per-chat narration recorder retains the last 30 diagnostic events
@@ -18238,11 +18244,59 @@ function getAssistantMessageText(data) {
     return null;
 }
 
+/*
+ * Technical explanations and beta reports may quote packet headings or
+ * protocol examples as code. Those examples are neither narration leaks
+ * nor gameplay events. Detection and event extraction must inspect the
+ * same text so ignoring an example cannot accidentally authorize its tags.
+ *
+ * Real protocol tags inside <plan> remain eligible: <plan> is not a
+ * Markdown code fence. This helper changes no saved mechanics or RNG.
+ */
+function aethermoorNonCodeText(text) {
+    if (typeof text !== 'string') return '';
+
+    const lines = text.split(/\r?\n/);
+    const output = [];
+    let fenceCharacter = null;
+    let fenceLength = 0;
+
+    for (const line of lines) {
+        const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/);
+
+        if (fenceCharacter) {
+            if (
+                fence &&
+                fence[1][0] === fenceCharacter &&
+                fence[1].length >= fenceLength &&
+                fence[2].trim() === ''
+            ) {
+                fenceCharacter = null;
+                fenceLength = 0;
+            }
+
+            output.push('');
+            continue;
+        }
+
+        if (fence) {
+            fenceCharacter = fence[1][0];
+            fenceLength = fence[1].length;
+            output.push('');
+            continue;
+        }
+
+        output.push(line);
+    }
+
+    // Inline code examples are also explanatory text, not event reports.
+    return output.join('\n').replace(/(`+)[^`\n]*?\1/g, '');
+}
+
 function extractAethermoorQuestEvents(text) {
     if (typeof text !== 'string') return [];
-
+    text = aethermoorNonCodeText(text);
     const events = [];
-
     const foundPattern =
         /<AETHERMOOR:(SEARCHED|FOUND)\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
 
@@ -18296,14 +18350,14 @@ const aethermoorNarrationWarnings = new WeakMap();
 
 function leakedAethermoorContext(text) {
     if (typeof text !== 'string') return [];
-
+    text = aethermoorNonCodeText(text);
     const leaks = [];
 
     /*
      * A marker mention is not sufficient evidence of a leaked handoff.
      * Require the opening marker, the private-context heading, and the
-     * closing marker in their actual packet positions. This still detects
-     * a reproduced full handoff, including one inside a code fence.
+     * closing marker in their actual packet positions. Fenced and inline
+     * code examples have already been excluded from this inspection.
      */
     const handoffPattern =
         /^\s*<aethermoor-mechanics-handoff>\s*\r?\n\s*PRIVATE ENGINE CONTEXT\b[\s\S]*?^\s*<aethermoor-mechanics-handoff>\s*$/im;
@@ -18379,10 +18433,12 @@ function warnAethermoorNarrationLeak(message, leaks) {
     );
 
     toastr.warning(
-        'The reply exposed private engine instructions. ' +
+        'Recognizable engine-instruction text appeared outside a code example. ' +
+        'This may be technical discussion or copied narration context; ' +
+        'inspect the reply before diagnosing a problem. ' +
         'Discovery and delivery tags from this reply were ignored. ' +
-        'Existing saved mechanics were not undone or rerolled.',
-        'Aethermoor: Narration warning'
+        'Saved mechanics were not undone or rerolled.',
+        'Aethermoor: Instruction-text match'
     );
 }
 

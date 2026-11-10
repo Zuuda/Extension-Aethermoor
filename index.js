@@ -12798,20 +12798,20 @@ function resolveBatch(args) {
  */
 function applyOutOfCombatRecovery(previousState, nextState) {
     const wasInCombat =
-        previousState?.encounter?.status === 'active';
+    const previousStatus =
+        previousState?.encounter?.status;
 
     const nextEncounterStatus =
         nextState?.encounter?.status;
 
-    const anotherEncounterPending =
-        nextEncounterStatus === 'active' ||
-        nextEncounterStatus === 'spotted';
+    const encounterEnded =
+        ['active', 'spotted'].includes(previousStatus) &&
+        ['cleared', 'fled'].includes(nextEncounterStatus);
 
     if (
-        !wasInCombat ||
-        anotherEncounterPending ||
-        nextEncounterStatus === 'dead' ||
-        nextState.crew?.qtik?.hp <= 0
+        !encounterEnded ||
+        nextState.crew?.qtik?.hp <= 0 ||
+        nextState.crew?.tansy?.hp <= 0
     ) {
         return null;
     }

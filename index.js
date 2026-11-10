@@ -7187,18 +7187,16 @@ function buildQuestV2PlanForOffer(
 
     const family = familyByArchetype[archetype.id];
     if (!family) return null;
+
     let v2Facts;
-    if (
-        archetype.id === 'missing_cargo' ||
-        archetype.id === 'sunken_salvage' ||
-        archetype.id === 'recover_cargo'
-    ) {
+
     if (
         archetype.id === 'missing_cargo' ||
         archetype.id === 'sunken_salvage' ||
         archetype.id === 'recover_cargo'
     ) {
         v2Facts = {
+
             item: facts.cargo,
             destination:
                 archetype.id === 'sunken_salvage' ||
@@ -7694,12 +7692,7 @@ function resolveQuestSeed(test) {
     const selectedArchetype =
         eligibleArchetypes[archetypeRoll - 1];
     const archetype = selectedArchetype.archetype;
-    const authored = buildQuestFacts(state, archetype, zone);
-    const gatesData = buildAuthoredQuestGates(
-        archetype,
-        gates,
-        authored.facts
-    );
+      const authored = buildQuestFacts(state, archetype, zone);
 
     const structureV2 = buildQuestV2PlanForOffer(
         state,
@@ -7709,20 +7702,18 @@ function resolveQuestSeed(test) {
         authored.variantId
     );
 
-    const usesV2Structure =
-        structureV2 &&
-        [
-            'recover_cargo',
-            'missing_cargo',
-            'sunken_salvage',
-            'territorial_beast',
-            'ruin_clearance'
-        ].includes(archetype.id);
-
-    const questGatesData =
-        usesV2Structure
-            ? clone(structureV2.gates)
-            : gatesData;
+    /*
+     * V2 archetypes supply complete structures. Build legacy gates only
+     * for archetypes that still use them; Recover Cargo intentionally
+     * has no legacy gate templates.
+     */
+    const questGatesData = structureV2
+        ? clone(structureV2.gates)
+        : buildAuthoredQuestGates(
+            archetype,
+            gates,
+            authored.facts
+        );
 
     const seed = {
         zone,
@@ -13123,6 +13114,7 @@ function discoveryNarrationPacket(encounter) {
 }
 
 const PUBLIC_QUEST_FACT_KEYS = {
+    recover_cargo: ['sponsor', 'cargo', 'place', 'wreck'],
     missing_cargo: ['sponsor', 'cargo', 'place'],
     ruin_clearance: ['sponsor', 'site'],
     herb_foraging: ['sponsor', 'herb', 'place'],

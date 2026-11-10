@@ -7098,7 +7098,13 @@ function buildQuestV2Structure(family, gateCount, facts) {
 }
 
 function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
+    /*
+     * Recover Cargo is the canonical V2 family. Keep the legacy IDs as
+     * compatibility aliases until existing saved quests are migrated.
+     * Variant identity remains separate from the mechanical family.
+     */
     const familyByArchetype = {
+        recover_cargo: 'retrieve_item',
         missing_cargo: 'retrieve_item',
         sunken_salvage: 'retrieve_item',
         territorial_beast: 'defeat_elite',
@@ -7107,9 +7113,7 @@ function buildQuestV2PlanForOffer(state, archetype, gateCount, facts) {
 
     const family = familyByArchetype[archetype.id];
     if (!family) return null;
-
     let v2Facts;
-
     if (archetype.id === 'missing_cargo') {
         v2Facts = {
             item: facts.cargo,
@@ -7621,6 +7625,7 @@ function resolveQuestSeed(test) {
     const usesV2Structure =
         structureV2 &&
         [
+            'recover_cargo',
             'missing_cargo',
             'sunken_salvage',
             'territorial_beast',

@@ -8290,6 +8290,16 @@ function resolveSelectedQuestEvent(test) {
         `Unsupported quest discovery event: ${test.event}`
     );
 
+    /*
+     * Older saved Missing Cargo quests may reach the recovery gate
+     * without its authored cargo ID copied onto currentGate. Re-run the
+     * idempotent preparation after selecting the owning quest so the
+     * search action can be authorized and validated.
+     */
+    if (quest.archetype?.id === 'missing_cargo') {
+        prepareMissingCargoDiscovery(state);
+    }
+
     const discovery = (quest.discoveries || []).find(
         item => item.id === test.questItemId
     );
@@ -8297,6 +8307,7 @@ function resolveSelectedQuestEvent(test) {
     assert(discovery, 'Unknown authored quest discovery');
     assert(
         state.currentLocationId === discovery.locationId,
+
         'Quest discovery is at the wrong location'
     );
 

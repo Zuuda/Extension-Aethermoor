@@ -6510,7 +6510,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Automatic confirmed-arrival resolution implemented for the existing
  *   benign, already-cleared, and genuine-hook outcomes; regression pending.
  * - Preserve locked inquiries and defer offers while the quest slot is busy.
- * - World no longer requires a generic Investigate action after arrival.
+ * - IMPLEMENTED — BETA PENDING: rumor resolution is arrival-driven; the
+ *   obsolete manual investigate_lead operation and narration path are removed.
  * - Elite, contact, settlement-discovery, and explorable-site outcomes remain
  *   unimplemented. Define their saved records and arrival contracts before
  *   adding them to the outcome table.
@@ -12474,83 +12475,6 @@ function resolveBatch(args) {
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
-               
-                case 'investigate_lead': {
-                    let state = clone(test.state);
-                    const lead = state.leads?.[test.leadId];
-
-                    assert(
-                        lead?.kind === 'rumor' &&
-                        lead.status === 'known',
-                        'Choose a known, uninvestigated rumor'
-                    );
-                    assert(
-                        lead.targetType === 'place' &&
-                        state.currentLocationId === lead.targetId,
-                        'The crew must arrive at the rumor destination first'
-                    );
-                    assert(
-                        !state.activeQuest ||
-                        !['offered', 'in_progress'].includes(
-                            state.activeQuest.status
-                        ),
-                        'Resolve the existing quest offer before investigating another rumor'
-                    );
-
-                    const issuer =
-                        questIssuerSettlement(state, test);
-
-                    const repTier =
-                        state.reputation?.[issuer.reputationKey]?.tier;
-
-                    assert(
-                        repTier,
-                        `No saved reputation tier for ${issuer.label}`
-                    );
-
-                    const inquiry = resolveWorldSeeds({
-                        state,
-                        inquiryId: lead.id,
-                        investigatedRumor: true
-                    });
-
-                    state = inquiry.state;
-                    const finding = inquiry.findings.rumor;
-                    let quest = null;
-
-                    if (
-                        finding ===
-                        'genuine_unclaimed_quest_or_dungeon_hook'
-                    ) {
-                        const offer = resolveQuestSeed({
-                            state,
-                            inquiryId: lead.id,
-                            zone: lead.zone || state.zone,
-                            repTier,
-                            town: issuer.reputationKey,
-                            settlementId: issuer.id
-                        });
-
-                        state = offer.state;
-                        if (offer.created) quest = offer.quest;
-                    }
-
-                    state.leads[test.leadId].status = 'investigated';
-                    state.leads[test.leadId].finding = finding;
-
-                    result = {
-                        ok: true,
-                        action: 'investigate_lead',
-                        created: true,
-                        leadId: test.leadId,
-                        finding,
-                        quest,
-                        state
-                    };
-                    break;
-                }
-
-
                 case 'engage': {
                     const state = clone(test.state);
                     assert(
@@ -13719,27 +13643,6 @@ function avoidEncounterNarrationPacket(encounter) {
     ].join('\n');
 }
 
-function rumorInvestigationNarrationPacket(result) {
-    const lines = [
-        `The crew investigated lead ${result.leadId} at its destination.`,
-        `The rumor resolves as: ${result.finding.replaceAll('_', ' ')}.`
-    ];
-
-    if (result.quest) {
-        lines.push(questOfferNarrationPacket(result.quest));
-
-    } else if (
-        result.finding === 'travelogue_flub_benign_oddity' ||
-        result.finding === 'already_cleared_by_other_immortals'
-    ) {
-        lines.push(
-            'This result resolves only the specific rumor. It does not mean the location has nothing else to explore.'
-        );
-    }
-
-    return lines.join('\n');
-}
-
 function combatNarrationPacket(result, actions) {
     const qtikActions = {
         fire_melee: 'Fire Melee',
@@ -14278,11 +14181,6 @@ async function runStoredMechanic(args) {
                     caseResult,
                     findQuestById(nextState, caseResult.questId)
                 )
-
-            : batch &&
-              oneCase?.kind === 'investigate_lead' &&
-              caseResult.created
-                ? rumorInvestigationNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'avoid' &&
@@ -14851,7 +14749,6 @@ function registerTools() {
                                     'quest_event',
                                     'quest_site_inspect',
                                     'quest_reveal_terminal',
-                                    'investigate_lead',
                                     'engage',
                                     'avoid',
                                     'turn',

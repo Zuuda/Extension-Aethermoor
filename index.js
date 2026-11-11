@@ -15578,22 +15578,6 @@ async function openWorldPanel() {
         }
 
 
-        for (const lead of leads) {
-            if (
-                lead.kind === 'rumor' &&
-                lead.status === 'known' &&
-                state.currentLocationId === lead.targetId
-            ) {
-                actions.push({
-                    label:
-                        `Investigate: ` +
-                        `${state.places[lead.targetId].label} rumor`,
-                    action: 'investigate_lead',
-                    leadId: lead.id
-                });
-            }
-        }
-
         const buttons = actions.map((entry, index) => ({
             text: entry.label,
             result: POPUP_RESULT[`CUSTOM${index + 1}`]
@@ -15691,28 +15675,6 @@ async function openWorldPanel() {
             );
 
             return;
-        }
-
-
-        if (selected.action === 'investigate_lead') {
-            const output = await runStoredMechanic({
-                cases: [{
-                    name: 'investigate_rumor_lead',
-                    kind: 'investigate_lead',
-                    leadId: selected.leadId
-                }]
-            });
-
-            assert(
-                output?.ok === true,
-                output?.results?.[0]?.error ||
-                    'Could not investigate rumor'
-            );
-
-            toastr.info(
-                'Rumor investigated. Generate the next scene to narrate what they learn.',
-                'Aethermoor'
-            );
         }
     } catch (error) {
         toastr.error(

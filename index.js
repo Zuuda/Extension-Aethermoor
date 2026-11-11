@@ -15701,16 +15701,37 @@ function formatWorldStatus(state) {
         'Rumors'
     ];
 
-    const rumors = leads.filter(lead => lead?.kind === 'rumor');
-    lines.push(
-        rumors.length
-            ? rumors.map(lead =>
-                `- ${lead.claim || lead.label || lead.id}`
-            ).join('\n')
-            : 'None recorded.'
+    const currentZoneRumors = leads.filter(lead =>
+        lead?.kind === 'rumor' &&
+        Number(state.places?.[lead.targetId]?.zone) === state.zone
     );
 
+    const earlierZoneRumors = leads.filter(lead =>
+        lead?.kind === 'rumor' &&
+        Number(state.places?.[lead.targetId]?.zone) < state.zone
+    );
+
+    lines.push(
+        currentZoneRumors.length
+            ? currentZoneRumors.map(lead =>
+                `- ${lead.claim || lead.label || lead.id}`
+            ).join('\n')
+            : 'None recorded in this zone.'
+    );
+
+    if (earlierZoneRumors.length > 0) {
+        lines.push(
+            '',
+            'Earlier-zone rumor history (optional; no return required)',
+            ...earlierZoneRumors.map(lead =>
+                `- Zone ${state.places[lead.targetId].zone}: ` +
+                `${lead.claim || lead.label || lead.id}`
+            )
+        );
+    }
+
     const otherLeads = leads.filter(lead => lead?.kind !== 'rumor');
+
     lines.push('', 'Other leads');
     lines.push(
         otherLeads.length

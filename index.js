@@ -13707,18 +13707,26 @@ function questOfferNarrationPacket(quest) {
 
     const variantLabels = {
         depot_recovery: 'Depot Recovery',
-        sunken_salvage: 'Sunken Salvage'
+        sunken_salvage: 'Sunken Salvage',
+        lost: 'Lost Person',
+        abducted: 'Abducted Person'
     };
 
     const variantLabel =
         variantLabels[quest.variant?.id] || null;
 
+    const variantText = variantLabel
+        ? quest.archetype?.id === 'recover_cargo'
+            ? `Recover Cargo variant: ${variantLabel}.`
+            : quest.archetype?.id === 'missing_person'
+                ? `Missing Person variant: ${variantLabel}.`
+                : `Quest variant: ${variantLabel}.`
+        : null;
+
     const factLines = publicQuestFactLines(quest);
     return [
         sourceText,
-        ...(variantLabel
-            ? [`Recover Cargo variant: ${variantLabel}.`]
-            : []),
+        ...(variantText ? [variantText] : []),
 
         `Quest offered: ${quest.title}.`,
         quest.pitch || 'A local request has been presented.',
@@ -15983,10 +15991,20 @@ function formatQuestStatus(quest) {
         return 'No active quest offer.';
     }
 
+       const variantLabels = {
+        depot_recovery: 'Depot Recovery',
+        sunken_salvage: 'Sunken Salvage',
+        lost: 'Lost Person',
+        abducted: 'Abducted Person'
+    };
+
     const lines = [
         `Quest: ${quest.title}`,
         `Status: ${quest.status}`,
         `Rank: ${quest.rank}`,
+        ...(variantLabels[quest.variant?.id]
+            ? [`Variant: ${variantLabels[quest.variant.id]}`]
+            : []),
         `Gates: ${quest.gates}`,
         `Payout: ${quest.payout.xp} XP, ` +
             `${quest.payout.silver} silver, ` +

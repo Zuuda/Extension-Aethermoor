@@ -5430,7 +5430,13 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
     });
 
     nextState = progression.state;
-    quest = nextState.activeQuest;
+    quest = findQuestById(nextState, questId);
+
+    assert(
+        quest,
+        `Arrival lost its quest record: ${questId}`
+    );
+
     quest.completedGates ||= [];
 
     if (!quest.completedGates.some(

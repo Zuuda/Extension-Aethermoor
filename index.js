@@ -7001,7 +7001,6 @@ const QUEST_V2_STRUCTURES = {
             3: ['approach', 'track', 'find_person']
         },
         abducted: {
-            2: ['approach', 'defeat'],
             3: ['approach', 'track', 'defeat'],
             4: ['approach', 'track', 'reach_lair', 'defeat'],
             5: ['approach', 'track', 'reach_lair', 'find_person', 'defeat']
@@ -7355,7 +7354,7 @@ function buildQuestV2PlanForOffer(
     if (family === 'rescue_person') {
         const validGateCounts =
             variantId === 'lost' ? [2, 3] :
-            variantId === 'abducted' ? [2, 3, 4, 5] :
+            variantId === 'abducted' ? [3, 4, 5] :
             [];
 
         assert(

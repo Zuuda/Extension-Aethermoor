@@ -13002,15 +13002,27 @@ function resolveBatch(args) {
                         action: 'complete',
                         objectiveCompleted: true,
                         completionEvidence:
-                            `Delivered ${
-                                quest.discoveries?.find(
-                                    item =>
-                                        item.id ===
-                                        quest.turnIn.discoveryId
-                                )?.name ||
-                                quest.facts?.cargo ||
-                                'the quest cargo'
-                            } to ${quest.turnIn.recipient}.`
+                            quest.turnIn.discoveryId
+                                ? `Delivered ${
+                                    quest.discoveries?.find(
+                                        item =>
+                                            item.id ===
+                                            quest.turnIn.discoveryId
+                                    )?.name ||
+                                    quest.facts?.cargo ||
+                                    'the quest cargo'
+                                } to ${quest.turnIn.recipient}.`
+                                : quest.structureV2?.family ===
+                                    'rescue_person'
+                                    ? `Returned ${
+                                        quest.facts.person
+                                    } safely to ${
+                                        quest.turnIn.recipient
+                                    }.`
+                                    : `Reported the completed objective to ${
+                                        quest.turnIn.recipient
+                                    }.`
+
                     });
 
                     if (previousSelectionId !== quest.id) {
@@ -13715,18 +13727,30 @@ function questActionNarrationPacket(result, questAction) {
         ].join('\n');
     }
 
-        if (questAction === 'complete') {
+    if (questAction === 'complete') {
         const rewards = result.rewards;
+        const recipient =
+            quest.turnIn?.recipient ||
+            quest.facts?.sponsor ||
+            quest.town;
+        const cargoDelivery =
+            Boolean(quest.turnIn?.discoveryId);
 
         return [
-            `The crew returned the quest cargo to ${quest.turnIn?.recipient || quest.facts?.sponsor || quest.town}.`,
+            cargoDelivery
+                ? `The crew delivered the quest cargo to ${recipient}.`
+                : quest.structureV2?.family === 'rescue_person'
+                    ? `The crew returned ${quest.facts.person} to ${recipient}.`
+                    : `The crew reported the completed objective to ${recipient}.`,
             `Quest completed: ${quest.title}.`,
             `Rewards paid: ${rewards.xp} XP, ${rewards.silver} silver, ` +
                 `${rewards.repSteps} reputation steps.`,
             ...rewards.loot.map(item =>
                 `Salvage received: ${item.name} (${item.rarity}).`
             ),
-            'The company cargo was delivered; its contents were not added to the crew purse.',
+            ...(cargoDelivery
+                ? ['Quest cargo contents were not added to the crew purse.']
+                : []),
             'Narrate the handover naturally without mentioning software, event tags, or state management.'
         ].join('\n');
     }
@@ -15731,10 +15755,12 @@ function formatQuestStatus(quest) {
         );
     }
 
-        if (quest.deliveryReady && quest.turnIn) {
+    if (quest.deliveryReady && quest.turnIn) {
         lines.push(
-            `Delivery is eligible to ${quest.turnIn.recipient}.`,
-            'When the protagonists actually hand over the cargo in the fiction, place this exact tag inside the disposable <plan> block:',
+            `Turn-in is eligible with ${quest.turnIn.recipient}.`,
+            quest.turnIn.discoveryId
+                ? 'When the protagonists actually hand over the cargo in the fiction, place this exact tag inside the disposable <plan> block:'
+                : 'When the protagonists actually meet the sponsor and report or return with the rescued person in the fiction, place this exact tag inside the disposable <plan> block:',
             `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
             'Do not emit the delivery tag before the fictional handoff.'
         );
@@ -15742,7 +15768,6 @@ function formatQuestStatus(quest) {
 
     return lines.join('\n');
 }
-
 
 async function openQuestPanel() {
     try {

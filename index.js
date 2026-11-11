@@ -6974,8 +6974,8 @@ const QUEST_ARCHETYPES = [
          * not a species or landscape. The narrator may describe the
          * engine-created Elite to fit the zone without changing its stats.
          */
-        scenarios: [
-                       {
+               scenarios: [
+            {
                 ranks: ['F'],
                 pitch:
                     'A small nuisance animal has been disrupting a ' +
@@ -6990,7 +6990,13 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'the animal keeps returning to the work area'
                 }
             },
-
+            {
+                pitch:
+                    'A territorial animal has driven people from a ' +
+                    'regularly used route.',
+                truth:
+                    'The animal has established a defended territory ' +
+                    'around a nearby shelter.',
                 facts: {
                     sponsor: 'the local route warden',
                     beast: 'the territorial animal',

@@ -6836,6 +6836,21 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'an approach exposed to the occupants'
                 }
             },
+             {
+                ranks: ['F'],
+                pitch:
+                    'Small nuisance creatures have settled in an unused ' +
+                    'work area. The local crew wants the space cleared.',
+                truth:
+                    'A small group of nuisance creatures is occupying the area.',
+                facts: {
+                    sponsor: 'the local work crew',
+                    site: 'the unused work area',
+                    threat: 'the nuisance creatures',
+                    evidence: 'signs of a small group nesting there',
+                    obstacle: 'the creatures must be cleared from the work area'
+                }
+            },
             {
                 pitch:
                     'An essential passage through an old structure has ' +
@@ -6960,13 +6975,22 @@ const QUEST_ARCHETYPES = [
          * engine-created Elite to fit the zone without changing its stats.
          */
         scenarios: [
-            {
+                       {
+                ranks: ['F'],
                 pitch:
-                    'A territorial animal has driven people from a ' +
-                    'regularly used route.',
+                    'A small nuisance animal has been disrupting a ' +
+                    'local work area.',
                 truth:
-                    'The animal has established a defended territory ' +
-                    'around a nearby shelter.',
+                    'The animal has repeatedly returned to the work area.',
+                facts: {
+                    sponsor: 'the local work crew',
+                    beast: 'the nuisance animal',
+                    place: 'the affected work area',
+                    evidence: 'repeated signs of the animal’s visits',
+                    obstacle: 'the animal keeps returning to the work area'
+                }
+            },
+
                 facts: {
                     sponsor: 'the local route warden',
                     beast: 'the territorial animal',
@@ -7014,9 +7038,13 @@ function eligibleQuestScenarios(_state, archetype, _zone, rank) {
             return false;
         }
 
-        // F has one authored, low-stakes objective at present.
+        // F offers are limited to explicitly authored menial scenarios.
         if (rank === 'F') {
-            return archetype.id === 'herb_foraging' &&
+            return [
+                'herb_foraging',
+                'ruin_clearance',
+                'territorial_beast'
+            ].includes(archetype.id) &&
                 scenario.ranks?.includes('F') === true;
         }
 
@@ -7109,12 +7137,14 @@ function buildQuestFacts(
             B: 'region-critical cargo whose loss disrupts several communities'
         },
         ruin_clearance: {
+            F: 'a nuisance disrupting one ordinary work area',
             E: 'a limited danger disrupting one local worksite',
             D: 'a threat preventing important local work or travel',
             C: 'a danger disrupting an essential community route or service',
             B: 'a major threat affecting routes or work across the region'
         },
         territorial_beast: {
+            F: 'a nuisance animal disrupting routine local work',
             E: 'an animal nuisance affecting a limited local area',
             D: 'a dangerous animal threatening regular local travel or work',
             C: 'a threat disrupting an essential route or community activity',

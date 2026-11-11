@@ -6573,6 +6573,28 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Defer implementation until ordinary rumor arrival, persistent knowledge,
  *   and local exploration are exercised and stable.
  *
+ * DEFERRED — Forward-moving zones and portable discoveries
+ * - Each zone is its own level-band ecosystem: Zone 1 covers levels 1–5,
+ *   Zone 2 covers 6–10, and so on. Local quests, rumors, NPCs, and dungeon
+ *   entrances stay in the zone where they were established.
+ * - The intended pace is a few quests, levels, and selected rumors before
+ *   moving forward—not exhausting every opportunity in a zone.
+ * - Leaving an opportunity behind does not move it to the next zone,
+ *   scale up its old encounters, or impose a return trip.
+ * - Keep older leads in history rather than automatically cancelling
+ *   accepted quests or deleting unresolved records on departure.
+ * - Portable Crew Knowledge can give later, locally playable opportunities
+ *   continuity. Carry forward what the crew learned, not an unfinished
+ *   destination or a requirement to remember its NPCs.
+ * - A later-zone continuation needs its own local site, appropriate
+ *   difficulty, and satisfying objective. Earlier clues may enrich it
+ *   but must not be required homework for players who missed them.
+ * - Travel roll 97 remains social opportunity; 98–100 currently resolve
+ *   as quiet travel. A possible future roll-100 result is a saved,
+ *   exceptional current-zone location, such as a one-time dungeon.
+ * - Do not enable that result until its destination and arrival contracts
+ *   exist. Do not impose a per-zone cap before play shows one is needed.
+ *
  * DEFERRED UNTIL CORE FLOWS ARE STABLE
  *
  * DEFERRED — Additional quest families and biome-specific presentation.

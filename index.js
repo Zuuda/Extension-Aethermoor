@@ -6593,8 +6593,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - World foregrounds open rumors in the current zone and shows older-zone
  *   rumors in collapsed, read-only history. This is a display rule only:
  *   departure does not cancel quests or delete unresolved records.
- * - Accepted quests remain visible even when their destination is in an
- *   earlier zone; whether to pursue or cancel one remains the player's choice.
+ * - Earlier-zone rumors remain read-only history, and earlier settlements
+ *   are not ordinary World travel targets. Accepted quests may still expose
+ *   their own earlier-zone destination or issuer return; the player chooses
+ *   whether to pursue or cancel that quest.
+ * - A later-zone continuation should create a new local opportunity informed
+ *   by portable Crew Knowledge, not require travel back to old content.
  * - Portable Crew Knowledge can give later, locally playable opportunities
  *   continuity. Carry forward what the crew learned, not an unfinished
  *   destination or a requirement to remember its NPCs.
@@ -17565,6 +17569,13 @@ async function renderWorldTab(host) {
         .filter(settlement => {
             if (!settlement?.locationId) return false;
             if (settlement.locationId === currentLocationId) return false;
+
+            /*
+             * Ordinary World travel moves forward. Accepted quests have
+             * their own destination/return entries above, so an earlier
+             * settlement can still be reached when that quest warrants it.
+             */
+            if (Number(settlement.zone) < state.zone) return false;
 
             const hasKnownPlace =
                 Boolean(state.places?.[settlement.locationId]);

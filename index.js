@@ -7119,6 +7119,11 @@ function buildQuestFacts(
             D: 'a dangerous animal threatening regular local travel or work',
             C: 'a threat disrupting an essential route or community activity',
             B: 'a territorial threat affecting travel or work across the region'
+        },
+        missing_person: {
+            D: 'one lost person whose safe return matters to their local sponsor',
+            C: 'one abducted person held by a hostile group',
+            B: 'an abducted person whose loss has serious consequences beyond one household'
         }
     };
 

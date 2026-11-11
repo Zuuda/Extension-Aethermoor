@@ -4081,10 +4081,7 @@ function spawnEncounter(test) {
     let questTerminal =
         null;
 
-    const previousSelectionId =
-        state.activeQuest?.id || null;
-
-    if (requestedKind === 'quest_terminal') {
+       if (requestedKind === 'quest_terminal') {
         assert(
             typeof test.questId === 'string' &&
             test.questId.length > 0,
@@ -4100,10 +4097,6 @@ function spawnEncounter(test) {
             activeQuest?.status === 'in_progress',
             'Quest-terminal spawn requires an in-progress quest'
         );
-
-        // The existing spawn code below still uses activeQuest.
-        // Select the ID-bound owner only on this operation's clone.
-        state.activeQuest = activeQuest;
 
         assert(
             !activeQuest.objectiveResolution,
@@ -4476,19 +4469,26 @@ const eliteChance =
         };
     }
 
-    if (questTerminal) {
-        const activeQuest =
-            state.activeQuest;
+        if (questTerminal) {
+        const linkedQuest = findQuestById(
+            state,
+            questTerminal.questId
+        );
+
+        assert(
+            linkedQuest?.status === 'in_progress',
+            'Spawn lost its linked quest'
+        );
 
         const encounterId =
             spawned.encounter.id;
 
-        activeQuest.terminalThreat.revealed = true;
-        activeQuest.terminalThreat.resolved = false;
-        activeQuest.terminalThreat.encounterId =
+        linkedQuest.terminalThreat.revealed = true;
+        linkedQuest.terminalThreat.resolved = false;
+        linkedQuest.terminalThreat.encounterId =
             encounterId;
 
-        activeQuest.seed.terminalThreat.encounterId =
+        linkedQuest.seed.terminalThreat.encounterId =
             encounterId;
 
         spawned.encounter.questTerminal = {
@@ -4502,22 +4502,11 @@ const eliteChance =
 if (!questTerminal) {
     spawned.encounter.status = 'spotted';
 }
-
     state.zone = test.zone;
     state.encounter = spawned.encounter;
-
-    if (questTerminal) {
-        state.activeQuest = null;
-        state.activeQuest = previousSelectionId
-            ? findQuestById(state, previousSelectionId)
-            : null;
-    }
-
     validate(state);
-
     return {
         ...spawned,
-
         rngState: state.rngState,
         state
     };
@@ -12396,9 +12385,16 @@ function resolveBatch(args) {
                     result = resolveQuestEvent(test);
                     break;
 
-                                    case 'quest_reveal_terminal': {
+                case 'quest_reveal_terminal': {
                     const state = clone(test.state);
-                    const quest = state.activeQuest;
+
+                    assert(
+                        typeof test.questId === 'string' &&
+                        test.questId.length > 0,
+                        'Quest threat reveal requires a questId'
+                    );
+
+                    const quest = findQuestById(state, test.questId);
 
                     assert(
                         quest?.status === 'in_progress',
@@ -12434,8 +12430,7 @@ function resolveBatch(args) {
                         state,
                         questId: quest.id,
                         encounterType: 'quest_terminal',
-                        encounterId:
-                            `quest-terminal-${quest.id}`
+                        encounterId: `quest-terminal-${quest.id}`
                     });
 
                     result.state.encounter.status = 'spotted';
@@ -12443,6 +12438,7 @@ function resolveBatch(args) {
                         quest.targetId;
 
                     result.action = 'quest_reveal_terminal';
+                    result.questId = quest.id;
                     break;
                 }
 
@@ -14419,7 +14415,10 @@ async function runStoredMechanic(args) {
             caseResult.created !== false
                 ? questTerminalNarrationPacket(
                     nextState.encounter,
-                    nextState.activeQuest
+                    findQuestById(
+                        nextState,
+                        nextState.encounter.questTerminal.questId
+                    )
                 )
 
             : beganNewEncounter
@@ -16119,7 +16118,8 @@ async function openQuestPanel() {
             const output = await runStoredMechanic({
                 cases: [{
                     name: 'reveal_quest_terminal',
-                    kind: 'quest_reveal_terminal'
+                    kind: 'quest_reveal_terminal',
+                    questId: quest.id
                 }]
             });
 
@@ -16897,7 +16897,8 @@ async function renderQuestTab(host) {
                         'quests',
                         {
                             name: 'reveal_quest_terminal',
-                            kind: 'quest_reveal_terminal'
+                            kind: 'quest_reveal_terminal',
+                            questId: quest.id
                         },
                         'Quest threat revealed. Open Combat to resolve it.'
                     )

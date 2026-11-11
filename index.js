@@ -4679,7 +4679,9 @@ function shortestRoute(state, destinationId) {
         );
     }
     position ||= {
-        nodeId: state.currentLocationId || routeNodeId(zone, 'outpost')
+        nodeId:
+            state.currentLocationId ||
+            routeNodeId(state.zone, 'outpost')
     };
 
     // A position exactly at an edge endpoint is a node, not a partial leg.

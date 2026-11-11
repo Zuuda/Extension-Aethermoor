@@ -6343,8 +6343,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - F: routine, low-stakes, menial help. A common-plant errand is now
  *   authored for any saved geography; other F objectives remain future work.
  * - Offer generation rolls only among reputation-permitted ranks with
- *   an eligible authored scenario. The remaining fixed-site archetypes
- *   still have temporary geography filters pending catalog conversion.
+ *   an eligible authored scenario. Geography does not filter new offers.
  * - E: useful work needing judgment or travel, with limited consequences.
  * - D: consequential local problems entrusted to a capable crew.
  * - C: serious threats to a community, essential service, or trade route.

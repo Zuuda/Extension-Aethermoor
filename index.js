@@ -6432,7 +6432,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — World integration
  * - World records and route edges are saved.
-  * - IMPLEMENTED — BETA PENDING: traveler rumors use setting-neutral
+ * - IMPLEMENTED — BETA PENDING: World exposes the saved route to the next
+ *   zone's primary settlement even before a local lead names it. This
+ *   enables forward progression without revealing NPCs or quest content.
+ * - IMPLEMENTED — BETA PENDING: traveler rumors use setting-neutral
  *   templates. Each new rumor owns a stable, zone-local destination;
  *   rolling the same template again does not reuse another rumor's site.
  * - The new site's route is saved with its lead, without advancing combat RNG.
@@ -17360,10 +17363,40 @@ async function renderWorldTab(host) {
             );
         }
     }
-
     host.appendChild(poiSection);
+
+    /*
+     * The saved world connects neighboring primary settlements, but the
+     * next settlement need not already be a character-known place or lead.
+     * Expose its route so the forward-moving campaign cannot stall.
+     * This establishes a travel choice, not knowledge of local NPCs,
+     * quests, rumors, or what awaits on arrival.
+     */
+    const nextZone = world.zones?.[state.zone + 1];
+    const nextSettlement = nextZone
+        ? world.settlements?.[nextZone.primarySettlementId]
+        : null;
+
+    if (nextSettlement?.locationId) {
+        const onward = makeAethermoorSection(
+            'ONWARD',
+            `Route toward Zone ${nextZone.number}: ${nextZone.name}\n` +
+                `Terrain ahead: ${nextZone.geography?.description || 'unknown'}.`,
+            'world'
+        );
+
+        addTravelAction(
+            onward,
+            `Travel onward to Zone ${nextZone.number}`,
+            nextSettlement.locationId
+        );
+
+        host.appendChild(onward);
+    }
+
     // Test fixtures are created from Narration Debug, not ordinary World.
     const settlements = Object.values(world.settlements || {})
+
         .filter(settlement => {
             if (!settlement?.locationId) return false;
             if (settlement.locationId === currentLocationId) return false;

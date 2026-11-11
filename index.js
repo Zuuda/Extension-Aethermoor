@@ -5497,7 +5497,23 @@ function resolveTravelStep(test) {
     state.places ||= {};
     state.leads ||= {};
 
-        /*
+    /*
+     * A message ID identifies one movement operation. Replay its saved
+     * result before changing direction, starting an automatic return,
+     * or checking whether the crew is already at the destination.
+     */
+    const existing = state.travelSteps[test.stepId];
+
+    if (existing) {
+        return {
+            ok: true,
+            created: false,
+            ...clone(existing),
+            state
+        };
+    }
+
+    /*
      * Explicit UI-generated movement takes precedence over automatic
      * quest-return routing. A new destination can change direction from
      * an existing journey; canceling preserves the crew's current position
@@ -5595,16 +5611,6 @@ function resolveTravelStep(test) {
                 status: 'traveling'
             };
         }
-    }
-
-    const existing = state.travelSteps[test.stepId];
-    if (existing) {
-        return {
-            ok: true,
-            created: false,
-            ...clone(existing),
-            state
-        };
     }
 
     assert(!['active', 'spotted'].includes(state.encounter?.status),
@@ -6259,7 +6265,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   pending but hid its movement entry. Explicit journey control added;
  *   verify after reload before marking this case complete.
 
-  * - Test quiet travel, environmental signs, points of interest, and social events.
+ * - Test quiet travel, environmental signs, points of interest, and social events.
+ * - Travel-step replay now checks its stable message ID before changing or
+ *   starting a journey. Verify duplicate commands after arrival and after
+ *   interrupted travel do not move the crew or save another revision.
  * - Traveler events return cloned state: refresh the journey reference before
  *   advancing progress so saved progress matches the narrated outcome.
  * - Verify a traveler on segment 1 saves 1/N, then a subsequent move saves 2/N.

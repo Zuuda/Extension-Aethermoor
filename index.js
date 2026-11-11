@@ -6402,6 +6402,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Deduplicate destinations and leads by stable identity.
  * - Show exact journey progress, interruption state, current gate, and delivery
  *   eligibility from saved state.
+ * - Legacy World movement now copies the same explicit movement command as
+ *   the main World tab; mechanics resolve only after the player submits it.
+ * - Ordinary legacy settlement choices exclude earlier zones; accepted quest
+ *   destinations remain available through their quest lead.
  * - Prevent action-button numbering collisions in legacy popup panels.
  *
  * PARTIAL — Narration authority
@@ -15815,9 +15819,11 @@ async function openWorldPanel() {
             }
         }
 
-                if (!journey) {
+        if (!journey) {
             const settlements = Object.values(
                 state.world?.settlements || {}
+            ).filter(settlement =>
+                Number(settlement.zone) >= state.zone
             );
 
             for (const settlement of settlements) {
@@ -15844,6 +15850,7 @@ async function openWorldPanel() {
                 });
             }
         }
+
 
         for (const lead of leads) {
             if (
@@ -15938,51 +15945,28 @@ async function openWorldPanel() {
             return;
         }
 
-        if (
+               if (
             selected.action === 'start_journey' ||
             selected.action === 'start_settlement_journey'
         ) {
-            const journeyCase = {
-                name: 'start_journey',
-                kind: 'journey',
-                action: 'start'
-            };
-
-            if (selected.action === 'start_journey') {
-                journeyCase.leadId = selected.leadId;
-            } else {
-                journeyCase.destinationId = selected.destinationId;
-            }
-
-            const output = await runStoredMechanic({
-                cases: [journeyCase]
-            });
+            const destinationId =
+                selected.action === 'start_journey'
+                    ? state.leads[selected.leadId]?.targetId
+                    : selected.destinationId;
 
             assert(
-                output?.ok === true,
-                output?.results?.[0]?.error ||
-                    'Could not start journey'
+                typeof destinationId === 'string' &&
+                destinationId.length > 0,
+                'Selected journey has no stable destination ID'
             );
 
-
-            toastr.info(
-                `Journey started toward ${
-                    selected.action === 'start_journey'
-                        ? state.places[
-                            state.leads[selected.leadId].targetId
-                          ].label
-                        : state.world.settlements[
-                            Object.values(state.world.settlements)
-                                .find(entry =>
-                                    entry.locationId ===
-                                    selected.destinationId
-                                ).id
-                          ].label
-                }. Each [moved] advances one segment.`,
-                'Aethermoor'
+            await copyAethermoorCommand(
+                destinationCommand(destinationId)
             );
+
             return;
         }
+
 
         if (selected.action === 'investigate_lead') {
             const output = await runStoredMechanic({

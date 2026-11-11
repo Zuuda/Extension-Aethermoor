@@ -6352,7 +6352,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   Saved world geography still guides narration and zone transitions.
  * - Full gameplay verification remains for beta.
  *
- * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
+ * PARTIAL — Quest ranks and settlement reputation
  * - Rank reflects stakes, trust, and consequences, not gate count alone.
  * - F: routine, low-stakes, menial help. A common-plant errand is now
  *   authored for any saved geography; other F objectives remain future work.
@@ -13376,7 +13376,7 @@ function discoveryNarrationPacket(encounter) {
 const PUBLIC_QUEST_FACT_KEYS = {
     recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
     ruin_clearance: ['sponsor', 'site'],
-    herb_foraging: ['sponsor', 'herb', 'place'],
+    herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place'],
     territorial_beast: ['sponsor', 'beast', 'place']
 };

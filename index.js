@@ -5742,6 +5742,22 @@ function resolveTravelStep(test) {
             signs[roll(state, signs.length) - 1];
     }
 
+        /*
+     * A point of interest is a place noticed directly during travel,
+     * unlike a rumor, which is an unverified claim heard from someone.
+     * Neither promises a dungeon, NPC, encounter, hazard, or reward.
+     *
+     * This branch currently locks a site seed but does not establish
+     * crew arrival or authorize a search. Future integration should make
+     * the site a reachable World destination and resolve only eligible
+     * actions from the player's fiction. Do not add an Inspect button or
+     * treat clicking Travel as searching the site.
+     */
+    if (event === 'point_of_interest') {
+        const siteId = `site-${test.stepId}`;
+        const inquiryKey = `site:${siteId}`;
+        const existingSite = state.inquiries[inquiryKey];
+
     if (event === 'point_of_interest') {
         const siteId = `site-${test.stepId}`;
         const inquiryKey = `site:${siteId}`;

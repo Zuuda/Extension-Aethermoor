@@ -6436,6 +6436,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * PLANNED — UI cleanup and consistency
  * - IMPLEMENTED — BETA PENDING: test-rumor creation lives in Narration Debug,
  *   not the ordinary World view; cancelled quests appear in history.
+ * - IMPLEMENTED — BETA PENDING: the Quests button opens the journal-based
+ *   Quests tab; the activeQuest-only legacy popup is no longer its UI path.
+ * - Remove the now-unused openQuestPanel implementation after confirming
+ *   there are no other callers.
  * - Deduplicate destinations and leads by stable identity.
  * - Show exact journey progress, interruption state, current gate, and delivery
  *   eligibility from saved state.
@@ -16048,8 +16052,11 @@ function createQuestController() {
     button.type = 'button';
     button.className = 'menu_button';
     button.textContent = 'Quests';
-    button.title = 'View the active Aethermoor quest';
-    button.addEventListener('click', openQuestPanel);
+    button.title = 'View the Aethermoor quest journal';
+    button.addEventListener('click', () => {
+        aethermoorActiveTab = 'quests';
+        openAethermoorPanel();
+    });
 
     composer.insertBefore(button, composer.firstChild);
 }

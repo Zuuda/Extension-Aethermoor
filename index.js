@@ -8706,11 +8706,13 @@ function advanceQuestFromDiscovery(state, discovery) {
             completionEvidence: evidence
         });
 
-        return {
+                return {
             state: progression.state,
             questGate: {
+                questId: quest.id,
                 completed: progression.completedGate,
-                next: progression.nextGate
+                next: progression.nextGate,
+                linkedEncounter: progression.linkedEncounter || null
             }
         };
     }
@@ -13640,6 +13642,13 @@ function questDiscoveryNarrationPacket(result, quest) {
             `Gate ${result.questGate.completed.step} completed.`,
             `Next objective: ${result.questGate.next.objective}`
         );
+
+        if (result.questGate.linkedEncounter) {
+            lines.push(
+                'That next objective has revealed its linked threat. ' +
+                'The encounter is spotted, not engaged; the crew must choose how to respond.'
+            );
+        }
     }
 
     return lines.join('\n');
@@ -14245,12 +14254,40 @@ async function runStoredMechanic(args) {
                 )
 
             : beganNewEncounter
-                ? discoveryNarrationPacket(nextEncounter) +
-                  (caseResult.journey
-                      ? `\n${travelNarrationPacket(caseResult)}`
-                      : '')
+                ? [
+                    discoveryNarrationPacket(nextEncounter),
+                    ...(nextEncounter.questTerminal
+                        ? [
+                            questTerminalNarrationPacket(
+                                nextEncounter,
+                                findQuestById(
+                                    nextState,
+                                    nextEncounter.questTerminal.questId
+                                )
+                            )
+                        ]
+                        : []),
+                    ...(batch &&
+                        oneCase?.kind === 'quest_event' &&
+                        caseResult.created &&
+                        caseResult.questGate
+                        ? [
+                            questDiscoveryNarrationPacket(
+                                caseResult,
+                                findQuestById(
+                                    nextState,
+                                    caseResult.questId
+                                )
+                            )
+                        ]
+                        : []),
+                    ...(caseResult.journey
+                        ? [travelNarrationPacket(caseResult)]
+                        : [])
+                ].join('\n\n')
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
+
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)

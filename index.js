@@ -13450,7 +13450,7 @@ const PUBLIC_QUEST_FACT_KEYS = {
     recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
     ruin_clearance: ['sponsor', 'site', 'stakes'],
     herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
-    missing_person: ['sponsor', 'person', 'place'],
+    missing_person: ['sponsor', 'person', 'place', 'stakes'],
     territorial_beast: ['sponsor', 'beast', 'place', 'stakes']
 };
 

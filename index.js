@@ -5709,10 +5709,10 @@ function resolveTravelStep(test) {
         event = 'wild_encounter';
     } else if (travelRoll <= 97) {
         event = 'social_opportunity';
-    } else if (travelRoll <= 99) {
-        event = 'significant_discovery';
     } else {
-        event = 'rare_event';
+        // Rolls 98–100 have no authored event contract yet.
+        // Treat them as quiet travel rather than invite an invented result.
+        event = 'quiet_travel';
     }
 
     const outcome = {
@@ -6415,8 +6415,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Regression pending: ordinary reply, leaked packet containing an example
  *   tag, and duplicate received/rendered notifications.
  * - Build every narration packet from the authoritative saved result.
+ * - Travel rolls 98–100 resolve as quiet travel until significant discoveries
+ *   and rare events have authored saved outcomes and narration contracts.
+ *   Do not present an undefined roll as an invitation to invent an event.
  * - Include encounter ID, journey progress, quest gate, objective resolution,
  *   delivery readiness, and reward status where relevant.
+
  * - Prevent prose from implying combat, discovery, arrival, or reward events
  *   that are absent from the saved result.
  *
@@ -13523,14 +13527,6 @@ function travelNarrationPacket(result) {
             );
         }
 
-    } else if (result.event === 'significant_discovery') {
-        lines.push(
-            'The travel roll produced a significant-discovery opportunity, but no specific discovery has been mechanically established yet.'
-        );
-    } else if (result.event === 'rare_event') {
-        lines.push(
-            'The travel roll produced a rare-event opportunity, but no specific event has been mechanically established yet.'
-        );
     }
     if (result.movement?.arrivalOnly) {
         lines.push(

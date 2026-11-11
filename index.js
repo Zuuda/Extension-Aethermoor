@@ -13274,22 +13274,20 @@ function resolveBatch(args) {
                         'The crew is not at this quest turn-in location'
                     );
 
-                    /*
-                     * Older Missing Cargo saves may lack the turn-in cargo
-                     * link. Repair it on this operation's clone before the
-                     * completion checks run.
+                              /*
+                     * Delivery is bound to quest.id. Preparation and
+                     * completion must not change the UI compatibility
+                     * selection or make another accepted quest active.
                      */
-                    state.activeQuest = quest;
-                if (
-                    quest.archetype?.id === 'missing_cargo' ||
-                    quest.archetype?.id === 'recover_cargo'
-                ) {
-                    prepareMissingCargoDiscovery(quest);
-                    prepareSunkenSalvageDiscovery(quest);
-                }
-
-                    const previousSelectionId =
-                        test.state.activeQuest?.id || null;
+                    if (
+                        [
+                            'missing_cargo',
+                            'recover_cargo'
+                        ].includes(quest.archetype?.id)
+                    ) {
+                        prepareMissingCargoDiscovery(quest);
+                        prepareSunkenSalvageDiscovery(quest);
+                    }
 
                     result = resolveQuestAction({
                         state,
@@ -13317,19 +13315,10 @@ function resolveBatch(args) {
                                     : `Reported the completed objective to ${
                                         quest.turnIn.recipient
                                     }.`
-
                     });
 
-                    if (previousSelectionId !== quest.id) {
-                        result.state.activeQuest = previousSelectionId
-                            ? findQuestById(
-                                result.state,
-                                previousSelectionId
-                            )
-                            : null;
-                    }
-
                     result.action = 'quest_delivery';
+
                     break;
                 }
 

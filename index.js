@@ -6344,9 +6344,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
  * - Rank reflects stakes, trust, and consequences, not gate count alone.
- * - F: routine, low-stakes, menial help. New F offers currently use an
- *   authored common-herb errand in compatible marsh regions; vermin
- *   clearance and other biomes still need authored F objectives.
+ * - F: routine, low-stakes, menial help. New F offers currently use
+ *   authored common-herb errands in marsh and karst regions. Other
+ *   biomes and vermin clearance still need authored F objectives.
+ * - Offer generation rolls only among reputation-permitted ranks with
+ *   at least one geographically compatible authored scenario.
  * - E: useful work needing judgment or travel, with limited consequences.
  * - D: consequential local problems entrusted to a capable crew.
  * - C: serious threats to a community, essential service, or trade route.
@@ -6738,6 +6740,19 @@ const QUEST_ARCHETYPES = [
         id: 'herb_foraging',
         label: 'Herb Foraging',
         scenarios: [
+            {
+                ranks: ['F'],
+                geographyProfiles: ['karst'],
+                pitch: 'A local herb-seller needs a small bundle of common chalkcap moss.',
+                truth: 'The moss grows openly beside a marked cave path.',
+                facts: {
+                    sponsor: 'the local herb-seller',
+                    herb: 'a bundle of common chalkcap moss',
+                    place: 'the marked cave path',
+                    need: 'ordinary herb stock',
+                    obstacle: 'loose stones beside the path'
+                }
+            },
             {
                 ranks: ['F'],
                 pitch: 'A local herb-seller needs a small bundle of common reedmint.',
@@ -7848,8 +7863,29 @@ function resolveQuestSeed(test) {
     trigger.questSeedConsumed !== true,
         'This quest trigger was already consumed'
     );
+    /*
+     * Reputation defines the permitted ranks; geography and authored
+     * scenarios determine which of those ranks can actually be offered.
+     * Never consume a quest trigger by rolling an impossible rank.
+     */
+    const availableRanks = rep.ranks
+        .map(rank => ({
+            rank,
+            archetypes: eligibleQuestArchetypes(state, zone, rank)
+        }))
+        .filter(entry => entry.archetypes.length > 0);
+
+    assert(
+        availableRanks.length > 0,
+        `No authored quest offers are available for Zone ${zone} ` +
+            `at ${rep.label} reputation`
+    );
+
     const questRoll =
-        roll(state, rep.ranks.length);
+        roll(state, availableRanks.length);
+
+    const selectedRank =
+        availableRanks[questRoll - 1];
 
     const gateCountRoll =
         roll(state, 2);
@@ -7857,8 +7893,7 @@ function resolveQuestSeed(test) {
     const salvageSlotRoll =
         roll(state, QUEST_SALVAGE_SLOTS.length);
 
-    const rank =
-        rep.ranks[questRoll - 1];
+    const rank = selectedRank.rank;
 
     const row =
         QUEST_REWARD_TABLES[zone][rank];
@@ -7867,6 +7902,7 @@ function resolveQuestSeed(test) {
         row,
         'No quest table entry exists for these inputs'
     );
+
 
     const progression =
         QUEST_PROGRESSION[row.rank];
@@ -7913,17 +7949,8 @@ function resolveQuestSeed(test) {
             row
         );
 
-    const eligibleArchetypes = eligibleQuestArchetypes(
-        state,
-        zone,
-        row.rank
-    );
-
-    assert(
-        eligibleArchetypes.length > 0,
-        `No authored quest scenarios are available for Zone ${zone} (${questGeographyProfile(state, zone) || 'unknown geography'})`
-    );
-
+    // Use the exact eligible pool that made this rank selectable.
+    const eligibleArchetypes = selectedRank.archetypes;
     const archetypeRoll = roll(state, eligibleArchetypes.length);
     const selectedArchetype =
         eligibleArchetypes[archetypeRoll - 1];

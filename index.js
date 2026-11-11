@@ -6325,20 +6325,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * PARTIAL SYSTEMS
  *
  * PARTIAL — V2 retrieve-item quests
- * - Missing Cargo and Sunken Salvage prepare authored discoveries for their
- *   two- through five-gate structures, including inner-site and access stages.
- * - New retrieval offers validate every discovery gate and require the final
- *   recovery discovery to match the locked turn-in cargo.
- * - Discovery preparation and validation consume no additional RNG.
+ * - IMPLEMENTED — BETA PENDING: new Recover Cargo offers use the
+ *   Abandoned Transport, Diverted Shipment, and Stolen Shipment variants.
+ * - Their authored discoveries cover supported retrieval gate counts and
+ *   require the final recovered cargo to match the locked turn-in item.
+ * - New cargo eligibility and discovery preparation do not depend on biome.
+ *   Saved world geography remains narration context.
+ * - Retired Missing Cargo and Sunken Salvage fixed-site catalogs, gate
+ *   templates, and discovery helpers have been removed for the beta reset.
  * - Full gameplay verification is deferred to beta.
- * - IMPLEMENTED — BETA PENDING: new Recover Cargo offers roll and save
- *   Abandoned Transport, Diverted Shipment, or Stolen Shipment.
- * - These premises and their authored discoveries do not depend on a biome.
- *   Zone geography informs the narrator's presentation, not cargo eligibility.
- * - Beta begins from reset state; the retired fixed-site cargo catalog
- *   entries and discovery helpers have been removed.
- * - Sunken salvage may return later as a GM presentation, not a separate
- *   geography-gated archetype or required mechanic.
  *
  * PARTIAL — Authored quest discoveries
  * - Some V2 quests have engine-authored discoveries with stable IDs,

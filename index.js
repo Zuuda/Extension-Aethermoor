@@ -6634,12 +6634,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   engine data; the narrator must not invent mandatory puzzles mid-quest.
  *
  * IMPLEMENTATION STATUS
- * - This comment records the agreed design, not a completed refactor.
- * - The catalog below still contains setting-specific scenarios.
- * - buildAuthoredQuestGates() still uses slice(0, gateCount); replace that
- *   behavior with complete structures in a subsequent implementation.
- * - Begin the refactor with retrieve-item and defeat-elite objectives,
- *   reusing the existing travel, discovery, combat, and delivery systems.
+ * - New offers require complete V2 structures; legacy template slicing
+ *   is not a fallback for newly generated quests.
+ * - The catalog still contains setting-specific authored scenarios.
+ * - Existing saved quests retain their locked gates and progress.
+ * - Discovery, linked-combat, and delivery paths use the V2 structures;
+ *   full campaign-flow verification remains for beta.
  *
  * BETA POLICY
  * Use this division for now. During beta testing, tighten specific failure
@@ -7966,18 +7966,19 @@ function resolveQuestSeed(test) {
     );
 
     /*
-     * V2 archetypes supply complete structures. Build legacy gates only
-     * for archetypes that still use them; Recover Cargo intentionally
-     * has no legacy gate templates.
+     * Every archetype eligible for a new offer must supply a complete V2
+     * structure. Never fall back to slicing legacy templates: doing so
+     * could omit the decisive objective from a newly generated quest.
+     * Existing saved quests retain their already-locked gate records.
      */
-    const questGatesData = structureV2
-        ? clone(structureV2.gates)
-        : buildAuthoredQuestGates(
-            archetype,
-            gates,
-            authored.facts
-        );
+    assert(
+        structureV2?.version === 2 &&
+        Array.isArray(structureV2.gates) &&
+        structureV2.gates.length === gates,
+        `New quest archetype ${archetype.id} lacks a complete V2 plan`
+    );
 
+    const questGatesData = clone(structureV2.gates);
     const seed = {
         zone,
         repTier: rep.label,

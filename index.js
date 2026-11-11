@@ -9063,25 +9063,28 @@ function resolveQuestAction(test) {
         state.activeQuest = quest;
         registerQuestDestination(state, quest);
         quest.status = 'in_progress';
-
-        if (
-            ['defeat_elite', 'rescue_person']
-                .includes(quest.structureV2?.family)
-        ) {
+        if (quest.structureV2?.version === 2) {
+            prepareRecoverCargoDiscovery(quest);
+            prepareHerbForagingDiscovery(quest);
             prepareV2QuestDiscoveries(quest);
 
             for (const gate of quest.gatesData) {
                 if (gate.trigger !== 'discovery') continue;
 
+                const discovery = quest.discoveries?.find(
+                    item => item.id === gate.requiredDiscoveryId
+                );
+
                 assert(
-                    gate.requiredDiscoveryId &&
+                    discovery &&
                     gate.requiredDiscoveryState === 'acquired' &&
-                    quest.discoveries?.some(item =>
-                        item.id === gate.requiredDiscoveryId &&
-                        item.locationId === quest.destinationId &&
-                        item.acquisitionPolicy === 'auto_on_reveal'
-                    ),
-                    `Quest ${quest.id} has no authored discovery for gate ${gate.step}`
+                    discovery.locationId === quest.destinationId &&
+                    discovery.acquisitionPolicy === 'auto_on_reveal' &&
+                    typeof discovery.hidingPlace === 'string' &&
+                    discovery.hidingPlace.trim().length > 0 &&
+                    typeof discovery.significance === 'string' &&
+                    discovery.significance.trim().length > 0,
+                    `Quest ${quest.id} has no complete authored discovery for gate ${gate.step}`
                 );
             }
         }

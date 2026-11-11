@@ -5239,10 +5239,16 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             questId: quest.id,
             title: quest.title,
             recipient: quest.turnIn.recipient,
-            cargoName:
-                cargo?.name ||
-                quest.facts?.cargo ||
-                'quest cargo'
+            deliveryType: quest.turnIn.discoveryId
+                ? 'cargo'
+                : 'report',
+            deliveryName: quest.turnIn.discoveryId
+                ? (
+                    cargo?.name ||
+                    quest.facts?.cargo ||
+                    'quest cargo'
+                )
+                : null
         };
 
         outcome.deliveryReadyList.push(deliveryReady);
@@ -5399,8 +5405,12 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
         nextState.leads[returnLeadId] ||= {
             id: returnLeadId,
             kind: 'quest_return',
-            label: `Return cargo to ${quest.turnIn.recipient}`,
-            claim: 'The recovered quest cargo is ready to return.',
+            label: quest.turnIn.discoveryId
+                ? `Return cargo to ${quest.turnIn.recipient}`
+                : `Report to ${quest.turnIn.recipient}`,
+            claim: quest.turnIn.discoveryId
+                ? 'The recovered quest cargo is ready to return.'
+                : 'The completed field objective is ready to report.',
             targetType: 'place',
             targetId: quest.turnIn.locationId,
             status: 'known'
@@ -8760,8 +8770,12 @@ function advanceQuestFromDiscovery(state, discovery) {
         progression.state.leads[leadId] ||= {
             id: leadId,
             kind: 'quest_return',
-            label: `Return cargo to ${updatedQuest.turnIn.recipient}`,
-            claim: 'The recovered quest cargo is ready to return.',
+            label: updatedQuest.turnIn.discoveryId
+                ? `Return cargo to ${updatedQuest.turnIn.recipient}`
+                : `Report to ${updatedQuest.turnIn.recipient}`,
+            claim: updatedQuest.turnIn.discoveryId
+                ? 'The recovered quest cargo is ready to return.'
+                : 'The completed field objective is ready to report.',
             targetType: 'place',
             targetId: updatedQuest.turnIn.locationId,
             status: 'known'
@@ -13389,10 +13403,12 @@ function travelNarrationPacket(result) {
 
     for (const delivery of result.deliveryReadyList || []) {
         lines.push(
-            `The crew returned to the turn-in location with ` +
-                `${delivery.cargoName} for ${delivery.title}.`,
-            `That quest is eligible for delivery to ` +
-                `${delivery.recipient}.`,
+            delivery.deliveryType === 'cargo'
+                ? `The crew returned to the turn-in location with ` +
+                    `${delivery.deliveryName} for ${delivery.title}.`
+                : `The crew returned to ${delivery.recipient} to report ` +
+                    `the completed objective for ${delivery.title}.`,
+            `That quest is eligible for delivery to ${delivery.recipient}.`,
             'Do not complete the quest mechanically until the fictional handoff occurs.'
         );
     }

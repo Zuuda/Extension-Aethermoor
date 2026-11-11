@@ -8188,6 +8188,7 @@ function resolveQuestSeed(test) {
         quest,
         state
     };
+  }
 }
 
 /*

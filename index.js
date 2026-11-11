@@ -6225,7 +6225,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Apply quest rewards exactly once after validated delivery.
  *
  * IMPLEMENTED — BETA PENDING: V2 linked-threat quest path
- * - Use complete V2 structures for the supported defeat-elite gate counts.
+ * - Use complete V2 structures for supported linked-threat gate counts.
  * - Longer structures use authored local discoveries for tracking, reaching
  *   the lair, and locating the target; they do not require repeat arrival.
  * - Complete the arrival gate, reveal the linked threat, resolve the linked
@@ -7415,7 +7415,7 @@ function buildQuestV2Structure(family, gateCount, facts) {
             find_target:
                 () => `Locate ${fact('target')} using the authored signs.`,
             defeat:
-                () => `Defeat the linked Elite target: ${fact('target')}.`
+                () => `Defeat the engine-linked threat: ${fact('target')}.`
         }
     }[family];
 

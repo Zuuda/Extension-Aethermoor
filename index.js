@@ -6169,8 +6169,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * DONE — V2 defeat-elite path
  * - Use complete V2 structures for the supported defeat-elite gate counts.
+ * - Longer structures use authored local discoveries for tracking, reaching
+ *   the lair, and locating the target; they do not require repeat arrival.
  * - Complete the arrival gate, reveal the linked threat, resolve the linked
  *   combat gate, return to the issuer, and complete report-only delivery.
+ * - Verify the longer discovery paths during beta.
  * - Keep the linked threat and the current encounter identity separate.
  * - Retain a narrowly scoped reconciliation operation for beta test saves.
  *
@@ -7086,8 +7089,8 @@ const QUEST_V2_STAGES = {
         },
         reach_lair: {
             mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Follow the established trail to the target’s lair.'
+            trigger: 'discovery',
+            objective: 'Find the authored route to the target’s lair.'
         },
         find_target: {
             mode: 'brain_social_heist',
@@ -8630,10 +8633,35 @@ function prepareHerbForagingDiscovery(quest) {
         significance:
             `The signs show the route taken by ${target}.`
     });
-
     if (family === 'defeat_elite') {
-        // Existing defeat-elite behavior remains limited to its track gate.
-        return trail;
+        /*
+         * Longer structures stay at the established quest destination.
+         * These are local discoveries, not repeat arrivals or new map nodes.
+         * Finding the target reveals the linked fight through clear_gate;
+         * it does not engage or defeat that encounter.
+         */
+        const targetName = quest.structureV2.facts.target;
+
+        const lair = bind('reach_lair', {
+            suffix: 'lair-route',
+            name: `Route to ${targetName}'s lair`,
+            hidingPlace:
+                quest.facts?.evidence ||
+                'among the signs at the quest site',
+            significance:
+                `The signs establish a route through ${quest.facts?.obstacle || 'the site'} toward ${targetName}.`
+        });
+
+        const foundTarget = bind('find_target', {
+            suffix: 'target-location',
+            name: `Location of ${targetName}`,
+            hidingPlace:
+                `at ${quest.structureV2.facts.lair}`,
+            significance:
+                `The signs establish where ${targetName} can be confronted.`
+        });
+
+        return trail || lair || foundTarget;
     }
 
     const variantId = quest.variant?.id;
@@ -9157,9 +9185,25 @@ function resolveQuestAction(test) {
                 .includes(quest.structureV2?.family)
         ) {
             prepareV2QuestDiscoveries(quest);
+
+            for (const gate of quest.gatesData) {
+                if (gate.trigger !== 'discovery') continue;
+
+                assert(
+                    gate.requiredDiscoveryId &&
+                    gate.requiredDiscoveryState === 'acquired' &&
+                    quest.discoveries?.some(item =>
+                        item.id === gate.requiredDiscoveryId &&
+                        item.locationId === quest.destinationId &&
+                        item.acquisitionPolicy === 'auto_on_reveal'
+                    ),
+                    `Quest ${quest.id} has no authored discovery for gate ${gate.step}`
+                );
+            }
         }
 
         saveQuestToJournal(state, quest);
+
 
         return result;
 

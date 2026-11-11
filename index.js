@@ -6404,8 +6404,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   eligibility from saved state.
  * - Legacy World movement now copies the same explicit movement command as
  *   the main World tab; mechanics resolve only after the player submits it.
- * - Ordinary legacy settlement choices exclude earlier zones; accepted quest
- *   destinations remain available through their quest lead.
+ * - Ordinary legacy settlement choices and leads exclude earlier zones;
+ *   earlier destinations remain available only when tied to an accepted quest.
  * - Prevent action-button numbering collisions in legacy popup panels.
  *
  * PARTIAL — Narration authority
@@ -15788,12 +15788,39 @@ async function openWorldPanel() {
         const state = snapshot.state;
         const { Popup, POPUP_TYPE, POPUP_RESULT } = getContext();
         const journey = state.currentJourney;
+        const acceptedQuestLocations = new Set(
+            ensureQuestJournal(state).accepted
+                .filter(quest => quest?.status === 'in_progress')
+                .flatMap(quest => [
+                    quest.destinationId,
+                    quest.turnIn?.locationId
+                ])
+                .filter(Boolean)
+        );
+
         const leads = Object.values(state.leads || {})
-            .filter(lead =>
-                lead?.status === 'known' &&
-                lead.targetType === 'place' &&
-                state.places?.[lead.targetId]
-            );
+            .filter(lead => {
+                if (
+                    lead?.status !== 'known' ||
+                    lead.targetType !== 'place' ||
+                    !state.places?.[lead.targetId]
+                ) {
+                    return false;
+                }
+
+                const zone = Number(
+                    state.places[lead.targetId].zone
+                );
+
+                if (Number.isFinite(zone) && zone >= state.zone) {
+                    return true;
+                }
+
+                return (
+                    ['quest', 'quest_return'].includes(lead.kind) &&
+                    acceptedQuestLocations.has(lead.targetId)
+                );
+            });
 
         const actions = [];
 

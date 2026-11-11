@@ -6534,6 +6534,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Automatic return travel uses a unique eligible journal quest; multiple
  *   possible returns require an explicit destination choice.
  * - Scene context includes every relevant accepted quest at the location.
+ * - Quest-site inspection and discovery reconciliation now address explicit
+ *   quest IDs instead of advancing the compatibility-selected quest.
  * - Encounter spawning and some older narration still contain activeQuest
  *   assumptions that must be migrated.
  * - Arrival integration implemented; live verification pending.
@@ -8987,13 +8989,23 @@ function reconcileQuestDiscovery(test) {
         typeof test.state === 'object',
         'Quest discovery reconciliation requires state'
     );
-
     const state = clone(test.state);
-    const quest = state.activeQuest;
+    ensureQuestJournal(state);
+
+    assert(
+        typeof test.questId === 'string' &&
+        test.questId.length > 0,
+        'Quest discovery reconciliation requires a questId'
+    );
+
+    const quest = findQuestById(
+        state,
+        test.questId
+    );
 
     assert(
         quest?.status === 'in_progress',
-        'Quest discovery reconciliation requires an in-progress quest'
+        `Quest ${test.questId} is not in progress`
     );
 
     const gate = quest.currentGate;
@@ -9033,6 +9045,7 @@ function reconcileQuestDiscovery(test) {
 
     const progression = resolveQuestAction({
         state,
+        questId: quest.id,
         action: 'clear_gate',
         objectiveCompleted: true,
         completionEvidence:
@@ -9046,10 +9059,12 @@ function reconcileQuestDiscovery(test) {
         created: true,
         action: 'quest_discovery_reconcile',
         discovery: clone(discovery),
+        questId: quest.id,
         questGate: {
             completed: progression.completedGate,
             next: progression.nextGate
         },
+
         state: progression.state
     };
 }
@@ -12541,40 +12556,69 @@ function resolveBatch(args) {
                 }
 
                 case 'quest_site_inspect': {
-                    const state = test.state;
-                    const quest = state?.activeQuest;
+                    const state = clone(test.state);
 
-                    assert(quest?.status === 'in_progress',
-                        'Accept the quest before inspecting its site');
-                    assert(quest.destinationId &&
+                    assert(
+                        typeof test.questId === 'string' &&
+                        test.questId.length > 0,
+                        'Quest site inspection requires a questId'
+                    );
+
+                    const quest = findQuestById(
+                        state,
+                        test.questId
+                    );
+
+                    assert(
+                        quest?.status === 'in_progress',
+                        `Quest ${test.questId} is not in progress`
+                    );
+
+                    assert(
+                        quest.destinationId &&
                         state.currentLocationId === quest.destinationId,
-                        'Travel to the quest destination first');
-                    assert(quest.currentGate?.step === 1 &&
+                        'Travel to the quest destination first'
+                    );
+
+                    assert(
+                        quest.currentGate?.step === 1 &&
                         quest.currentGate.step < quest.gates,
-                        'The first gate is not available for inspection');
-                    assert(!['active', 'spotted'].includes(
-                        state.encounter?.status
-                    ), 'Resolve or avoid the nearby encounter first');
+                        'The first gate is not available for inspection'
+                    );
+
+                    assert(
+                        !['active', 'spotted'].includes(
+                            state.encounter?.status
+                        ),
+                        'Resolve or avoid the nearby encounter first'
+                    );
 
                     const place = state.places[quest.destinationId];
+
+                    assert(
+                        place,
+                        'Quest inspection destination is missing'
+                    );
+
                     const evidence = quest.facts?.evidence
                         ? `Inspected ${quest.facts.evidence} at ${place.label}.`
                         : `Reached ${place.label} and inspected the signs relevant to the first gate.`;
 
                     result = resolveQuestAction({
                         state,
+                        questId: quest.id,
                         action: 'clear_gate',
                         objectiveCompleted: true,
                         completionEvidence: evidence
                     });
+
                     result.action = 'quest_site_inspect';
+                    result.questId = quest.id;
                     result.evidence = evidence;
                     break;
                 }
-
-                                    case 'debug_create_rumor': {
+                    case 'debug_create_rumor': {
                     const state = clone(test.state);
-
                     assert(
                         state && typeof state === 'object',
                         'Debug rumor requires saved state'
@@ -13053,7 +13097,7 @@ function resolveBatch(args) {
                     break;
                 }
 
-                                    case 'debug_reconcile_quest_terminal': {
+                    case 'debug_reconcile_quest_terminal': {
                     const state = clone(test.state);
                     const quest = state.activeQuest;
                     const gate = quest?.currentGate;

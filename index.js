@@ -15786,11 +15786,16 @@ function formatQuestStatus(quest) {
     }
 
     if (quest.deliveryReady && quest.turnIn) {
-        lines.push(
-            `Turn-in is eligible with ${quest.turnIn.recipient}.`,
+        const handoverInstruction =
             quest.turnIn.discoveryId
                 ? 'When the protagonists actually hand over the cargo in the fiction, place this exact tag inside the disposable <plan> block:'
-                : 'When the protagonists actually meet the sponsor and report or return with the rescued person in the fiction, place this exact tag inside the disposable <plan> block:',
+                : quest.structureV2?.family === 'rescue_person'
+                    ? 'When the protagonists actually return the rescued person and meet the sponsor, place this exact tag inside the disposable <plan> block:'
+                    : 'When the protagonists actually meet the sponsor and report the completed objective, place this exact tag inside the disposable <plan> block:';
+
+        lines.push(
+            `Turn-in is eligible with ${quest.turnIn.recipient}.`,
+            handoverInstruction,
             `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
             'Do not emit the delivery tag before the fictional handoff.'
         );

@@ -6387,9 +6387,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Herb Foraging has explicit F, E/D, and C/B stakes; Missing Person has
  *   Lost at D and Abducted at C/B; F nuisance variants are explicitly authored
  *   for Ruin Clearance and Territorial Beast Hunt.
- * - Other non-F archetypes may still appear across permitted ranks without
- *   rank-specific scenario eligibility. Continue assigning authored rank
- *   ranges and stakes; do not infer suitability from gate count or payout.
+ * - IMPLEMENTED — BETA PENDING: every current quest scenario has explicit
+ *   rank eligibility; offers roll only from scenarios authored for the
+ *   selected rank. Verify rank pools and stakes during beta.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
  * - IMPLEMENTED — BETA PENDING: linked-threat type follows rank: F/E normal
@@ -6822,6 +6822,7 @@ const QUEST_ARCHETYPES = [
          */
         scenarios: [
             {
+                ranks: ['D', 'C', 'B'],
                 pitch:
                     'A disused structure beside a working route has become ' +
                     'unsafe. The route keepers need the threat removed.',
@@ -6837,6 +6838,7 @@ const QUEST_ARCHETYPES = [
                 }
             },
             {
+                ranks: ['E', 'D'],
                 pitch:
                     'Workers can no longer use an old work site. Their ' +
                     'sponsor needs its dangerous occupants cleared.',
@@ -6866,6 +6868,7 @@ const QUEST_ARCHETYPES = [
                 }
             },
             {
+                ranks: ['C', 'B'],
                 pitch:
                     'An essential passage through an old structure has ' +
                     'become unsafe. The passage must be cleared.',
@@ -7005,6 +7008,7 @@ const QUEST_ARCHETYPES = [
                 }
             },
             {
+                ranks: ['D', 'C', 'B'],
                 pitch:
                     'A territorial animal has driven people from a ' +
                     'regularly used route.',
@@ -7020,6 +7024,7 @@ const QUEST_ARCHETYPES = [
                 }
             },
             {
+                ranks: ['E', 'D', 'C'],
                 pitch:
                     'An animal is threatening a place local workers ' +
                     'depend on.',

@@ -6581,8 +6581,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   moving forward—not exhausting every opportunity in a zone.
  * - Leaving an opportunity behind does not move it to the next zone,
  *   scale up its old encounters, or impose a return trip.
- * - Keep older leads in history rather than automatically cancelling
- *   accepted quests or deleting unresolved records on departure.
+ * - World foregrounds open rumors in the current zone and shows older-zone
+ *   rumors in collapsed, read-only history. This is a display rule only:
+ *   departure does not cancel quests or delete unresolved records.
+ * - Accepted quests remain visible even when their destination is in an
+ *   earlier zone; whether to pursue or cancel one remains the player's choice.
  * - Portable Crew Knowledge can give later, locally playable opportunities
  *   continuity. Carry forward what the crew learned, not an unfinished
  *   destination or a requirement to remember its NPCs.
@@ -17403,13 +17406,23 @@ async function renderWorldTab(host) {
             state.places?.[lead.targetId]
         );
 
-    const rumors = leads.filter(lead => lead.kind === 'rumor');
+      /*
+     * Foreground only current-zone rumors. Earlier-zone rumors remain
+     * saved, but are history rather than prompts to backtrack through
+     * obsolete encounters. Accepted quests remain visible above,
+     * regardless of zone; this display does not cancel anything.
+     */
+    const rumors = leads.filter(lead =>
+        lead.kind === 'rumor' &&
+        lead.testOnly !== true &&
+        Number(state.places[lead.targetId]?.zone) === state.zone
+    );
 
     const rumorSection = makeAethermoorSection(
-        'RUMORS',
+        'RUMORS · CURRENT ZONE',
         rumors.length
-            ? 'Known rumors and their destinations.'
-            : 'No known rumors.',
+            ? 'Known rumors and their destinations in this zone.'
+            : 'No open rumors in this zone.',
         'world'
     );
 
@@ -17424,10 +17437,9 @@ async function renderWorldTab(host) {
         if (lead.targetId === currentLocationId) {
             const status = document.createElement('div');
             status.className = 'aethermoor-ui-text';
-            status.textContent = lead.arrivalResolution
-                ? 'A genuine lead is established here. Its quest offer is ' +
-                  'waiting for the current quest or offer to be resolved.'
-                : 'Arrival resolution is pending.';
+            status.textContent =
+                'The crew is here. A confirmed arrival resolves this rumor; ' +
+                'check its saved result or any resulting quest offer.';
             rumorSection.appendChild(status);
         } else {
             addTravelAction(
@@ -17439,6 +17451,42 @@ async function renderWorldTab(host) {
     }
 
     host.appendChild(rumorSection);
+
+    const olderRumors = Object.values(state.leads || {})
+        .filter(lead => {
+            const place = state.places?.[lead?.targetId];
+            return lead?.kind === 'rumor' &&
+                lead.testOnly !== true &&
+                place &&
+                Number.isInteger(Number(place.zone)) &&
+                Number(place.zone) < state.zone;
+        });
+
+    if (olderRumors.length > 0) {
+        const history = document.createElement('details');
+        history.className = 'aethermoor-knowledge';
+
+        const heading = document.createElement('summary');
+        heading.className = 'aethermoor-ui-heading';
+        heading.textContent =
+            `EARLIER-ZONE RUMORS · ${olderRumors.length}`;
+        history.appendChild(heading);
+
+        for (const lead of olderRumors) {
+            const place = state.places[lead.targetId];
+            const entry = document.createElement('div');
+            entry.className = 'aethermoor-ui-text';
+            entry.style.marginTop = '8px';
+            entry.textContent =
+                `Zone ${place.zone} · ${place.label} · ` +
+                `${lead.status === 'known' ? 'Unresolved' : 'Investigated'}\n` +
+                `${lead.claim || lead.label || lead.id}`;
+            history.appendChild(entry);
+        }
+
+        host.appendChild(history);
+    }
+
         /*
      * Beta-only fixture control. This creates test data but does not resolve
      * the rumor; arrival still uses the ordinary saved rumor resolver.

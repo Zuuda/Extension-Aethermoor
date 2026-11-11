@@ -6718,6 +6718,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - New-offer scenarios are geography-neutral premises; saved zone geography
  *   is presentation context. Mechanical special requirements belong in the
  *   authored V2 structure, not dormant legacy gate templates.
+ * - Quest family defines the job; rank defines its stakes and reward;
+ *   gate count defines its length. More gates alone do not mean harder work.
+ * - Gate variants must fit the family and preserve its objective. A
+ *   non-combat quest remains non-combat; do not add fights to simulate rank.
+ * - Narration may invent names, scenery, and local dressing, but the engine
+ *   owns rank, objective, gates, threats, encounters, and rewards.
+ * - Non-combat mechanical difficulty is intentionally unresolved. Do not
+ *   treat extra narration or a dramatic name as mechanical challenge.
  * - Existing saved quests retain their locked gates and progress.
  * - Discovery, linked-combat, and delivery paths use the V2 structures;
  *   full campaign-flow verification remains for beta.

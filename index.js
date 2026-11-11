@@ -5179,39 +5179,22 @@ function questsForArrival(state, locationId) {
 }
 
 function completeQuestArrivalGate(state, outcome, questId) {
-    /*
-     * Arrival identity comes from the destination, not UI selection.
-     *
-     * Some progression helpers still read activeQuest. Select the owning
-     * quest only within this detached operation, then restore the previous
-     * selection after saving the updated journal entry.
-     *
-     * This bridge must not become a second source of quest data. The
-     * journal owns both quests; activeQuest is only a compatibility pointer.
-     * No RNG or separate metadata save is performed by this wrapper.
-     */
-    const workingState = clone(state);
-    ensureQuestJournal(workingState);
-
     assert(
         typeof questId === 'string' && questId.length > 0,
         'Quest arrival requires an explicit quest ID'
     );
 
-    const previousSelectionId =
-        workingState.activeQuest?.id || null;
+    ensureQuestJournal(state);
 
-    const arrivalQuest = findQuestById(workingState, questId);
+    const quest = findQuestById(state, questId);
 
     assert(
-        arrivalQuest?.status === 'in_progress',
+        quest?.status === 'in_progress',
         `Arrival requires an in-progress quest: ${questId}`
     );
 
-    workingState.activeQuest = arrivalQuest;
-
     const nextState = completeSelectedQuestArrivalGate(
-        workingState,
+        state,
         outcome,
         questId
     );
@@ -5224,15 +5207,6 @@ function completeQuestArrivalGate(state, outcome, questId) {
     );
 
     saveQuestToJournal(nextState, updatedQuest);
-
-    /*
-     * Resolve the previous selection from the returned journal rather than
-     * retaining an object from before a progression helper cloned state.
-     */
-    nextState.activeQuest = previousSelectionId
-        ? findQuestById(nextState, previousSelectionId)
-        : null;
-
     return nextState;
 }
 
@@ -6538,9 +6512,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   discovery events do not temporarily change the activeQuest selection.
  *   Beta verification remains pending.
  * - Cancelled quests remain in history and receive no rewards.
- * - Arrival selects quest identity from the destination and restores the
- *   previous selection after journal progression. Legacy arrival helpers
- *   temporarily use a scoped compatibility pointer.
+ * - Arrival selects quest identity from the destination and progresses it
+ *   by stable quest ID without changing the activeQuest selection.
  * - Arrival result arrays preserve independently affected quests.
  * - Cleared linked combat selects its quest by the encounter's locked quest
  *   and target IDs, then restores the previous compatibility selection.

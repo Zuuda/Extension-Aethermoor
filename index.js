@@ -2129,15 +2129,13 @@ function completeLinkedCombatQuestGate(state) {
         `${state.places?.[quest.destinationId]?.label ||
             quest.destinationId}.`;
 
-    /*
-     * resolveQuestAction still requires a selected quest for progression.
-     * Select the encounter's locked owner only on the operation state.
-     * Copy back the updated journal, then restore the prior selection.
-     * The encounter itself remains in place for resolveTurn.
+       /*
+     * The encounter's locked quest ID owns progression. Do not change
+     * activeQuest merely to complete its combat gate. Keep the encounter
+     * in place for resolveTurn.
      */
-    state.activeQuest = quest;
-
     const progression = gate.step < quest.gates
+
         ? resolveQuestAction({
             state,
             questId,
@@ -6531,8 +6529,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   and V2 discovery preparation helpers take explicit quest arguments.
  * - Quests tab renders all journal offers with ID-bound acceptance/decline.
  * - Rumor arrivals create journal offers immediately, preserving selection.
- * - Restore shared identity between activeQuest and its journal entry after
- *   JSON loading; legacy progression remains authoritative during migration.
+ * - The journal is authoritative after JSON loading. Reconnect activeQuest
+ *   to its journal record; never overwrite journal progress with a stale
+ *   compatibility selection. Import genuinely journal-less legacy quests once.
+ * - Linked-combat completion progresses the encounter's locked quest ID
+ *   without temporarily changing the selected quest.
  * - Journal delivery uses the fictional handover handshake, not a payout button.
  * - Verified in live testing: two offers survived reload; declining the
  *   Rank D test offer preserved the original Rank B offer after reload.
@@ -7656,58 +7657,38 @@ function ensureQuestJournal(state) {
         );
     }
 
-    function containsQuest(id) {
-        return Object.values(state.quests)
-            .some(bucket =>
-                bucket.some(quest => quest?.id === id)
-            );
-    }
-
     const active = state.activeQuest;
 
     if (
         active &&
         typeof active === 'object' &&
-        typeof active.id === 'string' &&
-        !containsQuest(active.id)
+        typeof active.id === 'string'
     ) {
-        const bucketByStatus = {
-            offered: 'offered',
-            in_progress: 'accepted',
-            complete: 'completed',
-            declined: 'declined',
-            abandoned: 'abandoned',
-            cancelled: 'cancelled'
-        };
+        const journalQuest = Object.values(state.quests)
+            .flatMap(bucket => bucket)
+            .find(quest => quest?.id === active.id);
 
-        const bucket = bucketByStatus[active.status];
+        if (journalQuest) {
+            /*
+             * JSON reload may separate these objects. The journal owns
+             * quest progress; reconnect the selected compatibility pointer
+             * to its record rather than overwriting the record with a
+             * potentially stale selection.
+             */
+            state.activeQuest = journalQuest;
+        } else {
+            /*
+             * Import a genuinely journal-less legacy selected quest once.
+             * Do not recreate an unsupported/retired quest as an offer.
+             */
+            const bucket = questJournalBucketForStatus(
+                active.status
+            );
 
-        if (bucket) {
-            state.quests[bucket].push(active);
-        }
-    }
-    /*
-     * JSON persistence does not preserve shared object references.
-     * Legacy progression still updates activeQuest, so use that selected
-     * record as authoritative during this migration and reconnect the
-     * journal to the same object before any quest action runs.
-     * Journal-only offers remain independent and are never selected here.
-     */
-    if (
-        active &&
-        typeof active.id === 'string' &&
-        questJournalBucketForStatus(active.status)
-    ) {
-        for (const bucket of Object.values(state.quests)) {
-            for (let index = bucket.length - 1; index >= 0; index--) {
-                if (bucket[index]?.id === active.id) {
-                    bucket.splice(index, 1);
-                }
+            if (bucket) {
+                state.quests[bucket].push(active);
             }
         }
-
-        state.quests[questJournalBucketForStatus(active.status)]
-            .push(active);
     }
 
     return state.quests;
@@ -7755,6 +7736,10 @@ function saveQuestToJournal(state, quest) {
 
     removeQuestFromJournal(state, quest.id);
     state.quests[bucket].push(quest);
+
+    if (state.activeQuest?.id === quest.id) {
+        state.activeQuest = quest;
+    }
 
     return quest;
 }

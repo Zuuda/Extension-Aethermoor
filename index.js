@@ -6513,8 +6513,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Multiple offers are stored and survive reload.
  * - Multiple quests may be accepted; activeQuest remains a temporary selected
  *   quest pointer during migration.
- * - Quest actions address stable quest IDs and never fall back from an explicit
- *   unknown ID.
+ * - Quest actions and FOUND discovery progression address stable quest IDs;
+ *   discovery events do not temporarily change the activeQuest selection.
+ *   Beta verification remains pending.
  * - Cancelled quests remain in history and receive no rewards.
  * - Arrival selects quest identity from the destination and restores the
  *   previous selection after journal progression. Legacy arrival helpers
@@ -8856,10 +8857,15 @@ function prepareHerbForagingDiscovery(quest) {
 }
 
 
-function advanceQuestFromDiscovery(state, discovery) {
-    const quest = state.activeQuest;
-    const gate = quest?.currentGate;
+function advanceQuestFromDiscovery(state, discovery, questId) {
+    assert(
+        typeof questId === 'string' &&
+        questId.length > 0,
+        'Discovery progression requires an explicit questId'
+    );
 
+    const quest = findQuestById(state, questId);
+    const gate = quest?.currentGate;
     const requiredState = gate?.requiredDiscoveryState || 'acquired';
 
     const satisfied =
@@ -8889,6 +8895,7 @@ function advanceQuestFromDiscovery(state, discovery) {
     if (gate.step < quest.gates) {
         const progression = resolveQuestAction({
             state,
+            questId,
             action: 'clear_gate',
             objectiveCompleted: true,
             completionEvidence: evidence
@@ -8911,6 +8918,7 @@ function advanceQuestFromDiscovery(state, discovery) {
 
     const progression = resolveQuestAction({
         state,
+        questId,
         action: 'resolve_objective',
         objectiveCompleted: true,
         objectiveRoute:
@@ -8922,7 +8930,10 @@ function advanceQuestFromDiscovery(state, discovery) {
         completionEvidence: evidence
     });
 
-    const updatedQuest = progression.state.activeQuest;
+    const updatedQuest = findQuestById(
+        progression.state,
+        questId
+    );
     updatedQuest.completedGates ||= [];
 
     if (!updatedQuest.completedGates.some(item => item.step === gate.step)) {
@@ -9069,41 +9080,25 @@ function resolveQuestEvent(test) {
     const state = clone(test.state);
     ensureQuestJournal(state);
 
-    const requestedQuest =
+    const quest =
         test.questId !== undefined
             ? findQuestById(state, test.questId)
             : findQuestByDiscoveryId(state, test.questItemId);
 
     assert(
-        requestedQuest?.status === 'in_progress',
+        quest?.status === 'in_progress',
         test.questId !== undefined
             ? `Quest ${test.questId} is not in progress`
             : `No in-progress quest owns discovery ${test.questItemId}`
     );
 
-    const previousSelectionId =
-        state.activeQuest?.id || null;
-
-    /*
-     * The legacy resolver still reads activeQuest. Scope that pointer to
-     * the quest identified by the authored discovery, then restore the
-     * previous selection after progression.
-     */
-    state.activeQuest = requestedQuest;
-
-    const result = resolveSelectedQuestEvent({
+    return resolveSelectedQuestEvent({
         ...test,
+        questId: quest.id,
         state
     });
-
-    const resultState = result.state;
-
-    resultState.activeQuest = previousSelectionId
-        ? findQuestById(resultState, previousSelectionId)
-        : null;
-
-    return result;
 }
+
 
 function resolveSelectedQuestEvent(test) {
     assert(
@@ -9112,12 +9107,21 @@ function resolveSelectedQuestEvent(test) {
     );
 
     const state = clone(test.state);
-    const quest = state.activeQuest;
+    ensureQuestJournal(state);
+
+    assert(
+        typeof test.questId === 'string' &&
+        test.questId.length > 0,
+        'Quest event requires an explicit questId'
+    );
+
+    const quest = findQuestById(state, test.questId);
 
     assert(
         quest?.status === 'in_progress',
-        'Quest event requires an in-progress quest'
+        `Quest ${test.questId} is not in progress`
     );
+
     assert(
         ['searched', 'found'].includes(test.event),
         `Unsupported quest discovery event: ${test.event}`
@@ -9211,7 +9215,25 @@ function resolveSelectedQuestEvent(test) {
         ? 'acquired'
         : 'found';
 
-    const progression = advanceQuestFromDiscovery(state, discovery);
+    const progression = advanceQuestFromDiscovery(
+        state,
+        discovery,
+        quest.id
+    );
+
+    const updatedQuest = findQuestById(
+        progression.state,
+        quest.id
+    );
+
+    const updatedDiscovery = updatedQuest?.discoveries?.find(
+        item => item.id === discovery.id
+    );
+
+    assert(
+        updatedQuest && updatedDiscovery,
+        `Discovery progression lost quest ${quest.id} or item ${discovery.id}`
+    );
 
     /*
      * Crew Knowledge records what was actually exposed, not hidden quest
@@ -9219,19 +9241,19 @@ function resolveSelectedQuestEvent(test) {
      * observation stable across duplicate notifications and reloads.
      */
     recordCrewKnowledge(progression.state, {
-        id: `knowledge-quest-discovery-${discovery.id}`,
+        id: `knowledge-quest-discovery-${updatedDiscovery.id}`,
         kind: 'quest_discovery',
         knowledgeType: 'observation',
         certainty: 'engine_established',
         summary:
-            `Found ${discovery.name}. ${discovery.significance}`,
+            `Found ${updatedDiscovery.name}. ${updatedDiscovery.significance}`,
         source: {
             id: quest.id,
             type: 'quest'
         },
-        learnedAtLocationId: discovery.locationId,
+        learnedAtLocationId: updatedDiscovery.locationId,
         learnedAtZone:
-            progression.state.places?.[discovery.locationId]?.zone ??
+            progression.state.places?.[updatedDiscovery.locationId]?.zone ??
             progression.state.zone
     });
 
@@ -9241,8 +9263,8 @@ function resolveSelectedQuestEvent(test) {
         action: 'quest_event',
         event: 'found',
         questId: quest.id,
-        quest: clone(quest),
-        discovery: clone(discovery),
+        quest: clone(updatedQuest),
+        discovery: clone(updatedDiscovery),
         questGate: progression.questGate,
         state: progression.state
     };
@@ -9312,15 +9334,11 @@ function resolveQuestAction(test) {
         );
     }
 
-    if (
-        ['clear_gate', 'resolve_objective', 'complete']
-            .includes(test.action)
-    ) {
-        assert(
-            state.activeQuest?.id === quest.id,
-            'Progression currently requires the selected active quest'
-        );
-    }
+    /*
+     * Progression is authorized by the journal quest ID above.
+     * activeQuest remains a UI/compatibility selection, not ownership
+     * of a discovery or encounter event.
+     */
 
     assert(
         [

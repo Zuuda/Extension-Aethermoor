@@ -4514,23 +4514,37 @@ if (!questTerminal) {
     };
 }
 
+/*
+ * Rumor templates establish a local claim and destination, not a fixed
+ * landmark repeated across every zone. The saved zone geography guides
+ * how the narrator describes the place. Arrival still resolves the
+ * claim through the locked rumor inquiry; this catalog grants no quest,
+ * encounter, loot, or guaranteed point of interest.
+ */
 const TRAVELER_RUMORS = [
     {
-        id: 'old-mill',
-        place: 'Old Mill',
-        claim: 'A traveler says lights have been seen inside the Old Mill after dark.'
+        id: 'unused-site',
+        place: 'Disused site',
+        claim:
+            'A traveler says there have been signs of activity at a ' +
+            'disused local site.'
     },
     {
-        id: 'stone-ford',
-        place: 'Stone Ford',
-        claim: 'A traveler says someone has been leaving fresh supplies at Stone Ford.'
+        id: 'route-marker',
+        place: 'Isolated route marker',
+        claim:
+            'A traveler says supplies have appeared beside an isolated ' +
+            'route marker.'
     },
     {
-        id: 'abandoned-watchtower',
-        place: 'Abandoned Watchtower',
-        claim: 'A traveler says the Abandoned Watchtower has been occupied recently.'
+        id: 'old-structure',
+        place: 'Old structure',
+        claim:
+            'A traveler says lights have been seen at an old local ' +
+            'structure after dark.'
     }
 ];
+
 
 const ROUTE_SEGMENT_EDGES = [
     ['outpost', 'stone-ford', 1],
@@ -4545,13 +4559,18 @@ function ensureWorldLocation(state) {
 
     state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
 
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId
+    );
+
     state.places[state.currentLocationId] ||= {
         id: state.currentLocationId,
-        label: state.currentLocationId === routeNodeId(state.zone, 'outpost')
-            ? 'Peat-Cairn Outpost'
-            : state.currentLocationId,
-        zone: state.zone,
-        kind: 'settlement'
+        label: settlement?.label || state.currentLocationId,
+        zone: settlement?.zone || state.zone,
+        ...(settlement ? { settlementId: settlement.id } : {}),
+        kind: settlement ? 'settlement' : 'place'
     };
 
     return state.currentLocationId;
@@ -6367,9 +6386,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — World integration
  * - World records and route edges are saved.
- * - Some older quest, route, settlement, and UI paths still use legacy IDs,
- *   labels, or assumptions.
- * - Replace those paths with stable world records in one migration pass.
+ * - IMPLEMENTED — BETA PENDING: new traveler rumors use zone-local,
+ *   setting-neutral sites and claims instead of repeating three named
+ *   Zone 3 landmarks throughout the world.
+ * - Missing current-place records use the saved settlement identity rather
+ *   than labelling every zone's outpost Peat-Cairn Outpost.
+ * - Existing saved places keep their established names and IDs.
+ * - Older route and UI paths still contain fixed local-map assumptions;
+ *   migrate those separately without removing live saved routes.
  *
  * PARTIAL — Migration and validation
  * - Existing saves receive world, journey, potion, and quest migrations.
@@ -13182,11 +13206,20 @@ function checkImportedState(state) {
     state.leads ||= {};
     state.currentLocationId ||= routeNodeId(state.zone, 'outpost');
 
+    const currentSettlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId
+    );
+
     state.places[state.currentLocationId] ||= {
         id: state.currentLocationId,
-        label: 'Peat-Cairn Outpost',
-        zone: state.zone,
-        kind: 'settlement'
+        label: currentSettlement?.label || state.currentLocationId,
+        zone: currentSettlement?.zone || state.zone,
+        ...(currentSettlement
+            ? { settlementId: currentSettlement.id }
+            : {}),
+        kind: currentSettlement ? 'settlement' : 'place'
     };
 
     const stats = derived(state.crew);

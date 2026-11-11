@@ -6332,6 +6332,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   person is diegetic; turn-in is report-only.
  * - Four- and five-gate Missing Person offers use Abducted, because the
  *   current Lost scenario supports only two or three field gates.
+ * - IMPLEMENTED — BETA PENDING: Ruin Clearance and Territorial Beast Hunt
+ *   use setting-neutral premises and saved V2 linked-threat structures.
+ * - New-offer scenario eligibility no longer reads geography profiles.
+ *   Saved world geography still guides narration and zone transitions.
  * - Full gameplay verification remains for beta.
  *
  * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
@@ -6763,42 +6767,57 @@ const QUEST_ARCHETYPES = [
     {
         id: 'ruin_clearance',
         label: 'Ruin Clearance',
+         /*
+         * Premises identify why the site needs clearing. The engine locks
+         * the linked encounter; local architecture and appearance come
+         * from the saved zone context, not a biome-specific quest table.
+         */
         scenarios: [
             {
-                pitch: 'A nearby route has become unsafe after activity was seen inside an old structure.',
-                truth: 'A territorial group has occupied the ruin while following a source of food deeper inside.',
+                pitch:
+                    'A disused structure beside a working route has become ' +
+                    'unsafe. The route keepers need the threat removed.',
+                truth:
+                    'A hostile group has occupied the structure and is ' +
+                    'using it to control the nearby route.',
                 facts: {
-                    sponsor: 'the Peat-Cairn road wardens',
-                    site: 'the drowned watch-house',
-                    threat: 'a band of marsh scavengers',
-                    evidence: 'fresh cookfire ash and newly cut trail marks',
-                    obstacle: 'a collapsed entrance and guarded upper windows'
+                    sponsor: 'the local route keepers',
+                    site: 'the disused route structure',
+                    threat: 'the occupying hostile group',
+                    evidence: 'fresh signs of occupation and repeated passage',
+                    obstacle: 'an approach watched from within the site'
                 }
             },
             {
-                pitch: 'A storage ruin thought to be empty has begun producing noises at night.',
-                truth: 'An opportunistic crew is using the ruin as cover while stripping its foundations.',
+                pitch:
+                    'Workers can no longer use an old work site. Their ' +
+                    'sponsor needs its dangerous occupants cleared.',
+                truth:
+                    'A hostile group has made the site its shelter.',
                 facts: {
-                    sponsor: 'the local stonecutters’ guild',
-                    site: 'the split-stone storehouse',
-                    threat: 'a salvage crew with armed lookouts',
-                    evidence: 'recent chisel marks and a hidden haul path',
-                    obstacle: 'a narrow approach overlooked from the roof'
+                    sponsor: 'the local work crew',
+                    site: 'the disused work site',
+                    threat: 'the occupying hostile group',
+                    evidence: 'recent activity at the old entrance',
+                    obstacle: 'an approach exposed to the occupants'
                 }
             },
             {
-                geographyProfiles: ['karst'],
-                pitch: 'A survey party has stopped reporting from a newly opened karst passage.',
-                truth: 'A cave-in separated the surveyors from their equipment, and something territorial has occupied the narrow route between them.',
+                pitch:
+                    'An essential passage through an old structure has ' +
+                    'become unsafe. The passage must be cleared.',
+                truth:
+                    'A territorial threat is holding the passage.',
                 facts: {
-                    sponsor: 'the Zone 4 survey office',
-                    site: 'the Split Echo passage',
-                    threat: 'a territorial cave-stalker',
-                    evidence: 'fresh survey chalk and a dropped brass plumb weight',
-                    obstacle: 'a narrow flooded fissure beneath unstable limestone'
+                    sponsor: 'the local passage wardens',
+                    site: 'the old passage structure',
+                    threat: 'the territorial threat',
+                    evidence: 'fresh tracks through the passage',
+                    obstacle: 'a confined approach to the occupied section'
                 }
             }
         ],
+
         gates: [
             ['traversal_discovery', 'Find a safe approach to {site} and verify {evidence}.'],
             ['combat_twist_showdown', 'Secure the first occupied section against {threat}.'],
@@ -6941,30 +6960,44 @@ const QUEST_ARCHETYPES = [
     {
         id: 'territorial_beast',
         label: 'Territorial Beast Hunt',
+        /*
+         * These variants establish animal behavior and a linked threat,
+         * not a species or landscape. The narrator may describe the
+         * engine-created Elite to fit the zone without changing its stats.
+         */
         scenarios: [
             {
-                pitch: 'A dangerous animal has begun driving local gatherers away from a familiar route.',
-                truth: 'The animal is defending a den after nearby logging exposed its young.',
+                pitch:
+                    'A territorial animal has driven people from a ' +
+                    'regularly used route.',
+                truth:
+                    'The animal has established a defended territory ' +
+                    'around a nearby shelter.',
                 facts: {
-                    sponsor: 'the peat-cutters’ trail warden',
-                    beast: 'a scar-backed mire drake',
-                    place: 'the cypress ridge trail',
-                    evidence: 'fresh claw marks and a trampled den approach',
-                    obstacle: 'the beast’s short, defended territory'
+                    sponsor: 'the local route warden',
+                    beast: 'the territorial animal',
+                    place: 'the affected route',
+                    evidence: 'repeated territorial signs along the route',
+                    obstacle: 'the animal’s defended approach'
                 }
             },
             {
-                pitch: 'A herd animal has stopped returning to its usual grazing ground.',
-                truth: 'A predator has established a hunting path beside the herd’s watering place.',
+                pitch:
+                    'An animal is threatening a place local workers ' +
+                    'depend on.',
+                truth:
+                    'The animal has begun treating the area as its ' +
+                    'regular hunting ground.',
                 facts: {
-                    sponsor: 'the Fen-Trollkin camp herders',
-                    beast: 'a pale marsh tusker',
-                    place: 'the reed-ringed watering hollow',
-                    evidence: 'broken reeds and a repeated set of heavy tracks',
-                    obstacle: 'the predator’s approach through deep water'
+                    sponsor: 'the affected local workers',
+                    beast: 'the dangerous animal',
+                    place: 'the affected work area',
+                    evidence: 'fresh signs of repeated animal activity',
+                    obstacle: 'the animal’s established hunting path'
                 }
             }
         ],
+
         gates: [
             ['traversal_discovery', 'Follow {evidence} to locate {beast} near {place}.'],
             ['traversal_discovery', 'Determine the boundaries of {beast}’s territory.'],
@@ -6981,60 +7014,21 @@ const QUEST_ARCHETYPES = [
  * and helper code after the remaining archetypes have been converted.
  */
 
-function questGeographyProfile(state, zone = state.zone) {
-    const savedProfile =
-        state.world?.zones?.[zone]?.geography?.profile;
-
-    if (savedProfile) return savedProfile;
-
-    const legacyProfiles = {
-        1: 'valley',
-        2: 'marsh_edge',
-        3: 'marsh',
-        4: 'karst',
-        5: 'hills'
-    };
-
-    return legacyProfiles[zone] || null;
-}
-
-function eligibleQuestScenarios(state, archetype, zone, rank) {
-    const profile = questGeographyProfile(state, zone);
-
+/*
+ * Quest eligibility depends on stakes and supported mechanics, not biome.
+ * Saved zone geography remains available to the narrator for scenery,
+ * names, and gradual transitions; it does not exclude an objective.
+ */
+function eligibleQuestScenarios(_state, archetype, _zone, rank) {
     return (archetype.scenarios || []).filter(scenario => {
-        const allowedProfiles =
-            scenario.geographyProfiles ||
-            ['marsh_edge', 'marsh'];
-
-         /*
-         * Generic cargo and herb requests are available in any saved
-         * geography. The other catalogs still contain fixed local places
-         * and remain filtered until they are converted too.
-         */
-        if (
-            ![
-                'recover_cargo',
-                'herb_foraging',
-                'missing_person'
-            ].includes(archetype.id) &&
-            !allowedProfiles.includes(profile)
-        ) {
-            return false;
-        }
-
         if (
             Array.isArray(scenario.ranks) &&
-
             !scenario.ranks.includes(rank)
         ) {
             return false;
         }
 
-        /*
-         * F currently has one authored, low-stakes objective. Do not
-         * downgrade cargo recovery, ruin clearance, or beast hunts merely
-         * by giving them F rewards and fewer gates.
-         */
+        // F has one authored, low-stakes objective at present.
         if (rank === 'F') {
             return archetype.id === 'herb_foraging' &&
                 scenario.ranks?.includes('F') === true;
@@ -7042,8 +7036,6 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
 
         if (archetype.id !== 'missing_person') return true;
 
-        // The current Lost plan fits D's 2–3 gates.
-        // Abducted fits the 3–5 gates used by C and B.
         if (scenario.variantId === 'lost') return rank === 'D';
         if (scenario.variantId === 'abducted') {
             return rank === 'C' || rank === 'B';

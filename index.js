@@ -6469,14 +6469,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Run the relevant regression group after every quest, travel, or persistence
  *   change instead of relying only on the live campaign state.
  *
- * * NEXT — Explicit movement commands and World destinations
- * - Generate stable-ID movement commands from clickable World entries.
- * - Support quest destinations, rumor destinations, settlements, and generic
- *   regional exploration.
- * - Allow an explicit destination command to change direction mid-journey.
- * - Keep legacy [moved] parsing for existing chats.
- * - Make UI clicks clipboard-only; movement resolves only when the command
- *   is submitted with the player's fiction.
+ * IMPLEMENTED — BETA PENDING: Explicit movement commands and World destinations
+ * - World entries copy stable-ID movement commands; movement resolves only
+ *   when the player submits the command with their fiction.
+ * - Supports known destinations and regional exploration.
+ * - Explicit destination commands can change direction mid-journey.
+ * - Legacy [moved] parsing remains supported.
+ * - Beta verification remains part of the travel interruption regression pass.
  *
  * PLANNED — Local site exploration sessions
  * - Do not implement fixed room counts in this movement pass.

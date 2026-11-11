@@ -6326,9 +6326,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   geography-agnostic requests and V2 authored discoveries for every
  *   supported gate count; the harvest remains locked turn-in cargo.
  * - Saved zone geography informs presentation, not Herb Foraging eligibility.
- * - Missing Person Search saves its variant: Lost at D, Abducted at C/B.
- *   Lost ends when the person is found; Abducted ends when the linked threat
- *   is defeated. Returning the person is diegetic; turn-in is report-only.
+ * - IMPLEMENTED — BETA PENDING: Missing Person Search uses geography-neutral
+ *   Lost-at-D and Abducted-at-C/B variants. Lost ends when the person is
+ *   found; Abducted ends when the linked threat is defeated. Returning the
+ *   person is diegetic; turn-in is report-only.
  * - Four- and five-gate Missing Person offers use Abducted, because the
  *   current Lost scenario supports only two or three field gates.
  * - Full gameplay verification remains for beta.
@@ -6855,32 +6856,46 @@ const QUEST_ARCHETYPES = [
         ]
     },
 
-      {
+    /*
+     * Missing Person variants lock the situation and objective structure,
+     * not a particular road, landscape, or local culture. The narrator may
+     * supply names and setting details using the current zone context.
+     */
+    {
         id: 'missing_person',
         label: 'Missing Person Search',
         scenarios: [
             {
                 variantId: 'lost',
-                pitch: 'A relative has not returned from a routine trip along the marsh road.',
-                truth: 'The missing traveler left the road to shelter from a sudden flood.',
+                ranks: ['D'],
+                pitch:
+                    'A person failed to return from a routine journey, and ' +
+                    'their sponsor wants the crew to find them.',
+                truth:
+                    'The traveler lost the route and is waiting at a nearby ' +
+                    'sheltered place.',
                 facts: {
-                    sponsor: 'the missing traveler’s sister',
-                    person: 'Mara Venn',
-                    place: 'the old ferry landing',
-                    evidence: 'a dropped satchel and a broken walking staff',
-                    obstacle: 'flooded ground beyond the landing'
+                    sponsor: 'the missing person’s concerned relative',
+                    person: 'the missing traveler',
+                    place: 'the last known location',
+                    evidence: 'signs left along the traveler’s route',
+                    obstacle: 'the traveler’s trail becomes difficult to follow'
                 }
             },
             {
                 variantId: 'abducted',
-                pitch: 'A local courier missed two expected check-ins while carrying sealed letters.',
-                truth: 'The courier was detained by a bandit crew searching for one particular letter.',
+                ranks: ['C', 'B'],
+                pitch:
+                    'A person was taken from a known route. Their sponsor ' +
+                    'wants the crew to find and recover them.',
+                truth:
+                    'A hostile group is holding the person at a nearby site.',
                 facts: {
-                    sponsor: 'the Peat-Cairn message office',
-                    person: 'Tovin Reed',
-                    place: 'the north causeway marker',
-                    evidence: 'a torn route docket and a fresh boot trail',
-                    obstacle: 'armed watchers controlling the causeway'
+                    sponsor: 'the missing person’s local sponsor',
+                    person: 'the abducted person',
+                    place: 'the last known location',
+                    evidence: 'signs showing where the person was taken',
+                    obstacle: 'the group holding the person'
                 }
             }
         ],
@@ -6997,7 +7012,11 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
          * and remain filtered until they are converted too.
          */
         if (
-            !['recover_cargo', 'herb_foraging'].includes(archetype.id) &&
+            ![
+                'recover_cargo',
+                'herb_foraging',
+                'missing_person'
+            ].includes(archetype.id) &&
             !allowedProfiles.includes(profile)
         ) {
             return false;

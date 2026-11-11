@@ -7045,8 +7045,13 @@ function eligibleQuestArchetypes(state, zone, rank) {
         .filter(entry => entry.scenarios.length > 0);
 }
 
-function buildQuestFacts(state, archetype, zone, eligibleScenarios) {
-
+function buildQuestFacts(
+    state,
+    archetype,
+    zone,
+    eligibleScenarios,
+    rank
+) {
 
     assert(
         eligibleScenarios.length > 0,
@@ -7095,13 +7100,31 @@ function buildQuestFacts(state, archetype, zone, eligibleScenarios) {
         `Quest archetype ${archetype.id} has an invalid scenario`
     );
 
+    const facts = clone(scenario.facts);
+
+    if (archetype.id === 'recover_cargo') {
+        const cargoStakesByRank = {
+            E: 'ordinary supplies needed for routine local work',
+            D: 'valuable property whose loss harms its local owner',
+            C: 'essential supplies needed by the community',
+            B: 'region-critical cargo whose loss disrupts several communities'
+        };
+
+        assert(
+            cargoStakesByRank[rank],
+            `Recover Cargo has no authored stakes for rank ${rank}`
+        );
+
+        facts.stakes = cargoStakesByRank[rank];
+    }
+
     return {
         variantRoll,
         variantId: scenario.variantId || variantId,
         scenarioRoll,
         pitch: scenario.pitch,
         truth: scenario.truth,
-        facts: clone(scenario.facts)
+        facts
     };
 }
 
@@ -7938,7 +7961,8 @@ function resolveQuestSeed(test) {
         state,
         archetype,
         zone,
-        selectedArchetype.scenarios
+        selectedArchetype.scenarios,
+        rank
     );
 
     const structureV2 = buildQuestV2PlanForOffer(
@@ -13350,7 +13374,7 @@ function discoveryNarrationPacket(encounter) {
 }
 
 const PUBLIC_QUEST_FACT_KEYS = {
-    recover_cargo: ['sponsor', 'cargo', 'place'],
+    recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
     ruin_clearance: ['sponsor', 'site'],
     herb_foraging: ['sponsor', 'herb', 'place'],
     missing_person: ['sponsor', 'person', 'place'],

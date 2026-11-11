@@ -6375,11 +6375,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Three reputation steps per tier. F/E grant one; D/C/B grant two.
  *   Keep earned tiers and banked steps. Tune pacing during beta.
  * - Missing Person: Lost at D; Abducted at C/B.
- * - Rank-specific scenario eligibility for the rest of the catalog is still
- *   pending. Current non-F archetypes may appear across permitted ranks even
- *   when their authored stakes have not yet been differentiated.
- * - Later assign authored rank ranges or stakes to each scenario; do not
- *   infer rank suitability from gate count or payout alone.
+ * - Herb Foraging has explicit F, E/D, and C/B stakes; Missing Person has
+ *   Lost at D and Abducted at C/B; F nuisance variants are explicitly authored
+ *   for Ruin Clearance and Territorial Beast Hunt.
+ * - Other non-F archetypes may still appear across permitted ranks without
+ *   rank-specific scenario eligibility. Continue assigning authored rank
+ *   ranges and stakes; do not infer suitability from gate count or payout.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
  *

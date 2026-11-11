@@ -1617,22 +1617,24 @@ function finalizeEncounterRewards(state, slainIds) {
 
 
     if (encounter.questTerminal) {
-        const activeQuest =
-            state.activeQuest;
-
-        assert(
-            activeQuest &&
-            activeQuest.id ===
-                encounter.questTerminal.questId,
-            'Quest-terminal encounter is linked to the wrong quest'
+        const linkedQuest = findQuestById(
+            state,
+            encounter.questTerminal.questId
         );
 
         assert(
-            activeQuest.terminalThreat,
-            'Linked quest has no terminal threat record'
+            linkedQuest?.status === 'in_progress' &&
+            linkedQuest.targetId ===
+                encounter.questTerminal.targetId,
+            'Quest-terminal encounter has no matching in-progress quest'
         );
 
-        activeQuest.terminalThreat.resolved = true;
+        assert(
+            linkedQuest.terminalThreat?.encounterId === encounter.id,
+            'Linked quest threat does not match this encounter'
+        );
+
+        linkedQuest.terminalThreat.resolved = true;
     }
 
     return {
@@ -2094,62 +2096,81 @@ function spawnLinkedQuestEncounter(state) {
 }
 
 function completeLinkedCombatQuestGate(state) {
-    const quest = state.activeQuest;
     const encounter = state.encounter;
-    const gate = quest?.currentGate;
 
     if (
-        quest?.status !== 'in_progress' ||
-        gate?.trigger !== 'linked_combat' ||
         !encounter?.questTerminal ||
-        encounter.status !== 'cleared' ||
-        encounter.questTerminal.questId !== quest.id ||
-        encounter.questTerminal.targetId !== gate.linkedTargetId ||
-        gate.linkedTargetId !== quest.targetId ||
-        quest.terminalThreat?.resolved !== true
+        encounter.status !== 'cleared'
     ) {
         return null;
     }
 
+    const questId = encounter.questTerminal.questId;
+    const quest = findQuestById(state, questId);
+    const gate = quest?.currentGate;
+
+    assert(
+        quest?.status === 'in_progress' &&
+        gate?.trigger === 'linked_combat' &&
+        encounter.questTerminal.targetId === gate.linkedTargetId &&
+        gate.linkedTargetId === quest.targetId &&
+        quest.terminalThreat?.resolved === true,
+        'Cleared linked encounter does not match its quest gate'
+    );
+
+    const previousSelectionId = state.activeQuest?.id || null;
     const evidence =
         `Defeated the linked quest target at ` +
         `${state.places?.[quest.destinationId]?.label ||
             quest.destinationId}.`;
 
+    /*
+     * resolveQuestAction still requires a selected quest for progression.
+     * Select the encounter's locked owner only on the operation state.
+     * Copy back the updated journal, then restore the prior selection.
+     * The encounter itself remains in place for resolveTurn.
+     */
+    state.activeQuest = quest;
+
     const progression = gate.step < quest.gates
         ? resolveQuestAction({
             state,
+            questId,
             action: 'clear_gate',
             objectiveCompleted: true,
             completionEvidence: evidence
         })
         : resolveQuestAction({
             state,
+            questId,
             action: 'resolve_objective',
             objectiveCompleted: true,
             objectiveRoute: 'combat',
             completionEvidence: evidence
         });
 
-    /*
-     * resolveQuestAction works on a clone. Copy its quest-related changes
-     * back into the combat state; otherwise the fight can clear and pay
-     * rewards while the saved quest remains on its old gate.
-     *
-     * Keep the current encounter object in place because resolveTurn still
-     * updates it after this function returns.
-     */
-    state.activeQuest = progression.state.activeQuest;
+    state.quests = progression.state.quests;
     state.leads = progression.state.leads;
 
+    const updatedQuest = findQuestById(state, questId);
+
+    assert(
+        updatedQuest,
+        `Linked combat lost quest ${questId}`
+    );
+
+    state.activeQuest = previousSelectionId
+        ? findQuestById(state, previousSelectionId)
+        : null;
+
     return {
+        questId,
         completed: progression.completedGate || clone(gate),
         next: progression.nextGate || null,
         objectiveSecured:
-            Boolean(state.activeQuest.objectiveResolution)
+            Boolean(updatedQuest.objectiveResolution)
     };
 }
-
 
 function resolveTurn({
     state,
@@ -6449,7 +6470,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   previous selection after journal progression. Legacy arrival helpers
  *   temporarily use a scoped compatibility pointer.
  * - Arrival result arrays preserve independently affected quests.
- * - Discovery, linked combat, return travel, delivery, and narration still
+ * - Cleared linked combat selects its quest by the encounter's locked quest
+ *   and target IDs, then restores the previous compatibility selection.
+ * - Encounter spawning, automatic return travel, and some narration still
  *   contain activeQuest assumptions that must be migrated.
  * - Arrival integration implemented; live verification pending.
  * - The next integration pass must select quest identity from destination,

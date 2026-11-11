@@ -6363,8 +6363,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   Well Respected D/C/B; Renowned C/B.
  * - Three reputation steps per tier. F/E grant one; D/C/B grant two.
  *   Keep earned tiers and banked steps. Tune pacing during beta.
- * - Missing Person: Lost at D; Abducted at C/B. Rank-specific scenario
- *   eligibility for the rest of the catalog is still pending.
+ * - Missing Person: Lost at D; Abducted at C/B.
+ * - Rank-specific scenario eligibility for the rest of the catalog is still
+ *   pending. Current non-F archetypes may appear across permitted ranks even
+ *   when their authored stakes have not yet been differentiated.
+ * - Later assign authored rank ranges or stakes to each scenario; do not
+ *   infer rank suitability from gate count or payout alone.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
  *

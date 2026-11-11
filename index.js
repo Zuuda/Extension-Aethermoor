@@ -6143,6 +6143,15 @@ function makeQuestSalvage(zone, slotRoll, row) {
         )
     };
 }
+/*
+ * Rank-linked threat rule: F/E quests use a normal pack; D/C roll between
+ * a normal pack and an Elite; B quests use an Elite.
+ *
+ * Gate count controls quest length, not difficulty. This combat rule is
+ * explicit and engine-owned; do not infer that non-combat objectives are
+ * mechanically harder merely because their rank, reward, or gate count is
+ * higher. Family-specific non-combat challenge remains unresolved.
+ */
 function rollQuestTerminalThreat(state, rank, zone) {
     assert(
         ZONES[zone],
@@ -6383,6 +6392,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   ranges and stakes; do not infer suitability from gate count or payout.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
+ * - IMPLEMENTED — BETA PENDING: linked-threat type follows rank: F/E normal
+ *   pack, D/C pack-or-Elite roll, B Elite.
+ * - Gate count means quest length, not difficulty. Mechanical challenge for
+ *   non-combat objectives remains unresolved; do not imply otherwise.
  *
  * PARTIAL — World integration
  * - World records and route edges are saved.

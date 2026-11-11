@@ -13431,7 +13431,7 @@ const PUBLIC_QUEST_FACT_KEYS = {
     ruin_clearance: ['sponsor', 'site', 'stakes'],
     herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place'],
-    territorial_beast: ['sponsor', 'beast', 'place']
+    territorial_beast: ['sponsor', 'beast', 'place', 'stakes']
 };
 
 function publicQuestFactLines(quest) {

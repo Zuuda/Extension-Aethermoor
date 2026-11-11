@@ -5336,11 +5336,7 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
         (
             gate.trigger === undefined &&
             gate.step === 1 &&
-            [
-                'missing_cargo',
-                'ruin_clearance',
-                'sunken_salvage'
-            ].includes(quest.archetype?.id)
+            quest.archetype?.id === 'ruin_clearance'
         );
 
     if (!eligibleArrival) {
@@ -6309,10 +6305,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   Abandoned Transport, Diverted Shipment, or Stolen Shipment.
  * - These premises and their authored discoveries do not depend on a biome.
  *   Zone geography informs the narrator's presentation, not cargo eligibility.
- * - Beta begins from reset state; the old fixed-site cargo helpers are
- *   retired from new-offer, discovery-event, and delivery paths.
- * - Remove the now-unused old cargo catalog entry and helper functions in
- *   the quest-catalog cleanup pass. Do not re-enable their variants.
+ * - Beta begins from reset state; the retired fixed-site cargo catalog
+ *   entries and discovery helpers have been removed.
+ * - Sunken salvage may return later as a GM presentation, not a separate
+ *   geography-gated archetype or required mechanic.
  *
  * PARTIAL — Authored quest discoveries
  * - Some V2 quests have engine-authored discoveries with stable IDs,
@@ -6920,43 +6916,7 @@ const QUEST_ARCHETYPES = [
         gates: []
     },
 
-    {
-        id: 'sunken_salvage',
-        label: 'Sunken Salvage',
-        variantId: 'sunken_salvage',
-        scenarios: [
-            {
-                pitch: 'A claimant has identified a sunken company scow and wants its sealed cargo recovered.',
-                truth: 'The cargo remains inside the wreck, concealed by silt and a collapsed section of hull.',
-                facts: {
-                    sponsor: 'the Peat-Cairn Excavation Co.',
-                    cargo: 'the sealed pay-chest',
-                    wreck: 'the scow at Sunken Channel #3',
-                    evidence: 'the stamped barge-lock plate',
-                    obstacle: 'root-bound iron brackets beneath the waterline'
-                }
-            },
-            {
-                pitch: 'A ferry crew wants a marked navigation case recovered before it is lost to the current.',
-                truth: 'The case is wedged beneath the wreck, while scavengers have begun stripping the deck.',
-                facts: {
-                    sponsor: 'the third-weir ferry crew',
-                    cargo: 'the brass navigation case',
-                    wreck: 'the split-hull ferry below the limestone bend',
-                    evidence: 'a painted ferry number on a floating plank',
-                    obstacle: 'a fast undertow and active scavengers'
-                }
-            }
-        ],
-        gates: [
-            ['traversal_discovery', 'Locate {wreck} and confirm it using {evidence}.'],
-            ['brain_social_heist', 'Find a way past {obstacle} to reach {cargo}.'],
-            ['combat_twist_showdown', 'Secure the wreck against its current guardians.'],
-            ['traversal_discovery', 'Extract {cargo} without losing it to the water or wreckage.'],
-            ['brain_social_heist', 'Return the recovered cargo to {sponsor}.']
-        ]
-    },
-    {
+      {
         id: 'territorial_beast',
         label: 'Territorial Beast Hunt',
         /*
@@ -7046,9 +7006,6 @@ function eligibleQuestScenarios(_state, archetype, _zone, rank) {
 
 function eligibleQuestArchetypes(state, zone, rank) {
     return QUEST_ARCHETYPES
-        .filter(archetype =>
-            archetype.id !== 'sunken_salvage'
-        )
         .map(archetype => ({
             archetype,
             scenarios: eligibleQuestScenarios(
@@ -7136,9 +7093,10 @@ function buildQuestFacts(state, archetype, zone, eligibleScenarios) {
  * - discovery: validated FOUND event for this gate's authored discovery.
  * - linked_combat: this gate's engine-created encounter is cleared.
  *
- * This builder is deliberately not connected to resolveQuestSeed yet.
- * Creation and progression must be integrated together before V2 offers
- * enter normal play. Existing quests retain their original structures.
+ * New offers are created from these complete structures, and their
+ * progression resolves through arrival, discovery, and linked-combat
+ * events. Existing saves are reset before beta, so retired catalog
+ * archetypes and their fixed-site preparation code are not retained.
  */
 
 const QUEST_V2_STRUCTURES = {
@@ -7443,8 +7401,6 @@ function buildQuestV2PlanForOffer(
      */
     const familyByArchetype = {
         recover_cargo: 'retrieve_item',
-        missing_cargo: 'retrieve_item',
-        sunken_salvage: 'retrieve_item',
         territorial_beast: 'defeat_elite',
         ruin_clearance: 'defeat_elite'
     };
@@ -8347,394 +8303,6 @@ function prepareRecoverCargoDiscovery(quest) {
     return quest.discoveries.find(
         item => item.id === cargoId
     );
-}
-
-function prepareMissingCargoDiscovery(quest) {
-    const isDepotRecovery =
-        quest?.archetype?.id === 'missing_cargo' ||
-        (
-            quest?.archetype?.id === 'recover_cargo' &&
-            quest.variant?.id === 'depot_recovery'
-        );
-
-    if (
-        !isDepotRecovery ||
-        !Array.isArray(quest.gatesData) ||
-        !quest.destinationId
-    ) {
-        return null;
-    }
-
-    assert(
-        quest.gates >= 1 && quest.gates <= 5,
-        `Missing Cargo discovery preparation does not support ${quest.gates} gates`
-    );
-
-    const profiles = {
-        1: {
-            clue: {
-                idSuffix: 'cargo-tally',
-                name: 'Counter-signed cargo tally',
-                hidingPlace:
-                    'inside the old gravel weir station’s tally drawer',
-                significance:
-                    'The tally and fresh drag marks show where the missing payroll strongbox was taken.'
-            },
-            innerSite: {
-                idSuffix: 'storehouse-entry',
-                name: 'Storehouse access mark',
-                hidingPlace:
-                    'on the old gravel weir station’s loading plan',
-                significance:
-                    'The mark identifies the storehouse entrance used for large consignments.'
-            },
-            access: {
-                idSuffix: 'storehouse-key',
-                name: 'Storehouse key',
-                hidingPlace:
-                    'inside the station keeper’s locked desk',
-                significance:
-                    'The key opens the storehouse containing the missing payroll strongbox.'
-            },
-            cargo: {
-                idSuffix: 'payroll-strongbox',
-                name: 'the sealed payroll strongbox',
-                requiredAction: 'search_storehouse',
-                hidingPlace:
-                    'inside the locked storehouse at the old gravel weir',
-                significance:
-                    'This is the missing payroll strongbox reported by the trading concern.'
-            }
-        },
-        2: {
-            clue: {
-                idSuffix: 'diversion-docket',
-                name: 'Counter-signed diversion docket',
-                hidingPlace:
-                    'inside the weigh-station scale counterweight housing',
-                significance:
-                    'It identifies the subcontractor who diverted the tool shipment.'
-            },
-            innerSite: {
-                idSuffix: 'freight-store-mark',
-                name: 'Freight-store access mark',
-                hidingPlace:
-                    'on the weigh-station’s loading plan',
-                significance:
-                    'The mark identifies the freight store used for diverted shipments.'
-            },
-            access: {
-                idSuffix: 'freight-store-key',
-                name: 'Freight-store key',
-                hidingPlace:
-                    'inside the weigh-station clerk’s locked drawer',
-                significance:
-                    'The key opens the freight store where the missing tool shipment is hidden.'
-            },
-            cargo: {
-                idSuffix: 'tool-shipment',
-                name: quest.facts?.cargo || 'Missing shipment',
-                requiredAction: 'search_crates',
-                hidingPlace:
-                    'inside the abandoned freight crates',
-                significance:
-                    'This is the missing cargo the North Sluice peat-cutters reported.'
-            }
-        }
-    };
-
-    const profile = profiles[quest.seed?.scenarioRoll];
-
-    assert(
-        profile,
-        `No authored Missing Cargo discovery profile for scenario ${quest.seed?.scenarioRoll}`
-    );
-
-    quest.discoveries ||= [];
-
-    function prepareDiscovery(definition, kind) {
-        const id = `${quest.id}-${definition.idSuffix}`;
-        let discovery = quest.discoveries.find(
-            item => item.id === id
-        );
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance
-            };
-
-            quest.discoveries.push(discovery);
-        }
-
-        return discovery;
-    }
-
-    function bindGate(stage, discovery) {
-        const gate = quest.gatesData.find(
-            entry => entry.stage === stage
-        );
-
-        if (!gate) return;
-
-        gate.requiredDiscoveryId = discovery.id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = discovery.id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const clue = prepareDiscovery(profile.clue, 'evidence');
-    bindGate('locate', clue);
-
-    const innerSiteDiscovery =
-        prepareDiscovery(profile.innerSite, 'evidence');
-    bindGate('reach_inner_site', innerSiteDiscovery);
-
-    const accessDiscovery =
-        prepareDiscovery(profile.access, 'evidence');
-    bindGate('find_access', accessDiscovery);
-
-    const cargoId = `${quest.id}-${profile.cargo.idSuffix}`;
-    let cargo = quest.discoveries.find(
-        item => item.id === cargoId
-    );
-
-    if (!cargo) {
-        cargo = {
-            id: cargoId,
-            kind: 'quest_item',
-            name: profile.cargo.name,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            requiredAction: profile.cargo.requiredAction,
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace: profile.cargo.hidingPlace,
-            significance: profile.cargo.significance,
-            questCargo: true
-        };
-
-        quest.discoveries.push(cargo);
-    }
-
-    bindGate('recover', cargo);
-
-    /*
-     * Retrieval quests carry the same authored cargo identity through
-     * delivery. Preserve the issuer and recipient already locked on the quest.
-     */
-    assert(
-        quest.turnIn && typeof quest.turnIn === 'object',
-        'Missing Cargo quest has no locked turn-in record'
-    );
-
-    assert(
-        !quest.turnIn.discoveryId ||
-        quest.turnIn.discoveryId === cargoId,
-        'Missing Cargo turn-in points to a different cargo discovery'
-    );
-
-    quest.turnIn.discoveryId = cargoId;
-
-    return clue;
-}
-
-function prepareSunkenSalvageDiscovery(quest) {
-    const isSunkenSalvage =
-        quest?.archetype?.id === 'sunken_salvage' ||
-        (
-            quest?.archetype?.id === 'recover_cargo' &&
-            quest.variant?.id === 'sunken_salvage'
-        );
-
-    if (
-        !isSunkenSalvage ||
-        !quest.destinationId ||
-        !Array.isArray(quest.gatesData)
-    ) {
-        return null;
-    }
-
-    assert(
-        quest.gates >= 1 && quest.gates <= 5,
-        `Sunken Salvage discovery preparation does not support ${quest.gates} gates`
-    );
-
-    const profiles = {
-        1: {
-            clue: {
-                idSuffix: 'wreck-identification',
-                name: 'Stamped barge-lock plate',
-                hidingPlace: 'bolted to the scow’s forward cargo hatch',
-                significance:
-                    'The stamp identifies this wreck as the company scow carrying the sealed pay-chest.'
-            },
-            innerSite: {
-                idSuffix: 'inner-hold-mark',
-                name: 'Inner-hold mark',
-                hidingPlace: 'beneath the scow’s forward cargo hatch',
-                significance:
-                    'The mark points to the inner hold containing the sealed pay-chest.'
-            },
-            access: {
-                idSuffix: 'hold-release',
-                name: 'Cargo-hold release pin',
-                hidingPlace: 'wedged behind a loose plate in the forward hatch',
-                significance:
-                    'The release pin disengages the brackets holding the pay-chest.'
-            },
-            cargo: {
-                contents: [
-                    'Company-stamped payroll packets inside an oilskin liner.',
-                    'A matching wage ledger identifying the intended workers.'
-                ],
-                description:
-                    'The packets remain bundled for company payroll. ' +
-                    'The ledger identifies the shipment as the missing pay-chest.',
-                requiredAction:
-                    'Free the pay-chest from its root-bound brackets, ' +
-                    'bring it onto secure ground, and inspect its contents.'
-            }
-        },
-        2: {
-            clue: {
-                idSuffix: 'wreck-identification',
-                name: 'Painted ferry number',
-                hidingPlace: 'on a floating plank caught beside the split-hull ferry',
-                significance:
-                    'The number identifies the wreck as the ferry carrying the missing navigation case.'
-            },
-            innerSite: {
-                idSuffix: 'inner-hold-mark',
-                name: 'Navigation-hold mark',
-                hidingPlace: 'painted beneath the ferry’s aft deck',
-                significance:
-                    'The mark identifies the hold where the navigation case was secured.'
-            },
-            access: {
-                idSuffix: 'hold-release',
-                name: 'Hatch-clearing lever',
-                hidingPlace: 'jammed beneath a broken deck beam',
-                significance:
-                    'The lever clears the jammed hatch above the navigation case.'
-            },
-            cargo: {
-                contents: [
-                    'Waxed navigation charts bearing the ferry crew stamp.',
-                    'A brass sounding instrument secured in a fitted wooden cradle.'
-                ],
-                description:
-                    'The markings identify the case as the ferry crew navigation cargo.',
-                requiredAction:
-                    'Recover the navigation case from beneath the wreck ' +
-                    'and inspect its identifying contents.'
-            }
-        }
-    };
-
-    const profile = profiles[quest.seed?.scenarioRoll];
-    assert(profile, 'No authored contents for this salvage scenario');
-
-    quest.discoveries ||= [];
-
-    function prepareDiscovery(definition, kind) {
-        const id = `${quest.id}-${definition.idSuffix}`;
-        let discovery = quest.discoveries.find(
-            item => item.id === id
-        );
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance
-            };
-
-            quest.discoveries.push(discovery);
-        }
-
-        return discovery;
-    }
-
-    function bindGate(stage, discovery) {
-        const gate = quest.gatesData.find(
-            entry => entry.stage === stage
-        );
-
-        if (!gate) return;
-
-        gate.requiredDiscoveryId = discovery.id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = discovery.id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const clue = prepareDiscovery(profile.clue, 'evidence');
-    bindGate('locate', clue);
-
-    const innerSite = prepareDiscovery(profile.innerSite, 'evidence');
-    bindGate('reach_inner_site', innerSite);
-
-    const access = prepareDiscovery(profile.access, 'evidence');
-    bindGate('find_access', access);
-
-    const cargoId = `${quest.id}-salvage-cargo`;
-    let cargo = quest.discoveries.find(
-        item => item.id === cargoId
-    );
-
-    if (!cargo) {
-        cargo = {
-            id: cargoId,
-            kind: 'quest_item',
-            name: quest.facts.cargo,
-            locationId: quest.destinationId,
-            state: 'hidden',
-            requiredAction: profile.cargo.requiredAction,
-            acquisitionPolicy: 'auto_on_reveal',
-            hidingPlace:
-                `${quest.facts.cargo} at ${quest.facts.wreck}, ` +
-                `obstructed by ${quest.facts.obstacle}`,
-            significance: profile.cargo.description,
-            contents: clone(profile.cargo.contents),
-            questCargo: true
-        };
-
-        quest.discoveries.push(cargo);
-    }
-
-    bindGate('recover', cargo);
-
-    assert(
-        quest.turnIn && typeof quest.turnIn === 'object',
-        'Sunken Salvage quest has no locked turn-in record'
-    );
-
-    assert(
-        !quest.turnIn.discoveryId ||
-        quest.turnIn.discoveryId === cargoId,
-        'Sunken Salvage turn-in points to a different cargo discovery'
-    );
-
-    quest.turnIn.discoveryId = cargoId;
-
-    return clue;
 }
 
 function prepareHerbForagingDiscovery(quest) {

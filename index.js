@@ -6722,7 +6722,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * IMPLEMENTATION STATUS
  * - New offers require complete V2 structures; legacy template slicing
  *   is not a fallback for newly generated quests.
- * - The catalog still contains setting-specific authored scenarios.
+ * - New-offer scenarios are geography-neutral premises; saved zone geography
+ *   is presentation context. Mechanical special requirements belong in the
+ *   authored V2 structure, not dormant legacy gate templates.
  * - Existing saved quests retain their locked gates and progress.
  * - Discovery, linked-combat, and delivery paths use the V2 structures;
  *   full campaign-flow verification remains for beta.
@@ -6847,14 +6849,6 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'a confined approach to the occupied section'
                 }
             }
-        ],
-
-        gates: [
-            ['traversal_discovery', 'Find a safe approach to {site} and verify {evidence}.'],
-            ['combat_twist_showdown', 'Secure the first occupied section against {threat}.'],
-            ['brain_social_heist', 'Determine why {threat} is using {site}.'],
-            ['combat_twist_showdown', 'Stop {threat} from reaching its objective.'],
-            ['traversal_discovery', 'Verify that the route past {site} is safe for {sponsor}.']
         ]
     },
       /*
@@ -6992,15 +6986,7 @@ const QUEST_ARCHETYPES = [
                 }
             }
         ],
-
-        gates: [
-            ['traversal_discovery', 'Follow {evidence} to locate {beast} near {place}.'],
-            ['traversal_discovery', 'Determine the boundaries of {beast}’s territory.'],
-            ['combat_twist_showdown', 'Confront {beast} while accounting for {obstacle}.'],
-            ['brain_social_heist', 'Determine whether the danger can be addressed without unnecessary killing.'],
-            ['traversal_discovery', 'Verify that {place} is safe enough for {sponsor} to use again.']
-        ]
-    }
+   }
 ];
 
 /*
@@ -7514,32 +7500,6 @@ function buildQuestV2PlanForOffer(
         ...structure,
         facts: clone(v2Facts)
     };
-}
-
-function buildAuthoredQuestGates(archetype, gateCount, facts) {
-    assert(
-        Array.isArray(archetype.gates) &&
-        archetype.gates.length >= gateCount,
-        `Quest archetype ${archetype.id} lacks ${gateCount} gate templates`
-    );
-
-    return archetype.gates.slice(0, gateCount).map(
-        ([mode, template], index) => ({
-            step: index + 1,
-            total: gateCount,
-            mode,
-            trigger: index === 0 && [
-                'missing_cargo', 'ruin_clearance', 'sunken_salvage'
-            ].includes(archetype.id)
-                ? 'arrival_with_evidence'
-                : null,
-            objective: template.replace(
-
-                /\{([a-zA-Z0-9_]+)\}/g,
-                (_match, key) => facts[key] ?? `{${key}}`
-            )
-        })
-    );
 }
 
 function registerQuestDestination(state, quest) {
@@ -13459,12 +13419,10 @@ function discoveryNarrationPacket(encounter) {
 }
 
 const PUBLIC_QUEST_FACT_KEYS = {
-    recover_cargo: ['sponsor', 'cargo', 'place', 'wreck'],
-    missing_cargo: ['sponsor', 'cargo', 'place'],
+    recover_cargo: ['sponsor', 'cargo', 'place'],
     ruin_clearance: ['sponsor', 'site'],
     herb_foraging: ['sponsor', 'herb', 'place'],
     missing_person: ['sponsor', 'person', 'place'],
-    sunken_salvage: ['sponsor', 'cargo', 'wreck'],
     territorial_beast: ['sponsor', 'beast', 'place']
 };
 

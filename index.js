@@ -6320,7 +6320,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
  * - Rank reflects stakes, trust, and consequences, not gate count alone.
- * - F: routine, low-stakes, menial help (for example, common herbs or vermin).
+ * - F: routine, low-stakes, menial help. New F offers currently use an
+ *   authored common-herb errand in compatible marsh regions; vermin
+ *   clearance and other biomes still need authored F objectives.
  * - E: useful work needing judgment or travel, with limited consequences.
  * - D: consequential local problems entrusted to a capable crew.
  * - C: serious threats to a community, essential service, or trade route.
@@ -6713,6 +6715,18 @@ const QUEST_ARCHETYPES = [
         label: 'Herb Foraging',
         scenarios: [
             {
+                ranks: ['F'],
+                pitch: 'A local herb-seller needs a small bundle of common reedmint.',
+                truth: 'The reedmint grows openly beside the marked path.',
+                facts: {
+                    sponsor: 'the local herb-seller',
+                    herb: 'a bundle of common reedmint',
+                    place: 'the marked reed-bank path',
+                    need: 'ordinary herb stock',
+                    obstacle: 'muddy footing beside the path'
+                }
+            },
+            {
                 pitch: 'A healer needs a fresh medicinal plant before the next supply sled departs.',
                 truth: 'The plant grows near a hazardous spring where territorial wildlife gathers.',
                 facts: {
@@ -6905,6 +6919,24 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
             ['marsh_edge', 'marsh'];
 
         if (!allowedProfiles.includes(profile)) return false;
+
+        if (
+            Array.isArray(scenario.ranks) &&
+            !scenario.ranks.includes(rank)
+        ) {
+            return false;
+        }
+
+        /*
+         * F currently has one authored, low-stakes objective. Do not
+         * downgrade cargo recovery, ruin clearance, or beast hunts merely
+         * by giving them F rewards and fewer gates.
+         */
+        if (rank === 'F') {
+            return archetype.id === 'herb_foraging' &&
+                scenario.ranks?.includes('F') === true;
+        }
+
         if (archetype.id !== 'missing_person') return true;
 
         // The current Lost plan fits D's 2–3 gates.

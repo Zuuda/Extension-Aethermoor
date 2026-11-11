@@ -7101,21 +7101,38 @@ function buildQuestFacts(
     );
 
     const facts = clone(scenario.facts);
-
-    if (archetype.id === 'recover_cargo') {
-        const cargoStakesByRank = {
+    const stakesByArchetype = {
+        recover_cargo: {
             E: 'ordinary supplies needed for routine local work',
             D: 'valuable property whose loss harms its local owner',
             C: 'essential supplies needed by the community',
             B: 'region-critical cargo whose loss disrupts several communities'
-        };
+        },
+        ruin_clearance: {
+            E: 'a limited danger disrupting one local worksite',
+            D: 'a threat preventing important local work or travel',
+            C: 'a danger disrupting an essential community route or service',
+            B: 'a major threat affecting routes or work across the region'
+        },
+        territorial_beast: {
+            E: 'an animal nuisance affecting a limited local area',
+            D: 'a dangerous animal threatening regular local travel or work',
+            C: 'a threat disrupting an essential route or community activity',
+            B: 'a territorial threat affecting travel or work across the region'
+        }
+    };
 
+    const rankStakes = stakesByArchetype[archetype.id]?.[rank];
+
+    if (rankStakes) {
+        facts.stakes = rankStakes;
+    }
+
+    if (archetype.id === 'recover_cargo') {
         assert(
-            cargoStakesByRank[rank],
+            rankStakes,
             `Recover Cargo has no authored stakes for rank ${rank}`
         );
-
-        facts.stakes = cargoStakesByRank[rank];
     }
 
     return {
@@ -13370,7 +13387,7 @@ function discoveryNarrationPacket(encounter) {
 
 const PUBLIC_QUEST_FACT_KEYS = {
     recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
-    ruin_clearance: ['sponsor', 'site'],
+    ruin_clearance: ['sponsor', 'site', 'stakes'],
     herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place'],
     territorial_beast: ['sponsor', 'beast', 'place']

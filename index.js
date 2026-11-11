@@ -6459,9 +6459,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Original rumor claims remain testimony; resolution does not make the
  *   claim itself true.
  * - Traveler rumors record unverified testimony when their claims are heard.
+ * - Validated FOUND quest events also record source-linked observations.
+ *   Hidden preparations and SEARCHED prerequisites are not crew knowledge.
+ * - Stable discovery IDs prevent repeated notifications from duplicating
+ *   those observations; existing acquired discoveries are not backfilled.
  * - Verified with a debug fixture: testimony exists before travel; arrival
  *   adds a separate observation without overwriting the original claim.
  * - World displays saved knowledge, sources, certainty, and learning locations.
+ * - Live verification of quest-discovery knowledge remains for beta.
+
  * - Knowledge display is read-only and labels identifiable test records.
  * - Crew Knowledge starts collapsed, with expandable Unverified and
  *   Established groups showing record counts.
@@ -9163,6 +9169,29 @@ function resolveSelectedQuestEvent(test) {
         : 'found';
 
     const progression = advanceQuestFromDiscovery(state, discovery);
+
+    /*
+     * Crew Knowledge records what was actually exposed, not hidden quest
+     * preparation or a SEARCHED prerequisite. The discovery ID makes this
+     * observation stable across duplicate notifications and reloads.
+     */
+    recordCrewKnowledge(progression.state, {
+        id: `knowledge-quest-discovery-${discovery.id}`,
+        kind: 'quest_discovery',
+        knowledgeType: 'observation',
+        certainty: 'engine_established',
+        summary:
+            `Found ${discovery.name}. ${discovery.significance}`,
+        source: {
+            id: quest.id,
+            type: 'quest'
+        },
+        learnedAtLocationId: discovery.locationId,
+        learnedAtZone:
+            progression.state.places?.[discovery.locationId]?.zone ??
+            progression.state.zone
+    });
+
     return {
         ok: true,
         created: true,
@@ -17077,6 +17106,14 @@ function renderCrewKnowledge(state) {
     for (const entry of entries) {
         const sourceId = entry.source?.id;
         const sourceLead = state.leads?.[sourceId];
+        const sourceQuest =
+            entry.source?.type === 'quest'
+                ? Object.values(state.quests || {})
+                    .flatMap(bucket =>
+                        Array.isArray(bucket) ? bucket : []
+                    )
+                    .find(quest => quest?.id === sourceId)
+                : null;
 
         const testRecord =
             sourceLead?.testOnly === true ||
@@ -17111,7 +17148,8 @@ function renderCrewKnowledge(state) {
                 ? 'Debug rumor fixture'
                 : entry.source?.type === 'traveler'
                     ? 'Traveler'
-                    : sourceLead?.label ||
+                    : sourceQuest?.title ||
+                      sourceLead?.label ||
                       sourceLead?.claim ||
                       sourceId ||
                       'Source not recorded';

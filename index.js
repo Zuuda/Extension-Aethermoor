@@ -6436,10 +6436,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * PLANNED — UI cleanup and consistency
  * - IMPLEMENTED — BETA PENDING: test-rumor creation lives in Narration Debug,
  *   not the ordinary World view; cancelled quests appear in history.
- * - IMPLEMENTED — BETA PENDING: the Quests button opens the journal-based
- *   Quests tab; the activeQuest-only legacy popup is no longer its UI path.
- * - Remove the now-unused openQuestPanel implementation after confirming
- *   there are no other callers.
+ * - IMPLEMENTED — BETA PENDING: the Quests and World buttons open their
+ *   saved-state tabs. Clicking either button while the panel is open
+ *   switches tabs instead of closing it.
+ * - The legacy quest and world popups are no longer ordinary UI paths;
+ *   remove their implementations in the UI cleanup pass.
  * - Deduplicate destinations and leads by stable identity.
  * - Show exact journey progress, interruption state, current gate, and delivery
  *   eligibility from saved state.
@@ -16040,6 +16041,16 @@ async function openQuestPanel() {
     }
 }
 
+function openAethermoorTab(tab) {
+    aethermoorActiveTab = tab;
+
+    if (aethermoorPanelOpen && aethermoorPanelElement?.hidden === false) {
+        renderAethermoorTab(tab);
+    } else {
+        openAethermoorPanel();
+    }
+}
+
 function createQuestController() {
     if (document.getElementById('aethermoor_quest_button')) return;
 
@@ -16059,8 +16070,7 @@ function createQuestController() {
     button.textContent = 'Quests';
     button.title = 'View the Aethermoor quest journal';
     button.addEventListener('click', () => {
-        aethermoorActiveTab = 'quests';
-        openAethermoorPanel();
+        openAethermoorTab('quests');
     });
 
     composer.insertBefore(button, composer.firstChild);
@@ -16082,8 +16092,10 @@ function createWorldController() {
     button.type = 'button';
     button.className = 'menu_button';
     button.textContent = 'World';
-    button.title = 'View known places and leads';
-    button.addEventListener('click', openWorldPanel);
+    button.title = 'View the Aethermoor World tab';
+    button.addEventListener('click', () => {
+        openAethermoorTab('world');
+    });
 
     composer.insertBefore(button, composer.firstChild);
 }

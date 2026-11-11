@@ -2033,9 +2033,13 @@ function materializeBossReinforcements(state) {
 
     return added;
 }
+function spawnLinkedQuestEncounter(state, questId) {
+    assert(
+        typeof questId === 'string' && questId.length > 0,
+        'Linked-threat spawn requires an explicit questId'
+    );
 
-function spawnLinkedQuestEncounter(state) {
-    const quest = state.activeQuest;
+    const quest = findQuestById(state, questId);
     const gate = quest?.currentGate;
 
     assert(
@@ -2043,7 +2047,7 @@ function spawnLinkedQuestEncounter(state) {
         ['defeat_elite', 'rescue_person']
             .includes(quest.structureV2?.family) &&
         gate?.trigger === 'linked_combat',
-        'There is no V2 linked-combat gate to spawn'
+        `Quest ${questId} has no V2 linked-combat gate to spawn`
     );
 
     assert(
@@ -5328,7 +5332,10 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             .includes(quest.structureV2?.family) &&
         gate.trigger === 'linked_combat'
     ) {
-        const spawned = spawnLinkedQuestEncounter(nextState);
+        const spawned = spawnLinkedQuestEncounter(
+            nextState,
+            quest.id
+        );
         nextState = spawned.state;
 
         const questEncounter = {

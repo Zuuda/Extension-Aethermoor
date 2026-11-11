@@ -5843,10 +5843,16 @@ function resolveTravelStep(test) {
             const template = TRAVELER_RUMORS[
                 roll(state, TRAVELER_RUMORS.length) - 1
             ];
-            const placeId = `place-z${state.zone}-${template.id}`;
             const leadId = `rumor-${test.stepId}`;
 
+            // The template describes a kind of place, not one shared
+            // landmark for every traveler who mentions that kind.
+            // The saved travel-step ID gives this rumor its own stable site.
+            const placeId =
+                `place-z${state.zone}-${template.id}-${test.stepId}`;
+
             state.places[placeId] ||= {
+
                 id: placeId,
                 label: template.place,
                 zone: state.zone,
@@ -5863,6 +5869,11 @@ function resolveTravelStep(test) {
                 targetId: placeId,
                 status: 'known'
             };
+
+            // World generation consumes no combat RNG. Save the route
+            // alongside the lead, so World can offer movement to this
+            // particular site as soon as the rumor is established.
+            ensureWorldRecords(state);
 
             recordCrewKnowledge(state, {
                 id: `knowledge-testimony-${leadId}`,
@@ -6386,9 +6397,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — World integration
  * - World records and route edges are saved.
- * - IMPLEMENTED — BETA PENDING: new traveler rumors use zone-local,
- *   setting-neutral sites and claims instead of repeating three named
- *   Zone 3 landmarks throughout the world.
+  * - IMPLEMENTED — BETA PENDING: traveler rumors use setting-neutral
+ *   templates. Each new rumor owns a stable, zone-local destination;
+ *   rolling the same template again does not reuse another rumor's site.
+ * - The new site's route is saved with its lead, without advancing combat RNG.
  * - Missing current-place records use the saved settlement identity rather
  *   than labelling every zone's outpost Peat-Cairn Outpost.
  * - Existing saved places keep their established names and IDs.

@@ -6305,10 +6305,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   recovery discovery to match the locked turn-in cargo.
  * - Discovery preparation and validation consume no additional RNG.
  * - Full gameplay verification is deferred to beta.
- * - New cargo offers use Recover Cargo with a separately rolled, saved
- *   depot_recovery or sunken_salvage variant.
- * - Existing missing_cargo and sunken_salvage quest IDs remain supported.
- * - Beta verification remains pending.
+ * - IMPLEMENTED — BETA PENDING: new Recover Cargo offers roll and save
+ *   Abandoned Transport, Diverted Shipment, or Stolen Shipment.
+ * - These premises and their authored discoveries do not depend on a biome.
+ *   Zone geography informs the narrator's presentation, not cargo eligibility.
+ * - Beta begins from reset state; the old fixed-site cargo helpers are
+ *   retired from new-offer, discovery-event, and delivery paths.
+ * - Remove the now-unused old cargo catalog entry and helper functions in
+ *   the quest-catalog cleanup pass. Do not re-enable their variants.
  *
  * PARTIAL — Authored quest discoveries
  * - Some V2 quests have engine-authored discoveries with stable IDs,
@@ -6692,42 +6696,67 @@ function rollQuestTerminalThreat(state, rank, zone) {
  */
 
 const QUEST_ARCHETYPES = [
+     /*
+     * New cargo offers use causal variants, not prewritten local geography.
+     * The selected premise and mechanical requirements are locked here.
+     * The narrator may name and dress the consignment, transport, and site
+     * to fit saved zone geography, but may not add a required encounter,
+     * gate, item, reward, or change the locked destination.
+     */
     {
-        id: 'missing_cargo',
-        label: 'Missing Cargo',
-        variantId: 'depot_recovery',
+        id: 'recover_cargo',
+        label: 'Recover Cargo',
         scenarios: [
             {
-                pitch: 'A local trading concern reports that a promised shipment never reached its destination.',
-                truth: 'The cargo was deliberately diverted and concealed.',
+                variantId: 'abandoned_transport',
+                pitch:
+                    'A shipment was left behind when its transport failed. ' +
+                    'The issuer wants the consignment recovered.',
+                truth:
+                    'The transport failed and its crew left the cargo at the ' +
+                    'last known stopping place.',
                 facts: {
-                    sponsor: 'the Peat-Cairn Excavation Co.',
-                    cargo: 'a sealed payroll strongbox',
-                    place: 'the old gravel weir',
-                    evidence: 'the cargo tally and fresh drag marks',
-                    obstacle: 'a locked storehouse guarded after dusk'
+                    sponsor: 'the local shipping office',
+                    cargo: 'the missing consignment',
+                    place: 'the abandoned transport site',
+                    evidence: 'signs of the failed transport',
+                    obstacle: 'an obstructed route to the cargo'
                 }
             },
             {
-                pitch: 'A peat-cutting crew reports that its winter tool shipment vanished between depots.',
-                truth: 'A subcontractor hid the tools to force the crew into an unfavorable debt.',
+                variantId: 'diverted_shipment',
+                pitch:
+                    'A shipment was diverted from its intended route. ' +
+                    'The issuer wants the consignment recovered.',
+                truth:
+                    'The cargo was deliberately moved away from its ' +
+                    'scheduled transfer point.',
                 facts: {
-                    sponsor: 'the North Sluice peat-cutters',
-                    cargo: 'a crate of iron dredging tools',
-                    place: 'the abandoned weigh-station',
-                    evidence: 'a split company seal and mismatched cart tracks',
-                    obstacle: 'a flooded approach watched by hired guards'
+                    sponsor: 'the local shipping office',
+                    cargo: 'the missing consignment',
+                    place: 'the diversion site',
+                    evidence: 'a discrepancy in the shipment record',
+                    obstacle: 'the cargo is concealed from ordinary view'
+                }
+            },
+            {
+                variantId: 'stolen_shipment',
+                pitch:
+                    'A shipment was stolen in transit. The issuer wants ' +
+                    'the consignment recovered.',
+                truth:
+                    'The thieves concealed the cargo at a separate site.',
+                facts: {
+                    sponsor: 'the local shipping office',
+                    cargo: 'the missing consignment',
+                    place: 'the suspected hiding place',
+                    evidence: 'signs of the cargo’s removal',
+                    obstacle: 'the cargo is hidden within the site'
                 }
             }
-        ],
-        gates: [
-            ['traversal_discovery', 'Locate {place} and inspect {evidence}.'],
-            ['brain_social_heist', 'Determine who diverted {cargo} from {sponsor}.'],
-            ['combat_twist_showdown', 'Recover {cargo} despite {obstacle}.'],
-            ['traversal_discovery', 'Trace the diversion from {place} to its beneficiary.'],
-            ['brain_social_heist', 'Present the recovered evidence to {sponsor}.']
         ]
     },
+
     {
         id: 'ruin_clearance',
         label: 'Ruin Clearance',
@@ -6941,35 +6970,10 @@ const QUEST_ARCHETYPES = [
 ];
 
 /*
- * New offers use one cargo-recovery archetype. Preserve the authored
- * legacy scenarios as selectable variants; existing quest records keep
- * their original archetype IDs and continue through their legacy helpers.
+ * Sunken Salvage and its fixed-site discoveries are retired from new
+ * offers. Beta will start from reset state; remove their dormant catalog
+ * and helper code after the remaining archetypes have been converted.
  */
-const RECOVER_CARGO_ARCHETYPE = (() => {
-    const depot = QUEST_ARCHETYPES.find(
-        entry => entry.id === 'missing_cargo'
-    );
-    const sunken = QUEST_ARCHETYPES.find(
-        entry => entry.id === 'sunken_salvage'
-    );
-
-    assert(depot && sunken, 'Legacy cargo scenarios are missing');
-
-    return {
-        id: 'recover_cargo',
-        label: 'Recover Cargo',
-        scenarios: [
-            ...depot.scenarios.map(scenario => ({
-                ...scenario,
-                variantId: 'depot_recovery'
-            })),
-            ...sunken.scenarios.map(scenario => ({
-                ...scenario,
-                variantId: 'sunken_salvage'
-            }))
-        ]
-    };
-})();
 
 function questGeographyProfile(state, zone = state.zone) {
     const savedProfile =
@@ -6996,10 +7000,21 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
             scenario.geographyProfiles ||
             ['marsh_edge', 'marsh'];
 
-        if (!allowedProfiles.includes(profile)) return false;
+        /*
+         * Recover Cargo's causal premises work in any saved geography.
+         * Other archetypes still use setting-specific scenarios; keep
+         * their filters until their catalogs and discoveries are converted.
+         */
+        if (
+            archetype.id !== 'recover_cargo' &&
+            !allowedProfiles.includes(profile)
+        ) {
+            return false;
+        }
 
         if (
             Array.isArray(scenario.ranks) &&
+
             !scenario.ranks.includes(rank)
         ) {
             return false;
@@ -7029,15 +7044,10 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
 }
 
 function eligibleQuestArchetypes(state, zone, rank) {
-    const newOfferArchetypes = QUEST_ARCHETYPES.filter(
-        archetype =>
-            !['missing_cargo', 'sunken_salvage']
-                .includes(archetype.id)
-    );
-
-    newOfferArchetypes.push(RECOVER_CARGO_ARCHETYPE);
-
-    return newOfferArchetypes
+    return QUEST_ARCHETYPES
+        .filter(archetype =>
+            archetype.id !== 'sunken_salvage'
+        )
         .map(archetype => ({
             archetype,
             scenarios: eligibleQuestScenarios(
@@ -7448,25 +7458,13 @@ function buildQuestV2PlanForOffer(
     if (!family) return null;
     let v2Facts;
 
-    if (
-        archetype.id === 'missing_cargo' ||
-        archetype.id === 'sunken_salvage' ||
-        archetype.id === 'recover_cargo'
-    ) {
+    if (archetype.id === 'recover_cargo') {
         v2Facts = {
-
             item: facts.cargo,
-            destination:
-                archetype.id === 'sunken_salvage' ||
-                (
-                    archetype.id === 'recover_cargo' &&
-                    variantId === 'sunken_salvage'
-                )
-                    ? facts.wreck
-                    : facts.place
+            destination: facts.place
         };
-
     } else if (archetype.id === 'herb_foraging') {
+
         v2Facts = {
             item: facts.herb,
             destination: facts.place
@@ -8143,8 +8141,7 @@ function resolveQuestSeed(test) {
      * change the compatibility selection or depend on activeQuest identity.
      * Defeat-elite discoveries are prepared after acceptance.
      */
-    prepareMissingCargoDiscovery(quest);
-    prepareSunkenSalvageDiscovery(quest);
+    prepareRecoverCargoDiscovery(quest);
     prepareHerbForagingDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
@@ -8211,6 +8208,143 @@ function validateRetrievalQuestDiscoveries(quest) {
         cargo?.kind === 'quest_item' &&
         finalGate.requiredDiscoveryId === cargo.id,
         'Retrieval quest must recover and deliver the same authored cargo'
+    );
+}
+
+function prepareRecoverCargoDiscovery(quest) {
+    if (
+        quest?.archetype?.id !== 'recover_cargo' ||
+        quest.structureV2?.family !== 'retrieve_item' ||
+        !quest.destinationId
+    ) {
+        return null;
+    }
+
+    const variants = {
+        abandoned_transport: {
+            clue: 'Signs of the failed transport',
+            inner: 'Way through the transport obstruction',
+            access: 'Access to the abandoned load'
+        },
+        diverted_shipment: {
+            clue: 'Shipment-route discrepancy',
+            inner: 'Way to the diverted consignment',
+            access: 'Access to the concealed load'
+        },
+        stolen_shipment: {
+            clue: 'Signs of the cargo’s removal',
+            inner: 'Way into the suspected hiding place',
+            access: 'Access to the hidden consignment'
+        }
+    };
+
+    const variant = variants[quest.variant?.id];
+
+    assert(
+        variant,
+        `Recover Cargo has no authored variant: ${quest.variant?.id}`
+    );
+    assert(
+        quest.turnIn && typeof quest.turnIn === 'object',
+        'Recover Cargo has no locked turn-in'
+    );
+
+    quest.discoveries ||= [];
+
+    const definitions = {
+        locate: {
+            suffix: 'cargo-clue',
+            kind: 'evidence',
+            name: variant.clue,
+            hidingPlace:
+                `${quest.facts.evidence} at ${quest.facts.place}`,
+            significance:
+                `The clue identifies where ${quest.facts.cargo} can be found.`
+        },
+        reach_inner_site: {
+            suffix: 'inner-route',
+            kind: 'evidence',
+            name: variant.inner,
+            hidingPlace: `within ${quest.facts.place}`,
+            significance:
+                `The route gets past ${quest.facts.obstacle}.`
+        },
+        find_access: {
+            suffix: 'cargo-access',
+            kind: 'evidence',
+            name: variant.access,
+            hidingPlace:
+                `near the consignment at ${quest.facts.place}`,
+            significance:
+                `This gives access to ${quest.facts.cargo}.`
+        },
+        recover: {
+            suffix: 'recovered-cargo',
+            kind: 'quest_item',
+            name: quest.facts.cargo,
+            hidingPlace:
+                `at ${quest.facts.place}, beyond ${quest.facts.obstacle}`,
+            significance:
+                `This is the consignment owed to ${quest.turnIn.recipient}.`,
+            requiredAction: 'recover_cargo',
+            questCargo: true
+        }
+    };
+
+    for (const gate of quest.gatesData) {
+        if (gate.trigger !== 'discovery') continue;
+
+        const definition = definitions[gate.stage];
+        assert(
+            definition,
+            `Recover Cargo has no discovery for ${gate.stage}`
+        );
+
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(
+            item => item.id === id
+        );
+
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: definition.kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance,
+                ...(definition.requiredAction
+                    ? { requiredAction: definition.requiredAction }
+                    : {}),
+                ...(definition.questCargo
+                    ? { questCargo: true }
+                    : {})
+            };
+            quest.discoveries.push(discovery);
+        }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const cargoId = `${quest.id}-recovered-cargo`;
+    assert(
+        !quest.turnIn.discoveryId ||
+        quest.turnIn.discoveryId === cargoId,
+        'Recover Cargo turn-in points to another discovery'
+    );
+
+    quest.turnIn.discoveryId = cargoId;
+
+    return quest.discoveries.find(
+        item => item.id === cargoId
     );
 }
 
@@ -9131,14 +9265,9 @@ function resolveSelectedQuestEvent(test) {
      * idempotent preparation after selecting the owning quest so the
      * search action can be authorized and validated.
      */
-    if (
-        quest.archetype?.id === 'missing_cargo' ||
-        quest.archetype?.id === 'recover_cargo'
-    ) {
-        prepareMissingCargoDiscovery(quest);
-        prepareSunkenSalvageDiscovery(quest);
+    if (quest.archetype?.id === 'recover_cargo') {
+        prepareRecoverCargoDiscovery(quest);
     }
-
 
     const discovery = (quest.discoveries || []).find(
         item => item.id === test.questItemId
@@ -12445,8 +12574,7 @@ function resolveBatch(args) {
                     );
 
                     const discovery =
-                        prepareMissingCargoDiscovery(quest) ||
-                        prepareSunkenSalvageDiscovery(quest) ||
+                        prepareRecoverCargoDiscovery(quest) ||
                         prepareHerbForagingDiscovery(quest) ||
                         prepareV2QuestDiscoveries(quest);
 
@@ -13268,14 +13396,8 @@ function resolveBatch(args) {
                      * completion must not change the UI compatibility
                      * selection or make another accepted quest active.
                      */
-                    if (
-                        [
-                            'missing_cargo',
-                            'recover_cargo'
-                        ].includes(quest.archetype?.id)
-                    ) {
-                        prepareMissingCargoDiscovery(quest);
-                        prepareSunkenSalvageDiscovery(quest);
+                    if (quest.archetype?.id === 'recover_cargo') {
+                        prepareRecoverCargoDiscovery(quest);
                     }
 
                     result = resolveQuestAction({
@@ -13744,8 +13866,9 @@ function questOfferNarrationPacket(quest) {
         : 'The crew followed a quest breadcrumb found on a cleared pack.';
 
     const variantLabels = {
-        depot_recovery: 'Depot Recovery',
-        sunken_salvage: 'Sunken Salvage',
+        abandoned_transport: 'Abandoned Transport',
+        diverted_shipment: 'Diverted Shipment',
+        stolen_shipment: 'Stolen Shipment',
         lost: 'Lost Person',
         abducted: 'Abducted Person'
     };
@@ -16037,8 +16160,9 @@ function formatQuestStatus(quest) {
     }
 
        const variantLabels = {
-        depot_recovery: 'Depot Recovery',
-        sunken_salvage: 'Sunken Salvage',
+        abandoned_transport: 'Abandoned Transport',
+        diverted_shipment: 'Diverted Shipment',
+        stolen_shipment: 'Stolen Shipment',
         lost: 'Lost Person',
         abducted: 'Abducted Person'
     };

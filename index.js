@@ -4545,14 +4545,6 @@ const TRAVELER_RUMORS = [
     }
 ];
 
-
-const ROUTE_SEGMENT_EDGES = [
-    ['outpost', 'stone-ford', 1],
-    ['stone-ford', 'old-mill', 2],
-    ['stone-ford', 'abandoned-watchtower', 3],
-    ['old-mill', 'abandoned-watchtower', 2]
-];
-
 function ensureWorldLocation(state) {
     state.places ||= {};
     state.leads ||= {};
@@ -4582,27 +4574,15 @@ function routeNodeId(zone, place) {
         : `place-z${zone}-${place}`;
 }
 
-function routeEdgeLength(fromId, toId, zone) {
-    for (const [from, to, length] of ROUTE_SEGMENT_EDGES) {
-        const a = routeNodeId(zone, from);
-        const b = routeNodeId(zone, to);
-        if ((a === fromId && b === toId) ||
-            (a === toId && b === fromId)) return length;
-    }
-    return null;
-}
-
-function journeyLegs(journey, zone) {
+function journeyLegs(journey) {
     if (Array.isArray(journey.legs)) return journey.legs;
 
-    // Journeys started before this change contain a node path instead.
-    assert(Array.isArray(journey.route), 'Journey route is missing');
-    journey.legs = journey.route.slice(1).map((toId, index) => {
-        const fromId = journey.route[index];
-        const length = routeEdgeLength(fromId, toId, zone);
-        assert(length !== null, 'Journey uses an unknown route edge');
-        return { fromId, toId, length, startOffset: 0, endOffset: length };
-    });
+    // Beta starts from reset state. Legacy path-only journeys cannot be
+    // safely reconstructed without their originally saved route edges.
+    assert(
+        Array.isArray(journey.legs),
+        'Journey is missing its saved route legs'
+    );
     return journey.legs;
 }
 
@@ -4634,17 +4614,14 @@ function positionAfterSegments(legs, completed) {
 }
 
 function shortestRoute(state, destinationId) {
-    const zone = state.zone;
-    const edges = [
-        ...ROUTE_SEGMENT_EDGES.map(([from, to, length]) => ({
-            fromId: routeNodeId(zone, from),
-            toId: routeNodeId(zone, to),
-            length
-        })),
-        ...(state.routeEdges || []).filter(edge =>
-            Number.isInteger(edge.length) && edge.length > 0
-        )
-    ];
+    /*
+     * Routes are saved world facts. Do not synthesize retired local
+     * landmarks in every zone; generated settlements, quest sites, and
+     * rumor sites add their own stable route edges.
+     */
+    const edges = (state.routeEdges || []).filter(edge =>
+        Number.isInteger(edge.length) && edge.length > 0
+    );
 
     function fromNode(originId) {
         const distances = new Map([[originId, 0]]);
@@ -6399,8 +6376,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Missing current-place records use the saved settlement identity rather
  *   than labelling every zone's outpost Peat-Cairn Outpost.
  * - Existing saved places keep their established names and IDs.
- * - Older route and UI paths still contain fixed local-map assumptions;
- *   migrate those separately without removing live saved routes.
+ * - IMPLEMENTED — BETA PENDING: route search uses saved world edges only;
+ *   retired Stone Ford, Old Mill, and Watchtower edges are not synthesized
+ *   in every zone. Generated settlements and authored destinations save
+ *   their own stable route edges.
+ * - Beta starts from reset state; path-only legacy journeys without saved
+ *   route legs are not reconstructed.
+
  *
  * PARTIAL — Migration and validation
  * - Existing saves receive world, journey, potion, and quest migrations.

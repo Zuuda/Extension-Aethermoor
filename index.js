@@ -6520,8 +6520,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Scene context includes every relevant accepted quest at the location.
  * - Quest-site inspection and discovery reconciliation now address explicit
  *   quest IDs instead of advancing the compatibility-selected quest.
- * - Encounter spawning and some older narration still contain activeQuest
- *   assumptions that must be migrated.
+ * - Reconciliation and site-inspection narration resolve their quest by the
+ *   result's stable quest ID. Remaining activeQuest-dependent narration still
+ *   needs migration.
  * - Arrival integration implemented; live verification pending.
  * - The next integration pass must select quest identity from destination,
  *   authored discovery, encounter linkage, or delivery quest ID.
@@ -14580,7 +14581,7 @@ async function runStoredMechanic(args) {
               caseResult.created
                 ? questDiscoveryNarrationPacket(
                     caseResult,
-                    nextState.activeQuest
+                    findQuestById(nextState, caseResult.questId)
                 )
 
             : batch &&
@@ -14599,7 +14600,7 @@ async function runStoredMechanic(args) {
               oneCase?.kind === 'quest_site_inspect'
                 ? questSiteInspectionPacket(
                     caseResult,
-                    nextState.activeQuest
+                    findQuestById(nextState, caseResult.questId)
                 )
 
             : batch &&

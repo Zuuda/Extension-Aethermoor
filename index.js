@@ -2149,16 +2149,26 @@ function completeLinkedCombatQuestGate(state) {
             completionEvidence: evidence
         });
 
-    state.quests = progression.state.quests;
-    state.leads = progression.state.leads;
-
-    const updatedQuest = findQuestById(state, questId);
+    /*
+     * Read the progressed quest from the returned state first. Looking it
+     * up in state while activeQuest still points to the pre-fight object
+     * would let ensureQuestJournal overwrite the new journal entry.
+     */
+    const updatedQuest = findQuestById(
+        progression.state,
+        questId
+    );
 
     assert(
         updatedQuest,
         `Linked combat lost quest ${questId}`
     );
 
+    state.quests = progression.state.quests;
+    state.leads = progression.state.leads;
+
+    // Remove the stale selection before consulting the copied journal.
+    state.activeQuest = null;
     state.activeQuest = previousSelectionId
         ? findQuestById(state, previousSelectionId)
         : null;

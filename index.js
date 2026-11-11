@@ -5525,49 +5525,53 @@ function resolveTravelStep(test) {
         }
     }
 
-        /*
-     * Once the field objective is secured, the next movement defaults
-     * to the quest's locked turn-in location. An explicitly selected
-     * journey already in progress is left untouched.
+     /*
+     * Explicit movement and an existing journey take precedence.
+     * With no chosen destination, auto-return only when exactly one
+     * accepted quest has a secured objective awaiting its issuer.
+     * Multiple possible returns require a player choice in World.
      */
-    const returnQuest = state.activeQuest;
+    if (!state.currentJourney && !test.destinationId) {
+        const returnCandidates = ensureQuestJournal(state)
+            .accepted.filter(quest =>
+                quest.status === 'in_progress' &&
+                Boolean(quest.objectiveResolution) &&
+                Boolean(quest.turnIn?.locationId) &&
+                state.currentLocationId !== quest.turnIn.locationId
+            );
 
-    if (
-        !state.currentJourney &&
-        returnQuest?.status === 'in_progress' &&
-        returnQuest.objectiveResolution &&
-        returnQuest.turnIn &&
-        state.currentLocationId !== returnQuest.turnIn.locationId
-    ) {
-        const turnInPlace =
-            state.places?.[returnQuest.turnIn.locationId];
+        if (returnCandidates.length === 1) {
+            const returnQuest = returnCandidates[0];
+            const turnInPlace =
+                state.places?.[returnQuest.turnIn.locationId];
 
-        assert(
-            turnInPlace,
-            'Quest turn-in location is missing from the place registry'
-        );
+            assert(
+                turnInPlace,
+                'Quest turn-in location is missing from the place registry'
+            );
 
-        const route = shortestRoute(state, turnInPlace.id);
+            const route = shortestRoute(state, turnInPlace.id);
 
-        assert(
-            route && route.totalSegments > 0,
-            `No return route to ${turnInPlace.label}`
-        );
+            assert(
+                route && route.totalSegments > 0,
+                `No return route to ${turnInPlace.label}`
+            );
 
-        state.currentJourney = {
-            id: `return-${returnQuest.id}`,
-            type: 'quest_return',
-            questId: returnQuest.id,
-            leadId: `quest-return-${returnQuest.id}`,
-            destinationId: turnInPlace.id,
-            destinationLabel: turnInPlace.label,
-            originId: route.originId,
-            route: route.path,
-            legs: route.legs,
-            totalSegments: route.totalSegments,
-            completedSegments: 0,
-            status: 'traveling'
-        };
+            state.currentJourney = {
+                id: `return-${returnQuest.id}`,
+                type: 'quest_return',
+                questId: returnQuest.id,
+                leadId: `quest-return-${returnQuest.id}`,
+                destinationId: turnInPlace.id,
+                destinationLabel: turnInPlace.label,
+                originId: route.originId,
+                route: route.path,
+                legs: route.legs,
+                totalSegments: route.totalSegments,
+                completedSegments: 0,
+                status: 'traveling'
+            };
+        }
     }
 
     const existing = state.travelSteps[test.stepId];
@@ -6472,8 +6476,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Arrival result arrays preserve independently affected quests.
  * - Cleared linked combat selects its quest by the encounter's locked quest
  *   and target IDs, then restores the previous compatibility selection.
- * - Encounter spawning, automatic return travel, and some narration still
- *   contain activeQuest assumptions that must be migrated.
+ * - Automatic return travel uses a unique eligible journal quest; multiple
+ *   possible returns require an explicit destination choice.
+ * - Scene context includes every relevant accepted quest at the location.
+ * - Encounter spawning and some older narration still contain activeQuest
+ *   assumptions that must be migrated.
  * - Arrival integration implemented; live verification pending.
  * - The next integration pass must select quest identity from destination,
  *   authored discovery, encounter linkage, or delivery quest ID.
@@ -19538,63 +19545,57 @@ globalThis.aethermoorMechanicsInterceptor =
             ? ensureQuestJournal(contextState)
             : null;
 
-        let quest =
-            questJournal?.accepted.find(entry =>
-                entry?.status === 'in_progress' &&
-                (
-                    entry.destinationId === contextState.currentLocationId ||
-                    entry.turnIn?.locationId === contextState.currentLocationId
-                )
-            ) ||
-            contextState?.activeQuest;
-
-        /*
-         * Older accepted Missing Cargo saves can have the authored cargo
-         * discovery but lack its ID on the current recovery gate. Repair a
-         * detached context copy before building the narrator handoff; do not
-         * save or advance game state while preparing a prompt.
-         *
-         * The quest-event resolver performs its own repair on the operation
-         * state, where the event is validated and saved.
+              /*
+         * The journal, not activeQuest selection, determines which accepted
+         * quests concern this location. Context is detached and read-only:
+         * it never prepares or saves discoveries during prompt construction.
          */
-        if (
-            quest?.status === 'in_progress' &&
-            quest.archetype?.id === 'missing_cargo' &&
-            contextState.currentLocationId === quest.destinationId
-        ) {
-            prepareMissingCargoDiscovery(quest);
-            prepareSunkenSalvageDiscovery(quest);
-        }
+        const relevantQuests = (questJournal?.accepted || [])
+            .filter(quest =>
+                quest?.status === 'in_progress' &&
+                (
+                    quest.destinationId === contextState.currentLocationId ||
+                    quest.turnIn?.locationId === contextState.currentLocationId
+                )
+            );
 
         if (
-            quest &&
+            contextState &&
             !['active', 'spotted'].includes(
                 contextState.encounter?.status
             )
         ) {
-            const deliveryPacket =
-                questDeliveryContextPacket(quest);
+            for (const quest of relevantQuests) {
+                if (
+                    quest.deliveryReady === true &&
+                    contextState.currentLocationId ===
+                        quest.turnIn?.locationId
+                ) {
+                    const packet = questDeliveryContextPacket(quest);
 
-            if (deliveryPacket) {
-                entries.push({
-                    id: `delivery-context-${quest.id}`,
-                    type: 'quest_delivery_context',
-                    packet: deliveryPacket
-                });
-            } else if (
-                contextState.currentLocationId === quest.destinationId
-            ) {
-                const discoveryPacket =
-                    questDiscoveryContextPacket(quest);
+                    if (packet) {
+                        entries.push({
+                            id: `delivery-context-${quest.id}`,
+                            type: 'quest_delivery_context',
+                            packet
+                        });
+                    }
+                }
 
-                if (discoveryPacket) {
-                    entries.push({
-                        id:
-                            `scene-context-${quest.id}-` +
-                            `${quest.currentGate?.step || 1}`,
-                        type: 'quest_context',
-                        packet: discoveryPacket
-                    });
+                if (
+                    contextState.currentLocationId === quest.destinationId
+                ) {
+                    const packet = questDiscoveryContextPacket(quest);
+
+                    if (packet) {
+                        entries.push({
+                            id:
+                                `scene-context-${quest.id}-` +
+                                `${quest.currentGate?.step || 1}`,
+                            type: 'quest_context',
+                            packet
+                        });
+                    }
                 }
             }
         }

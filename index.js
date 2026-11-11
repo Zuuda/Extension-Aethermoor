@@ -15318,14 +15318,17 @@ function formatWorldStatus(state) {
         }`,
         `Primary settlement: ${settlement?.label || 'not recorded'}`,
         '',
-        'Known places',
+        'Known places in this zone',
 
-        places.size
-            ? [...places.values()].map((place, index) =>
+        [...places.values()]
+            .filter(place => Number(place.zone) === state.zone)
+            .map((place, index) =>
                 `${index + 1}. ${place.label} ` +
                 `(Zone ${place.zone}; reference: ${place.id})`
-            ).join('\n')
-            : 'None recorded.',
+            )
+            .join('\n') || 'None recorded in this zone.',
+        '',
+        'Earlier-zone places are history by default; do not suggest returning unless an accepted quest or authored continuation makes the trip relevant.',
         '',
         'Rumors'
     ];

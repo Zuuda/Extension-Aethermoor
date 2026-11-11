@@ -6171,7 +6171,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * Status meanings:
  * - DONE: implemented and exercised in the current campaign flow.
- * - PARTIAL: the foundation exists, but important paths or integrations remain.
+ * - IMPLEMENTED — BETA PENDING: code path is connected; campaign-flow
+ *   verification is deliberately deferred to beta, not unfinished coding.
+ * - PARTIAL: important implementation paths or integrations remain.
  * - NEXT: the next focused implementation target.
  * - PLANNED: agreed work that has not started.
  * - DEFERRED: useful work intentionally postponed while another dependency is settled.
@@ -6383,7 +6385,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
 
  * 
  * PLANNED — UI cleanup and consistency
- * - Remove stale debug controls from ordinary quest and world views.
+ * - IMPLEMENTED — BETA PENDING: test-rumor creation lives in Narration Debug,
+ *   not the ordinary World view; cancelled quests appear in history.
  * - Deduplicate destinations and leads by stable identity.
  * - Show exact journey progress, interruption state, current gate, and delivery
  *   eligibility from saved state.
@@ -17098,7 +17101,8 @@ async function renderQuestTab(host) {
     const historyCounts = [
         ['Completed', journal.completed.length],
         ['Declined', journal.declined.length],
-        ['Abandoned', journal.abandoned.length]
+        ['Abandoned', journal.abandoned.length],
+        ['Cancelled', journal.cancelled.length]
     ];
 
     host.appendChild(
@@ -17577,31 +17581,7 @@ async function renderWorldTab(host) {
         host.appendChild(history);
     }
 
-        /*
-     * Beta-only fixture control. This creates test data but does not resolve
-     * the rumor; arrival still uses the ordinary saved rumor resolver.
-     * Keep it beside Rumors so regression setup does not require raw tool calls.
-     */
-    host.appendChild(
-        makeAethermoorAction(
-            'Debug: Create Test Rumor',
-            'world',
-            () => runAethermoorPanelCase(
-                host,
-                'world',
-                {
-                    name: 'debug_create_rumor',
-                    kind: 'debug_create_rumor',
-                    inquiryId: `watchtower-test-${Date.now()}`,
-                    reason: 'Test Rumor Site',
-                    completionEvidence:
-                        'A debug rumor points to a test destination.'
-                },
-                'Test rumor created.'
-            )
-        )
-    );
-
+    // Test fixtures are created from Narration Debug, not ordinary World.
 
     const settlements = Object.values(world.settlements || {})
         .filter(settlement => {
@@ -19315,7 +19295,42 @@ function openNarrationDebug() {
         });
     });
 
-    controls.append(toggle, refreshButton, clear);
+    const createTestRumor = makeAethermoorAction(
+        'Create test rumor',
+        'world',
+        async () => {
+            try {
+                const result = await runStoredMechanic({
+                    cases: [{
+                        name: 'debug_create_rumor',
+                        kind: 'debug_create_rumor',
+                        inquiryId: `watchtower-test-${Date.now()}`,
+                        reason: 'Test Rumor Site',
+                        completionEvidence:
+                            'A debug rumor points to a test destination.'
+                    }]
+                });
+
+                assert(
+                    result?.ok === true &&
+                    result.results?.[0]?.ok !== false,
+                    result?.results?.[0]?.error ||
+                        'Could not create test rumor'
+                );
+
+                toastr.info('Test rumor created.', 'Aethermoor Debug');
+            } catch (error) {
+                toastr.error(
+                    error instanceof Error
+                        ? error.message
+                        : String(error),
+                    'Aethermoor Debug'
+                );
+            }
+        }
+    );
+
+    controls.append(toggle, refreshButton, clear, createTestRumor);
     body.append(status, controls, output);
     panel.append(header, body);
     document.body.appendChild(panel);

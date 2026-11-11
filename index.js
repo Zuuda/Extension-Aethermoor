@@ -6322,8 +6322,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — Quest family migration
  * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.
- * - Herb Foraging uses V2 retrieval structures and authored discoveries for
- *   every supported gate count; gathered herbs remain locked turn-in cargo.
+ * - IMPLEMENTED — BETA PENDING: Herb Foraging uses rank-appropriate,
+ *   geography-agnostic requests and V2 authored discoveries for every
+ *   supported gate count; the harvest remains locked turn-in cargo.
+ * - Saved zone geography informs presentation, not Herb Foraging eligibility.
  * - Missing Person Search saves its variant: Lost at D, Abducted at C/B.
  *   Lost ends when the person is found; Abducted ends when the linked threat
  *   is defeated. Returning the person is diegetic; turn-in is report-only.
@@ -6333,11 +6335,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PROPOSED QUEST RANK AND REPUTATION INTENT — mechanics unchanged
  * - Rank reflects stakes, trust, and consequences, not gate count alone.
- * - F: routine, low-stakes, menial help. New F offers currently use
- *   authored common-herb errands in marsh and karst regions. Other
- *   biomes and vermin clearance still need authored F objectives.
+ * - F: routine, low-stakes, menial help. A common-plant errand is now
+ *   authored for any saved geography; other F objectives remain future work.
  * - Offer generation rolls only among reputation-permitted ranks with
- *   at least one geographically compatible authored scenario.
+ *   an eligible authored scenario. The remaining fixed-site archetypes
+ *   still have temporary geography filters pending catalog conversion.
  * - E: useful work needing judgment or travel, with limited consequences.
  * - D: consequential local problems entrusted to a capable crew.
  * - C: serious threats to a community, essential service, or trade route.
@@ -6804,66 +6806,55 @@ const QUEST_ARCHETYPES = [
             ['traversal_discovery', 'Verify that the route past {site} is safe for {sponsor}.']
         ]
     },
+      /*
+     * Herb requests are selected by stakes, not biome. These are generic
+     * mechanical identities; the narrator may give the plant and site
+     * setting-appropriate names without changing the locked harvest or
+     * inventing a threat. Delivery remains outside the field gate count.
+     */
     {
         id: 'herb_foraging',
         label: 'Herb Foraging',
         scenarios: [
             {
                 ranks: ['F'],
-                geographyProfiles: ['karst'],
-                pitch: 'A local herb-seller needs a small bundle of common chalkcap moss.',
-                truth: 'The moss grows openly beside a marked cave path.',
+                pitch: 'A supplier needs a small, ordinary plant harvest.',
+                truth: 'The requested plants are available at the identified gathering area.',
                 facts: {
-                    sponsor: 'the local herb-seller',
-                    herb: 'a bundle of common chalkcap moss',
-                    place: 'the marked cave path',
-                    need: 'ordinary herb stock',
-                    obstacle: 'loose stones beside the path'
+                    sponsor: 'the local supplier',
+                    herb: 'a bundle of common gathering plants',
+                    place: 'the nearby gathering area',
+                    need: 'routine supplies',
+                    obstacle: 'ordinary care is needed to gather them intact'
                 }
             },
             {
-                ranks: ['F'],
-                pitch: 'A local herb-seller needs a small bundle of common reedmint.',
-                truth: 'The reedmint grows openly beside the marked path.',
+                ranks: ['E', 'D'],
+                pitch: 'A healer needs a medicinal plant for a patient.',
+                truth: 'A usable patch remains at the identified gathering area.',
                 facts: {
-                    sponsor: 'the local herb-seller',
-                    herb: 'a bundle of common reedmint',
-                    place: 'the marked reed-bank path',
-                    need: 'ordinary herb stock',
-                    obstacle: 'muddy footing beside the path'
+                    sponsor: 'the local healer',
+                    herb: 'a usable medicinal plant harvest',
+                    place: 'the identified gathering area',
+                    need: 'treatment for a patient',
+                    obstacle: 'the usable plants must be identified and gathered intact'
                 }
             },
             {
-                pitch: 'A healer needs a fresh medicinal plant before the next supply sled departs.',
-                truth: 'The plant grows near a hazardous spring where territorial wildlife gathers.',
+                ranks: ['C', 'B'],
+                pitch: 'A settlement healer needs an essential medicinal harvest before existing supplies run out.',
+                truth: 'The needed plants can be found at the identified gathering area, but the usable harvest requires careful collection.',
                 facts: {
-                    sponsor: 'Daga at the Sodden Beam',
-                    herb: 'silver-vein marshmallow root',
-                    place: 'the warm spring beyond the reed beds',
-                    need: 'a treatment for lung fever',
-                    obstacle: 'unstable ground around the spring'
-                }
-            },
-            {
-                pitch: 'A camp medic has run short of a plant used to treat infected cuts.',
-                truth: 'The remaining patch is in a nesting area avoided by local gatherers.',
-                facts: {
-                    sponsor: 'Vena’s stilt-camp',
-                    herb: 'bitter blue woundleaf',
-                    place: 'the shaded bank beneath the leaning cypress',
-                    need: 'a remedy for infected wounds',
-                    obstacle: 'a nesting animal guarding the bank'
+                    sponsor: 'the settlement healer',
+                    herb: 'the essential medicinal harvest',
+                    place: 'the identified gathering area',
+                    need: 'an essential local treatment',
+                    obstacle: 'the usable harvest must be gathered without spoiling it'
                 }
             }
-        ],
-        gates: [
-            ['traversal_discovery', 'Locate {place} using local growing signs.'],
-            ['brain_social_heist', 'Identify and gather {herb} without contaminating it.'],
-            ['combat_twist_showdown', 'Protect the harvest from the danger at {place}.'],
-            ['traversal_discovery', 'Confirm that enough {herb} remains for {need}.'],
-            ['brain_social_heist', 'Deliver the usable harvest to {sponsor}.']
         ]
     },
+
       {
         id: 'missing_person',
         label: 'Missing Person Search',
@@ -7000,13 +6991,13 @@ function eligibleQuestScenarios(state, archetype, zone, rank) {
             scenario.geographyProfiles ||
             ['marsh_edge', 'marsh'];
 
-        /*
-         * Recover Cargo's causal premises work in any saved geography.
-         * Other archetypes still use setting-specific scenarios; keep
-         * their filters until their catalogs and discoveries are converted.
+         /*
+         * Generic cargo and herb requests are available in any saved
+         * geography. The other catalogs still contain fixed local places
+         * and remain filtered until they are converted too.
          */
         if (
-            archetype.id !== 'recover_cargo' &&
+            !['recover_cargo', 'herb_foraging'].includes(archetype.id) &&
             !allowedProfiles.includes(profile)
         ) {
             return false;
@@ -8761,26 +8752,27 @@ function prepareHerbForagingDiscovery(quest) {
             suffix: 'growing-signs',
             kind: 'evidence',
             name: `Growing signs of ${herbName}`,
-            hidingPlace: `among the vegetation at ${place}`,
+            hidingPlace: `among the growing signs at ${place}`,
             significance:
-                `These signs identify the patch where ${herbName} grows.`
+                `These signs identify where ${herbName} can be gathered.`
         },
         reach_inner_site: {
             suffix: 'safe-approach',
             kind: 'evidence',
-            name: 'Safe approach to the herb patch',
-            hidingPlace: `at the edge of ${place}`,
+            name: 'Way to the usable plants',
+            hidingPlace: `within ${place}`,
             significance:
-                `The approach avoids ${obstacle} and reaches the patch.`
+                `The approach accounts for ${obstacle} and reaches the harvest.`
         },
         find_access: {
             suffix: 'harvest-method',
             kind: 'evidence',
             name: `Usable way to harvest ${herbName}`,
-            hidingPlace: `beside the herb patch at ${place}`,
+            hidingPlace: `at the harvest within ${place}`,
             significance:
-                `The plant can be gathered without ruining the harvest.`
+                `The plants can be gathered without ruining the harvest.`
         },
+
         recover: {
             suffix: 'harvested-herb',
             kind: 'quest_item',

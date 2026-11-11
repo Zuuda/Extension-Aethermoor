@@ -6556,8 +6556,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Update acceptance, progression, delivery, UI, narration, and duplicate
  *   protection to address an explicit quest ID.
  * - Multiple offers are stored and survive reload.
- * - Multiple quests may be accepted; activeQuest remains a temporary selected
- *   quest pointer during migration.
+ * - Multiple quests may be accepted; accepting another offer preserves an
+ *   already in-progress activeQuest selection. Journal records remain
+ *   authoritative and new mechanics use stable quest IDs.
  * - Quest actions and FOUND discovery progression address stable quest IDs;
  *   discovery events do not temporarily change the activeQuest selection.
  *   Beta verification remains pending.
@@ -9172,9 +9173,20 @@ function resolveQuestAction(test) {
             quest.status === 'offered',
             `Quest cannot be accepted from status ${quest.status}`
         );
-        state.activeQuest = quest;
+        const selectedQuestIsInProgress =
+            state.activeQuest?.status === 'in_progress';
+
         registerQuestDestination(state, quest);
         quest.status = 'in_progress';
+
+        /*
+         * Accepting another offer must not change the compatibility
+         * selection away from an already in-progress quest. The journal
+         * remains authoritative; new mechanics use quest IDs.
+         */
+        if (!selectedQuestIsInProgress) {
+            state.activeQuest = quest;
+        }
         if (quest.structureV2?.version === 2) {
             prepareRecoverCargoDiscovery(quest);
             prepareHerbForagingDiscovery(quest);

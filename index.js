@@ -5092,50 +5092,61 @@ function resolveJourneyAction(test) {
 function applyArrivalLocation(state, locationId, outcome) {
     state.world ||= {};
     state.world.settlements ||= {};
+    state.places ||= {};
 
     const settlement = Object.values(
         state.world.settlements
     ).find(entry => entry.locationId === locationId);
 
-    if (!settlement) {
-        return state;
-    }
+    const place = state.places[locationId];
+
+    assert(
+        place || settlement,
+        `Arrival location is not recorded: ${locationId}`
+    );
+
+    const destinationZone = settlement?.zone ?? place.zone;
+
+    assert(
+        Number.isInteger(destinationZone) &&
+        ZONES[destinationZone],
+        `Arrival location has an invalid zone: ${destinationZone}`
+    );
 
     const previousZone = state.zone;
 
-    state.places ||= {};
-    state.places[locationId] ||= {
-        id: locationId,
-        label: settlement.label,
-        zone: settlement.zone,
-        settlementId: settlement.id,
-        kind: 'settlement',
-        visited: false
-    };
+    if (settlement) {
+        state.places[locationId] ||= {
+            id: locationId,
+            label: settlement.label,
+            zone: settlement.zone,
+            settlementId: settlement.id,
+            kind: 'settlement',
+            visited: false
+        };
+    }
 
     state.places[locationId].visited = true;
-
-    state.zone = settlement.zone;
-
+    state.zone = destinationZone;
     state.currentLocationId = locationId;
     state.currentPosition = { nodeId: locationId };
 
-    if (previousZone !== settlement.zone) {
+    if (previousZone !== destinationZone) {
         const previousZoneRecord =
             state.world.zones?.[previousZone];
 
         const nextZoneRecord =
-            state.world.zones?.[settlement.zone];
+            state.world.zones?.[destinationZone];
 
         outcome.zoneTransition = {
             fromZone: previousZone,
-            toZone: settlement.zone,
+            toZone: destinationZone,
             fromRegion:
                 previousZoneRecord?.name ||
                 `Zone ${previousZone}`,
             toRegion:
                 nextZoneRecord?.name ||
-                `Zone ${settlement.zone}`,
+                `Zone ${destinationZone}`,
             fromGeography:
                 previousZoneRecord?.geography?.description ||
                 null,

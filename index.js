@@ -6224,7 +6224,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Support cargo delivery for retrieval objectives.
  * - Apply quest rewards exactly once after validated delivery.
  *
- * DONE — V2 defeat-elite path
+ * IMPLEMENTED — BETA PENDING: V2 linked-threat quest path
  * - Use complete V2 structures for the supported defeat-elite gate counts.
  * - Longer structures use authored local discoveries for tracking, reaching
  *   the lair, and locating the target; they do not require repeat arrival.
@@ -8079,17 +8079,12 @@ function resolveQuestSeed(test) {
             quest.currentGate.linkedTargetId = quest.targetId;
         }
 
-        // V2 defeat-elite structures require an Elite regardless of rank.
-        if (
-            ['defeat_elite', 'rescue_person']
-                .includes(structureV2.family) &&
-            quest.gatesData.at(-1)?.trigger === 'linked_combat'
-        ) {
-
-            quest.terminalThreat.kind = 'elite';
-            quest.seed.terminalThreat.kind = 'elite';
-        }
-    }
+        /*
+         * Keep the rank-selected threat. V2 links the encounter to the
+         * objective, but does not require every linked threat to be an
+         * Elite; F/E use normal packs, D/C may roll a pack or Elite, and
+         * B uses an Elite as established by rollQuestTerminalThreat().
+         */
 
     registerQuestDestination(state, quest);
         quest.turnIn ||= {
@@ -13516,15 +13511,17 @@ function questDiscoveryContextPacket(quest) {
 
     return lines.join('\n');
 }
-
 function questTerminalNarrationPacket(encounter, quest) {
-    const foe = encounter.foes?.[0];
+    const foes = encounter.foes || [];
+    const roster = foes.map((foe, index) =>
+        `${foe.role} ${index + 1} (level ${foe.level})`
+    );
 
     return [
         `The quest threat for ${quest.title} has been spotted.`,
-        `A level ${foe.level} ${foe.role} is guarding the objective.`,
+        `Engine-established encounter: ${roster.join('; ')}.`,
         'The encounter is spotted but not engaged. Combat has not begun.',
-        'Narrate the threat and its relation to the established quest objective. Leave the decision to engage, avoid, or try another approach to the protagonists.'
+        'Narrate this threat in relation to the established quest objective. Do not add foes or abilities. Leave the decision to engage, avoid, or try another approach to the protagonists.'
     ].join('\n');
 }
 

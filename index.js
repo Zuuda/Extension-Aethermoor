@@ -4674,7 +4674,7 @@ function shortestRoute(state, destinationId) {
     let position = state.currentPosition;
     if (!position && state.currentJourney) {
         position = positionAfterSegments(
-            journeyLegs(state.currentJourney, zone),
+            journeyLegs(state.currentJourney),
             state.currentJourney.completedSegments
         );
     }
@@ -5010,7 +5010,7 @@ function resolveJourneyAction(test) {
         assert(state.currentJourney, 'No journey to cancel');
         const journey = state.currentJourney;
         state.currentPosition = positionAfterSegments(
-            journeyLegs(journey, state.zone),
+            journeyLegs(journey),
             journey.completedSegments
         ) || { nodeId: state.currentLocationId };
         state.currentJourney = null;
@@ -5888,7 +5888,7 @@ function resolveTravelStep(test) {
     if (journey) {
         journey.completedSegments += 1;
         state.currentPosition = positionAfterSegments(
-            journeyLegs(journey, state.zone),
+            journeyLegs(journey),
             journey.completedSegments
         );
 
@@ -9165,7 +9165,7 @@ function resolveQuestAction(test) {
             )
         ) {
             state.currentPosition = positionAfterSegments(
-                journeyLegs(journey, state.zone),
+                journeyLegs(journey),
                 journey.completedSegments
             ) || state.currentPosition || {
                 nodeId: state.currentLocationId

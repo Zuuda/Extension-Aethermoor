@@ -6325,11 +6325,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   templates, and discovery helpers have been removed for the beta reset.
  * - Full gameplay verification is deferred to beta.
  *
- * PARTIAL — Authored quest discoveries
- * - Some V2 quests have engine-authored discoveries with stable IDs,
- *   locations, hiding places, required actions, and acquisition states.
- * - Add authored discoveries for every discovery-triggered gate.
- * - Remove fallback behavior that lets a narrator imply an unrecorded discovery.
+ * IMPLEMENTED — BETA PENDING: Authored quest discoveries
+ * - Every current V2 discovery-triggered gate receives a stable,
+ *   engine-authored discovery with a locked location and acquisition state.
+ * - Acceptance validates its discovery ID, location, acquisition policy,
+ *   hiding place, and significance before saving the accepted quest.
+ * - FOUND events validate the current gate and record acquired discoveries
+ *   as source-linked Crew Knowledge; hidden preparations are not knowledge.
+ * - Verify each quest family from acceptance through discovery during beta.
  *
  * PARTIAL — Quest family migration
  * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.

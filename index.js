@@ -5133,7 +5133,29 @@ function applyArrivalLocation(state, locationId, outcome) {
     state.currentLocationId = locationId;
     state.currentPosition = { nodeId: locationId };
 
+    if (state.places[locationId].kind === 'point_of_interest') {
+        outcome.poiArrival = {
+            placeId: locationId,
+            label: state.places[locationId].label
+        };
+
+        recordCrewKnowledge(state, {
+            id: `knowledge-poi-visit-${locationId}`,
+            kind: 'place_visit',
+            knowledgeType: 'observation',
+            certainty: 'engine_established',
+            summary: `The crew visited ${state.places[locationId].label}.`,
+            source: {
+                id: locationId,
+                type: 'place'
+            },
+            learnedAtLocationId: locationId,
+            learnedAtZone: destinationZone
+        });
+    }
+
     if (previousZone !== destinationZone) {
+
         const previousZoneRecord =
             state.world.zones?.[previousZone];
 
@@ -6536,11 +6558,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta verification remains part of the travel interruption regression pass.
  *
  * PLANNED — Local site exploration sessions
- * - IMPLEMENTED — BETA PENDING: travel can establish a directly noticed
+ * - IMPLEMENTED — BETA PENDING: travel establishes a directly noticed
  *   POI with a stable place ID and saved route; World offers Travel to it.
- * - A POI is not a rumor. It may be scenic and have no reward. Neither
- *   noticing nor arriving at one authorizes a search or reveals its
- *   privately locked curiosity outcome.
+ * - Confirmed POI arrival records one source-linked visit observation and
+ *   authorizes visible, potentially scenic description. It does not search
+ *   the site or reveal its privately locked curiosity outcome.
+ * - A POI is not a rumor and need not contain a reward.
  * - Do not add a generic Inspect button. Player-described interaction
  *   needs an eligible, saved resolution contract before a stash, hazard,
  *   NPC, or dungeon can become consequential.
@@ -13435,6 +13458,17 @@ function travelNarrationPacket(result) {
     if (result.arrived || result.event === 'journey_arrival') {
         lines.push(
             'Arrival does not establish whether any rumor about this place is true.'
+        );
+    }
+
+    if (result.poiArrival) {
+        lines.push(
+            `Confirmed arrival at ${result.poiArrival.label}.`,
+            'The crew may observe and describe the site’s visible features. ' +
+                'It may simply be scenic.',
+            'Arrival did not search the site or reveal its privately locked ' +
+                'curiosity result. Do not add loot, hazards, encounters, ' +
+                'quests, or rewards.'
         );
     }
 

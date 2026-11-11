@@ -2064,13 +2064,14 @@ function spawnLinkedQuestEncounter(state) {
 
     const spawned = spawnEncounter({
         state,
+        questId: quest.id,
         encounterType: 'quest_terminal',
         encounterId: `quest-terminal-${quest.id}`
     });
 
     const nextState = spawned.state;
     const encounter = nextState.encounter;
-    const activeQuest = nextState.activeQuest;
+    const activeQuest = findQuestById(nextState, quest.id);
 
     encounter.status = 'spotted';
     encounter.questTerminal ||= {
@@ -4080,15 +4081,30 @@ function spawnEncounter(test) {
     let questTerminal =
         null;
 
+    const previousSelectionId =
+        state.activeQuest?.id || null;
+
     if (requestedKind === 'quest_terminal') {
-        const activeQuest =
-            state.activeQuest;
+        assert(
+            typeof test.questId === 'string' &&
+            test.questId.length > 0,
+            'Quest-terminal spawn requires a questId'
+        );
+
+        const activeQuest = findQuestById(
+            state,
+            test.questId
+        );
 
         assert(
-            activeQuest &&
-            activeQuest.status === 'in_progress',
+            activeQuest?.status === 'in_progress',
             'Quest-terminal spawn requires an in-progress quest'
         );
+
+        // The existing spawn code below still uses activeQuest.
+        // Select the ID-bound owner only on this operation's clone.
+        state.activeQuest = activeQuest;
+
         assert(
             !activeQuest.objectiveResolution,
             'Quest objective is already secured'
@@ -4489,6 +4505,14 @@ if (!questTerminal) {
 
     state.zone = test.zone;
     state.encounter = spawned.encounter;
+
+    if (questTerminal) {
+        state.activeQuest = null;
+        state.activeQuest = previousSelectionId
+            ? findQuestById(state, previousSelectionId)
+            : null;
+    }
+
     validate(state);
 
     return {
@@ -9439,6 +9463,7 @@ function resolveQuestAction(test) {
 
             const spawned = spawnEncounter({
                 state,
+                questId: quest.id,
                 encounterType: 'quest_terminal',
                 encounterId: `quest-terminal-${quest.id}`
             });
@@ -12380,11 +12405,13 @@ function resolveBatch(args) {
 
                     result = spawnEncounter({
                         state,
+                        questId: quest.id,
                         encounterType: 'quest_terminal',
                         encounterId:
                             `quest-terminal-${quest.id}`
                     });
-                                                            result.state.encounter.status = 'spotted';
+
+                    result.state.encounter.status = 'spotted';
                     result.state.encounter.questTerminal.targetId =
                         quest.targetId;
 

@@ -6871,8 +6871,10 @@ const QUEST_ARCHETYPES = [
                     herb: 'a bundle of common gathering plants',
                     place: 'the nearby gathering area',
                     need: 'routine supplies',
+                    stakes: 'common plants for ordinary stock',
                     obstacle: 'ordinary care is needed to gather them intact'
                 }
+
             },
             {
                 ranks: ['E', 'D'],
@@ -6883,6 +6885,7 @@ const QUEST_ARCHETYPES = [
                     herb: 'a usable medicinal plant harvest',
                     place: 'the identified gathering area',
                     need: 'treatment for a patient',
+                    stakes: 'a scarce remedy needed for a patient',
                     obstacle: 'the usable plants must be identified and gathered intact'
                 }
             },
@@ -6895,6 +6898,7 @@ const QUEST_ARCHETYPES = [
                     herb: 'the essential medicinal harvest',
                     place: 'the identified gathering area',
                     need: 'an essential local treatment',
+                    stakes: 'an urgent harvest for an essential local treatment',
                     obstacle: 'the usable harvest must be gathered without spoiling it'
                 }
             }

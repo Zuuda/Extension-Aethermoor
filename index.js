@@ -5742,28 +5742,19 @@ function resolveTravelStep(test) {
             signs[roll(state, signs.length) - 1];
     }
 
-        /*
-     * A point of interest is a place noticed directly during travel,
-     * unlike a rumor, which is an unverified claim heard from someone.
-     * Neither promises a dungeon, NPC, encounter, hazard, or reward.
+      /*
+     * A POI is a place noticed directly during travel; a rumor is an
+     * unverified claim heard from someone. Neither guarantees content.
      *
-     * This branch currently locks a site seed but does not establish
-     * crew arrival or authorize a search. Future integration should make
-     * the site a reachable World destination and resolve only eligible
-     * actions from the player's fiction. Do not add an Inspect button or
-     * treat clicking Travel as searching the site.
+     * Lock the private curiosity seed once, but expose only the place at
+     * this stage. Noticing, traveling to, and arriving at a POI are not
+     * searches. Do not add an Inspect button. Consequential outcomes need
+     * their own player-action and saved-resolution contracts.
      */
     if (event === 'point_of_interest') {
         const siteId = `site-${test.stepId}`;
         const inquiryKey = `site:${siteId}`;
-        const existingSite = state.inquiries[inquiryKey];
-
-    if (event === 'point_of_interest') {
-        const siteId = `site-${test.stepId}`;
-        const inquiryKey = `site:${siteId}`;
-        const existingSite = state.inquiries[inquiryKey];
-
-        let siteRecord = existingSite;
+        let siteRecord = state.inquiries[inquiryKey];
 
         if (!siteRecord) {
             const curiosityRoll = roll(state, 10);
@@ -5801,15 +5792,41 @@ function resolveTravelStep(test) {
             id: siteId,
             label: 'Uncharted point of interest',
             zone: state.zone,
+            kind: 'point_of_interest',
+            knownFrom: 'direct_observation',
+            visited: false,
             sourceStepId: test.stepId,
             inquiryId: siteId
         };
 
+        state.routeEdges ||= [];
+
+        const anchor = savedPrimarySettlement(
+            state,
+            state.zone
+        );
+
+        if (!state.routeEdges.some(edge =>
+            (edge.fromId === anchor.locationId &&
+                edge.toId === siteId) ||
+            (edge.fromId === siteId &&
+                edge.toId === anchor.locationId)
+        )) {
+            state.routeEdges.push({
+                fromId: anchor.locationId,
+                toId: siteId,
+                length: 2,
+                kind: 'poi_access',
+                fromZone: state.zone,
+                toZone: state.zone
+            });
+        }
+
+        // Do not put the locked curiosity result in the travel packet.
         outcome.site = {
             id: siteId,
             zone: state.zone,
-            curiosityRoll: siteRecord.roll,
-            curiosity: siteRecord.result
+            label: state.places[siteId].label
         };
     }
 
@@ -6516,7 +6533,16 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta verification remains part of the travel interruption regression pass.
  *
  * PLANNED — Local site exploration sessions
+ * - IMPLEMENTED — BETA PENDING: travel can establish a directly noticed
+ *   POI with a stable place ID and saved route; World offers Travel to it.
+ * - A POI is not a rumor. It may be scenic and have no reward. Neither
+ *   noticing nor arriving at one authorizes a search or reveals its
+ *   privately locked curiosity outcome.
+ * - Do not add a generic Inspect button. Player-described interaction
+ *   needs an eligible, saved resolution contract before a stash, hazard,
+ *   NPC, or dungeon can become consequential.
  * - Do not implement fixed room counts in this movement pass.
+
  * - Later represent discovered local nodes and exits as saved site-session data.
  * - Prevent repeated visits to the same local node from rerolling encounters
  *   or discoveries indefinitely.
@@ -13329,10 +13355,15 @@ function travelNarrationPacket(result) {
         const site = result.site;
 
         lines.push(
-            `The crew reached a new point of interest, site ${site.id}.`,
-            `The site's curiosity result is: ${site.curiosity.replaceAll('_', ' ')}.`,
-            'Describe the site around this established result. Do not add an unrolled reward or quest.'
+            `The crew noticed a point of interest: ${site.label} ` +
+                `(reference: ${site.id}).`,
+            'It is now a known, reachable place. The crew has not ' +
+                'necessarily arrived there or searched it.',
+            'Give it modest, setting-appropriate visible features. ' +
+                'A scenic place with no reward is valid. Do not reveal ' +
+                'hidden content or add an encounter, quest, or reward.'
         );
+
     } else if (result.event === 'wild_encounter') {
         lines.push(
             `The crew spotted encounter ${result.encounterId}.`,
@@ -17298,8 +17329,40 @@ async function renderWorldTab(host) {
         host.appendChild(history);
     }
 
-    // Test fixtures are created from Narration Debug, not ordinary World.
+    const pointsOfInterest = Object.values(state.places || {})
+        .filter(place =>
+            place?.kind === 'point_of_interest' &&
+            Number(place.zone) === state.zone &&
+            place.testOnly !== true
+        );
 
+    const poiSection = makeAethermoorSection(
+        'POINTS OF INTEREST · CURRENT ZONE',
+        pointsOfInterest.length
+            ? 'Places noticed during travel. Visiting is not searching.'
+            : 'No points of interest noticed in this zone.',
+        'world'
+    );
+
+    for (const place of pointsOfInterest) {
+        if (place.id === currentLocationId) {
+            const atSite = document.createElement('div');
+            atSite.className = 'aethermoor-ui-text';
+            atSite.textContent =
+                `${place.label}\nThe crew is here. ` +
+                'What they do next is up to the player.';
+            poiSection.appendChild(atSite);
+        } else {
+            addTravelAction(
+                poiSection,
+                `Travel to ${place.label}`,
+                place.id
+            );
+        }
+    }
+
+    host.appendChild(poiSection);
+    // Test fixtures are created from Narration Debug, not ordinary World.
     const settlements = Object.values(world.settlements || {})
         .filter(settlement => {
             if (!settlement?.locationId) return false;

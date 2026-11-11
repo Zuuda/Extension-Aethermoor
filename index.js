@@ -5936,17 +5936,13 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
         }
 
         return {
-            low: [
-                reward('F', 1, 1, 'common', base),
-                reward('E', 1.5, 1, 'common', base),
-                reward('D', 3, 2, 'uncommon', base + 1)
-            ],
-            high: [
-                reward('D', 3, 2, 'uncommon', base + 1),
-                reward('C', 5, 2, 'uncommon', base + 1),
-                reward('B', 9, 2, 'rare', base + 3)
-            ]
+            F: reward('F', 1, 1, 'common', base),
+            E: reward('E', 1.5, 1, 'common', base),
+            D: reward('D', 3, 2, 'uncommon', base + 1),
+            C: reward('C', 5, 2, 'uncommon', base + 1),
+            B: reward('B', 9, 2, 'rare', base + 3)
         };
+
     }
 });
 
@@ -5995,6 +5991,16 @@ const QUEST_SALVAGE_SLOTS = [
     { owner: 'qtik',  slot: 'wristCuffs', variant: 'vitality' }
 ];
 
+const QUEST_OFFER_RANKS_BY_REPUTATION = {
+    Unknown: ['F', 'E'],
+    'Slightly Known': ['F', 'E', 'D'],
+    Known: ['E', 'D', 'C'],
+    'Well Respected': ['D', 'C', 'B'],
+    Renowned: ['C', 'B']
+};
+
+const QUEST_REPUTATION_STEPS_PER_TIER = 3;
+
 function normalizeQuestRepTier(value) {
     assert(
         typeof value === 'string',
@@ -6006,40 +6012,17 @@ function normalizeQuestRepTier(value) {
         .trim()
         .toLowerCase();
 
-    if (
-        tier === 'unknown' ||
-        tier === 'slightly known'
-    ) {
-        return {
-            band: 'low',
-            label:
-                tier === 'unknown'
-                    ? 'Unknown'
-                    : 'Slightly Known'
-        };
-    }
+    const label = Object.keys(QUEST_OFFER_RANKS_BY_REPUTATION)
+        .find(entry => entry.toLowerCase() === tier);
 
-    if (
-        tier === 'known' ||
-        tier === 'well respected' ||
-        tier === 'renowned'
-    ) {
-        const labelByTier = {
-            known: 'Known',
-            'well respected': 'Well Respected',
-            renowned: 'Renowned'
-        };
+    assert(label, `Unsupported reputation tier: ${value}`);
 
-        return {
-            band: 'high',
-            label: labelByTier[tier]
-        };
-    }
-
-    throw new Error(
-        `Unsupported reputation tier: ${value}`
-    );
+    return {
+        label,
+        ranks: QUEST_OFFER_RANKS_BY_REPUTATION[label]
+    };
 }
+
 
 function makeQuestSalvage(zone, slotRoll, row) {
     int(slotRoll, 'salvageSlotRoll', 1);
@@ -6290,7 +6273,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.
  * - Herb Foraging uses V2 retrieval structures and authored discoveries for
  *   every supported gate count; gathered herbs remain locked turn-in cargo.
- * - Missing Person Search uses saved Lost and Abducted variants, not Rank F.
+ * - Missing Person Search saves its variant: Lost at D, Abducted at C/B.
  *   Lost ends when the person is found; Abducted ends when the linked threat
  *   is defeated. Returning the person is diegetic; turn-in is report-only.
  * - Four- and five-gate Missing Person offers use Abducted, because the
@@ -6312,8 +6295,12 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   undertake lower-ranked work.
  * - Reputation should encourage regional momentum, not require clearing a
  *   fixed number of quests before the crew can move on.
- * - Proposed starting pace: three reputation steps per tier. F/E quests grant
- *   one step; D/C/B quests grant two. Tune during beta.
+ * - New offer bands: Unknown F/E; Slightly Known F/E/D; Known E/D/C;
+ *   Well Respected D/C/B; Renowned C/B.
+ * - Three reputation steps per tier. F/E grant one; D/C/B grant two.
+ *   Keep earned tiers and banked steps. Tune pacing during beta.
+ * - Missing Person: Lost at D; Abducted at C/B. Rank-specific scenario
+ *   eligibility for the rest of the catalog is still pending.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
  *
@@ -6866,7 +6853,7 @@ function questGeographyProfile(state, zone = state.zone) {
     return legacyProfiles[zone] || null;
 }
 
-function eligibleQuestScenarios(state, archetype, zone = state.zone) {
+function eligibleQuestScenarios(state, archetype, zone, rank) {
     const profile = questGeographyProfile(state, zone);
 
     return (archetype.scenarios || []).filter(scenario => {
@@ -6874,19 +6861,25 @@ function eligibleQuestScenarios(state, archetype, zone = state.zone) {
             scenario.geographyProfiles ||
             ['marsh_edge', 'marsh'];
 
-        return allowedProfiles.includes(profile);
+        if (!allowedProfiles.includes(profile)) return false;
+        if (archetype.id !== 'missing_person') return true;
+
+        // The current Lost plan fits D's 2–3 gates.
+        // Abducted fits the 3–5 gates used by C and B.
+        if (scenario.variantId === 'lost') return rank === 'D';
+        if (scenario.variantId === 'abducted') {
+            return rank === 'C' || rank === 'B';
+        }
+
+        return false;
     });
 }
 
-function eligibleQuestArchetypes(state, zone = state.zone, rank = null) {
+function eligibleQuestArchetypes(state, zone, rank) {
     const newOfferArchetypes = QUEST_ARCHETYPES.filter(
         archetype =>
             !['missing_cargo', 'sunken_salvage']
-                .includes(archetype.id) &&
-            !(
-                archetype.id === 'missing_person' &&
-                rank === 'F'
-            )
+                .includes(archetype.id)
     );
 
     newOfferArchetypes.push(RECOVER_CARGO_ARCHETYPE);
@@ -6897,27 +6890,15 @@ function eligibleQuestArchetypes(state, zone = state.zone, rank = null) {
             scenarios: eligibleQuestScenarios(
                 state,
                 archetype,
-                zone
+                zone,
+                rank
             )
         }))
         .filter(entry => entry.scenarios.length > 0);
 }
 
-function buildQuestFacts(
-    state,
-    archetype,
-    zone = state.zone,
-    gateCount = null
-) {
-    const eligibleScenarios = eligibleQuestScenarios(
-        state,
-        archetype,
-        zone
-    ).filter(scenario =>
-        archetype.id !== 'missing_person' ||
-        gateCount <= 3 ||
-        scenario.variantId === 'abducted'
-    );
+function buildQuestFacts(state, archetype, zone, eligibleScenarios) {
+
 
     assert(
         eligibleScenarios.length > 0,
@@ -7769,9 +7750,8 @@ function resolveQuestSeed(test) {
     trigger.questSeedConsumed !== true,
         'This quest trigger was already consumed'
     );
-
     const questRoll =
-        roll(state, 3);
+        roll(state, rep.ranks.length);
 
     const gateCountRoll =
         roll(state, 2);
@@ -7779,11 +7759,11 @@ function resolveQuestSeed(test) {
     const salvageSlotRoll =
         roll(state, QUEST_SALVAGE_SLOTS.length);
 
-    const table =
-        QUEST_REWARD_TABLES[zone][rep.band];
+    const rank =
+        rep.ranks[questRoll - 1];
 
     const row =
-        table[questRoll - 1];
+        QUEST_REWARD_TABLES[zone][rank];
 
     assert(
         row,
@@ -7854,7 +7834,7 @@ function resolveQuestSeed(test) {
         state,
         archetype,
         zone,
-        gates
+        selectedArchetype.scenarios
     );
 
     const structureV2 = buildQuestV2PlanForOffer(
@@ -9569,16 +9549,22 @@ function resolveQuestAction(test) {
             rung >= 0,
             `Unknown reputation tier: ${rep.tier}`
         );
+        const stepsPerTier = QUEST_REPUTATION_STEPS_PER_TIER;
+
         int(rep.steps, `${town} reputation steps`);
         assert(
-            rep.steps < 2 || rung === tierOrder.length - 1,
-            `${town} reputation steps must be 0 or 1`
+            rep.steps < stepsPerTier ||
+                rung === tierOrder.length - 1,
+            `${town} reputation steps must be below ${stepsPerTier}`
         );
 
         let steps = rep.steps + payout.repSteps;
 
-        while (steps >= 2 && rung < tierOrder.length - 1) {
-            steps -= 2;
+        while (
+            steps >= stepsPerTier &&
+            rung < tierOrder.length - 1
+        ) {
+            steps -= stepsPerTier;
             rung++;
         }
 

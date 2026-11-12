@@ -6711,16 +6711,32 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Do not enable spawn-rich explorable-site outcomes until persistent local
  *   exploration can prevent repeated visits from generating unlimited rolls.
  *
- * TENTATIVE — Conditional connections between world systems
- * - Later allow authored quests and events to reference saved discoveries,
- *   contacts, routes, and world changes through stable IDs.
- * - Prefer explicit prerequisite checks over a general simulation framework.
- * - Keep conditions separate from narration and reward application; a newly
- *   eligible opportunity is not automatically completed or paid.
- * - Any triggered event needs a saved identity and duplicate-event protection.
- * - A changed condition may justify new content at an explored site; ordinary
- *   revisits alone must not refresh its encounters or discoveries.
- * - Implement only when a concrete quest or event needs this integration.
+ * TENTATIVE — Diegetic opportunities and conditional connections
+ * - Aspirational vision: quests are relatively rare discoveries, not a
+ *   settlement quest board or an exclamation mark over every NPC. Wandering,
+ *   combat breadcrumbs, rumors, local discoveries, conversation, and prior
+ *   help can each reveal opportunities. Several small chances may combine
+ *   into a lively world without making every conversation yield a quest.
+ * - The crew's actions can change what a local person is willing to share:
+ *   helping a worker might reveal a friend's concern; discovering a ruin
+ *   might make a local scholar interested in speaking. Carry such facts as
+ *   saved knowledge or stable events, not as assumed LLM memory.
+ * - Do not require players to exhaust endless NPC dialogue or guess an exact
+ *   keyword. Meaningful engagement may reveal an eligible opening; an NPC
+ *   without one can still be worth talking to.
+ * - The engine decides whether an opportunity exists, its prerequisites,
+ *   objective, rank, rewards, and one-time identity. The narrator handles
+ *   conversation and local presentation, not quest generation.
+ * - Beta-sized first step: implement one or two authored local connections
+ *   with explicit saved prerequisites and one-time reveal. Do not build a
+ *   settlement-wide relationship simulation or weighted variable web.
+ * - Keep routine F work discoverable by asking around if play needs a
+ *   fallback, without making a quest board mandatory. A multi-step social
+ *   unlock should not automatically spend its payoff on a random F errand.
+ * - Revealing a lead is not accepting a quest, completing an objective, or
+ *   paying a reward. Repeated conversation or revisits must not reroll it.
+ * - Tune opportunity frequency and the need for an F fallback during beta;
+ *   quest scarcity is intentional, but an empty-feeling world is not.
  *
  * DEFERRED — Larger rumor threads and regional mysteries
  * - Potentially connect distinct clues to an authored conclusion, such as a

@@ -17197,6 +17197,11 @@ function addAethermoorPanelStyles() {
             border-top: 2px solid #4da6ff;
         }
 
+        .aethermoor-tab[data-tab="inventory"].active {
+            color: #ffffff;
+            border-top: 2px solid #4ade80;
+        }
+
         .aethermoor-panel-content {
             min-height: 150px;
             overflow: auto;
@@ -17702,7 +17707,7 @@ function ensureAethermoorTabViews() {
 
     aethermoorTabViews = {};
 
-    for (const tab of ['combat', 'quests', 'world']) {
+    for (const tab of ['combat', 'quests', 'world', 'inventory']) {
         const view = document.createElement('section');
         view.className = 'aethermoor-tab-view';
         view.dataset.tab = tab;
@@ -18877,6 +18882,189 @@ async function openAethermoorHerbalistWindow() {
     close.focus();
 }
 
+/*
+ * Inventory is a read-only view of this chat's saved mechanics state.
+ * Rendering cannot consume potions, equip gear, change silver, or reopen
+ * a shop automatically. Shop reopen controls require the crew to remain
+ * at the settlement where the corresponding window was opened.
+ */
+async function renderInventoryTab(host) {
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.replaceChildren();
+        host.appendChild(
+            makeAethermoorSection(
+                'INVENTORY',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
+                'world'
+            )
+        );
+        return;
+    }
+
+    const state = snapshot.state;
+    const inventory = state.inventory || {};
+    const gear = state.crew?.gear || {};
+    const settlements = Object.values(
+        state.world?.settlements || {}
+    );
+
+    host.replaceChildren();
+    markCampaignViewRendered(snapshot);
+
+    host.appendChild(
+        makeAethermoorSection(
+            'CREW INVENTORY',
+            `Purse: ${state.crew.purse}s\n` +
+                'Items below are from saved state, not narrated estimates.',
+            'world'
+        )
+    );
+
+    const consumables = (inventory.consumables || [])
+        .filter(item => item?.quantity > 0)
+        .map(item => {
+            const definition = consumableDefinition(item.id);
+
+            return `${definition?.name || item.name || item.id} ` +
+                `×${item.quantity}` +
+                (definition?.heal
+                    ? ` · Restores up to ${definition.heal} HP`
+                    : '');
+        });
+
+    host.appendChild(
+        makeAethermoorSection(
+            'POTIONS & TONICS',
+            consumables.join('\n') || 'None in shared stock.',
+            'world'
+        )
+    );
+
+    const bag = inventory.bagReserves || [];
+
+    host.appendChild(
+        makeAethermoorSection(
+            `BAG RESERVES · ${bag.length}`,
+            bag.map((item, index) =>
+                `${index + 1}. ${item.name || 'Unnamed gear'} · ` +
+                `${item.rarity || 'Rarity unknown'} · ` +
+                `Stat ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
+                `${item.bound ? 'Bound' : 'Unbound'}`
+            ).join('\n') || 'No gear in Bag Reserves.',
+            'world'
+        )
+    );
+
+    for (const [owner, label] of [
+        ['tansy', 'TANSY'],
+        ['qtik', "Q'TIK"]
+    ]) {
+        const equipped = Object.entries(gear[owner] || {})
+            .filter(([, item]) =>
+                item && Number(item.stat ?? item.rawStat) > 0
+            )
+            .map(([slot, item]) =>
+                `${slot}: ${item.name || 'Unnamed gear'} · ` +
+                `Stat ${item.stat ?? item.rawStat}`
+            );
+
+        host.appendChild(
+            makeAethermoorSection(
+                `${label} · WORN GEAR`,
+                equipped.join('\n') || 'No gear equipped.',
+                'world'
+            )
+        );
+    }
+
+    const listings = inventory.activeTradeListings || [];
+
+    if (listings.length) {
+        host.appendChild(
+            makeAethermoorSection(
+                `TRADE-STREAM LISTINGS · ${listings.length}`,
+                listings.map(item =>
+                    item.name || item.listingId || 'Unnamed listing'
+                ).join('\n'),
+                'world'
+            )
+        );
+    }
+
+    if (
+        state.currentJourney ||
+        ['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        return;
+    }
+
+    const currentSettlement = settlements.find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    if (!currentSettlement) return;
+
+    const shopSection = makeAethermoorSection(
+        'OPENED SHOPS',
+        'Reopen a shop already shown at this settlement. ' +
+            'Reopening does not stage or complete a trade.',
+        'world'
+    );
+
+    let hasShop = false;
+
+    if (state.vendorMenu?.settlementId === currentSettlement.id) {
+        hasShop = true;
+        shopSection.appendChild(
+            makeAethermoorAction(
+                'Reopen Trade Window',
+                'world',
+                () => {
+                    void openAethermoorShopWindow().catch(error =>
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        )
+                    );
+                }
+            )
+        );
+    }
+
+    if (state.herbalistMenu?.settlementId === currentSettlement.id) {
+        hasShop = true;
+        shopSection.appendChild(
+            makeAethermoorAction(
+                'Reopen Herbalist Window',
+                'world',
+                () => {
+                    void openAethermoorHerbalistWindow().catch(error =>
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        )
+                    );
+                }
+            )
+        );
+    }
+
+    if (hasShop) host.appendChild(shopSection);
+}
+
 async function renderWorldTab(host) {
 
     let snapshot;
@@ -18954,65 +19142,7 @@ async function renderWorldTab(host) {
         state.currentLocationId ||
         routeNodeId(state.zone, 'outpost');
 
-    const currentShop = Object.values(
-        world.settlements || {}
-    ).find(entry =>
-        entry.id === state.vendorMenu?.settlementId &&
-        entry.locationId === currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    if (
-        currentShop &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status)
-    ) {
-        host.appendChild(
-            makeAethermoorAction(
-                'Reopen Trade Window',
-                'world',
-                () => {
-                    void openAethermoorShopWindow().catch(error => {
-                        toastr.error(
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                            'Aethermoor'
-                        );
-                    });
-                }
-            )
-        );
-    }
-
-    const herbalistHere = Object.values(
-        world.settlements || {}
-    ).some(entry =>
-        entry.id === state.herbalistMenu?.settlementId &&
-        entry.locationId === currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    if (
-        herbalistHere &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status)
-    ) {
-        host.appendChild(
-            makeAethermoorAction(
-                'Reopen Herbalist Window',
-                'world',
-                () => {
-                    void openAethermoorHerbalistWindow()
-                        .catch(error => toastr.error(
-                            error.message || String(error),
-                            'Aethermoor'
-                        ));
-                }
-            )
-        );
-    }
-
+    // Shop reopening belongs to Inventory; World lists travel choices.
     const movementBlocked = [
         'active',
         'spotted'
@@ -19416,9 +19546,10 @@ function renderAethermoorTab(tab) {
         renderQuestTab(views.quests);
     } else if (tab === 'world') {
         renderWorldTab(views.world);
+    } else if (tab === 'inventory') {
+        renderInventoryTab(views.inventory);
     }
 }
-
 
 const AETHERMOOR_PANEL_GEOMETRY_KEY =
     'aethermoorMainPanelGeometry';
@@ -19645,7 +19776,8 @@ function openAethermoorPanel() {
         for (const [tab, label] of [
             ['combat', 'Combat'],
             ['quests', 'Quests'],
-            ['world', 'World']
+            ['world', 'World'],
+            ['inventory', 'Inventory']
         ]) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -20013,7 +20145,8 @@ function registerAethermoorCampaignAutoRefresh() {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            !['quests', 'world'].includes(aethermoorActiveTab) ||
+            !['quests', 'world', 'inventory']
+                .includes(aethermoorActiveTab) ||
             aethermoorCampaignRefreshBusy ||
             !aethermoorTabViews
         ) {
@@ -20040,7 +20173,9 @@ function registerAethermoorCampaignAutoRefresh() {
         const refresh =
             aethermoorActiveTab === 'quests'
                 ? renderQuestTab(host)
-                : renderWorldTab(host);
+                : aethermoorActiveTab === 'inventory'
+                    ? renderInventoryTab(host)
+                    : renderWorldTab(host);
 
         Promise.resolve(refresh)
             .catch(error => {

@@ -16564,62 +16564,15 @@ async function renderQuestTab(host) {
         snapshot = await readStoredCombatState();
     } catch (error) {
         host.replaceChildren();
-
-        if (
-            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-        ) {
-            const start = makeAethermoorSection(
-                'START CAMPAIGN',
-                'Create the level-1 crew in Thornhaven. This does not ' +
-                    'generate a quest, encounter, or opening scene.',
-                'world'
-            );
-
-            const button = makeAethermoorAction(
-                'Start Campaign',
-                'world',
-                async () => {
-                    button.disabled = true;
-
-                    try {
-                        const result = await runStoredMechanic({
-                            cases: [{
-                                name: 'initialize_campaign',
-                                kind: 'state',
-                                action: 'initialize'
-                            }]
-                        });
-
-                        assert(
-                            result?.ok === true &&
-                            result.initialized === true,
-                            result?.error ||
-                                'Could not initialize campaign'
-                        );
-
-                        await renderWorldTab(host);
-                    } catch (startError) {
-                        button.disabled = false;
-                        toastr.error(
-                            startError instanceof Error
-                                ? startError.message
-                                : String(startError),
-                            'Aethermoor'
-                        );
-                    }
-                }
-            );
-
-            start.appendChild(button);
-            host.appendChild(start);
-            return;
-        }
-
         host.appendChild(
             makeAethermoorSection(
-                'WORLD',
-                error instanceof Error ? error.message : String(error),
-                'world'
+                'QUEST JOURNAL',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
+                'quest'
             )
         );
         return;
@@ -16987,6 +16940,55 @@ async function renderWorldTab(host) {
         snapshot = await readStoredCombatState();
     } catch (error) {
         host.replaceChildren();
+
+        if (!getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]) {
+            const start = makeAethermoorSection(
+                'START CAMPAIGN',
+                'Create the level-1 crew in Thornhaven. This does not ' +
+                    'generate a quest, encounter, or opening scene.',
+                'world'
+            );
+
+            const button = makeAethermoorAction(
+                'Start Campaign',
+                'world',
+                async () => {
+                    button.disabled = true;
+
+                    try {
+                        const result = await runStoredMechanic({
+                            cases: [{
+                                name: 'initialize_campaign',
+                                kind: 'state',
+                                action: 'initialize'
+                            }]
+                        });
+
+                        assert(
+                            result?.ok === true &&
+                            result.initialized === true,
+                            result?.error ||
+                                'Could not initialize campaign'
+                        );
+
+                        await renderWorldTab(host);
+                    } catch (startError) {
+                        button.disabled = false;
+                        toastr.error(
+                            startError instanceof Error
+                                ? startError.message
+                                : String(startError),
+                            'Aethermoor'
+                        );
+                    }
+                }
+            );
+
+            start.appendChild(button);
+            host.appendChild(start);
+            return;
+        }
+
         host.appendChild(
             makeAethermoorSection(
                 'WORLD',

@@ -10582,10 +10582,8 @@ function resolveVendorMenuOpen(test) {
         'The crew must be free to speak at a saved settlement'
     );
 
-    if (
-        state.vendorMenu?.settlementId === settlement.id &&
-        state.vendorMenu?.inquiryId === test.socialId
-    ) {
+    if (state.vendorMenu?.settlementId === settlement.id) {
+        // Another request to view this shop must not erase a staged quote.
         return {
             ok: true,
             created: false,
@@ -10597,7 +10595,8 @@ function resolveVendorMenuOpen(test) {
 
     state.vendorMenu = {
         settlementId: settlement.id,
-        inquiryId: test.socialId
+        inquiryId: test.socialId,
+        pendingBasket: null
     };
 
     return {
@@ -17011,11 +17010,20 @@ function addAethermoorPanelStyles() {
         }
 
         .aethermoor-vendor-bonus {
+            color: #9caab8;
+        }
+
+        .aethermoor-trade-gain {
             color: #4ade80;
         }
 
+        .aethermoor-trade-loss,
         .aethermoor-vendor-skip {
             color: #f87171;
+        }
+
+        .aethermoor-trade-even {
+            color: #9caab8;
         }
 
         .aethermoor-trade-columns {
@@ -17939,25 +17947,78 @@ async function openAethermoorShopWindow() {
                     `+${amount} ${bonusNames[name] || name}`
                 );
 
-            button.textContent =
-                `${owner} ${entry.slotName} · ` +
-                `${option.label || 'Standard'} · ${entry.price}s\n` +
-                `Common · Stat ${entry.stat} · ` +
-                `Equipped Stat ${entry.equippedStat}\n` +
-                (effects.join(' · ') || 'No stat bonus');
+            const worn =
+                state.crew.gear?.[entry.owner]?.[entry.slot];
 
-        button.addEventListener('click', () => {
-            if (selectedSales.has(key)) {
-                selectedSales.delete(key);
-            } else {
-                selectedSales.set(key, {
-                    ...choice,
-                    proceeds
-                });
+            const wornBonus = gearBonus(
+                entry.owner,
+                entry.slot,
+                worn
+            );
+
+            const comparisonKeys = {
+                crewAtk: ['atk', 'Crew ATK'],
+                tansyMaxHp: ['hp', 'Tansy MaxHP'],
+                qtikMaxHp: ['hp', 'Q’tik MaxHP'],
+                frontlineDef: ['def', 'Frontline DEF'],
+                crewLuk: ['luk', 'Crew LUK']
+            };
+
+            const heading = document.createElement('div');
+            heading.className = 'aethermoor-vendor-name';
+            heading.textContent =
+                `${owner} ${entry.slotName} · ` +
+                `${option.label || 'Standard'} · ${entry.price}s`;
+
+            const detail = document.createElement('div');
+            detail.className = 'aethermoor-vendor-detail';
+            detail.textContent =
+                `Common · Stat ${entry.stat} · ` +
+                `Equipped Stat ${entry.equippedStat}`;
+
+            button.append(heading, detail);
+
+            for (const [key, [wornKey, label]] of Object.entries(
+                comparisonKeys
+            )) {
+                const proposed = Number(option.bonus[key] || 0);
+                const current = Number(wornBonus[wornKey] || 0);
+
+                if (proposed === 0 && current === 0) continue;
+
+                const difference = proposed - current;
+                const line = document.createElement('div');
+
+                line.className = difference > 0
+                    ? 'aethermoor-trade-gain'
+                    : difference < 0
+                        ? 'aethermoor-trade-loss'
+                        : 'aethermoor-trade-even';
+
+                line.textContent =
+                    `${label}: ${difference > 0 ? '+' : ''}` +
+                    `${difference} vs worn`;
+
+                button.appendChild(line);
             }
 
-            refresh();
-        });
+            button.addEventListener('click', () => {
+                const selected = selectedBuys.get(key);
+
+                if (
+                    selected?.number === entry.number &&
+                    selected?.variant === option.variant
+                ) {
+                    selectedBuys.delete(key);
+                } else {
+                    selectedBuys.set(key, {
+                        number: entry.number,
+                        variant: option.variant
+                    });
+                }
+
+                refresh();
+            });
 
             merchant.appendChild(button);
             buyButtons.push({
@@ -17986,15 +18047,10 @@ async function openAethermoorShopWindow() {
             `${item.name || label} · +${proceeds}s\n` +
             `${label} · ${item.rarity || 'Common'} · Stat ${rawStat}`;
 
-            button.addEventListener('click', () => {
-                const selected = selectedBuys.get(key);
-
-                if (
-                    selected?.number === entry.number &&
-                    selected?.variant === option.variant
-                ) {
-                    selectedBuys.delete(key);
-                } else {
+        button.addEventListener('click', () => {
+            if (selectedSales.has(key)) {
+                selectedSales.delete(key);
+            } else {
                 selectedSales.set(key, {
                     ...choice,
                     proceeds
@@ -18182,8 +18238,37 @@ async function renderWorldTab(host) {
         state.currentLocationId ||
         routeNodeId(state.zone, 'outpost');
 
-      // Vendor stock opens in its own window after the ASK_WARES handshake.
-    // World remains focused on places, journeys, and discoveries.
+    const currentShop = Object.values(
+        world.settlements || {}
+    ).find(entry =>
+        entry.id === state.vendorMenu?.settlementId &&
+        entry.locationId === currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    if (
+        currentShop &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        host.appendChild(
+            makeAethermoorAction(
+                'Reopen Trade Window',
+                'world',
+                () => {
+                    void openAethermoorShopWindow().catch(error => {
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        );
+                    });
+                }
+            )
+        );
+    }
+
     const movementBlocked = [
         'active',
         'spotted'

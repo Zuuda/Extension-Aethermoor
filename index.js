@@ -6523,8 +6523,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   validates engine-issued gear-variant and potion-grade keys.
  * - The batch is saved once per zone; a duplicate reply cannot rename it.
  *   Missing or malformed replies leave generic names and never block play.
- * - Next: use the saved labels consistently in shop windows, purchase
- *   receipts, Inventory, and Combat.
+ * - IMPLEMENTED — BETA PENDING: saved labels now flow through gear and
+ *   herbalist shop windows, purchase receipts, Bag Reserves, Inventory,
+ *   and combat potion choices.
+ * - Generic labels remain fallbacks when a naming batch is absent.
  * - On confirmed arrival in a new zone, the extension supplies the GM
  *   with saved geography and engine-issued keys for the zone's gear and
  *   herbalist stock. The GM returns cosmetic names inside <plan>.
@@ -11176,21 +11178,40 @@ function resolveVendorAction(test) {
                     upgradeable,
                     skip: !upgradeable,
                     variants: definition.variants.map(
-                        variant => ({
-                            variant,
-                            label: variantTitle(variant),
-                            bonus: lootBonus(
-                                definition.owner,
-                                definition.slot,
+                        variant => {
+                            const fallback =
+                                `${definition.owner === 'qtik'
+                                    ? "Q'tik"
+                                    : 'Tansy'} ` +
+                                `${ZONE_LOOT_MATERIALS[zone]} ` +
+                                `${variantTitle(variant) || ''} ` +
+                                `${slotNames[definition.slot]}`
+                                    .replace(/\s+/g, ' ')
+                                    .trim();
+
+                            return {
                                 variant,
-                                stat
-                            )
-                        })
+                                label: variantTitle(variant),
+                                displayName:
+                                    cosmeticStockName(
+                                        state,
+                                        gearCosmeticStockKey(
+                                            definition.owner,
+                                            definition.slot,
+                                            variant
+                                        ),
+                                        fallback
+                                    ),
+                                bonus: lootBonus(
+                                    definition.owner,
+                                    definition.slot,
+                                    variant,
+                                    stat
+                                )
+                            };
+                        }
                     )
                 };
-            }
-        );
-
         return {
             ok: true,
             action: 'stock',
@@ -11299,8 +11320,19 @@ function resolveVendorAction(test) {
         slotNames[test.slot]
     ].filter(Boolean);
 
+    const fallbackName = nameParts.join(' ');
+
     const item = {
-        name: nameParts.join(' '),
+        name: cosmeticStockName(
+            state,
+            gearCosmeticStockKey(
+                test.owner,
+                test.slot,
+                variant
+            ),
+            fallbackName
+        ),
+
         owner: test.owner,
         slot: test.slot,
         variant,
@@ -11686,11 +11718,17 @@ function resolveHerbalistAction(test) {
             );
         }
 
+        const displayName = cosmeticStockName(
+            state,
+            potionCosmeticStockKey(choice.id),
+            definition.name
+        );
+
         return {
             side: choice.side,
             id: choice.id,
             quantity,
-            name: definition.name,
+            name: displayName,
             unitPrice: choice.side === 'buy'
                 ? definition.buyPrice
                 : definition.sellPrice
@@ -11776,7 +11814,7 @@ function resolveHerbalistAction(test) {
             const definition = consumableDefinition(choice.id);
             entry = {
                 id: choice.id,
-                name: definition.name,
+                name: choice.name,
                 type: definition.type,
                 quantity: 0,
                 recipient: null
@@ -12124,16 +12162,25 @@ function resolveStockNames(test) {
         ])
     );
 
-    return {
-        ok: true,
-        created: true,
-        action: 'apply',
-        zone: state.zone,
-        state
-    };
+function cosmeticStockName(state, key, fallback) {
+    const name =
+        state.cosmeticStockNames?.[state.zone]?.[key];
+
+    return typeof name === 'string' && name.trim().length > 0
+        ? name
+        : fallback;
 }
 
-function resolveConsumableAction(test) {
+function gearCosmeticStockKey(owner, slot, variant) {
+    return (
+        `gear:${owner}:${slot}:` +
+        `${variant || 'standard'}`
+    );
+}
+
+function potionCosmeticStockKey(id) {
+    return `potion:${id}`;
+}
 
     const allowedActions = [
         'stock', 'buy', 'sell', 'grant', 'remove', 'use'
@@ -12227,7 +12274,11 @@ function resolveConsumableAction(test) {
         if (!entry) {
             entry = {
                 id: test.item,
-                name: definition.name,
+                name: cosmeticStockName(
+                    state,
+                    potionCosmeticStockKey(test.item),
+                    definition.name
+                ),
                 type: definition.type,
                 quantity: 0,
                 recipient: null
@@ -12242,7 +12293,10 @@ function resolveConsumableAction(test) {
         result.quantity = quantity;
         result.silverChanged = -total;
         result.totalCost = total;
-        result.itemName = definition.name;
+        result.itemName =
+            state.inventory.consumables.find(
+                entry => entry.id === test.item
+            )?.name || definition.name;
 
         return result;
     }
@@ -12282,7 +12336,10 @@ function resolveConsumableAction(test) {
         result.quantity = quantity;
         result.silverChanged = proceeds;
         result.proceeds = proceeds;
-        result.itemName = definition.name;
+        result.itemName =
+            state.inventory.consumables.find(
+                entry => entry.id === test.item
+            )?.name || definition.name;
 
         return result;
     }
@@ -12349,7 +12406,10 @@ function resolveConsumableAction(test) {
         }
 
         result.quantity = quantity;
-        result.itemName = definition.name;
+        result.itemName =
+            state.inventory.consumables.find(
+                entry => entry.id === test.item
+            )?.name || definition.name;
         result.recipient = recipient;
         result.healing = healing;
         result.reason = test.reason || null;
@@ -18880,8 +18940,8 @@ async function openAethermoorShopWindow() {
             const heading = document.createElement('div');
             heading.className = 'aethermoor-vendor-name';
             heading.textContent =
-                `${owner} ${entry.slotName} · ` +
-                `${option.label || 'Standard'} · ${entry.price}s`;
+                `${option.displayName || entry.slotName} · ` +
+                `${entry.price}s`;
 
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
@@ -19126,7 +19186,14 @@ async function openAethermoorHerbalistWindow() {
 
     assert(settlement, 'No herbalist is open at this settlement');
 
-    const stock = herbalistStock(state.zone);
+    const stock = herbalistStock(state.zone).map(item => ({
+        ...item,
+        name: cosmeticStockName(
+            state,
+            potionCosmeticStockKey(item.id),
+            item.name
+        )
+    }));
     const quantities = new Map();
 
     for (const choice of
@@ -19747,7 +19814,7 @@ async function renderInventoryTab(host) {
         name.className =
             `aethermoor-vendor-name ${rarityClass(item)}`;
         name.textContent =
-            `${definition?.name || item.name || item.id} ×${item.quantity}`;
+            `${item.name || definition?.name || item.id} ×${item.quantity}`;
 
         main.appendChild(name);
 
@@ -21032,6 +21099,7 @@ function potionOptionsFor(state) {
         .map(entry => ({
             value: entry.id,
             label:
+                entry.name ||
                 consumableDefinition(entry.id).name,
             detail: `${entry.quantity} in stock`
         }));

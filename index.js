@@ -6518,14 +6518,18 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   route legs are not reconstructed.
  *
  * PARTIAL — Shared cosmetic stock naming
+ *
  * - IMPLEMENTED — BETA PENDING: at a saved settlement, the extension
  *   requests one geography-aware naming batch for the current zone and
  *   validates engine-issued gear-variant and potion-grade keys.
- * - The batch is saved once per zone; a duplicate reply cannot rename it.
+ * - The batch is saved once per zone and can be extended only for newly
+ *   added stock keys; existing names cannot be silently renamed.
  *   Missing or malformed replies leave generic names and never block play.
+ *
  * - IMPLEMENTED — BETA PENDING: saved labels now flow through gear and
  *   herbalist shop windows, purchase receipts, Bag Reserves, Inventory,
  *   and combat potion choices.
+ *
  * - Generic labels remain fallbacks when a naming batch is absent.
  * - On confirmed arrival in a new zone, the extension supplies the GM
  *   with saved geography and engine-issued keys for the zone's gear and
@@ -11991,7 +11995,11 @@ function resolveInnAction(test) {
 
         return {
             id: service.id,
-            label: service.label,
+            label: cosmeticStockName(
+                state,
+                `inn:${service.id}`,
+                service.label
+            ),
             quantity,
             unitPrice: service.price
         };
@@ -12094,7 +12102,12 @@ function stockNamingEntries(state) {
                     : 'mid-tier'} healing potion`
         }));
 
-    return [...gear, ...potions];
+    const innServices = INN_SERVICES.map(service => ({
+        key: `inn:${service.id}`,
+        description: service.label
+    }));
+
+    return [...gear, ...potions, ...innServices];
 }
 
 function resolveStockNames(test) {
@@ -12124,7 +12137,18 @@ function resolveStockNames(test) {
 
     state.cosmeticStockNames ||= {};
 
-    if (state.cosmeticStockNames[state.zone]) {
+    const entries = stockNamingEntries(state);
+    const saved =
+        state.cosmeticStockNames[state.zone] || {};
+    const missingEntries = entries.filter(
+        entry => typeof saved[entry.key] !== 'string'
+    );
+    const expected = new Set(
+        missingEntries.map(entry => entry.key)
+    );
+    const names = test.names;
+
+    if (missingEntries.length === 0) {
         return {
             ok: true,
             created: false,
@@ -12134,16 +12158,12 @@ function resolveStockNames(test) {
         };
     }
 
-    const entries = stockNamingEntries(state);
-    const expected = new Set(entries.map(entry => entry.key));
-    const names = test.names;
-
     assert(
         names && typeof names === 'object' &&
         !Array.isArray(names) &&
         Object.keys(names).length === expected.size &&
         Object.keys(names).every(key => expected.has(key)),
-        'Naming reply must contain exactly the requested stock keys'
+        'Naming reply must contain exactly the missing stock keys'
     );
 
     for (const [key, value] of Object.entries(names)) {
@@ -12158,12 +12178,15 @@ function resolveStockNames(test) {
         );
     }
 
-    state.cosmeticStockNames[state.zone] = Object.fromEntries(
-        Object.entries(names).map(([key, value]) => [
-            key,
-            value.trim()
-        ])
-    );
+    state.cosmeticStockNames[state.zone] = {
+        ...saved,
+        ...Object.fromEntries(
+            Object.entries(names).map(([key, value]) => [
+                key,
+                value.trim()
+            ])
+        )
+    };
 
     return {
         ok: true,
@@ -18762,6 +18785,15 @@ async function openAethermoorShopWindow() {
 
     const state = snapshot.state;
     const settlement = Object.values(
+        const displayServices = INN_SERVICES.map(service => ({
+        ...service,
+        displayName: cosmeticStockName(
+            state,
+            `inn:${service.id}`,
+            service.label
+        )
+    }));
+
         state.world?.settlements || {}
     ).find(entry =>
         entry.id === state.vendorMenu?.settlementId &&
@@ -19509,6 +19541,9 @@ async function openAethermoorInnWindow() {
             .map(choice => [choice.id, choice.quantity])
     );
 
+    const serviceById = id =>
+        displayServices.find(service => service.id === id);
+
     document.getElementById('aethermoor_inn_window')?.remove();
 
     const panel = document.createElement('section');
@@ -19615,16 +19650,14 @@ async function openAethermoorInnWindow() {
         column.appendChild(label);
 
         for (const id of ids) {
-            const service = INN_SERVICES.find(
-                entry => entry.id === id
-            );
+            const service = serviceById(id);
             const row = document.createElement('div');
             row.className = 'aethermoor-vendor-row';
 
             const name = document.createElement('div');
             name.className = 'aethermoor-vendor-name';
             name.append(document.createTextNode(
-                `${service.label} · `
+                `${service.displayName} · `
             ));
 
             const price = document.createElement('span');
@@ -23398,14 +23431,23 @@ globalThis.aethermoorMechanicsInterceptor =
                     )
                 });
 
+                const namingEntries =
+                    stockNamingEntries(contextState);
+
+                const savedNames =
+                    contextState.cosmeticStockNames?.[
+                        contextState.zone
+                    ] || {};
+
+                const missingNamingEntries =
+                    namingEntries.filter(entry =>
+                        typeof savedNames[entry.key] !== 'string'
+                    );
+
                 if (
                     !contextState.currentJourney &&
-                    !contextState.cosmeticStockNames?.[
-                        contextState.zone
-                    ]
+                    missingNamingEntries.length > 0
                 ) {
-                    const namingEntries =
-                        stockNamingEntries(contextState);
 
                     entries.push({
                         id: `stock-naming-zone-${contextState.zone}`,
@@ -23423,7 +23465,7 @@ globalThis.aethermoorMechanicsInterceptor =
                             }.`,
                             'In this reply, return one JSON object containing ' +
                                 'exactly these keys and fictional item names:',
-                            ...namingEntries.map(entry =>
+                            ...missingNamingEntries.map(entry =>
                                 `- ${entry.key}: ${entry.description}`
                             ),
                             'Put it inside this exact form in <plan>:',

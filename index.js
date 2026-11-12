@@ -6430,16 +6430,19 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — Quest family migration
  * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.
+ *
  * - IMPLEMENTED — BETA PENDING: Herb Foraging uses rank-appropriate,
  *   geography-agnostic requests and V2 authored discoveries for every
  *   supported gate count; the harvest remains locked turn-in cargo.
  * - Saved zone geography informs presentation, not Herb Foraging eligibility.
+ *
  * - IMPLEMENTED — BETA PENDING: Missing Person Search uses geography-neutral
  *   Lost-at-D and Abducted-at-C/B variants. Lost ends when the person is
  *   found; Abducted ends when the linked threat is defeated. Returning the
  *   person is diegetic; turn-in is report-only.
  * - Four- and five-gate Missing Person offers use Abducted, because the
  *   current Lost scenario supports only two or three field gates.
+ *
  * - IMPLEMENTED — BETA PENDING: Ruin Clearance and Territorial Beast Hunt
  *   use setting-neutral premises and saved V2 linked-threat structures.
  * - New-offer scenario eligibility no longer reads geography profiles.
@@ -6472,11 +6475,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Herb Foraging has explicit F, E/D, and C/B stakes; Missing Person has
  *   Lost at D and Abducted at C/B; F nuisance variants are explicitly authored
  *   for Ruin Clearance and Territorial Beast Hunt.
+ *
  * - IMPLEMENTED — BETA PENDING: every current quest scenario has explicit
  *   rank eligibility; offers roll only from scenarios authored for the
  *   selected rank. Verify rank pools and stakes during beta.
  * - Keep A/S offer generation disabled until their special objectives and
  *   rewards are authored.
+ *
  * - IMPLEMENTED — BETA PENDING: linked-threat type follows rank: F/E normal
  *   pack, D/C pack-or-Elite roll, B Elite.
  * - Gate count means quest length, not difficulty. Mechanical challenge for
@@ -6491,6 +6496,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - IMPLEMENTED — BETA PENDING: World exposes the saved route to the next
  *   zone's primary settlement even before a local lead names it. This
  *   enables forward progression without revealing NPCs or quest content.
+ *
  * - IMPLEMENTED — BETA PENDING: traveler rumors use setting-neutral
  *   templates. Each new rumor owns a stable, zone-local destination;
  *   rolling the same template again does not reuse another rumor's site.
@@ -6498,6 +6504,7 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Missing current-place records use the saved settlement identity rather
  *   than labelling every zone's outpost Peat-Cairn Outpost.
  * - Existing saved places keep their established names and IDs.
+ *
  * - IMPLEMENTED — BETA PENDING: route search uses saved world edges only;
  *   retired Stone Ford, Old Mill, and Watchtower edges are not synthesized
  *   in every zone. Generated settlements and authored destinations save
@@ -6538,17 +6545,19 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   existing test sites, preventing repeated fixtures from forming long
  *   accidental route chains. Existing interrupted journeys retain their
  *   saved route until cancelled and restarted.
-
  * 
  * PLANNED — UI cleanup and consistency
  * - IMPLEMENTED — BETA PENDING: test-rumor creation lives in Narration Debug,
  *   not the ordinary World view; cancelled quests appear in history.
+ *
  * - IMPLEMENTED — BETA PENDING: the Quests and World buttons open their
  *   saved-state tabs. Clicking either button while the panel is open
  *   switches tabs instead of closing it.
+ *
  * - IMPLEMENTED — BETA PENDING: removed the unused legacy quest and World
  *   popups. Ordinary UI uses the saved-state tabs; the old popup's direct
  *   quest-payout path is no longer present.
+ *
  * - Deduplicate destinations and leads by stable identity.
  * - Show exact journey progress, interruption state, current gate, and delivery
  *   eligibility from saved state.
@@ -6587,7 +6596,6 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   Do not present an undefined roll as an invitation to invent an event.
  * - Include encounter ID, journey progress, quest gate, objective resolution,
  *   delivery readiness, and reward status where relevant.
-
  * - Prevent prose from implying combat, discovery, arrival, or reward events
  *   that are absent from the saved result.
  *
@@ -6618,7 +6626,6 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   needs an eligible, saved resolution contract before a stash, hazard,
  *   NPC, or dungeon can become consequential.
  * - Do not implement fixed room counts in this movement pass.
-
  * - Later represent discovered local nodes and exits as saved site-session data.
  * - Prevent repeated visits to the same local node from rerolling encounters
  *   or discoveries indefinitely.
@@ -6647,13 +6654,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   adds a separate observation without overwriting the original claim.
  * - World displays saved knowledge, sources, certainty, and learning locations.
  * - Live verification of quest-discovery knowledge remains for beta.
-
  * - Knowledge display is read-only and labels identifiable test records.
  * - Crew Knowledge starts collapsed, with expandable Unverified and
  *   Established groups showing record counts.
-  * - Natural traveler testimony integration still awaits live verification.
+ * - Natural traveler testimony integration still awaits live verification.
  * - Authored lore content and quest prerequisite checks remain unimplemented.
- *
  * - Let future quests explicitly recognize relevant prior knowledge.
  * - Keep discovery records separate from inventory and rewards.
  * - Do not migrate incidental historical chat prose into authoritative data.
@@ -6748,7 +6753,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   without one can still be worth talking to.
  * - The engine decides whether an opportunity exists, its prerequisites,
  *   objective, rank, rewards, and one-time identity. The narrator handles
- *   conversation and local presentation, not quest generation.
+ * conversation and local presentation, not quest generation.
+ *
  * - IMPLEMENTED — BETA PENDING: while at a settlement, the narrator
  *   receives the private ASK_WORK reporting rule even without a queued
  *   event. Previously checked contacts and their saved results are
@@ -6759,8 +6765,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Keep routine F work discoverable by asking around if play needs a
  *   fallback, without making a quest board mandatory. A multi-step social
  *   unlock should not automatically spend its payoff on a random F errand.
- * - Revealing a lead is not accepting a quest, completing an objective, or
- *   paying a reward. Repeated conversation or revisits must not reroll it.
+ *
+ * - IMPLEMENTED — BETA PENDING: successful ASK_WORK checks lock a quest
+ *   under the contact without exposing it in the journal. The GM receives
+ *   that saved result on a relevant later reply; after describing the
+ *   request, REVEAL_WORK publishes the same offer without another roll.
+ * - Publishing an offer is not accepting a quest, completing an objective,
+ *   or paying a reward. Repeated reports do not reroll or republish it.
+ *
  * - IMPLEMENTED — BETA PENDING: a GM-reported conversation about local work
  *   checks one stable contact once. No predetermined quest-giver roster,
  *   dialogue keyword, interaction button, or guaranteed quest.
@@ -11814,6 +11826,75 @@ function resolveShadowDeckAction(test) {
 }
 
 /*
+ * The narrator reports disclosure only after describing the request to
+ * the players. This publishes the already-locked quest; it does not roll
+ * another opportunity or accept the offer.
+ */
+function resolveSocialWorkReveal(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Social work reveal requires saved state'
+    );
+
+    const state = clone(test.state);
+    const contact =
+        state.socialOpportunities?.contacts?.[test.socialId];
+
+    assert(
+        contact?.result === 'offer' && contact.questId,
+        'This contact has no locked work offer to reveal'
+    );
+
+    const settlement =
+        state.world?.settlements?.[contact.settlementId];
+
+    assert(
+        settlement?.locationId === state.currentLocationId &&
+        settlement.zone === state.zone,
+        'The crew must be at this contact’s settlement'
+    );
+
+    if (!contact.pendingQuest) {
+        const existing = findQuestById(state, contact.questId);
+
+        assert(
+            existing,
+            'Revealed social offer is missing from the journal'
+        );
+
+        return {
+            ok: true,
+            created: false,
+            action: 'reveal_work',
+            socialId: contact.id,
+            questId: contact.questId,
+            state
+        };
+    }
+
+    const quest = contact.pendingQuest;
+
+    assert(
+        quest.id === contact.questId &&
+        quest.status === 'offered' &&
+        !findQuestById(state, quest.id),
+        'Pending social offer does not match its contact'
+    );
+
+    saveQuestToJournal(state, quest);
+    delete contact.pendingQuest;
+
+    return {
+        ok: true,
+        created: true,
+        action: 'reveal_work',
+        socialId: contact.id,
+        questId: quest.id,
+        state
+    };
+}
+
+/*
  * A contact is established by the conversation, not generated as an NPC
  * roster on settlement arrival. The assistant reports an inquiry after
  * narrating the first conversational beat. Its stable socialId must be
@@ -11936,11 +12017,24 @@ function resolveSocialWorkOpportunity(test) {
     const savedContact =
         offered.state.socialOpportunities.contacts[contact.id];
 
+    /*
+     * The quest is locked, but the contact has not disclosed it yet.
+     * Do not expose it in the journal before the next conversational
+     * beat. Preserve the previous selected quest, if any.
+     */
+    if (offered.state.activeQuest?.id === offered.quest.id) {
+        offered.state.activeQuest = null;
+    }
+
+    removeQuestFromJournal(offered.state, offered.quest.id);
     savedContact.questId = offered.quest.id;
+    savedContact.pendingQuest = offered.quest;
+
     offered.state.socialOpportunities
         .settlements[settlement.id].offers++;
 
     return {
+
         ok: true,
         created: true,
         action: 'check_work',
@@ -13045,7 +13139,9 @@ function resolveBatch(args) {
                 case 'social':
                     result = test.action === 'check_work'
                         ? resolveSocialWorkOpportunity(test)
-                        : resolveSocialSeed(test);
+                        : test.action === 'reveal_work'
+                            ? resolveSocialWorkReveal(test)
+                            : resolveSocialSeed(test);
                     break;
 
                 case 'loot':
@@ -14619,7 +14715,9 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'travel' ||
                 (
                     oneCase.kind === 'social' &&
-                    oneCase.action === 'check_work'
+                    ['check_work', 'reveal_work'].includes(
+                        oneCase.action
+                    )
                 )
             ) &&
             caseResult.created === false
@@ -15599,6 +15697,7 @@ function registerTools() {
                                     'initialize',
                                     'import',
                                     'check_work',
+                                    'reveal_work',
                                     'status',
                                     'export',
                                     'accept',
@@ -19291,6 +19390,16 @@ function extractAethermoorQuestEvents(text) {
                 socialId: match[1]
             });
         }
+
+        const revealPattern =
+            /<AETHERMOOR:REVEAL_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
+
+        for (const match of plan[1].matchAll(revealPattern)) {
+            events.push({
+                event: 'reveal_work',
+                socialId: match[1]
+            });
+        }
     }
 
     const foundPattern =
@@ -19462,6 +19571,15 @@ async function processAethermoorAssistantEvents(data) {
                         name: 'assistant_social_work_inquiry',
                         kind: 'social',
                         action: 'check_work',
+                        socialId: event.socialId
+                    }]
+                });
+            } else if (event.event === 'reveal_work') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_social_work_reveal',
+                        kind: 'social',
+                        action: 'reveal_work',
                         socialId: event.socialId
                     }]
                 });
@@ -19646,12 +19764,13 @@ function settlementWorkContextPacket(state, settlement) {
     ];
 
     for (const contact of contacts) {
-        if (contact.result === 'offer') {
-            const quest = Object.values(state.quests || {})
-                .flatMap(bucket =>
-                    Array.isArray(bucket) ? bucket : []
-                )
-                .find(entry => entry?.id === contact.questId);
+         if (contact.result === 'offer') {
+            const quest = contact.pendingQuest ||
+                Object.values(state.quests || {})
+                    .flatMap(bucket =>
+                        Array.isArray(bucket) ? bucket : []
+                    )
+                    .find(entry => entry?.id === contact.questId);
 
             if (quest) {
                 lines.push(
@@ -19660,9 +19779,19 @@ function settlementWorkContextPacket(state, settlement) {
                     questOfferNarrationPacket(quest),
                     'Use this information only if conversation with THAT ' +
                         'contact resumes. Do not announce their job while ' +
-                        'speaking to someone else or after the crew leaves.'
+                        'speaking to someone else or after the crew leaves.',
+                    ...(contact.pendingQuest
+                        ? [
+                            'After actually revealing this request to the ' +
+                                'players, place this exact tag inside <plan>:',
+                            `<AETHERMOOR:REVEAL_WORK social_id=${contact.id}>`,
+                            'This publishes the locked offer; it does not ' +
+                                'accept the quest or grant rewards.'
+                        ]
+                        : [])
                 );
             }
+
         } else {
             lines.push(
                 `Previously checked contact ${contact.id}: no job. ` +

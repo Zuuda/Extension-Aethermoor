@@ -11930,9 +11930,15 @@ function resolveInnAction(test) {
             1
         );
 
+        const isRoom = [
+            'common_room',
+            'private_room',
+            'luxurious_room'
+        ].includes(service.id);
+
         assert(
-            quantity <= 20,
-            'Inn service quantity cannot exceed 20'
+            quantity <= (isRoom || service.id === 'hot_water' ? 1 : 20),
+            `${service.label} exceeds its allowed quantity`
         );
 
         return {
@@ -11943,7 +11949,16 @@ function resolveInnAction(test) {
         };
     });
 
+    assert(
+        choices.filter(choice =>
+            ['common_room', 'private_room', 'luxurious_room']
+                .includes(choice.id)
+        ).length <= 1,
+        'Choose at most one room type per inn exchange'
+    );
+
     const cost = choices.reduce(
+
         (sum, choice) =>
             sum + choice.unitPrice * choice.quantity,
         0
@@ -17724,11 +17739,21 @@ function addAethermoorPanelStyles() {
         }
 
         .aethermoor-herbalist-window .aethermoor-vendor-name {
-
             color: #4ade80;
         }
 
-        .aethermoor-herbalist-window .aethermoor-vendor-row button {
+        .aethermoor-inn-window .aethermoor-vendor-name,
+        .aethermoor-inn-window .aethermoor-inn-price {
+            color: #ffffff;
+        }
+
+        .aethermoor-inn-price {
+            font-weight: 700;
+        }
+
+        .aethermoor-herbalist-window .aethermoor-vendor-row button,
+        .aethermoor-inn-window .aethermoor-vendor-row button {
+
             min-width: 28px;
             margin: 7px 6px 0 0;
             padding: 3px 7px;
@@ -17738,20 +17763,30 @@ function addAethermoorPanelStyles() {
             cursor: pointer;
         }
 
-        .aethermoor-herbalist-window .aethermoor-vendor-row button:hover {
+        .aethermoor-herbalist-window .aethermoor-vendor-row button:hover,
+        .aethermoor-inn-window .aethermoor-vendor-row button:hover {
             border-color: #4da6ff;
         }
 
-        .aethermoor-herbalist-window .aethermoor-vendor-row button:disabled {
+        .aethermoor-herbalist-window .aethermoor-vendor-row button:disabled,
+        .aethermoor-inn-window .aethermoor-vendor-row button:disabled {
             opacity: 0.4;
             cursor: not-allowed;
         }
 
-        .aethermoor-herbalist-window .aethermoor-vendor-row span {
+        .aethermoor-herbalist-window .aethermoor-vendor-row span,
+        .aethermoor-inn-window .aethermoor-vendor-row span {
             display: inline-block;
             min-width: 30px;
             text-align: center;
             color: #ffd166;
+        }
+
+        .aethermoor-inn-window .aethermoor-vendor-row
+        span.aethermoor-inn-price {
+            min-width: 0;
+            text-align: left;
+            color: #ffffff;
         }
 
         .aethermoor-vendor-bonus {
@@ -19262,7 +19297,7 @@ async function openAethermoorInnWindow() {
 
     const panel = document.createElement('section');
     panel.id = 'aethermoor_inn_window';
-    panel.className = 'aethermoor-shop aethermoor-herbalist-window';
+    panel.className = 'aethermoor-shop aethermoor-inn-window';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Inn services');
 
@@ -19316,13 +19351,30 @@ async function openAethermoorInnWindow() {
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
+        const roomIds = [
+            'common_room',
+            'private_room',
+            'luxurious_room'
+        ];
+        const selectedRoom = roomIds.find(id =>
+            (quantities.get(id) || 0) > 0
+        );
+
         for (const control of controls) {
-            const count = quantities.get(control.service.id) || 0;
+            const { service } = control;
+            const count = quantities.get(service.id) || 0;
+            const isRoom = roomIds.includes(service.id);
+            const maximum =
+                isRoom || service.id === 'hot_water' ? 1 : 20;
+
             control.count.textContent = ` ×${count} `;
             control.minus.disabled = count === 0;
             control.plus.disabled =
-                count >= 20 ||
-                remaining < control.service.price;
+                count >= maximum ||
+                (isRoom &&
+                    selectedRoom !== undefined &&
+                    selectedRoom !== service.id) ||
+                remaining < service.price;
         }
     }
 
@@ -19355,10 +19407,17 @@ async function openAethermoorInnWindow() {
 
             const name = document.createElement('div');
             name.className = 'aethermoor-vendor-name';
-            name.textContent =
-                `${service.label} · ${service.price}s`;
+            name.append(document.createTextNode(
+                `${service.label} · `
+            ));
+
+            const price = document.createElement('span');
+            price.className = 'aethermoor-inn-price';
+            price.textContent = `${service.price}s`;
+            name.appendChild(price);
 
             const minus = document.createElement('button');
+
             minus.type = 'button';
             minus.textContent = '−';
 
@@ -22918,8 +22977,13 @@ function settlementWorkContextPacket(state, settlement) {
             ),
             `Total ${stagedInn.cost}s; projected purse ` +
                 `${stagedInn.purseAfter}s.`,
-            'Only after the players and innkeeper agree to these ' +
-                'services in the fiction, put ' +
+            'Compare the player’s spoken order with these staged ' +
+                'services. If they differ, have the innkeeper clarify ' +
+                'the order and price. Let the player reopen Inn Services ' +
+                'and change the selection. Do not silently substitute ' +
+                'services, charge a difference, or emit INN_AGREED.',
+            'Only after the players and innkeeper agree to the SAME ' +
+                'staged services in the fiction, put ' +
                 '<AETHERMOOR:INN_AGREED> inside <plan>. ' +
                 'The engine will deduct the saved expense after this reply.'
         );

@@ -1680,8 +1680,9 @@ function applyConsumableItem(state, item, recipient) {
         recipient === 'qtik' || recipient === 'tansy',
         `Invalid potion recipient: ${recipient}`
     );
+    const definition = consumableDefinition(item);
     assert(
-        CONSUMABLE_CATALOG[item],
+        definition,
         `Unsupported consumable: ${item}`
     );
 
@@ -1715,11 +1716,8 @@ function applyConsumableItem(state, item, recipient) {
         potionUses.qtik + potionUses.tansy;
 
 
-    if (
-        item === 'basic_health_potion' ||
-        item === 'mid_health_potion'
-    ) {
-        const amount = item === 'mid_health_potion' ? 120 : 50;
+    if (definition.type === 'potion') {
+        const amount = definition.heal;
         const character = crew[recipient];
         const stats = derived(crew);
         const maxHp = recipient === 'qtik'
@@ -6303,6 +6301,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
  *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
  * - Preserve locked combat outcomes and prevent duplicate reward resolution.
+ *
+ * - IMPLEMENTED — BETA PENDING: healing potions have fixed purchase-zone
+ *   grades. Basic heals 50 × zone HP for 10 × zone silver; Mid-Tier heals
+ *   120 × zone HP for 20 × zone silver. An old bottle never scales up.
+ *   Cleansing Tonic retains its fixed effect. Verify use in combat and
+ *   outside combat before expanding the catalog.
+
  *
  * DONE — Quest delivery foundation
  * - Lock the quest issuer and return location.
@@ -11382,6 +11387,15 @@ function resolveCurrencyAction(test) {
         state
     };
 }
+/*
+ * A healing bottle's ID includes its PURCHASE zone. Its healing and price
+ * are fixed from that ID, never recalculated from the crew's current zone
+ * or maximum HP. The GM may give it a local cosmetic name, but cannot
+ * change its mechanical grade or effect.
+ *
+ * Ungraded IDs remain readable as Zone 1 bottles for the current chat.
+ * Cleansing Tonic retains its existing fixed utility effect and price.
+ */
 const CONSUMABLE_CATALOG = {
     basic_health_potion: {
         name: 'Basic Health Potion',
@@ -11400,10 +11414,57 @@ const CONSUMABLE_CATALOG = {
     cleansing_tonic: {
         name: 'Cleansing Tonic',
         type: 'tonic',
+        heal: 0,
         buyPrice: 14,
         sellPrice: 3
     }
 };
+
+function consumableDefinition(id) {
+    if (CONSUMABLE_CATALOG[id]) {
+        return CONSUMABLE_CATALOG[id];
+    }
+
+    const match = typeof id === 'string'
+        ? /^(basic|mid)_health_potion_z([1-9]\d*)$/.exec(id)
+        : null;
+
+    if (!match) return null;
+
+    const zone = Number(match[2]);
+
+    if (!Number.isSafeInteger(zone) || !ZONES[zone]) {
+        return null;
+    }
+
+    const basic = match[1] === 'basic';
+
+    return {
+        name:
+            `${basic ? 'Basic' : 'Mid-Tier'} Health Potion ` +
+            `(Zone ${zone}, ${basic ? 50 * zone : 120 * zone} HP)`,
+        type: 'potion',
+        heal: (basic ? 50 : 120) * zone,
+        buyPrice: (basic ? 10 : 20) * zone,
+        sellPrice: (basic ? 2 : 5) * zone,
+        purchaseZone: zone
+    };
+}
+
+function herbalistStock(zone) {
+    int(zone, 'herbalist zone', 1);
+
+    const ids = [
+        `basic_health_potion_z${zone}`,
+        `mid_health_potion_z${zone}`,
+        'cleansing_tonic'
+    ];
+
+    return ids.map(id => ({
+        id,
+        ...consumableDefinition(id)
+    }));
+}
 
 function normalizeConsumableInventory(inventory) {
     inventory.consumables ||= [];
@@ -11417,7 +11478,7 @@ function normalizeConsumableInventory(inventory) {
         assert(
             entry &&
             typeof entry.id === 'string' &&
-            CONSUMABLE_CATALOG[entry.id],
+            consumableDefinition(entry.id),
             'Consumable inventory entry has an unknown item ID'
         );
 
@@ -11443,16 +11504,19 @@ function resolveConsumableAction(test) {
         return {
             ok: true,
             action: 'stock',
-            catalog: Object.entries(CONSUMABLE_CATALOG).map(
-                ([id, item]) => ({
-                    id,
-                    name: item.name,
-                    type: item.type,
-                    heal: item.heal || 0,
-                    buyPrice: item.buyPrice,
-                    sellPrice: item.sellPrice
-                })
-            )
+    if (test.action === 'stock') {
+        const zone = test.zone ?? test.state?.zone;
+
+        assert(
+            Number.isSafeInteger(zone) && ZONES[zone],
+            'Herbalist stock requires a valid zone'
+        );
+
+        return {
+            ok: true,
+            action: 'stock',
+            zone,
+            catalog: herbalistStock(zone)
         };
     }
 
@@ -11471,13 +11535,21 @@ function resolveConsumableAction(test) {
 
     normalizeConsumableInventory(state.inventory);
 
+    const definition = consumableDefinition(test.item);
+
     assert(
-        CONSUMABLE_CATALOG[test.item],
+        definition,
         `Unknown consumable item: ${test.item}`
     );
 
-    const definition =
-        CONSUMABLE_CATALOG[test.item];
+    if (test.action === 'buy') {
+        assert(
+            herbalistStock(state.zone).some(
+                entry => entry.id === test.item
+            ),
+            'This potion grade is not sold in the current zone'
+        );
+    }
 
     const result = {
         ok: true,
@@ -16271,11 +16343,8 @@ function registerTools() {
                             
                             item: {
                                 type: 'string',
-                                enum: [
-                                    'basic_health_potion',
-                                    'mid_health_potion',
-                                    'cleansing_tonic'
-                                ]
+                                description:
+                                    'Saved consumable ID; healing grades include their purchase zone'
                             },
 
                             quantity: {
@@ -19134,14 +19203,12 @@ function potionOptionsFor(state) {
         .filter(entry =>
             entry &&
             entry.quantity > 0 &&
-            CONSUMABLE_CATALOG[entry.id]
+            consumableDefinition(entry.id)
         )
         .map(entry => ({
             value: entry.id,
             label:
-                CONSUMABLE_CATALOG[entry.id].name ||
-                entry.name ||
-                entry.id,
+                consumableDefinition(entry.id).name,
             detail: `${entry.quantity} in stock`
         }));
 }
@@ -19525,7 +19592,7 @@ function decorateAethermoorCombatControls(host, state) {
         '.aethermoor-combat-choice[data-group="qtikItem"], ' +
         '.aethermoor-combat-choice[data-group="tansyItem"]'
     )) {
-        const item = CONSUMABLE_CATALOG[button.dataset.value];
+        const item = consumableDefinition(button.dataset.value);
         if (!item) continue;
 
         button.title = item.heal

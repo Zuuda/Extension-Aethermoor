@@ -6517,6 +6517,23 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta starts from reset state; path-only legacy journeys without saved
  *   route legs are not reconstructed.
  *
+ * PLANNED — Shared cosmetic stock naming
+ * - On confirmed arrival in a new zone, the extension supplies the GM
+ *   with saved geography and engine-issued keys for the zone's gear and
+ *   herbalist stock. The GM returns cosmetic names inside <plan>.
+ * - The extension validates and saves one naming batch per zone. All
+ *   settlements in that zone reuse it, including stackable potion grades.
+ * - Names change presentation only: never item IDs, slots, variants,
+ *   healing, stats, prices, ownership, or rewards.
+ * - Shops, purchase receipts, Inventory, and Combat should display the
+ *   same saved name. Missing or invalid names retain generic labels and
+ *   never block arrival or trade.
+ * - The extension initiates the request in the arrival handoff; it must
+ *   not rely on the GM remembering a standing instruction. SillyTavern's
+ *   configured regex handles hiding <plan> from the player.
+ * - Implement this as one shared naming path after inn services, not
+ *   separate GM-naming handshakes for each shop.
+ *
  * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
  * - ASK_WARES opens the extension-rendered, two-sided trade window.
  * - Clicks select stock variants, Bag Reserves, or worn gear. Close stages

@@ -6329,6 +6329,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * NEXT FOCUSED WORK
  *
+ * IMPLEMENTED — BETA PENDING: Fresh-campaign initialization
+ * - A reset chat can create its level-1 crew and Zone 1 saved world from
+ *   the World tab without a manual state import.
+ * - Initialization creates no quest, rumor, NPC, encounter, or handoff.
+ * - It cannot overwrite an existing campaign. Verify from a fresh chat
+ *   during beta.
+ *
  * PARTIAL — Travel interruption behavior
  * - Destination journeys roll random travel events only before the final
  *   segment. An event consumes one segment, including wild encounters.
@@ -13293,7 +13300,89 @@ function queueAethermoor(task) {
 
 const AETHERMOOR_METADATA_KEY = 'aethermoorV2';
 
+/*
+ * A fresh chat must be playable without a manually supplied state export.
+ * Start with no encounter or opportunities: the crew discovers those
+ * through play. Initialization consumes no campaign RNG rolls.
+ */
+function createInitialCampaignState() {
+    const state = {
+        zone: 1,
+        rngState: createWorldSeed(),
+        crew: {
+            level: 1,
+            xp: 0,
+            purse: 0,
+            qtik: {
+                hp: 150,
+                maxHp: 150,
+                def: 1,
+                regen: 2
+            },
+            tansy: {
+                hp: 50,
+                maxHp: 50
+            },
+            weasels: {
+                active: 3,
+                max: 3
+            },
+            shadows: {
+                deck: [],
+                active: []
+            },
+            gear: {
+                tansy: {},
+                qtik: {}
+            }
+        },
+        inventory: {
+            consumables: [],
+            bagReserves: [],
+            activeTradeListings: []
+        },
+        encounter: null,
+        activeQuest: null,
+        quests: {
+            offered: [],
+            accepted: [],
+            completed: [],
+            declined: [],
+            abandoned: [],
+            cancelled: []
+        },
+        inquiries: {},
+        socialSeeds: {},
+        reputation: {},
+        gearGrantIds: {},
+        discoveries: {},
+        travelSteps: {},
+        places: {},
+        leads: {},
+        routeEdges: [],
+        currentLocationId: 'outpost-z1',
+        currentPosition: { nodeId: 'outpost-z1' },
+        currentJourney: null
+    };
+
+    ensureWorldRecords(state);
+    ensureWorldLocation(state);
+
+    const stats = derived(state.crew);
+
+    state.crew.qtik.hp = stats.qtikMaxHp;
+    state.crew.qtik.maxHp = stats.qtikMaxHp;
+    state.crew.qtik.def = stats.def;
+    state.crew.qtik.regen = stats.regen;
+    state.crew.tansy.hp = stats.tansyMaxHp;
+    state.crew.tansy.maxHp = stats.tansyMaxHp;
+
+    checkImportedState(state);
+    return state;
+}
+
 function checkImportedState(state) {
+
     assert(
         state && typeof state === 'object' && !Array.isArray(state),
         'Import requires a state object'
@@ -14191,13 +14280,24 @@ async function runStoredMechanic(args) {
                 };
             }
 
-            assert(oneCase.action === 'import',
-                'State action must be import, status, or export');
-            assert(!stored,
-                'This chat already has saved state; import will not overwrite it');
-            const imported = clone(oneCase.state);
-            ensureWorldRecords(imported);
-            checkImportedState(imported);
+            assert(
+                oneCase.action === 'import' ||
+                oneCase.action === 'initialize',
+                'State action must be initialize, import, status, or export'
+            );
+            assert(
+                !stored,
+                'This chat already has saved state; initialization will not overwrite it'
+            );
+
+            const imported = oneCase.action === 'initialize'
+                ? createInitialCampaignState()
+                : clone(oneCase.state);
+
+            if (oneCase.action === 'import') {
+                ensureWorldRecords(imported);
+                checkImportedState(imported);
+            }
 
             assert(getContext().chatMetadata === metadata,
                 'Chat changed during import; nothing was saved');
@@ -14216,7 +14316,8 @@ async function runStoredMechanic(args) {
 
             return {
                 ok: true,
-                imported: true,
+                initialized: oneCase.action === 'initialize',
+                imported: oneCase.action === 'import',
                 summary: stateSummary(imported, 1)
             };
         }
@@ -15237,6 +15338,7 @@ function registerTools() {
                             action: {
                                 type: 'string',
                                 enum: [
+                                    'initialize',
                                     'import',
                                     'status',
                                     'export',
@@ -16238,11 +16340,63 @@ async function renderQuestTab(host) {
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren(
+        host.replaceChildren();
+
+        if (
+            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+        ) {
+            const start = makeAethermoorSection(
+                'START CAMPAIGN',
+                'Create the level-1 crew in Thornhaven. This does not ' +
+                    'generate a quest, encounter, or opening scene.',
+                'world'
+            );
+
+            const button = makeAethermoorAction(
+                'Start Campaign',
+                'world',
+                async () => {
+                    button.disabled = true;
+
+                    try {
+                        const result = await runStoredMechanic({
+                            cases: [{
+                                name: 'initialize_campaign',
+                                kind: 'state',
+                                action: 'initialize'
+                            }]
+                        });
+
+                        assert(
+                            result?.ok === true &&
+                            result.initialized === true,
+                            result?.error ||
+                                'Could not initialize campaign'
+                        );
+
+                        await renderWorldTab(host);
+                    } catch (startError) {
+                        button.disabled = false;
+                        toastr.error(
+                            startError instanceof Error
+                                ? startError.message
+                                : String(startError),
+                            'Aethermoor'
+                        );
+                    }
+                }
+            );
+
+            start.appendChild(button);
+            host.appendChild(start);
+            return;
+        }
+
+        host.appendChild(
             makeAethermoorSection(
-                'QUESTS',
+                'WORLD',
                 error instanceof Error ? error.message : String(error),
-                'quest'
+                'world'
             )
         );
         return;

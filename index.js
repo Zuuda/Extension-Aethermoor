@@ -6774,7 +6774,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   remains authoritative if the conversation resumes later.
  * - Beta starting odds for social job inquiries: first checked contact at
  *   a settlement 1-in-2; later contacts 1-in-10; at most two offers from
- *   this channel per settlement. Tune scarcity during beta.
+ *   this channel per settlement. A successful first check weights F work
+ *   three times as strongly as E for an Unknown crew; it guarantees neither.
+ * - Social offer packets identify a contact as a possible referral to the
+ *   locked sponsor, not necessarily the quest giver. Tune scarcity and
+ *   introductory rank weighting during beta.
  * - Do not transmit or score every line of NPC dialogue yet. Add narrowly
  *   defined interaction events only when a concrete mechanic needs them.
  * - Tune opportunity frequency and the need for an F fallback during beta;
@@ -8125,11 +8129,35 @@ function resolveQuestSeed(test) {
             `at ${rep.label} reputation`
     );
 
+    /*
+     * A settlement's first successful conversational work inquiry gives
+     * routine F work extra weight, not a guarantee. Other triggers and
+     * later contacts use the ordinary reputation-permitted rank pool.
+     * Repeat entries affect this rank roll only; archetype and scenario
+     * selection still use their existing eligible pools.
+     */
+    const firstSocialCheck =
+        test.socialId !== undefined &&
+        state.socialOpportunities?.settlements?.[
+            issuerSettlement.id
+        ]?.checks === 1;
+
+    const rankPool =
+        firstSocialCheck &&
+        availableRanks.some(entry => entry.rank === 'F')
+            ? [
+                ...availableRanks,
+                ...Array(2).fill(
+                    availableRanks.find(entry => entry.rank === 'F')
+                )
+            ]
+            : availableRanks;
+
     const questRoll =
-        roll(state, availableRanks.length);
+        roll(state, rankPool.length);
 
     const selectedRank =
-        availableRanks[questRoll - 1];
+        rankPool[questRoll - 1];
 
     const gateCountRoll =
         roll(state, 2);
@@ -13880,9 +13908,17 @@ function publicQuestFactLines(quest) {
 }
 
 function questOfferNarrationPacket(quest) {
-    const sourceText = quest.seed?.source === 'rumor'
-        ? 'The crew followed a rumor lead.'
-        : 'The crew followed a quest breadcrumb found on a cleared pack.';
+    const sourceText = {
+        rumor: 'The crew followed a rumor lead.',
+        pack_drop:
+            'The crew followed a quest breadcrumb found on a cleared pack.',
+        social:
+            'A local contact knows of this request. They may introduce ' +
+            'or refer the crew to its saved sponsor; the contact need not ' +
+            'personally be the sponsor.',
+        debug_test: 'A test trigger created this quest offer.'
+    }[quest.seed?.source] ||
+        'The crew discovered an engine-established quest offer.';
 
     const variantLabels = {
         abandoned_transport: 'Abandoned Transport',

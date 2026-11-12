@@ -10548,7 +10548,71 @@ function resolveTradeAction(test) {
     return result;
 }
 
+/*
+ * The GM reports that the crew asked to see wares. The engine identifies
+ * that report by its saved assistant message and opens a read-only catalog
+ * for the settlement the crew actually occupies. Repeated notifications
+ * for the same message do not create another mechanics revision.
+ *
+ * Opening stock is not a purchase, item grant, or equipment change.
+ */
+function resolveVendorMenuOpen(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Showing wares requires saved state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        typeof test.socialId === 'string' &&
+        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+        'Showing wares requires an engine-issued message reference'
+    );
+
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'The crew must be free to speak at a saved settlement'
+    );
+
+    if (
+        state.vendorMenu?.settlementId === settlement.id &&
+        state.vendorMenu?.inquiryId === test.socialId
+    ) {
+        return {
+            ok: true,
+            created: false,
+            action: 'open',
+            settlementId: settlement.id,
+            state
+        };
+    }
+
+    state.vendorMenu = {
+        settlementId: settlement.id,
+        inquiryId: test.socialId
+    };
+
+    return {
+        ok: true,
+        created: true,
+        action: 'open',
+        settlementId: settlement.id,
+        state
+    };
+}
+
 function resolveVendorAction(test) {
+
     assert(
         Number.isInteger(test.zone) &&
         ZONES[test.zone],
@@ -12625,8 +12689,11 @@ function resolveBatch(args) {
                     });
                     break;
                 case 'vendor':
-                    result = resolveVendorAction(test);
+                    result = test.action === 'open'
+                        ? resolveVendorMenuOpen(test)
+                        : resolveVendorAction(test);
                     break;
+
                     
                 case 'shadows':
                     result = resolveShadowDeckAction(test);
@@ -14765,6 +14832,10 @@ async function runStoredMechanic(args) {
                     ['check_work', 'reveal_work'].includes(
                         oneCase.action
                     )
+                ) ||
+                (
+                    oneCase.kind === 'vendor' &&
+                    oneCase.action === 'open'
                 )
             ) &&
             caseResult.created === false
@@ -16458,6 +16529,19 @@ function addAethermoorPanelStyles() {
             overflow-wrap: anywhere;
         }
 
+        .aethermoor-vendor-row {
+            padding: 8px 0;
+            border-top: 1px solid #1f2730;
+            color: #d0d7de;
+            font: 12px/1.5 Consolas, monospace;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-vendor-row:first-of-type {
+            border-top: 0;
+        }
+
         .aethermoor-knowledge {
             padding: 10px;
             background: #12161c;
@@ -17190,6 +17274,70 @@ async function renderWorldTab(host) {
     const currentLocationId =
         state.currentLocationId ||
         routeNodeId(state.zone, 'outpost');
+
+    /*
+     * Render stock directly from the engine catalog and current equipment.
+     * A saved menu opened in another settlement is not displayed here.
+     * Rendering reads state only; it never buys or equips gear.
+     */
+    const currentSettlement = Object.values(
+        world.settlements || {}
+    ).find(entry =>
+        entry.locationId === currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    if (
+        currentSettlement &&
+        state.vendorMenu?.settlementId === currentSettlement.id
+    ) {
+        const stock = resolveVendorAction({
+            action: 'stock',
+            zone: state.zone,
+            state
+        });
+
+        const menu = makeAethermoorSection(
+            'SYSTEM LOG // VENDOR STOCK',
+            `${currentSettlement.label} · Zone ${state.zone}\n` +
+                `Purse: ${state.crew.purse}s · ` +
+                `Stock floor: Stat ${stock.stat}\n` +
+                'Viewing stock does not buy or equip anything.',
+            'world'
+        );
+
+        for (const entry of stock.catalog) {
+            const bonuses = entry.variants.map(option => {
+                const effects = Object.entries(option.bonus)
+                    .filter(([, amount]) => amount > 0)
+                    .map(([name, amount]) =>
+                        `+${amount} ${name}`
+                    )
+                    .join(', ');
+
+                return (
+                    `${option.label || 'Standard'}: ` +
+                    `${effects || 'No stat bonus'}`
+                );
+            });
+
+            const row = document.createElement('div');
+            row.className = 'aethermoor-vendor-row';
+            row.textContent =
+                `${entry.number}. ` +
+                `${entry.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
+                `${entry.slotName} — ${entry.price}s\n` +
+                `Common · Stat ${entry.stat} · ` +
+                `Equipped Stat ${entry.equippedStat}` +
+                (entry.skip ? ' · Equal/worse: skip' : '') +
+                '\n' +
+                bonuses.map(text => `• ${text}`).join('\n');
+
+            menu.appendChild(row);
+        }
+
+        host.appendChild(menu);
+    }
 
     const movementBlocked = [
         'active',
@@ -19484,7 +19632,16 @@ function extractAethermoorQuestEvents(text) {
             });
         }
 
+        for (const _match of plan[1].matchAll(
+            /<AETHERMOOR:ASK_WARES\s*>/g
+        )) {
+            events.push({
+                event: 'ask_wares'
+            });
+        }
+
         const revealPattern =
+
             /<AETHERMOOR:REVEAL_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
 
         for (const match of plan[1].matchAll(revealPattern)) {
@@ -19684,6 +19841,23 @@ async function processAethermoorAssistantEvents(data) {
                         socialId: event.socialId
                     }]
                 });
+            } else if (event.event === 'ask_wares') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    messageId,
+                    'Wares inquiry awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_vendor_menu_open',
+                        kind: 'vendor',
+                        action: 'open',
+                        socialId: messageId
+                    }]
+                });
             } else if (event.event === 'delivered') {
                 const stateResult = await readStoredCombatState();
                 const quest = findQuestById(
@@ -19851,6 +20025,15 @@ function settlementWorkContextPacket(state, settlement) {
         'PRIVATE SETTLEMENT CONVERSATION CONTEXT — do not recite.',
         `Current settlement: ${settlement.label}.`,
         'Ordinary conversation needs no mechanics tag.',
+        'If the players ask a local merchant to show their wares, ' +
+            'respond naturally without inventing stock, stats, or prices. ' +
+            'Place <AETHERMOOR:ASK_WARES> inside the disposable <plan> block.',
+        'The extension opens its exact stock menu in World after that ' +
+            'reply. On a later relevant reply, invite the players to ' +
+            'consult the menu. You may describe region-appropriate ' +
+            'cosmetic appearances; do not change item identities, ' +
+            'bonuses, variants, prices, or ownership.',
+        'Seeing wares does not purchase or equip an item.',
         'If the players meaningfully ask a local person about work, ' +
             'respond naturally without promising a specific unestablished job.',
         'For the first meaningful work inquiry with a local person, ' +

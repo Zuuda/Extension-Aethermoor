@@ -14113,7 +14113,19 @@ function socialWorkNarrationPacket(result) {
         ].join('\n');
     }
 
+    return [
+        'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
+        `Engine-issued contact reference: ${result.socialId}.`,
+        'This contact has no work request to share. Conversation may ' +
+            'continue normally.',
+        'Do not reroll this inquiry or imply that continued conversation ' +
+            'will produce a hidden job.',
+        'Do not mention the check, roll, tag, or extension.'
+    ].join('\n');
+}
+
 function questDeliveryContextPacket(quest) {
+
     if (
         quest?.status !== 'in_progress' ||
         quest.deliveryReady !== true ||

@@ -6504,7 +6504,22 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   their own stable route edges.
  * - Beta starts from reset state; path-only legacy journeys without saved
  *   route legs are not reconstructed.
-
+ *
+ * PLANNED — Diegetic vendor interaction
+ * - When the crew speaks with a vendor, give the narrator the exact
+ *   engine-established stock, variants, prices, and availability before
+ *   it describes what is for sale. Do not invent vendor inventory.
+ * - A fictional purchase must be reported to the extension with the
+ *   selected stock identity and quantity. The engine validates the
+ *   transaction, charges silver, and places the item in Bag Reserves.
+ * - Equipping is a separate engine-recorded action. The engine owns worn
+ *   slots, binding, derived stats, and HP adjustments; the narrator does
+ *   not calculate or silently change them.
+ * - Preserve the fictional conversation and handover. Neither opening a
+ *   vendor menu nor hearing a price automatically buys or equips gear.
+ * - Connect the existing vendor, inventory, and equip mechanics after
+ *   the local NPC/quest-opportunity path; do not build this during the
+ *   current social-opportunity pass.
  *
  * PARTIAL — Migration and validation
  * - Existing saves receive world, journey, potion, and quest migrations.

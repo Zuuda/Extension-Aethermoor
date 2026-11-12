@@ -6773,10 +6773,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Publishing an offer is not accepting a quest, completing an objective,
  *   or paying a reward. Repeated reports do not reroll or republish it.
  *
- * - IMPLEMENTED — BETA PENDING: a GM-reported conversation about local work
- *   checks one settlement-scoped contact once. The same local contact ID
- *   may be used in a later settlement without reusing an earlier result.
- *   No predetermined roster, interaction button, or guaranteed quest.
+ * - IMPLEMENTED — BETA PENDING: ASK_WORK reports an interaction without
+ *   a GM-chosen ID. The extension derives the inquiry ID from the saved
+ *   assistant message and scopes its result to the current settlement.
+ * - Message identity prevents duplicate notification rolls; it does not
+ *   identify a fictional NPC across different conversations. Reusing an
+ *   engine-issued contact ID for a recurring person remains a GM reporting
+ *   obligation until NPC continuity has its own identity contract.
+ * - No predetermined roster, interaction button, or guaranteed quest.
  * - Delayed handshake: player acts; the GM narrates only what is already
  *   known and privately reports an eligible interaction; the extension
  *   resolves and saves it after that reply; the NEXT relevant GM reply
@@ -6796,6 +6800,25 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   defined interaction events only when a concrete mechanic needs them.
  * - Tune opportunity frequency and the need for an F fallback during beta;
  *   quest scarcity is intentional, but an empty-feeling world is not.
+ *
+ * - Do not transmit or score every line of NPC dialogue yet. Add narrowly
+ *   defined interaction events only when a concrete mechanic needs them.
+ * - Tune opportunity frequency and the need for an F fallback during beta;
+ *   quest scarcity is intentional, but an empty-feeling world is not.
+ *
+ * DEFERRED — Fictional continuity and relevant-context retrieval
+ * - Chat metadata could retain concise, source-linked facts established in
+ *   play: recurring NPC details, settlement events, relationships, and
+ *   relevant clues. Do not save every NPC or every line of dialogue.
+ * - Keep GM-reported fictional continuity separate from engine-authoritative
+ *   mechanics and from unverified NPC claims.
+ * - Supply a compact settlement recap on a relevant return, or a specific
+ *   old clue when a new opportunity explicitly references it. Do not inject
+ *   the entire history into every prompt or depend solely on name matching.
+ * - Establish stable NPC identity, fact-update rules, source links, and
+ *   retrieval limits before accepting GM-written continuity records.
+ * - This is not part of the current social-work ID repair or beta-start
+ *   requirement.
  *
  * DEFERRED — Larger rumor threads and regional mysteries
  * - Potentially connect distinct clues to an authored conclusion, such as a
@@ -8065,7 +8088,9 @@ function resolveQuestSeed(test) {
     const inquiryRecord = test.inquiryId !== undefined
         ? state.inquiries?.[`rumor:${test.inquiryId}`]
         : test.socialId !== undefined
-            ? state.socialOpportunities?.contacts?.[test.socialId]
+            ? state.socialOpportunities?.contacts?.[
+                `${issuerSettlement.id}:${test.socialId}`
+              ]
             : null;
 
     if (inquiryRecord) {
@@ -12017,9 +12042,13 @@ function resolveSocialWorkOpportunity(test) {
         offered.created && offered.quest,
         'Social trigger did not produce its locked offer'
     );
-
     const savedContact =
-        offered.state.socialOpportunities.contacts[contact.id];
+        offered.state.socialOpportunities.contacts[contactKey];
+
+    assert(
+        savedContact,
+        'Generated social offer lost its settlement-scoped contact'
+    );
 
     /*
      * The quest is locked, but the contact has not disclosed it yet.
@@ -19327,6 +19356,35 @@ function getAssistantMessageText(data) {
 }
 
 /*
+ * Identify the actual saved assistant reply, not an NPC name supplied by
+ * the narrator. Both received and rendered notifications for that reply
+ * derive the same ID. If the reply is not in chat yet, wait for a later
+ * notification rather than roll under an unstable event identity.
+ *
+ * This identifies an inquiry event, not a fictional person. Persistent NPC
+ * recognition needs a separate, explicitly linked continuity record.
+ */
+function socialWorkIdForAssistantMessage(message) {
+    const chat = getContext().chat;
+
+    if (!Array.isArray(chat)) return null;
+
+    for (let index = chat.length - 1; index >= 0; index--) {
+        const entry = chat[index];
+
+        if (
+            entry?.is_user !== true &&
+            entry?.is_system !== true &&
+            entry?.mes === message.text
+        ) {
+            return `work-${index}-${worldHash(entry.mes).toString(36)}`;
+        }
+    }
+
+    return null;
+}
+
+/*
  * Technical explanations and beta reports may quote packet headings or
  * protocol examples as code. Those examples are neither narration leaks
  * nor gameplay events. Detection and event extraction must inspect the
@@ -19385,13 +19443,16 @@ function extractAethermoorQuestEvents(text) {
      * Require it inside the disposable plan block, not in story prose.
      */
     for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
-        const pattern =
-            /<AETHERMOOR:ASK_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
+        /*
+         * ASK_WORK reports the interaction only. The GM does not assign
+         * contact identity. REVEAL_WORK below uses an ID previously
+         * issued by the engine.
+         */
+        const pattern = /<AETHERMOOR:ASK_WORK\s*>/g;
 
-        for (const match of plan[1].matchAll(pattern)) {
+        for (const _match of plan[1].matchAll(pattern)) {
             events.push({
-                event: 'ask_work',
-                socialId: match[1]
+                event: 'ask_work'
             });
         }
 
@@ -19570,12 +19631,20 @@ async function processAethermoorAssistantEvents(data) {
         try {
             let result;
             if (event.event === 'ask_work') {
+                const socialId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    socialId,
+                    'Work inquiry awaits a saved assistant message'
+                );
+
                 result = await runStoredMechanic({
                     cases: [{
                         name: 'assistant_social_work_inquiry',
                         kind: 'social',
                         action: 'check_work',
-                        socialId: event.socialId
+                        socialId
                     }]
                 });
             } else if (event.event === 'reveal_work') {
@@ -19756,15 +19825,17 @@ function settlementWorkContextPacket(state, settlement) {
         'Ordinary conversation needs no mechanics tag.',
         'If the players meaningfully ask a local person about work, ' +
             'respond naturally without promising a specific unestablished job.',
-        'In the disposable <plan> block, report that interaction as:',
-        '<AETHERMOOR:ASK_WORK social_id=stable-contact-id>',
-        'Use one short ID made of letters, numbers, dots, underscores, ' +
-            'colons, or hyphens. Reuse the SAME ID for that person in ' +
-            'this settlement; never use a fresh ID to ask them again. ' +
-            'IDs are local to this settlement.',
-        'The extension checks that contact after this reply. Its saved ' +
-            'result can inform the NEXT relevant reply. A check does not ' +
+        'For the first meaningful work inquiry with a local person, ' +
+            'put this tag in the disposable <plan> block:',
+        '<AETHERMOOR:ASK_WORK>',
+        'Do not supply a social_id or invent a contact ID. Report at most ' +
+            'one new work inquiry per reply.',
+        'The extension assigns an ID to the saved reply, checks once, ' +
+            'and supplies its result on a later reply. A check does not ' +
             'accept a quest or make every NPC a quest giver.',
+        'For a person already listed below, reuse their engine-issued ' +
+            'contact ID; do not report them as a new inquiry. The engine ' +
+            'cannot independently identify a returning NPC from prose.',
         'Do not mention the tag, roll, or extension in story prose.'
     ];
 

@@ -6749,6 +6749,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - The engine decides whether an opportunity exists, its prerequisites,
  *   objective, rank, rewards, and one-time identity. The narrator handles
  *   conversation and local presentation, not quest generation.
+ * - IMPLEMENTED — BETA PENDING: while at a settlement, the narrator
+ *   receives the private ASK_WORK reporting rule even without a queued
+ *   event. Previously checked contacts and their saved results are
+ *   supplied again for relevant resumed conversations.
  * - Beta-sized first step: implement one or two authored local connections
  *   with explicit saved prerequisites and one-time reveal. Do not build a
  *   settlement-wide relationship simulation or weighted variable web.
@@ -6757,6 +6761,22 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   unlock should not automatically spend its payoff on a random F errand.
  * - Revealing a lead is not accepting a quest, completing an objective, or
  *   paying a reward. Repeated conversation or revisits must not reroll it.
+ * - IMPLEMENTED — BETA PENDING: a GM-reported conversation about local work
+ *   checks one stable contact once. No predetermined quest-giver roster,
+ *   dialogue keyword, interaction button, or guaranteed quest.
+ * - Delayed handshake: player acts; the GM narrates only what is already
+ *   known and privately reports an eligible interaction; the extension
+ *   resolves and saves it after that reply; the NEXT relevant GM reply
+ *   receives the result. Never promise an unrolled job in the first reply.
+ * - This timing boundary also applies to future vendor stock, consequential
+ *   site interactions, and other results the engine cannot supply midway
+ *   through a reply. Saved state, not a <template> note or one-use packet,
+ *   remains authoritative if the conversation resumes later.
+ * - Beta starting odds for social job inquiries: first checked contact at
+ *   a settlement 1-in-2; later contacts 1-in-10; at most two offers from
+ *   this channel per settlement. Tune scarcity during beta.
+ * - Do not transmit or score every line of NPC dialogue yet. Add narrowly
+ *   defined interaction events only when a concrete mechanic needs them.
  * - Tune opportunity frequency and the need for an F fallback during beta;
  *   quest scarcity is intentional, but an empty-feeling world is not.
  *
@@ -8025,23 +8045,28 @@ function resolveQuestSeed(test) {
             test.repTier || repRecord.tier
         );
 
-    const inquiryRecord = test.inquiryId === undefined
-        ? null
-        : state.inquiries?.[`rumor:${test.inquiryId}`];
+    const inquiryRecord = test.inquiryId !== undefined
+        ? state.inquiries?.[`rumor:${test.inquiryId}`]
+        : test.socialId !== undefined
+            ? state.socialOpportunities?.contacts?.[test.socialId]
+            : null;
 
     if (inquiryRecord) {
         assert(
             zone === inquiryRecord.zone,
-            'Quest zone does not match locked rumor inquiry'
+            'Quest zone does not match its locked trigger'
         );
     }
 
     assert(
-        test.inquiryId === undefined || inquiryRecord,
-        'Unknown locked rumor inquiry'
+        (test.inquiryId === undefined &&
+            test.socialId === undefined) ||
+            inquiryRecord,
+        'Unknown locked quest trigger'
     );
 
     const trigger = inquiryRecord || state.encounter;
+
     assert(
     trigger && typeof trigger === 'object',
     'Quest offer requires an encounter or rumor inquiry'
@@ -8228,7 +8253,9 @@ function resolveQuestSeed(test) {
     const quest = {
         id:
             `quest-${inquiryRecord
-                ? `rumor-${inquiryRecord.id}`
+                ? test.socialId !== undefined
+                    ? `social-${issuerSettlement.id}-${inquiryRecord.id}`
+                    : `rumor-${inquiryRecord.id}`
                 : state.encounter.id}-` +
             `${row.rank}-${questRoll}-${archetype.id}`,
         title:
@@ -11757,6 +11784,146 @@ function resolveShadowDeckAction(test) {
         state
     };
 }
+
+/*
+ * A contact is established by the conversation, not generated as an NPC
+ * roster on settlement arrival. The assistant reports an inquiry after
+ * narrating the first conversational beat. Its stable socialId must be
+ * reused for that same contact; repeats never roll again.
+ *
+ * This operation only works at a saved settlement. The two-offer limit
+ * applies to this social channel, not to rumors or combat breadcrumbs.
+ */
+function resolveSocialWorkOpportunity(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Social opportunity requires saved state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        typeof test.socialId === 'string' &&
+        /^[A-Za-z0-9._:-]{1,80}$/.test(test.socialId),
+        'Social opportunity needs a stable contact ID'
+    );
+
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status) &&
+        !state.currentJourney,
+        'Finish travel or resolve the encounter before asking locally'
+    );
+
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry => entry.locationId === state.currentLocationId);
+
+    assert(
+        settlement && settlement.zone === state.zone,
+        'Social work inquiry requires presence at its settlement'
+    );
+
+    state.socialOpportunities ||= {
+        contacts: {},
+        settlements: {}
+    };
+
+    const contacts = state.socialOpportunities.contacts;
+    const counters = state.socialOpportunities.settlements;
+
+    if (contacts[test.socialId]) {
+        assert(
+            contacts[test.socialId].settlementId === settlement.id,
+            'This contact ID belongs to another settlement'
+        );
+
+        return {
+            ok: true,
+            created: false,
+            action: 'check_work',
+            socialId: test.socialId,
+            outcome: contacts[test.socialId].result,
+            questId: contacts[test.socialId].questId || null,
+            state
+        };
+    }
+
+    const counter = counters[settlement.id] ||= {
+        checks: 0,
+        offers: 0
+    };
+
+    const firstContact = counter.checks === 0;
+    const eligible = counter.offers < 2;
+    const chance = firstContact ? 2 : 10;
+    const value = eligible ? roll(state, chance) : null;
+    const hasWork = eligible && value === 1;
+
+    const contact = {
+        id: test.socialId,
+        settlementId: settlement.id,
+        locationId: settlement.locationId,
+        zone: state.zone,
+        roll: value,
+        sides: eligible ? chance : null,
+        result: hasWork ? 'offer' : 'no_work',
+        questSeed: hasWork
+            ? {
+                source: 'social',
+                roll: value,
+                result: 'genuine_unclaimed_quest_or_dungeon_hook'
+            }
+            : null,
+        questSeedConsumed: false,
+        questId: null
+    };
+
+    contacts[test.socialId] = contact;
+    counter.checks++;
+
+    if (!hasWork) {
+        return {
+            ok: true,
+            created: true,
+            action: 'check_work',
+            socialId: contact.id,
+            outcome: contact.result,
+            questId: null,
+            state
+        };
+    }
+
+    const offered = resolveQuestSeed({
+        state,
+        socialId: contact.id,
+        zone: contact.zone,
+        settlementId: settlement.id
+    });
+
+    assert(
+        offered.created && offered.quest,
+        'Social trigger did not produce its locked offer'
+    );
+
+    const savedContact =
+        offered.state.socialOpportunities.contacts[contact.id];
+
+    savedContact.questId = offered.quest.id;
+    offered.state.socialOpportunities
+        .settlements[settlement.id].offers++;
+
+    return {
+        ok: true,
+        created: true,
+        action: 'check_work',
+        socialId: contact.id,
+        outcome: 'offer',
+        questId: offered.quest.id,
+        quest: offered.quest,
+        state: offered.state
+    };
+}
+
 function resolveSocialSeed(test) {
     assert(
         test.state &&
@@ -12848,14 +13015,16 @@ function resolveBatch(args) {
                     result = resolveWorldSeeds(test);
                     break;
                 case 'social':
-                    result = resolveSocialSeed(test);
+                    result = test.action === 'check_work'
+                        ? resolveSocialWorkOpportunity(test)
+                        : resolveSocialSeed(test);
                     break;
 
                 case 'loot':
                     result = claimLockedLoot(test);
                     break;
 
-                                    case 'debug_create_quest_breadcrumb': {
+                case 'debug_create_quest_breadcrumb': {
                     const state = clone(test.state);
                     const encounter = state.encounter;
 
@@ -13754,6 +13923,29 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
+function socialWorkNarrationPacket(result) {
+    if (result.outcome === 'offer') {
+        return [
+            'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
+            `Contact reference: ${result.socialId}.`,
+            questOfferNarrationPacket(result.quest),
+            'The offer is not accepted. Reveal it only if the player ' +
+                'continues this conversation or asks for the answer.',
+            'If the crew leaves, do not call them back or announce it ' +
+                'from elsewhere. The saved offer remains in the journal.',
+            'Do not mention the check, roll, tag, or extension.'
+        ].join('\n');
+    }
+
+    return [
+        'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
+        `Contact reference: ${result.socialId}.`,
+        'This contact has no job to offer. They may still converse normally.',
+        'Do not imply that asking the same contact again rerolls a job.',
+        'Do not mention the check, roll, tag, or extension.'
+    ].join('\n');
+}
+
 function questDeliveryContextPacket(quest) {
     if (
         quest?.status !== 'in_progress' ||
@@ -14385,7 +14577,17 @@ async function runStoredMechanic(args) {
 
         // A repeated [moved] message reuses its locked result without
         // saving another revision or replacing a pending handoff.
-        if (batch && oneCase.kind === 'travel' && caseResult.created === false) {
+        if (
+            batch &&
+            (
+                oneCase.kind === 'travel' ||
+                (
+                    oneCase.kind === 'social' &&
+                    oneCase.action === 'check_work'
+                )
+            ) &&
+            caseResult.created === false
+        ) {
             const { state: _saved, ...visibleResult } = caseResult;
             return {
                 ok: true,
@@ -14526,8 +14728,13 @@ async function runStoredMechanic(args) {
                         : [])
                 ].join('\n\n')
 
-            : batch && oneCase?.kind === 'follow_breadcrumb' &&
+            : batch &&
+              oneCase?.kind === 'social' &&
+              oneCase.action === 'check_work' &&
+              caseResult.created
+                ? socialWorkNarrationPacket(caseResult)
 
+            : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest)
@@ -15355,6 +15562,7 @@ function registerTools() {
                                 enum: [
                                     'initialize',
                                     'import',
+                                    'check_work',
                                     'status',
                                     'export',
                                     'accept',
@@ -19030,6 +19238,23 @@ function extractAethermoorQuestEvents(text) {
     if (typeof text !== 'string') return [];
     text = aethermoorNonCodeText(text);
     const events = [];
+
+    /*
+     * A work check is a report of an already narrated interaction.
+     * Require it inside the disposable plan block, not in story prose.
+     */
+    for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
+        const pattern =
+            /<AETHERMOOR:ASK_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
+
+        for (const match of plan[1].matchAll(pattern)) {
+            events.push({
+                event: 'ask_work',
+                socialId: match[1]
+            });
+        }
+    }
+
     const foundPattern =
         /<AETHERMOOR:(SEARCHED|FOUND)\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
 
@@ -19193,7 +19418,16 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-            if (event.event === 'delivered') {
+            if (event.event === 'ask_work') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_social_work_inquiry',
+                        kind: 'social',
+                        action: 'check_work',
+                        socialId: event.socialId
+                    }]
+                });
+            } else if (event.event === 'delivered') {
                 const stateResult = await readStoredCombatState();
                 const quest = findQuestById(
                     stateResult.state,
@@ -19341,6 +19575,67 @@ function travelStepId(message) {
     return `chat-message-${message.index}-${(hash >>> 0).toString(36)}`;
 }
 
+/*
+ * The GM cannot receive a newly resolved interaction midway through its
+ * reply. Give it the reporting rule before settlement conversation, then
+ * supply saved results on later replies. This is read-only prompt context:
+ * the assistant's tag requests a check; only the saved mechanic decides
+ * whether a job exists. Apply the same delayed-handshake principle to
+ * future vendor and site interactions.
+ */
+function settlementWorkContextPacket(state, settlement) {
+    const contacts = Object.values(
+        state.socialOpportunities?.contacts || {}
+    ).filter(contact =>
+        contact.settlementId === settlement.id
+    );
+
+    const lines = [
+        'PRIVATE SETTLEMENT CONVERSATION CONTEXT — do not recite.',
+        `Current settlement: ${settlement.label}.`,
+        'Ordinary conversation needs no mechanics tag.',
+        'If the players meaningfully ask a local person about work, ' +
+            'respond naturally without promising a specific unestablished job.',
+        'In the disposable <plan> block, report that interaction as:',
+        '<AETHERMOOR:ASK_WORK social_id=stable-contact-id>',
+        'Use one short ID made of letters, numbers, dots, underscores, ' +
+            'colons, or hyphens. Reuse the SAME ID for that person in ' +
+            'this settlement; never use a fresh ID to ask them again.',
+        'The extension checks that contact after this reply. Its saved ' +
+            'result can inform the NEXT relevant reply. A check does not ' +
+            'accept a quest or make every NPC a quest giver.',
+        'Do not mention the tag, roll, or extension in story prose.'
+    ];
+
+    for (const contact of contacts) {
+        if (contact.result === 'offer') {
+            const quest = Object.values(state.quests || {})
+                .flatMap(bucket =>
+                    Array.isArray(bucket) ? bucket : []
+                )
+                .find(entry => entry?.id === contact.questId);
+
+            if (quest) {
+                lines.push(
+                    `Previously checked contact ${contact.id}: ` +
+                        `quest ${quest.id} (${quest.status}).`,
+                    questOfferNarrationPacket(quest),
+                    'Use this information only if conversation with THAT ' +
+                        'contact resumes. Do not announce their job while ' +
+                        'speaking to someone else or after the crew leaves.'
+                );
+            }
+        } else {
+            lines.push(
+                `Previously checked contact ${contact.id}: no job. ` +
+                    'Conversation may continue; do not reroll this contact.'
+            );
+        }
+    }
+
+    return lines.join('\n');
+}
+
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
         if (!Array.isArray(chat)) return;
@@ -19436,10 +19731,35 @@ globalThis.aethermoorMechanicsInterceptor =
             }
         }
 
+        /*
+         * Supply the interaction rule on ordinary settlement replies,
+         * not only after a quest result has already been queued. Include
+         * saved contact results so a resumed conversation does not depend
+         * on a consumed one-use handoff or long-term LLM memory.
+         */
+        if (contextState) {
+            const settlement = Object.values(
+                contextState.world?.settlements || {}
+            ).find(entry =>
+                entry.locationId === contextState.currentLocationId
+            );
+
+            if (settlement) {
+                entries.push({
+                    id: `settlement-work-context-${settlement.id}`,
+                    type: 'social_context',
+                    packet: settlementWorkContextPacket(
+                        contextState,
+                        settlement
+                    )
+                });
+            }
+        }
         if (!metadata || entries.length === 0) {
             console.log('[Aethermoor] No handoff queued');
             return;
         }
+
 
         // The handoff is inserted for generation. Retain its exact object
         // and metadata reference so cleanup cannot affect another chat.

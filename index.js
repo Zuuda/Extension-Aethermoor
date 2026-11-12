@@ -6776,10 +6776,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - IMPLEMENTED — BETA PENDING: ASK_WORK reports an interaction without
  *   a GM-chosen ID. The extension derives the inquiry ID from the saved
  *   assistant message and scopes its result to the current settlement.
- * - Message identity prevents duplicate notification rolls; it does not
- *   identify a fictional NPC across different conversations. Reusing an
- *   engine-issued contact ID for a recurring person remains a GM reporting
- *   obligation until NPC continuity has its own identity contract.
+ * - Inquiry identity excludes temporary system handoffs from the saved
+ *   assistant-message position, so received/rendered notifications cannot
+ *   change its ID merely because the handoff was removed. Verify both
+ *   notification orders during beta.
+ * - Message identity does not identify a fictional NPC across different
+ *   conversations. Reusing an engine-issued contact ID for a recurring
+ *   person remains a GM reporting obligation until NPC continuity has
+ *   its own identity contract.
  * - No predetermined roster, interaction button, or guaranteed quest.
  * - Delayed handshake: player acts; the GM narrates only what is already
  *   known and privately reports an eligible interaction; the extension
@@ -14092,24 +14096,22 @@ function socialWorkNarrationPacket(result) {
     if (result.outcome === 'offer') {
         return [
             'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
-            `Contact reference: ${result.socialId}.`,
+            `Engine-issued contact reference: ${result.socialId}.`,
             questOfferNarrationPacket(result.quest),
-            'The offer is not accepted. Reveal it only if the player ' +
-                'continues this conversation or asks for the answer.',
-            'If the crew leaves, do not call them back or announce it ' +
-                'from elsewhere. The saved offer remains in the journal.',
+            'This request is locked but not yet published in the quest ' +
+                'journal or accepted by the crew.',
+            'Reveal it only if the player continues this conversation ' +
+                'or asks for the answer.',
+            'After actually describing the request, place the ' +
+                'REVEAL_WORK tag supplied in settlement conversation ' +
+                'context inside the disposable <plan> block. That ' +
+                'publishes this same locked offer; it does not reroll it.',
+            'If the crew leaves, do not call them back or announce the ' +
+                'request elsewhere. The pending request remains saved ' +
+                'under this contact.',
             'Do not mention the check, roll, tag, or extension.'
         ].join('\n');
     }
-
-    return [
-        'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
-        `Contact reference: ${result.socialId}.`,
-        'This contact has no job to offer. They may still converse normally.',
-        'Do not imply that asking the same contact again rerolls a job.',
-        'Do not mention the check, roll, tag, or extension.'
-    ].join('\n');
-}
 
 function questDeliveryContextPacket(quest) {
     if (
@@ -19377,7 +19379,21 @@ function socialWorkIdForAssistantMessage(message) {
             entry?.is_system !== true &&
             entry?.mes === message.text
         ) {
-            return `work-${index}-${worldHash(entry.mes).toString(36)}`;
+            /*
+             * The private handoff is temporarily inserted into chat and
+             * removed after generation. Exclude system messages from the
+             * position used for identity so both notifications for this
+             * reply derive the same inquiry ID.
+             */
+            const savedPosition = chat
+                .slice(0, index)
+                .filter(item => item?.is_system !== true)
+                .length;
+
+            return (
+                `work-${savedPosition}-` +
+                worldHash(entry.mes).toString(36)
+            );
         }
     }
 

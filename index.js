@@ -22902,10 +22902,12 @@ function settlementWorkContextPacket(state, settlement) {
             'bonuses, variants, prices, or ownership.',
         'Seeing wares does not purchase or equip an item.',
         'If the players ask an innkeeper about meals, rooms, or hot ' +
-            'water, answer naturally and put <AETHERMOOR:ASK_INN> ' +
-            'inside <plan>. The extension opens the exact inn-service ' +
-            'menu after this reply. You may dress meals and rooms for ' +
-            'the locale; do not invent prices, healing, or buffs.',
+            'water, have the innkeeper offer a bill of fare or ordering ' +
+            'slate and put <AETHERMOOR:ASK_INN> inside <plan>. The ' +
+            'extension opens its exact service menu after this reply. ' +
+            'The player’s selections represent what they indicate on ' +
+            'that slate; no payment occurs yet. Dress meals and rooms ' +
+            'for the locale, but do not invent prices, healing, or buffs.',
         'If the players ask a herbalist to trade potions, respond ' +
             'naturally without inventing prices, healing, or stock. ' +
             'Place <AETHERMOOR:ASK_HERBALIST> inside <plan>. The ' +
@@ -22977,10 +22979,14 @@ function settlementWorkContextPacket(state, settlement) {
             ),
             `Total ${stagedInn.cost}s; projected purse ` +
                 `${stagedInn.purseAfter}s.`,
-            'Compare the player’s spoken order with these staged ' +
-                'services. If they differ, have the innkeeper clarify ' +
-                'the order and price. Let the player reopen Inn Services ' +
-                'and change the selection. Do not silently substitute ' +
+            'The staged services are what the crew indicated on the ' +
+                'innkeeper’s bill of fare, not a payment already made. ' +
+                'If their spoken order differs, have the innkeeper point ' +
+                'to the specific mismatch and ask which they want. ' +
+                'The player can reopen Inn Services and correct the ' +
+                'selection. Do not invent a prior order, treat the ' +
+                'difference as money paid or owed, silently substitute ' +
+                'services, or emit INN_AGREED while it is unresolved.',
                 'services, charge a difference, or emit INN_AGREED.',
             'Only after the players and innkeeper agree to the SAME ' +
                 'staged services in the fiction, put ' +

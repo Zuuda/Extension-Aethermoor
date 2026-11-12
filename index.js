@@ -16529,20 +16529,75 @@ function addAethermoorPanelStyles() {
             overflow-wrap: anywhere;
         }
 
-        .aethermoor-vendor-row {
-            padding: 8px 0;
-            border-top: 1px solid #1f2730;
+        .aethermoor-shop {
+            position: fixed;
+            z-index: 10002;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: min(620px, calc(100vw - 24px));
+            max-height: min(75vh, 720px);
+            overflow: auto;
+            box-sizing: border-box;
+            padding: 12px;
             color: #d0d7de;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #4da6ff;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
             font: 12px/1.5 Consolas, monospace;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
         }
 
-        .aethermoor-vendor-row:first-of-type {
-            border-top: 0;
+        .aethermoor-shop-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1f2730;
+        }
+
+        .aethermoor-shop-title {
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .aethermoor-shop-summary {
+            margin: 8px 0;
+            color: #9caab8;
+            white-space: pre-wrap;
+        }
+
+        .aethermoor-vendor-row {
+            padding: 9px 0;
+            border-top: 1px solid #1f2730;
+        }
+
+        .aethermoor-vendor-name {
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .aethermoor-vendor-price {
+            float: right;
+            color: #ffd166;
+            font-weight: 700;
+        }
+
+        .aethermoor-vendor-detail {
+            color: #9caab8;
+        }
+
+        .aethermoor-vendor-bonus {
+            color: #4ade80;
+        }
+
+        .aethermoor-vendor-skip {
+            color: #f87171;
         }
 
         .aethermoor-knowledge {
+
             padding: 10px;
             background: #12161c;
             border: 1px solid #2b3542;
@@ -17199,7 +17254,136 @@ function renderCrewKnowledge(state) {
     return section;
 }
 
+/*
+ * ASK_WARES opens this independent read-only window after the saved
+ * operation succeeds. It reads the authoritative stock at render time.
+ * It does not buy, equip, or create a vendor inventory record.
+ */
+async function openAethermoorShopWindow() {
+    const metadata = getContext().chatMetadata;
+    const snapshot = await readStoredCombatState();
+
+    assert(
+        getContext().chatMetadata === metadata,
+        'Chat changed before the shop could open'
+    );
+
+    const state = snapshot.state;
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.id === state.vendorMenu?.settlementId &&
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement,
+        'There is no open shop at the crew’s current settlement'
+    );
+
+    const stock = resolveVendorAction({
+        action: 'stock',
+        zone: state.zone,
+        state
+    });
+
+    document.getElementById('aethermoor_shop_window')?.remove();
+
+    const windowElement = document.createElement('section');
+    windowElement.id = 'aethermoor_shop_window';
+    windowElement.className = 'aethermoor-shop';
+    windowElement.setAttribute('role', 'dialog');
+    windowElement.setAttribute(
+        'aria-label',
+        `Vendor stock at ${settlement.label}`
+    );
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-shop-header';
+
+    const title = document.createElement('div');
+    title.className = 'aethermoor-shop-title';
+    title.textContent =
+        `System Log // Vendor Stock · ${settlement.label}`;
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'aethermoor-panel-close';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => windowElement.remove());
+
+    header.append(title, close);
+    windowElement.appendChild(header);
+
+    const summary = document.createElement('div');
+    summary.className = 'aethermoor-shop-summary';
+    summary.textContent =
+        `Zone ${state.zone} · Purse: ${state.crew.purse}s · ` +
+        `Stock floor: Stat ${stock.stat}\n` +
+        'Viewing wares does not buy or equip anything.';
+    windowElement.appendChild(summary);
+
+    const bonusNames = {
+        crewAtk: 'Crew ATK',
+        tansyMaxHp: 'Tansy MaxHP',
+        qtikMaxHp: 'Q’tik MaxHP',
+        frontlineDef: 'Frontline DEF',
+        crewLuk: 'Crew LUK'
+    };
+
+    for (const entry of stock.catalog) {
+        const row = document.createElement('div');
+        row.className = 'aethermoor-vendor-row';
+
+        const price = document.createElement('span');
+        price.className = 'aethermoor-vendor-price';
+        price.textContent = `${entry.price}s`;
+
+        const name = document.createElement('div');
+        name.className = 'aethermoor-vendor-name';
+        name.textContent =
+            `${entry.number}. ` +
+            `${entry.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
+            entry.slotName;
+        name.appendChild(price);
+        row.appendChild(name);
+
+        const comparison = document.createElement('div');
+        comparison.className = entry.skip
+            ? 'aethermoor-vendor-skip'
+            : 'aethermoor-vendor-detail';
+        comparison.textContent =
+            `Common · Stat ${entry.stat} · ` +
+            `Equipped Stat ${entry.equippedStat}` +
+            (entry.skip ? ' · Equal/worse: skip' : '');
+        row.appendChild(comparison);
+
+        for (const option of entry.variants) {
+            const variant = document.createElement('div');
+            variant.className = 'aethermoor-vendor-bonus';
+
+            const effects = Object.entries(option.bonus)
+                .filter(([, amount]) => amount > 0)
+                .map(([key, amount]) =>
+                    `+${amount} ${bonusNames[key] || key}`
+                );
+
+            variant.textContent =
+                `• ${option.label || 'Standard'}: ` +
+                (effects.join(', ') || 'No stat bonus');
+            row.appendChild(variant);
+        }
+
+        windowElement.appendChild(row);
+    }
+
+    document.body.appendChild(windowElement);
+    close.focus();
+}
+
 async function renderWorldTab(host) {
+
     let snapshot;
 
     try {
@@ -17275,70 +17459,8 @@ async function renderWorldTab(host) {
         state.currentLocationId ||
         routeNodeId(state.zone, 'outpost');
 
-    /*
-     * Render stock directly from the engine catalog and current equipment.
-     * A saved menu opened in another settlement is not displayed here.
-     * Rendering reads state only; it never buys or equips gear.
-     */
-    const currentSettlement = Object.values(
-        world.settlements || {}
-    ).find(entry =>
-        entry.locationId === currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    if (
-        currentSettlement &&
-        state.vendorMenu?.settlementId === currentSettlement.id
-    ) {
-        const stock = resolveVendorAction({
-            action: 'stock',
-            zone: state.zone,
-            state
-        });
-
-        const menu = makeAethermoorSection(
-            'SYSTEM LOG // VENDOR STOCK',
-            `${currentSettlement.label} · Zone ${state.zone}\n` +
-                `Purse: ${state.crew.purse}s · ` +
-                `Stock floor: Stat ${stock.stat}\n` +
-                'Viewing stock does not buy or equip anything.',
-            'world'
-        );
-
-        for (const entry of stock.catalog) {
-            const bonuses = entry.variants.map(option => {
-                const effects = Object.entries(option.bonus)
-                    .filter(([, amount]) => amount > 0)
-                    .map(([name, amount]) =>
-                        `+${amount} ${name}`
-                    )
-                    .join(', ');
-
-                return (
-                    `${option.label || 'Standard'}: ` +
-                    `${effects || 'No stat bonus'}`
-                );
-            });
-
-            const row = document.createElement('div');
-            row.className = 'aethermoor-vendor-row';
-            row.textContent =
-                `${entry.number}. ` +
-                `${entry.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
-                `${entry.slotName} — ${entry.price}s\n` +
-                `Common · Stat ${entry.stat} · ` +
-                `Equipped Stat ${entry.equippedStat}` +
-                (entry.skip ? ' · Equal/worse: skip' : '') +
-                '\n' +
-                bonuses.map(text => `• ${text}`).join('\n');
-
-            menu.appendChild(row);
-        }
-
-        host.appendChild(menu);
-    }
-
+      // Vendor stock opens in its own window after the ASK_WARES handshake.
+    // World remains focused on places, journeys, and discoveries.
     const movementBlocked = [
         'active',
         'spotted'
@@ -19858,6 +19980,14 @@ async function processAethermoorAssistantEvents(data) {
                         socialId: messageId
                     }]
                 });
+
+                assert(
+                    result?.ok === true &&
+                    result.results?.[0]?.result?.action === 'open',
+                    'Vendor menu did not open'
+                );
+
+                await openAethermoorShopWindow();
             } else if (event.event === 'delivered') {
                 const stateResult = await readStoredCombatState();
                 const quest = findQuestById(
@@ -20028,9 +20158,9 @@ function settlementWorkContextPacket(state, settlement) {
         'If the players ask a local merchant to show their wares, ' +
             'respond naturally without inventing stock, stats, or prices. ' +
             'Place <AETHERMOOR:ASK_WARES> inside the disposable <plan> block.',
-        'The extension opens its exact stock menu in World after that ' +
-            'reply. On a later relevant reply, invite the players to ' +
-            'consult the menu. You may describe region-appropriate ' +
+        'The extension opens its exact stock in a separate shop window ' +
+            'after that reply. On a later relevant reply, invite the ' +
+            'players to consult that window. You may describe region-appropriate ' +
             'cosmetic appearances; do not change item identities, ' +
             'bonuses, variants, prices, or ownership.',
         'Seeing wares does not purchase or equip an item.',

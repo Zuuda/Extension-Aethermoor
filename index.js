@@ -18785,15 +18785,6 @@ async function openAethermoorShopWindow() {
 
     const state = snapshot.state;
     const settlement = Object.values(
-        const displayServices = INN_SERVICES.map(service => ({
-        ...service,
-        displayName: cosmeticStockName(
-            state,
-            `inn:${service.id}`,
-            service.label
-        )
-    }));
-
         state.world?.settlements || {}
     ).find(entry =>
         entry.id === state.vendorMenu?.settlementId &&
@@ -19526,6 +19517,16 @@ async function openAethermoorInnWindow() {
     );
 
     const state = snapshot.state;
+
+    const displayServices = INN_SERVICES.map(service => ({
+        ...service,
+        displayName: cosmeticStockName(
+            state,
+            `inn:${service.id}`,
+            service.label
+        )
+    }));
+
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
@@ -23261,10 +23262,9 @@ function settlementWorkContextPacket(state, settlement) {
                 'innkeeper’s bill of fare, not a payment already made. ' +
                 'If their spoken order differs, have the innkeeper point ' +
                 'to the specific mismatch and ask which they want. ' +
-                'The player can reopen Inn Services and correct the ' +
+            'The player can reopen Inn Services and correct the ' +
                 'selection. Do not invent a prior order, treat the ' +
                 'difference as money paid or owed, silently substitute ' +
-                'services, or emit INN_AGREED while it is unresolved.',
                 'services, charge a difference, or emit INN_AGREED.',
             'Only after the players and innkeeper agree to the SAME ' +
                 'staged services in the fiction, put ' +

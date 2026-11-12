@@ -145,8 +145,9 @@ const WORLD_GEOGRAPHY = {
  * Preserve established campaign geography. These are overrides, not the
  * maximum world size. Beyond Zone 7, compatible transitions are generated.
  *
- * Settlement names not yet established in play are generated placeholders.
- * They can later be renamed without changing IDs or quest ownership.
+ * Unestablished settlement names are deterministic, geography-compatible
+ * presentation placeholders. They can later be renamed without changing
+ * saved place IDs, routes, reputation keys, or quest ownership.
  */
 const WORLD_ZONE_OVERRIDES = {
     1: {
@@ -271,17 +272,39 @@ function ensureWorldRecords(state) {
         const geography = WORLD_GEOGRAPHY[profile];
         assert(geography, `Unknown geography profile: ${profile}`);
 
-        // Existing campaign names remain presentation labels.
-        // New regions use neutral labels; the narrator may name them.
-        const zoneName = ZONE_NAMES[number] || `Zone ${number}`;
+        /*
+         * Preserve established names. Later zones and unnamed primary
+         * settlements receive deterministic presentation placeholders
+         * based on the saved world seed and geographic profile.
+         * worldChoice() does not consume campaign combat/loot RNG.
+         */
+        const zoneName =
+            ZONE_NAMES[number] ||
+            `${worldChoice(
+                world,
+                `zone-root:${number}`,
+                WORLD_NAME_ROOTS
+            )} ${worldChoice(
+                world,
+                `zone-word:${number}`,
+                geography.zoneWords
+            )}`;
+
         const settlementId = `settlement-z${number}-primary`;
 
-        // Keep route IDs stable for existing saves and journeys.
+        // Place and route identity never depends on presentation names.
         const locationId = `outpost-z${number}`;
         const settlementName =
             override.settlementName ||
-            `Primary settlement, Zone ${number}`;
-
+            `${worldChoice(
+                world,
+                `settlement-root:${number}`,
+                WORLD_NAME_ROOTS
+            )} ${worldChoice(
+                world,
+                `settlement-word:${number}`,
+                geography.settlementWords
+            )}`;
 
         world.zones[number] = {
             id: `zone-${number}`,
@@ -6454,6 +6477,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PARTIAL — World integration
  * - World records and route edges are saved.
+ * - IMPLEMENTED — BETA PENDING: newly generated zones beyond the named
+ *   campaign start and unnamed primary settlements receive deterministic,
+ *   geography-compatible placeholder names. Saved records are not renamed;
+ *   IDs and reputation keys remain independent of presentation.
  * - IMPLEMENTED — BETA PENDING: World exposes the saved route to the next
  *   zone's primary settlement even before a local lead names it. This
  *   enables forward progression without revealing NPCs or quest content.

@@ -12162,6 +12162,15 @@ function resolveStockNames(test) {
         ])
     );
 
+    return {
+        ok: true,
+        created: true,
+        action: 'apply',
+        zone: state.zone,
+        state
+    };
+}
+
 function cosmeticStockName(state, key, fallback) {
     const name =
         state.cosmeticStockNames?.[state.zone]?.[key];
@@ -12181,10 +12190,6 @@ function gearCosmeticStockKey(owner, slot, variant) {
 function potionCosmeticStockKey(id) {
     return `potion:${id}`;
 }
-
-    const allowedActions = [
-        'stock', 'buy', 'sell', 'grant', 'remove', 'use'
-    ];
 
     assert(
         allowedActions.includes(test.action),

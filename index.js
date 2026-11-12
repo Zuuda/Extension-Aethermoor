@@ -6534,6 +6534,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Implement this as one shared naming path after inn services, not
  *   separate GM-naming handshakes for each shop.
  *
+ * IMPLEMENTED — BETA PENDING: Diegetic inn services
+ * - Flat-price meals (1/3/5s), rooms (1/2/5s), and hot water (2s)
+ *   establish ordinary living costs without zone scaling.
+ * - ASK_INN opens a movable services window. Selection stages a quote;
+ *   only fictional agreement and INN_AGREED deduct silver once.
+ * - Inn purchases currently grant no buffs, healing, inventory items,
+ *   or automatic passage of time. Verify staging, payment, and replay.
+ *
  * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
  * - ASK_WARES opens the extension-rendered, two-sided trade window.
  * - Clicks select stock variants, Bag Reserves, or worn gear. Close stages
@@ -11791,6 +11799,206 @@ function resolveHerbalistAction(test) {
     };
 }
 
+/*
+ * Ordinary inn prices establish the civilian economy and do not scale
+ * with zone. These are expenses, not food buffs, healing, lodging recovery,
+ * or elapsed-time mechanics. The GM dresses the purchased service locally;
+ * its saved ID and price remain engine-owned.
+ */
+const INN_SERVICES = [
+    { id: 'standard_meal', label: 'Standard filling fare', price: 1 },
+    { id: 'better_meal', label: 'Better meal', price: 3 },
+    { id: 'special_meal', label: 'Special meal', price: 5 },
+    { id: 'common_room', label: 'Common-room bed', price: 1 },
+    { id: 'private_room', label: 'Private room', price: 2 },
+    { id: 'luxurious_room', label: 'Luxurious room', price: 5 },
+    { id: 'hot_water', label: 'Hot water', price: 2 }
+];
+
+function resolveInnAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Inn interaction requires saved state'
+    );
+
+    const state = clone(test.state);
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Inn services require presence at a free settlement'
+    );
+
+    state.innReceipts ||= {};
+
+    /*
+     * Check receipts before inspecting the current menu. Replayed
+     * assistant notifications must not charge again, even after the
+     * crew leaves the settlement.
+     */
+    if (test.action === 'commit') {
+        assert(
+            typeof test.socialId === 'string' &&
+            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+            'Inn agreement requires an engine-issued message reference'
+        );
+
+        const previous = state.innReceipts[test.socialId];
+
+        if (previous) {
+            return {
+                ok: true,
+                created: false,
+                action: 'commit',
+                receipt: clone(previous),
+                state
+            };
+        }
+    }
+
+    if (test.action === 'open') {
+        assert(
+            typeof test.socialId === 'string' &&
+            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+            'Inn opening requires an engine-issued message reference'
+        );
+
+        if (state.innMenu?.settlementId === settlement.id) {
+            return { ok: true, created: false, action: 'open', state };
+        }
+
+        state.innMenu = {
+            settlementId: settlement.id,
+            inquiryId: test.socialId,
+            pendingBasket: null
+        };
+
+        return { ok: true, created: true, action: 'open', state };
+    }
+
+    assert(
+        state.innMenu?.settlementId === settlement.id,
+        'No inn menu is open at this settlement'
+    );
+
+    if (test.action === 'discard') {
+        state.innMenu.pendingBasket = null;
+        return { ok: true, action: 'discard', state };
+    }
+
+    assert(
+        ['stage', 'commit'].includes(test.action),
+        `Unsupported inn action: ${test.action}`
+    );
+
+    const pending = state.innMenu.pendingBasket;
+    const requested = test.action === 'commit'
+        ? pending?.choices
+        : test.basket?.choices;
+
+    assert(
+        Array.isArray(requested) && requested.length > 0,
+        'Choose at least one inn service'
+    );
+
+    const seen = new Set();
+    const choices = requested.map(choice => {
+        assert(
+            choice && typeof choice.id === 'string',
+            'Invalid inn service selection'
+        );
+
+        const service = INN_SERVICES.find(
+            entry => entry.id === choice.id
+        );
+
+        assert(service, `Unknown inn service: ${choice.id}`);
+        assert(!seen.has(service.id),
+            `Duplicate inn service: ${service.id}`);
+        seen.add(service.id);
+
+        const quantity = int(
+            choice.quantity,
+            `${service.id} quantity`,
+            1
+        );
+
+        assert(
+            quantity <= 20,
+            'Inn service quantity cannot exceed 20'
+        );
+
+        return {
+            id: service.id,
+            label: service.label,
+            quantity,
+            unitPrice: service.price
+        };
+    });
+
+    const cost = choices.reduce(
+        (sum, choice) =>
+            sum + choice.unitPrice * choice.quantity,
+        0
+    );
+
+    const purseBefore = int(state.crew.purse, 'crew purse');
+    const purseAfter = purseBefore - cost;
+
+    assert(
+        purseAfter >= 0,
+        `Inn services would leave the crew ${-purseAfter}s short`
+    );
+
+    const quote = {
+        settlementId: settlement.id,
+        choices,
+        cost,
+        purseBefore,
+        purseAfter
+    };
+
+    if (test.action === 'stage') {
+        state.innMenu.pendingBasket = quote;
+        return {
+            ok: true,
+            action: 'stage',
+            basket: clone(quote),
+            state
+        };
+    }
+
+    assert(
+        JSON.stringify(pending) === JSON.stringify(quote),
+        'Inn quote changed; reopen and stage it again'
+    );
+
+    state.crew.purse = purseAfter;
+    state.innMenu.pendingBasket = null;
+
+    const receipt = {
+        id: test.socialId,
+        ...quote
+    };
+
+    state.innReceipts[test.socialId] = clone(receipt);
+
+    return {
+        ok: true,
+        created: true,
+        action: 'commit',
+        receipt,
+        state
+    };
+}
+
 function resolveConsumableAction(test) {
 
     const allowedActions = [
@@ -13434,6 +13642,9 @@ function resolveBatch(args) {
                 case 'herbalist':
                     result = resolveHerbalistAction(test);
                     break;
+                case 'inn':
+                    result = resolveInnAction(test);
+                    break;
                 case 'food':
                     result = resolveFoodAction({
                         ...test,
@@ -14917,6 +15128,20 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
+function innServiceNarrationPacket(receipt) {
+    return [
+        'PRIVATE INN SERVICE RECEIPT — do not recite this heading.',
+        `Paid ${receipt.cost}s at ${receipt.settlementId}.`,
+        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
+        ...receipt.choices.map(choice =>
+            `${choice.label} ×${choice.quantity}.`
+        ),
+        'Payment was applied once. Continue naturally from the ' +
+            'agreement; do not charge again.',
+        'No healing, buffs, inventory items, or time passage were applied.'
+    ].join('\n');
+}
+
 function herbalistTradeNarrationPacket(receipt) {
     return [
         'PRIVATE HERBALIST TRADE RESULT — do not recite this heading.',
@@ -15632,7 +15857,7 @@ async function runStoredMechanic(args) {
                     )
                 ) ||
                 (
-                    ['vendor', 'herbalist'].includes(oneCase.kind) &&
+                    ['vendor', 'herbalist', 'inn'].includes(oneCase.kind) &&
                     ['open', 'commit'].includes(oneCase.action)
                 )
             )
@@ -15789,6 +16014,12 @@ async function runStoredMechanic(args) {
               oneCase.action === 'commit' &&
               caseResult.created
                 ? herbalistTradeNarrationPacket(caseResult.receipt)
+
+            : batch &&
+              oneCase?.kind === 'inn' &&
+              oneCase.action === 'commit' &&
+              caseResult.created
+                ? innServiceNarrationPacket(caseResult.receipt)
 
             : batch &&
               oneCase?.kind === 'social' &&
@@ -16430,6 +16661,7 @@ function registerTools() {
                                     'currency',
                                     'consumable',
                                     'herbalist',
+                                    'inn',
                                     'food',
                                     'death',
                                     'xp',
@@ -16642,6 +16874,7 @@ function registerTools() {
                                     'list',
                                     'settle',
                                     'stock',
+                                    'open',
                                     'stage',
                                     'discard',
                                     'commit',
@@ -18995,6 +19228,262 @@ async function openAethermoorHerbalistWindow() {
 }
 
 /*
+ * Inn selections are UI-local until Close stages a quote. Closing does
+ * not deduct silver. The narrator's later agreement report commits it.
+ */
+async function openAethermoorInnWindow() {
+    addAethermoorPanelStyles();
+
+    const metadata = getContext().chatMetadata;
+    const snapshot = await readStoredCombatState();
+
+    assert(
+        getContext().chatMetadata === metadata,
+        'Chat changed before the inn menu could open'
+    );
+
+    const state = snapshot.state;
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.id === state.innMenu?.settlementId &&
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(settlement, 'No inn menu is open here');
+
+    const quantities = new Map(
+        (state.innMenu.pendingBasket?.choices || [])
+            .map(choice => [choice.id, choice.quantity])
+    );
+
+    document.getElementById('aethermoor_inn_window')?.remove();
+
+    const panel = document.createElement('section');
+    panel.id = 'aethermoor_inn_window';
+    panel.className = 'aethermoor-shop aethermoor-herbalist-window';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Inn services');
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-shop-header';
+
+    const title = document.createElement('b');
+    title.className = 'aethermoor-shop-title';
+    title.textContent =
+        `System Log // Inn Services · ${settlement.label}`;
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'aethermoor-panel-close';
+    close.textContent = 'Close & stage selection';
+
+    header.append(title, close);
+    panel.appendChild(header);
+
+    const summary = document.createElement('div');
+    summary.className = 'aethermoor-shop-summary';
+    summary.textContent =
+        `Purse: ${state.crew.purse}s\n` +
+        'Meals and lodging are expenses only. Close stages a quote; ' +
+        'agree in the story to pay. No healing or buffs are included.';
+    panel.appendChild(summary);
+
+    const columns = document.createElement('div');
+    columns.className = 'aethermoor-trade-columns';
+    panel.appendChild(columns);
+
+    const ledger = document.createElement('div');
+    ledger.className = 'aethermoor-trade-ledger';
+    panel.appendChild(ledger);
+
+    const controls = [];
+
+    function refresh() {
+        const cost = INN_SERVICES.reduce(
+            (sum, service) =>
+                sum + service.price *
+                    (quantities.get(service.id) || 0),
+            0
+        );
+
+        const remaining = state.crew.purse - cost;
+
+        ledger.textContent =
+            `Services −${cost}s · Projected purse: ${remaining}s\n` +
+            'No payment has occurred.';
+        ledger.style.color =
+            remaining < 0 ? '#f87171' : '#ffd166';
+
+        for (const control of controls) {
+            const count = quantities.get(control.service.id) || 0;
+            control.count.textContent = ` ×${count} `;
+            control.minus.disabled = count === 0;
+            control.plus.disabled =
+                count >= 20 ||
+                remaining < control.service.price;
+        }
+    }
+
+    for (const [heading, ids] of [
+        ['MEALS', [
+            'standard_meal',
+            'better_meal',
+            'special_meal'
+        ]],
+        ['ROOMS & COMFORTS', [
+            'common_room',
+            'private_room',
+            'luxurious_room',
+            'hot_water'
+        ]]
+    ]) {
+        const column = document.createElement('section');
+        column.className = 'aethermoor-trade-column';
+
+        const label = document.createElement('h3');
+        label.textContent = heading;
+        column.appendChild(label);
+
+        for (const id of ids) {
+            const service = INN_SERVICES.find(
+                entry => entry.id === id
+            );
+            const row = document.createElement('div');
+            row.className = 'aethermoor-vendor-row';
+
+            const name = document.createElement('div');
+            name.className = 'aethermoor-vendor-name';
+            name.textContent =
+                `${service.label} · ${service.price}s`;
+
+            const minus = document.createElement('button');
+            minus.type = 'button';
+            minus.textContent = '−';
+
+            const count = document.createElement('span');
+
+            const plus = document.createElement('button');
+            plus.type = 'button';
+            plus.textContent = '+';
+
+            minus.addEventListener('click', () => {
+                const next = (quantities.get(id) || 0) - 1;
+                if (next > 0) quantities.set(id, next);
+                else quantities.delete(id);
+                refresh();
+            });
+
+            plus.addEventListener('click', () => {
+                quantities.set(id, (quantities.get(id) || 0) + 1);
+                refresh();
+            });
+
+            row.append(name, minus, count, plus);
+            column.appendChild(row);
+
+            controls.push({ service, minus, count, plus });
+        }
+
+        columns.appendChild(column);
+    }
+
+    const discard = document.createElement('button');
+    discard.type = 'button';
+    discard.className = 'aethermoor-trade-option';
+    discard.textContent = 'Discard selection';
+
+    discard.addEventListener('click', async () => {
+        discard.disabled = true;
+
+        try {
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'discard_inn_selection',
+                    kind: 'inn',
+                    action: 'discard'
+                }]
+            });
+
+            assert(output?.ok === true, 'Could not discard inn selection');
+            panel.remove();
+        } catch (error) {
+            discard.disabled = false;
+            toastr.error(
+                error instanceof Error ? error.message : String(error),
+                'Aethermoor'
+            );
+        }
+    });
+
+    panel.appendChild(discard);
+
+    close.addEventListener('click', async () => {
+        close.disabled = true;
+
+        try {
+            const choices = [...quantities].map(
+                ([id, quantity]) => ({ id, quantity })
+            );
+
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: choices.length
+                        ? 'stage_inn_selection'
+                        : 'discard_inn_selection',
+                    kind: 'inn',
+                    action: choices.length ? 'stage' : 'discard',
+                    ...(choices.length
+                        ? { basket: { choices } }
+                        : {})
+                }]
+            });
+
+            assert(
+                output?.ok === true,
+                output?.results?.[0]?.error ||
+                    'Could not stage inn selection'
+            );
+
+            panel.remove();
+        } catch (error) {
+            close.disabled = false;
+            toastr.error(
+                error instanceof Error ? error.message : String(error),
+                'Aethermoor'
+            );
+        }
+    });
+
+    refresh();
+    document.body.appendChild(panel);
+
+    restoreAethermoorPanelGeometry(
+        panel,
+        AETHERMOOR_INN_GEOMETRY_KEY
+    );
+    enableAethermoorPanelDragging(
+        header,
+        panel,
+        AETHERMOOR_INN_GEOMETRY_KEY
+    );
+
+    panel.addEventListener('pointerup', () => {
+        setTimeout(() => {
+            if (panel.isConnected) {
+                saveAethermoorPanelGeometry(
+                    panel,
+                    AETHERMOOR_INN_GEOMETRY_KEY
+                );
+            }
+        }, 0);
+    });
+
+    close.focus();
+}
+
+/*
  * Inventory is a read-only view of this chat's saved mechanics state.
  * Rendering cannot consume potions, equip gear, change silver, or reopen
  * a shop automatically. Shop reopen controls require the crew to remain
@@ -19398,6 +19887,26 @@ async function renderInventoryTab(host) {
                 'world',
                 () => {
                     void openAethermoorHerbalistWindow().catch(error =>
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        )
+                    );
+                }
+            )
+        );
+    }
+
+    if (state.innMenu?.settlementId === currentSettlement.id) {
+        hasShop = true;
+        shopSection.appendChild(
+            makeAethermoorAction(
+                'Reopen Inn Services',
+                'world',
+                () => {
+                    void openAethermoorInnWindow().catch(error =>
                         toastr.error(
                             error instanceof Error
                                 ? error.message
@@ -19905,6 +20414,8 @@ const AETHERMOOR_SHOP_GEOMETRY_KEY =
     'aethermoorShopWindowGeometry';
 const AETHERMOOR_HERBALIST_GEOMETRY_KEY =
     'aethermoorHerbalistWindowGeometry';
+const AETHERMOOR_INN_GEOMETRY_KEY =
+    'aethermoorInnWindowGeometry';
 
 function restoreAethermoorPanelGeometry(
     panel,
@@ -21813,6 +22324,18 @@ function extractAethermoorQuestEvents(text) {
         }
 
         for (const _match of plan[1].matchAll(
+            /<AETHERMOOR:ASK_INN\s*>/g
+        )) {
+            events.push({ event: 'ask_inn' });
+        }
+
+        for (const _match of plan[1].matchAll(
+            /<AETHERMOOR:INN_AGREED\s*>/g
+        )) {
+            events.push({ event: 'inn_agreed' });
+        }
+
+        for (const _match of plan[1].matchAll(
             /<AETHERMOOR:HERBALIST_AGREED\s*>/g
         )) {
             events.push({ event: 'herbalist_agreed' });
@@ -22074,7 +22597,44 @@ async function processAethermoorAssistantEvents(data) {
                 );
 
                 await openAethermoorHerbalistWindow();
+            } else if (event.event === 'ask_inn') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(messageId, 'Inn inquiry awaits a saved reply');
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_inn_open',
+                        kind: 'inn',
+                        action: 'open',
+                        socialId: messageId
+                    }]
+                });
+
+                assert(
+                    result?.ok === true &&
+                    result.results?.[0]?.result?.action === 'open',
+                    'Inn menu did not open'
+                );
+
+                await openAethermoorInnWindow();
+            } else if (event.event === 'inn_agreed') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(messageId, 'Inn agreement awaits a saved reply');
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_inn_commit',
+                        kind: 'inn',
+                        action: 'commit',
+                        socialId: messageId
+                    }]
+                });
             } else if (event.event === 'herbalist_agreed') {
+
                 const messageId =
                     socialWorkIdForAssistantMessage(message);
 
@@ -22282,6 +22842,11 @@ function settlementWorkContextPacket(state, settlement) {
             'cosmetic appearances; do not change item identities, ' +
             'bonuses, variants, prices, or ownership.',
         'Seeing wares does not purchase or equip an item.',
+        'If the players ask an innkeeper about meals, rooms, or hot ' +
+            'water, answer naturally and put <AETHERMOOR:ASK_INN> ' +
+            'inside <plan>. The extension opens the exact inn-service ' +
+            'menu after this reply. You may dress meals and rooms for ' +
+            'the locale; do not invent prices, healing, or buffs.',
         'If the players ask a herbalist to trade potions, respond ' +
             'naturally without inventing prices, healing, or stock. ' +
             'Place <AETHERMOOR:ASK_HERBALIST> inside <plan>. The ' +
@@ -22339,6 +22904,24 @@ function settlementWorkContextPacket(state, settlement) {
                 'exchange in the fiction, put ' +
                 '<AETHERMOOR:HERBALIST_AGREED> inside <plan>. ' +
                 'The engine will validate and apply the saved basket.'
+        );
+    }
+
+    const stagedInn = state.innMenu?.pendingBasket;
+
+    if (stagedInn?.settlementId === settlement.id) {
+        lines.push(
+            'Inn services are selected but NOT paid for yet.',
+            ...stagedInn.choices.map(choice =>
+                `${choice.label} ×${choice.quantity}: ` +
+                    `${choice.unitPrice * choice.quantity}s.`
+            ),
+            `Total ${stagedInn.cost}s; projected purse ` +
+                `${stagedInn.purseAfter}s.`,
+            'Only after the players and innkeeper agree to these ' +
+                'services in the fiction, put ' +
+                '<AETHERMOOR:INN_AGREED> inside <plan>. ' +
+                'The engine will deduct the saved expense after this reply.'
         );
     }
 

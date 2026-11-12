@@ -6774,8 +6774,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   or paying a reward. Repeated reports do not reroll or republish it.
  *
  * - IMPLEMENTED — BETA PENDING: a GM-reported conversation about local work
- *   checks one stable contact once. No predetermined quest-giver roster,
- *   dialogue keyword, interaction button, or guaranteed quest.
+ *   checks one settlement-scoped contact once. The same local contact ID
+ *   may be used in a later settlement without reusing an earlier result.
+ *   No predetermined roster, interaction button, or guaranteed quest.
  * - Delayed handshake: player acts; the GM narrates only what is already
  *   known and privately reports an eligible interaction; the extension
  *   resolves and saves it after that reply; the NEXT relevant GM reply
@@ -11837,21 +11838,25 @@ function resolveSocialWorkReveal(test) {
     );
 
     const state = clone(test.state);
-    const contact =
-        state.socialOpportunities?.contacts?.[test.socialId];
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement,
+        'Work disclosure requires presence at a settlement'
+    );
+
+    const contact = state.socialOpportunities?.contacts?.[
+        `${settlement.id}:${test.socialId}`
+    ];
 
     assert(
         contact?.result === 'offer' && contact.questId,
-        'This contact has no locked work offer to reveal'
-    );
-
-    const settlement =
-        state.world?.settlements?.[contact.settlementId];
-
-    assert(
-        settlement?.locationId === state.currentLocationId &&
-        settlement.zone === state.zone,
-        'The crew must be at this contact’s settlement'
+        'This contact has no locked work offer to reveal here'
     );
 
     if (!contact.pendingQuest) {
@@ -11936,23 +11941,22 @@ function resolveSocialWorkOpportunity(test) {
         contacts: {},
         settlements: {}
     };
-
     const contacts = state.socialOpportunities.contacts;
     const counters = state.socialOpportunities.settlements;
 
-    if (contacts[test.socialId]) {
-        assert(
-            contacts[test.socialId].settlementId === settlement.id,
-            'This contact ID belongs to another settlement'
-        );
+    // A name such as "innkeeper" may recur in another settlement.
+    // Scope its saved identity without changing the GM's local ID.
+    const contactKey = `${settlement.id}:${test.socialId}`;
+    const existingContact = contacts[contactKey];
 
+    if (existingContact) {
         return {
             ok: true,
             created: false,
             action: 'check_work',
             socialId: test.socialId,
-            outcome: contacts[test.socialId].result,
-            questId: contacts[test.socialId].questId || null,
+            outcome: existingContact.result,
+            questId: existingContact.questId || null,
             state
         };
     }
@@ -11987,7 +11991,7 @@ function resolveSocialWorkOpportunity(test) {
         questId: null
     };
 
-    contacts[test.socialId] = contact;
+    contacts[contactKey] = contact;
     counter.checks++;
 
     if (!hasWork) {
@@ -19756,7 +19760,8 @@ function settlementWorkContextPacket(state, settlement) {
         '<AETHERMOOR:ASK_WORK social_id=stable-contact-id>',
         'Use one short ID made of letters, numbers, dots, underscores, ' +
             'colons, or hyphens. Reuse the SAME ID for that person in ' +
-            'this settlement; never use a fresh ID to ask them again.',
+            'this settlement; never use a fresh ID to ask them again. ' +
+            'IDs are local to this settlement.',
         'The extension checks that contact after this reply. Its saved ' +
             'result can inform the NEXT relevant reply. A check does not ' +
             'accept a quest or make every NPC a quest giver.',

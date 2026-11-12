@@ -16957,7 +16957,12 @@ function addAethermoorPanelStyles() {
             left: 50%;
             transform: translate(-50%, -50%);
             width: min(620px, calc(100vw - 24px));
-            max-height: min(75vh, 720px);
+            height: min(75vh, 720px);
+            min-width: min(320px, calc(100vw - 24px));
+            min-height: min(260px, calc(100vh - 24px));
+            max-width: calc(100vw - 24px);
+            max-height: calc(100vh - 24px);
+            resize: both;
             overflow: auto;
             box-sizing: border-box;
             padding: 12px;
@@ -16976,6 +16981,9 @@ function addAethermoorPanelStyles() {
             gap: 12px;
             padding-bottom: 8px;
             border-bottom: 1px solid #1f2730;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
         }
 
         .aethermoor-shop-title {
@@ -18158,6 +18166,31 @@ async function openAethermoorShopWindow() {
 
     refresh();
     document.body.appendChild(windowElement);
+
+    restoreAethermoorPanelGeometry(
+        windowElement,
+        AETHERMOOR_SHOP_GEOMETRY_KEY
+    );
+
+    enableAethermoorPanelDragging(
+        header,
+        windowElement,
+        AETHERMOOR_SHOP_GEOMETRY_KEY
+    );
+
+    // Resizing ends with a pointer release; dragging saves through its
+    // own handler. Neither operation stages or commits the trade.
+    windowElement.addEventListener('pointerup', () => {
+        setTimeout(() => {
+            if (windowElement.isConnected) {
+                saveAethermoorPanelGeometry(
+                    windowElement,
+                    AETHERMOOR_SHOP_GEOMETRY_KEY
+                );
+            }
+        }, 0);
+    });
+
     close.focus();
 }
 
@@ -18678,13 +18711,16 @@ function renderAethermoorTab(tab) {
 
 const AETHERMOOR_PANEL_GEOMETRY_KEY =
     'aethermoorMainPanelGeometry';
+const AETHERMOOR_SHOP_GEOMETRY_KEY =
+    'aethermoorShopWindowGeometry';
 
-function restoreAethermoorPanelGeometry(panel) {
+function restoreAethermoorPanelGeometry(
+    panel,
+    storageKey = AETHERMOOR_PANEL_GEOMETRY_KEY
+) {
     try {
         const saved = JSON.parse(
-            localStorage.getItem(
-                AETHERMOOR_PANEL_GEOMETRY_KEY
-            ) || 'null'
+            localStorage.getItem(storageKey) || 'null'
         );
 
         if (
@@ -18719,6 +18755,7 @@ function restoreAethermoorPanelGeometry(panel) {
 
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
+        panel.style.transform = 'none';
         panel.style.width = `${width}px`;
         panel.style.height = `${height}px`;
     } catch (error) {
@@ -18729,12 +18766,15 @@ function restoreAethermoorPanelGeometry(panel) {
     }
 }
 
-function saveAethermoorPanelGeometry(panel) {
+function saveAethermoorPanelGeometry(
+    panel,
+    storageKey = AETHERMOOR_PANEL_GEOMETRY_KEY
+) {
     const rect = panel.getBoundingClientRect();
 
     try {
         localStorage.setItem(
-            AETHERMOOR_PANEL_GEOMETRY_KEY,
+            storageKey,
             JSON.stringify({
                 left: rect.left,
                 top: rect.top,
@@ -18750,7 +18790,11 @@ function saveAethermoorPanelGeometry(panel) {
     }
 }
 
-function enableAethermoorPanelDragging(header, panel) {
+function enableAethermoorPanelDragging(
+    header,
+    panel,
+    storageKey = AETHERMOOR_PANEL_GEOMETRY_KEY
+) {
     header.addEventListener('pointerdown', event => {
         if (
             event.button !== 0 ||
@@ -18770,7 +18814,7 @@ function enableAethermoorPanelDragging(header, panel) {
         panel.style.top = `${rect.top}px`;
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
-
+        panel.style.transform = 'none';
         header.setPointerCapture(pointerId);
 
         function movePanel(moveEvent) {
@@ -18827,7 +18871,7 @@ function enableAethermoorPanelDragging(header, panel) {
                 header.releasePointerCapture(pointerId);
             }
 
-            saveAethermoorPanelGeometry(panel);
+            saveAethermoorPanelGeometry(panel, storageKey);
         }
 
         header.addEventListener(

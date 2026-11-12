@@ -11451,7 +11451,7 @@ function consumableDefinition(id) {
     return {
         name:
             `${basic ? 'Basic' : 'Mid-Tier'} Health Potion ` +
-            `(Zone ${zone}, ${basic ? 50 * zone : 120 * zone} HP)`,
+            `(${basic ? 50 * zone : 120 * zone} HP)`,
         type: 'potion',
         heal: (basic ? 50 : 120) * zone,
         buyPrice: (basic ? 10 : 20) * zone,
@@ -17376,7 +17376,38 @@ function addAethermoorPanelStyles() {
             color: #9caab8;
         }
 
+        .aethermoor-herbalist-window .aethermoor-vendor-name {
+            color: #4ade80;
+        }
+
+        .aethermoor-herbalist-window .aethermoor-vendor-row button {
+            min-width: 28px;
+            margin: 7px 6px 0 0;
+            padding: 3px 7px;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+        }
+
+        .aethermoor-herbalist-window .aethermoor-vendor-row button:hover {
+            border-color: #4da6ff;
+        }
+
+        .aethermoor-herbalist-window .aethermoor-vendor-row button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .aethermoor-herbalist-window .aethermoor-vendor-row span {
+            display: inline-block;
+            min-width: 30px;
+            text-align: center;
+            color: #ffd166;
+        }
+
         .aethermoor-vendor-bonus {
+
             color: #9caab8;
         }
 
@@ -18595,7 +18626,7 @@ async function openAethermoorHerbalistWindow() {
 
     const panel = document.createElement('section');
     panel.id = 'aethermoor_herbalist_window';
-    panel.className = 'aethermoor-shop';
+    panel.className = 'aethermoor-shop aethermoor-herbalist-window';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Herbalist trade');
 

@@ -6512,21 +6512,19 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta starts from reset state; path-only legacy journeys without saved
  *   route legs are not reconstructed.
  *
- * PLANNED — Diegetic vendor interaction
- * - When the crew speaks with a vendor, give the narrator the exact
- *   engine-established stock, variants, prices, and availability before
- *   it describes what is for sale. Do not invent vendor inventory.
- * - A fictional purchase must be reported to the extension with the
- *   selected stock identity and quantity. The engine validates the
- *   transaction, charges silver, and places the item in Bag Reserves.
- * - Equipping is a separate engine-recorded action. The engine owns worn
- *   slots, binding, derived stats, and HP adjustments; the narrator does
- *   not calculate or silently change them.
- * - Preserve the fictional conversation and handover. Neither opening a
- *   vendor menu nor hearing a price automatically buys or equips gear.
- * - Connect the existing vendor, inventory, and equip mechanics after
- *   the local NPC/quest-opportunity path; do not build this during the
- *   current social-opportunity pass.
+ * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
+ * - ASK_WARES opens the extension-rendered, two-sided trade window.
+ * - Clicks select stock variants, Bag Reserves, or worn gear. Close stages
+ *   a quote; Discard clears it. Neither action transfers possessions.
+ * - After fictional agreement, TRADE_AGREED revalidates the complete
+ *   basket and commits sales and purchases atomically. Sale proceeds may
+ *   fund purchases; the final purse cannot be negative.
+ * - Sold worn gear is removed and derived stats/HP are updated by the
+ *   engine. Purchased gear enters Bag Reserves unbound; equipping remains
+ *   a separate engine action.
+ * - A saved receipt prevents duplicate assistant notifications from
+ *   repeating the trade. Verify staging, stale-basket rejection, mixed
+ *   purchases and sales, worn-gear HP changes, and replay during beta.
  *
  * PARTIAL — Migration and validation
  * - Existing saves receive world, journey, potion, and quest migrations.
@@ -10790,6 +10788,210 @@ function resolveVendorSelection(test) {
     };
 }
 
+/*
+ * A trade is committed only after the fictional agreement is reported.
+ * Re-stage the saved choices against CURRENT state: the staged quote is
+ * never authority for prices, possession, equipment, or available silver.
+ * All changes happen on one clone and are saved as one operation.
+ *
+ * The assistant-message ID identifies the agreement event. Repeated
+ * received/rendered notifications return its saved receipt without
+ * transferring items or silver twice.
+ */
+function resolveVendorTradeCommit(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Trade agreement requires saved state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        typeof test.socialId === 'string' &&
+        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+        'Trade agreement requires an engine-issued message reference'
+    );
+
+    state.vendorTradeReceipts ||= {};
+
+    const previousReceipt =
+        state.vendorTradeReceipts[test.socialId];
+
+    if (previousReceipt) {
+        return {
+            ok: true,
+            created: false,
+            action: 'commit',
+            receipt: clone(previousReceipt),
+            state
+        };
+    }
+
+    const pending = state.vendorMenu?.pendingBasket;
+
+    assert(
+        pending &&
+        Array.isArray(pending.buy) &&
+        Array.isArray(pending.sell),
+        'No staged trade awaits agreement'
+    );
+
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.id === pending.settlementId &&
+        entry.id === state.vendorMenu.settlementId &&
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone &&
+        pending.zone === state.zone
+    );
+
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'The crew must still be at the shop to complete this trade'
+    );
+
+    /*
+     * Use the existing staging validator to re-price and re-identify
+     * the basket. Compare its complete quote, including item snapshots,
+     * before changing any possession or silver.
+     */
+    const checked = resolveVendorSelection({
+        state,
+        action: 'stage',
+        basket: {
+            buy: pending.buy.map(item => ({
+                number: item.number,
+                variant: item.variant
+            })),
+            sell: pending.sell.map(item =>
+                item.location === 'worn'
+                    ? {
+                        location: 'worn',
+                        owner: item.owner,
+                        slot: item.slot
+                    }
+                    : {
+                        location: 'bag',
+                        index: item.index
+                    }
+            )
+        }
+    });
+
+    assert(
+        JSON.stringify(checked.basket) === JSON.stringify(pending),
+        'Trade selection changed; reopen the shop and stage it again'
+    );
+
+    let working = checked.state;
+    const beforeStats = derived(working.crew);
+    const purseBefore = working.crew.purse;
+    const sold = pending.sell.map(choice => ({
+        name: choice.item.name || 'Unnamed gear',
+        location: choice.location,
+        owner: choice.owner || null,
+        slot: choice.slot || null,
+        proceeds: choice.proceeds
+    }));
+
+    for (const choice of pending.sell.filter(
+        item => item.location === 'worn'
+    )) {
+        delete working.crew.gear[choice.owner][choice.slot];
+    }
+
+    for (const choice of pending.sell
+        .filter(item => item.location === 'bag')
+        .sort((a, b) => b.index - a.index)) {
+        working.inventory.bagReserves.splice(choice.index, 1);
+    }
+
+    /*
+     * Sale proceeds can fund purchases in the same exchange. Purchases
+     * still go through the existing authoritative vendor item builder.
+     * None of these intermediate clones is saved separately.
+     */
+    working.crew.purse += pending.proceeds;
+
+    const bought = [];
+
+    for (const choice of pending.buy) {
+        const purchase = resolveVendorAction({
+            state: working,
+            action: 'buy',
+            zone: pending.zone,
+            owner: choice.owner,
+            slot: choice.slot,
+            variant: choice.variant
+        });
+
+        working = purchase.state;
+        bought.push(clone(purchase.item));
+    }
+
+    assert(
+        working.crew.purse === pending.purseAfter,
+        'Trade purse does not match the validated quote'
+    );
+
+    const afterStats = derived(working.crew);
+
+    /*
+     * Selling worn gear changes derived stats immediately on commit.
+     * Preserve the existing equip rule: adjust current HP by the change
+     * in maximum HP, then clamp. Purchases stay in Bag Reserves.
+     */
+    working.crew.qtik.hp = Math.max(
+        0,
+        Math.min(
+            afterStats.qtikMaxHp,
+            working.crew.qtik.hp +
+                afterStats.qtikMaxHp - beforeStats.qtikMaxHp
+        )
+    );
+
+    working.crew.tansy.hp = Math.max(
+        0,
+        Math.min(
+            afterStats.tansyMaxHp,
+            working.crew.tansy.hp +
+                afterStats.tansyMaxHp - beforeStats.tansyMaxHp
+        )
+    );
+
+    working.crew.qtik.maxHp = afterStats.qtikMaxHp;
+    working.crew.qtik.def = afterStats.def;
+    working.crew.qtik.regen = afterStats.regen;
+    working.crew.tansy.maxHp = afterStats.tansyMaxHp;
+
+    const receipt = {
+        id: test.socialId,
+        settlementId: settlement.id,
+        bought,
+        sold,
+        cost: pending.cost,
+        proceeds: pending.proceeds,
+        purseBefore,
+        purseAfter: working.crew.purse,
+        derivedBefore: beforeStats,
+        derivedAfter: afterStats
+    };
+
+    working.vendorMenu.pendingBasket = null;
+    working.vendorTradeReceipts[test.socialId] = clone(receipt);
+
+    return {
+        ok: true,
+        created: true,
+        action: 'commit',
+        receipt,
+        state: working
+    };
+}
+
 function resolveVendorAction(test) {
 
     assert(
@@ -12869,9 +13071,11 @@ function resolveBatch(args) {
                 case 'vendor':
                     result = test.action === 'open'
                         ? resolveVendorMenuOpen(test)
-                        : ['stage', 'discard'].includes(test.action)
-                            ? resolveVendorSelection(test)
-                            : resolveVendorAction(test);
+                        : test.action === 'commit'
+                            ? resolveVendorTradeCommit(test)
+                            : ['stage', 'discard'].includes(test.action)
+                                ? resolveVendorSelection(test)
+                                : resolveVendorAction(test);
                     break;
                     
                 case 'shadows':
@@ -14338,6 +14542,28 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
+function vendorTradeNarrationPacket(receipt) {
+    return [
+        'PRIVATE COMPLETED TRADE RESULT — do not recite this heading.',
+        `Settlement: ${receipt.settlementId}.`,
+        `Silver received for sales: ${receipt.proceeds}s.`,
+        `Silver paid for purchases: ${receipt.cost}s.`,
+        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
+        ...receipt.sold.map(item =>
+            `Sold: ${item.name} for ${item.proceeds}s` +
+                (item.location === 'worn' ? ' (removed from worn gear).' : '.')
+        ),
+        ...receipt.bought.map(item =>
+            `Purchased: ${item.name} (${item.rarity}, Stat ` +
+                `${item.rawStat}) — placed in Bag Reserves, NOT equipped.`
+        ),
+        'The agreed exchange has already been applied once. Continue ' +
+            'naturally from the handover; do not charge, grant, or sell ' +
+            'these items again.',
+        'Do not mention the tag, extension, or state management.'
+    ].join('\n');
+}
+
 function socialWorkNarrationPacket(result) {
     if (result.outcome === 'offer') {
         return [
@@ -15014,10 +15240,11 @@ async function runStoredMechanic(args) {
                 ) ||
                 (
                     oneCase.kind === 'vendor' &&
-                    oneCase.action === 'open'
+                    ['open', 'commit'].includes(oneCase.action)
                 )
             ) &&
             caseResult.created === false
+
         ) {
             const { state: _saved, ...visibleResult } = caseResult;
             return {
@@ -15158,6 +15385,12 @@ async function runStoredMechanic(args) {
                         ? [travelNarrationPacket(caseResult)]
                         : [])
                 ].join('\n\n')
+
+            : batch &&
+              oneCase?.kind === 'vendor' &&
+              oneCase.action === 'commit' &&
+              caseResult.created
+                ? vendorTradeNarrationPacket(caseResult.receipt)
 
             : batch &&
               oneCase?.kind === 'social' &&
@@ -16012,6 +16245,7 @@ function registerTools() {
                                     'stock',
                                     'stage',
                                     'discard',
+                                    'commit',
                                     'buy',
                                     'spend',
                                     'earn',
@@ -17598,8 +17832,9 @@ async function openAethermoorShopWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Zone ${state.zone} · Purse: ${state.crew.purse}s\n` +
-        'Selection only — trading is not yet enabled. ' +
-        'Closing does not buy, sell, or equip.';
+        'Select either side of the trade. Close stages a quote; it ' +
+        'does not buy, sell, or equip. Agree with the merchant in ' +
+        'the story to complete the exchange.';
     windowElement.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -17659,12 +17894,13 @@ async function openAethermoorShopWindow() {
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
-        for (const { button, key, price } of buyButtons) {
+        for (const { button, key, price, number, variant } of buyButtons) {
             const selected = selectedBuys.get(key);
-            button.setAttribute(
-                'aria-pressed',
-                String(selected?.button === button)
-            );
+            const isSelected =
+                selected?.number === number &&
+                selected?.variant === variant;
+
+            button.setAttribute('aria-pressed', String(isSelected));
             button.disabled =
                 !selected &&
                 remaining < price;
@@ -17726,7 +17962,9 @@ async function openAethermoorShopWindow() {
             buyButtons.push({
                 button,
                 key,
-                price: entry.price
+                price: entry.price,
+                number: entry.number,
+                variant: option.variant
             });
         }
     }
@@ -17747,10 +17985,15 @@ async function openAethermoorShopWindow() {
             `${item.name || label} · +${proceeds}s\n` +
             `${label} · ${item.rarity || 'Common'} · Stat ${rawStat}`;
 
-        button.addEventListener('click', () => {
-            if (selectedSales.has(key)) {
-                selectedSales.delete(key);
-            } else {
+            button.addEventListener('click', () => {
+                const selected = selectedBuys.get(key);
+
+                if (
+                    selected?.number === entry.number &&
+                    selected?.variant === option.variant
+                ) {
+                    selectedBuys.delete(key);
+                } else {
                 selectedSales.set(key, {
                     ...choice,
                     proceeds
@@ -20241,8 +20484,15 @@ function extractAethermoorQuestEvents(text) {
             });
         }
 
-        const revealPattern =
+        for (const _match of plan[1].matchAll(
+            /<AETHERMOOR:TRADE_AGREED\s*>/g
+        )) {
+            events.push({
+                event: 'trade_agreed'
+            });
+        }
 
+        const revealPattern =
             /<AETHERMOOR:REVEAL_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
 
         for (const match of plan[1].matchAll(revealPattern)) {
@@ -20467,6 +20717,23 @@ async function processAethermoorAssistantEvents(data) {
                 );
 
                 await openAethermoorShopWindow();
+            } else if (event.event === 'trade_agreed') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    messageId,
+                    'Trade agreement awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_vendor_trade_agreement',
+                        kind: 'vendor',
+                        action: 'commit',
+                        socialId: messageId
+                    }]
+                });
             } else if (event.event === 'delivered') {
                 const stateResult = await readStoredCombatState();
                 const quest = findQuestById(
@@ -20658,6 +20925,28 @@ function settlementWorkContextPacket(state, settlement) {
             'cannot independently identify a returning NPC from prose.',
         'Do not mention the tag, roll, or extension in story prose.'
     ];
+
+    const stagedTrade = state.vendorMenu?.pendingBasket;
+
+    if (
+        stagedTrade?.settlementId === settlement.id &&
+        stagedTrade.zone === state.zone
+    ) {
+        lines.push(
+            'A trade selection is staged, but NOTHING has been sold, ' +
+                'bought, paid, or equipped yet.',
+            `Merchant asks ${stagedTrade.cost}s; crew offers items ` +
+                `valued at ${stagedTrade.proceeds}s. ` +
+                `Projected purse after exchange: ${stagedTrade.purseAfter}s.`,
+            'Only if the players agree to this staged exchange AND the ' +
+                'merchant agrees in the fiction, place this exact tag ' +
+                'inside the disposable <plan> block:',
+            '<AETHERMOOR:TRADE_AGREED>',
+            'The tag supplies no prices or item identities. The engine ' +
+                'rechecks the saved basket and commits it atomically ' +
+                'after this reply. Do not claim an item is equipped.'
+        );
+    }
 
     for (const contact of contacts) {
          if (contact.result === 'offer') {

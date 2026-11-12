@@ -14879,7 +14879,7 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
-funfunction herbalistTradeNarrationPacket(receipt) {
+function herbalistTradeNarrationPacket(receipt) {
     return [
         'PRIVATE HERBALIST TRADE RESULT — do not recite this heading.',
         `Silver spent: ${receipt.cost}s; received: ` +
@@ -14897,7 +14897,6 @@ funfunction herbalistTradeNarrationPacket(receipt) {
 }
 
 function vendorTradeNarrationPacket(receipt) {
-ction vendorTradeNarrationPacket(receipt) {
     return [
         'PRIVATE COMPLETED TRADE RESULT — do not recite this heading.',
         `Settlement: ${receipt.settlementId}.`,
@@ -15585,6 +15584,7 @@ async function runStoredMechanic(args) {
         // saving another revision or replacing a pending handoff.
         if (
             batch &&
+            caseResult.created === false &&
             (
                 oneCase.kind === 'travel' ||
                 (
@@ -15594,14 +15594,12 @@ async function runStoredMechanic(args) {
                     )
                 ) ||
                 (
-                (
                     ['vendor', 'herbalist'].includes(oneCase.kind) &&
                     ['open', 'commit'].includes(oneCase.action)
                 )
-            ) &&
-            caseResult.created === false
-
+            )
         ) {
+
             const { state: _saved, ...visibleResult } = caseResult;
             return {
                 ok: true,

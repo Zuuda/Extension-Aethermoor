@@ -6532,8 +6532,29 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   purchases and sales, worn-gear HP changes, and replay during beta.
  *
  * IMPLEMENTED — BETA PENDING: Diegetic herbalist trade
- * - Current-zone Basic and Mid-Tier healing grades plus fixed Cleansing
- *   Tonic appear in a separate movable, resizable potion window.
+ *
+ * IMPLEMENTED — BETA PENDING: Inventory readout and basic item actions
+ * - Inventory displays saved potions, Bag Reserves, and worn gear.
+ * - Potion labels carry their authoritative healing value; redundant
+ *   explanatory text is omitted.
+ * - Eligible Bag Reserve gear can be equipped through the existing engine
+ *   action. Healing potions can be used outside combat on a selected
+ *   protagonist. Cleansing Tonic remains combat-only for now.
+ * - Verify equip replacement, HP/stat changes, potion use, and duplicate
+ *   button events during beta.
+ *
+ * PLANNED — Currency presentation
+ * - Centralize silver formatting before introducing denominations such as
+ *   100 silver = 1 gold. Keep saved currency in integer silver internally.
+ * - Decide the next denomination and conversion display before adding it to
+ *   vendor, herbalist, quest, and expense packets.
+ *
+ * DEFERRED — Aether-Trade window
+ * - Reuse the independent window pattern for Trade-Stream listings:
+ *   pending sales, sold/unsold receipts, returned items, proceeds, and
+ *   eventually purchases.
+ * - Keep listing settlement and NPC/vendor purchases as separate saved
+ *   mechanics until their handshake contracts are authored.
  * - Owned bottles, including older grades, may be sold. Quantities show
  *   projected silver; closing stages but does not exchange anything.
  * - Fictional agreement commits the revalidated buy/sell basket once.
@@ -17381,7 +17402,79 @@ function addAethermoorPanelStyles() {
             color: #9caab8;
         }
 
+        .aethermoor-inventory-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 0;
+            border-top: 1px solid #1f2730;
+        }
+
+        .aethermoor-inventory-item:first-child {
+            border-top: 0;
+        }
+
+        .aethermoor-inventory-item-main {
+            min-width: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-inventory-item-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 5px;
+        }
+
+        .aethermoor-inventory-item-actions button {
+            padding: 4px 7px;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+            font: inherit;
+            white-space: nowrap;
+        }
+
+        .aethermoor-inventory-item-actions button:hover,
+        .aethermoor-inventory-item-actions button:focus-visible {
+            border-color: #4da6ff;
+            color: #ffffff;
+        }
+
+        .aethermoor-rarity-common {
+            color: #ffffff;
+        }
+
+        .aethermoor-rarity-uncommon,
+        .aethermoor-inventory-gain {
+            color: #4ade80;
+        }
+
+        .aethermoor-rarity-rare {
+            color: #38bdf8;
+        }
+
+        .aethermoor-rarity-epic {
+            color: #c084fc;
+        }
+
+        .aethermoor-rarity-legendary {
+            color: #fbbf24;
+        }
+
+        .aethermoor-inventory-loss {
+            color: #f87171;
+        }
+
+        .aethermoor-inventory-neutral {
+            color: #9caab8;
+        }
+
         .aethermoor-herbalist-window .aethermoor-vendor-name {
+
             color: #4ade80;
         }
 
@@ -17765,6 +17858,8 @@ async function runAethermoorPanelCase(host, tab, caseData, successText) {
 
         if (tab === 'quests') {
             await renderQuestTab(host);
+        } else if (tab === 'inventory') {
+            await renderInventoryTab(host);
         } else {
             await renderWorldTab(host);
         }
@@ -18928,61 +19023,297 @@ async function renderInventoryTab(host) {
         )
     );
 
-    const consumables = (inventory.consumables || [])
-        .filter(item => item?.quantity > 0)
-        .map(item => {
-            const definition = consumableDefinition(item.id);
-
-            return `${definition?.name || item.name || item.id} ` +
-                `×${item.quantity}` +
-                (definition?.heal
-                    ? ` · Restores up to ${definition.heal} HP`
-                    : '');
-        });
-
-    host.appendChild(
-        makeAethermoorSection(
-            'POTIONS & TONICS',
-            consumables.join('\n') || 'None in shared stock.',
-            'world'
-        )
+    const potionSection = makeAethermoorSection(
+        'POTIONS & TONICS',
+        'Saved consumables available outside combat.',
+        'world'
     );
+
+    const consumableEntries = (inventory.consumables || [])
+        .filter(item => item?.quantity > 0);
+
+    if (consumableEntries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'aethermoor-ui-text';
+        empty.textContent = 'None in shared stock.';
+        potionSection.appendChild(empty);
+    }
+
+    for (const item of consumableEntries) {
+        const definition = consumableDefinition(item.id);
+
+        const row = document.createElement('div');
+        row.className = 'aethermoor-inventory-item';
+
+        const main = document.createElement('div');
+        main.className = 'aethermoor-inventory-item-main';
+
+        const name = document.createElement('div');
+        name.className =
+            `aethermoor-vendor-name ${rarityClass(item)}`;
+        name.textContent =
+            `${definition?.name || item.name || item.id} ×${item.quantity}`;
+
+        main.appendChild(name);
+
+        if (definition?.type === 'tonic') {
+            const detail = document.createElement('div');
+            detail.className = 'aethermoor-vendor-detail';
+            detail.textContent = 'Cleansing tonic · combat use';
+            main.appendChild(detail);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'aethermoor-inventory-item-actions';
+
+        if (definition?.type === 'potion') {
+            for (const [recipient, label] of [
+                ['qtik', "Use on Q'tik"],
+                ['tansy', 'Use on Tansy']
+            ]) {
+                const use = document.createElement('button');
+                use.type = 'button';
+                use.textContent = label;
+
+                use.addEventListener('click', async () => {
+                    use.disabled = true;
+
+                    await runAethermoorPanelCase(
+                        host,
+                        'inventory',
+                        {
+                            name:
+                                `use_${item.id}_${recipient}`,
+                            kind: 'consumable',
+                            action: 'use',
+                            item: item.id,
+                            quantity: 1,
+                            recipient
+                        },
+                        `${definition.name} used on ${
+                            recipient === 'qtik'
+                                ? "Q'tik"
+                                : 'Tansy'
+                        }.`
+                    );
+                });
+
+                actions.appendChild(use);
+            }
+        } else {
+            const note = document.createElement('div');
+            note.className = 'aethermoor-inventory-neutral';
+            note.textContent = 'No outside-combat use yet.';
+            actions.appendChild(note);
+        }
+
+        row.append(main, actions);
+        potionSection.appendChild(row);
+    }
+
+    host.appendChild(potionSection);
 
     const bag = inventory.bagReserves || [];
 
-    host.appendChild(
-        makeAethermoorSection(
-            `BAG RESERVES · ${bag.length}`,
-            bag.map((item, index) =>
-                `${index + 1}. ${item.name || 'Unnamed gear'} · ` +
-                `${item.rarity || 'Rarity unknown'} · ` +
-                `Stat ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
-                `${item.bound ? 'Bound' : 'Unbound'}`
-            ).join('\n') || 'No gear in Bag Reserves.',
-            'world'
-        )
+    const bagSection = makeAethermoorSection(
+        `BAG RESERVES · ${bag.length}`,
+        bag.length
+            ? 'Unbound gear available to equip or trade.'
+            : 'No gear in Bag Reserves.',
+        'world'
     );
+
+    const currentGear = gear;
+
+    function rarityClass(item) {
+        return `aethermoor-rarity-${
+            String(item.rarity || 'common').toLowerCase()
+        }`;
+    }
+
+    function itemComparison(item) {
+        if (
+            !item.owner ||
+            !item.slot ||
+            !['tansy', 'qtik'].includes(item.owner)
+        ) {
+            return null;
+        }
+
+        const worn =
+            currentGear[item.owner]?.[item.slot] || null;
+
+        const candidateBonus = gearBonus(
+            item.owner,
+            item.slot,
+            {
+                stat: item.rawStat,
+                variant: item.variant
+            }
+        );
+
+        const wornBonus = gearBonus(
+            item.owner,
+            item.slot,
+            worn
+        );
+
+        const differences = [];
+
+        for (const [key, label] of [
+            ['atk', 'ATK'],
+            ['def', 'DEF'],
+            ['hp', 'HP'],
+            ['luk', 'LUK']
+        ]) {
+            const difference =
+                Number(candidateBonus[key] || 0) -
+                Number(wornBonus[key] || 0);
+
+            if (difference !== 0) {
+                differences.push({
+                    difference,
+                    label
+                });
+            }
+        }
+
+        if (differences.length === 0) {
+            return {
+                text: 'Equal to worn gear',
+                className: 'aethermoor-inventory-neutral'
+            };
+        }
+
+        return {
+            text: differences.map(entry =>
+                `${entry.difference > 0 ? '+' : ''}` +
+                    `${entry.difference} ${entry.label}`
+            ).join(' · '),
+            className: differences.every(
+                entry => entry.difference >= 0
+            )
+                ? 'aethermoor-inventory-gain'
+                : differences.every(
+                    entry => entry.difference <= 0
+                )
+                    ? 'aethermoor-inventory-loss'
+                    : 'aethermoor-inventory-neutral'
+        };
+    }
+
+    for (const [index, item] of bag.entries()) {
+        const row = document.createElement('div');
+        row.className = 'aethermoor-inventory-item';
+
+        const main = document.createElement('div');
+        main.className = 'aethermoor-inventory-item-main';
+
+        const name = document.createElement('div');
+        name.className =
+            `aethermoor-vendor-name ${rarityClass(item)}`;
+        name.textContent =
+            item.name || 'Unnamed gear';
+
+        const detail = document.createElement('div');
+        detail.className = 'aethermoor-vendor-detail';
+        detail.textContent =
+            `Tier ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
+            `${item.bound ? 'Bound' : 'Unbound'}`;
+
+        main.append(name, detail);
+
+        const comparison = itemComparison(item);
+
+        if (comparison) {
+            const comparisonLine = document.createElement('div');
+            comparisonLine.className = comparison.className;
+            comparisonLine.textContent = comparison.text;
+            main.appendChild(comparisonLine);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'aethermoor-inventory-item-actions';
+
+        if (
+            item.owner &&
+            item.slot &&
+            item.classRestricted !== true
+        ) {
+            const equip = document.createElement('button');
+            equip.type = 'button';
+            equip.textContent = 'Equip';
+
+            equip.addEventListener('click', async () => {
+                equip.disabled = true;
+
+                await runAethermoorPanelCase(
+                    host,
+                    'inventory',
+                    {
+                        name: `equip_inventory_item_${index}`,
+                        kind: 'gear',
+                        action: 'equip',
+                        itemIndex: index
+                    },
+                    'Gear equipped.'
+                );
+            });
+
+            actions.appendChild(equip);
+        }
+
+        row.append(main, actions);
+        bagSection.appendChild(row);
+    }
+
+    host.appendChild(bagSection);
 
     for (const [owner, label] of [
         ['tansy', 'TANSY'],
         ['qtik', "Q'TIK"]
     ]) {
+        const wornSection = makeAethermoorSection(
+            `${label} · WORN GEAR`,
+            'Currently equipped items.',
+            'world'
+        );
+
         const equipped = Object.entries(gear[owner] || {})
             .filter(([, item]) =>
                 item && Number(item.stat ?? item.rawStat) > 0
-            )
-            .map(([slot, item]) =>
-                `${slot}: ${item.name || 'Unnamed gear'} · ` +
-                `Stat ${item.stat ?? item.rawStat}`
             );
 
-        host.appendChild(
-            makeAethermoorSection(
-                `${label} · WORN GEAR`,
-                equipped.join('\n') || 'No gear equipped.',
-                'world'
-            )
-        );
+        if (equipped.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'aethermoor-ui-text';
+            empty.textContent = 'No gear equipped.';
+            wornSection.appendChild(empty);
+        }
+
+        for (const [slot, item] of equipped) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const name = document.createElement('div');
+            name.className =
+                `aethermoor-vendor-name ${rarityClass(item)}`;
+            name.textContent = item.name || 'Unnamed gear';
+
+            const detail = document.createElement('div');
+            detail.className = 'aethermoor-vendor-detail';
+            detail.textContent =
+                `${slot} · Tier ${item.stat ?? item.rawStat}`;
+
+            main.append(name, detail);
+            row.appendChild(main);
+            wornSection.appendChild(row);
+        }
+
+        host.appendChild(wornSection);
     }
 
     const listings = inventory.activeTradeListings || [];

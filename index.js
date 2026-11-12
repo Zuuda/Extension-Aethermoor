@@ -17750,6 +17750,8 @@ function renderCrewKnowledge(state) {
  * before a later engine operation may exchange money or gear.
  */
 async function openAethermoorShopWindow() {
+    addAethermoorPanelStyles();
+
     const metadata = getContext().chatMetadata;
     const snapshot = await readStoredCombatState();
 
@@ -17944,19 +17946,18 @@ async function openAethermoorShopWindow() {
                 `Equipped Stat ${entry.equippedStat}\n` +
                 (effects.join(' · ') || 'No stat bonus');
 
-            button.addEventListener('click', () => {
-                if (selectedBuys.get(key)?.button === button) {
-                    selectedBuys.delete(key);
-                } else {
-                    selectedBuys.set(key, {
-                        number: entry.number,
-                        variant: option.variant,
-                        button
-                    });
-                }
+        button.addEventListener('click', () => {
+            if (selectedSales.has(key)) {
+                selectedSales.delete(key);
+            } else {
+                selectedSales.set(key, {
+                    ...choice,
+                    proceeds
+                });
+            }
 
-                refresh();
-            });
+            refresh();
+        });
 
             merchant.appendChild(button);
             buyButtons.push({

@@ -10611,6 +10611,185 @@ function resolveVendorMenuOpen(test) {
     };
 }
 
+/*
+ * A staged trade is a quote, not a transaction. Preserve exactly which
+ * stock options and owned items were selected, along with a snapshot of
+ * the owned items. A later commit must revalidate everything against
+ * current state; a saved quote is never authority to grant an item.
+ */
+function resolveVendorSelection(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Vendor selection requires saved state'
+    );
+
+    const state = clone(test.state);
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.id === state.vendorMenu?.settlementId &&
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Trade selection requires presence at the open shop'
+    );
+
+    if (test.action === 'discard') {
+        state.vendorMenu.pendingBasket = null;
+
+        return {
+            ok: true,
+            action: 'discard',
+            state
+        };
+    }
+
+    assert(
+        test.action === 'stage',
+        `Unsupported vendor selection action: ${test.action}`
+    );
+
+    const basket = test.basket;
+
+    assert(
+        basket &&
+        Array.isArray(basket.buy) &&
+        Array.isArray(basket.sell) &&
+        basket.buy.length + basket.sell.length > 0,
+        'Select at least one item to stage a trade'
+    );
+
+    const stock = resolveVendorAction({
+        action: 'stock',
+        zone: state.zone,
+        state
+    });
+
+    const seenBuys = new Set();
+    const seenSales = new Set();
+
+    const buy = basket.buy.map(choice => {
+        const entry = stock.catalog.find(
+            item => item.number === choice.number
+        );
+
+        assert(entry, `Unknown shop row ${choice.number}`);
+        assert(
+            entry.variants.some(option =>
+                option.variant === choice.variant
+            ),
+            `Invalid tuning for shop row ${choice.number}`
+        );
+
+        const key = `${entry.owner}:${entry.slot}`;
+
+        assert(
+            !seenBuys.has(key),
+            `Select only one replacement for ${key}`
+        );
+
+        seenBuys.add(key);
+
+        return {
+            number: entry.number,
+            owner: entry.owner,
+            slot: entry.slot,
+            variant: choice.variant,
+            price: entry.price
+        };
+    });
+
+    const sell = basket.sell.map(choice => {
+        const key = choice.location === 'worn'
+            ? `worn:${choice.owner}:${choice.slot}`
+            : `bag:${choice.index}`;
+
+        assert(!seenSales.has(key), `Duplicate sale: ${key}`);
+        seenSales.add(key);
+
+        const item = choice.location === 'worn'
+            ? state.crew.gear?.[choice.owner]?.[choice.slot]
+            : choice.location === 'bag'
+                ? state.inventory?.bagReserves?.[choice.index]
+                : null;
+
+        assert(
+            item &&
+            Number.isInteger(item.rawStat ?? item.stat) &&
+            (item.rawStat ?? item.stat) > 0,
+            `Selected item is unavailable: ${key}`
+        );
+
+        return {
+            location: choice.location,
+            ...(choice.location === 'worn'
+                ? { owner: choice.owner, slot: choice.slot }
+                : { index: choice.index }),
+            item: clone(item),
+            proceeds: 2 * (item.rawStat ?? item.stat)
+        };
+    });
+
+    const cost = buy.reduce(
+        (total, item) => total + item.price,
+        0
+    );
+    const proceeds = sell.reduce(
+        (total, item) => total + item.proceeds,
+        0
+    );
+    const purseAfter = state.crew.purse + proceeds - cost;
+
+    assert(
+        purseAfter >= 0,
+        `Trade would leave the crew ${-purseAfter}s short`
+    );
+
+    /*
+     * Buying an equal-or-worse item remains forbidden unless the
+     * currently worn item in that slot is part of this exchange.
+     */
+    for (const choice of buy) {
+        const wornStat = Number(
+            state.crew.gear?.[choice.owner]?.[choice.slot]?.stat || 0
+        );
+        const sellingWorn = sell.some(item =>
+            item.location === 'worn' &&
+            item.owner === choice.owner &&
+            item.slot === choice.slot
+        );
+
+        assert(
+            sellingWorn || wornStat < stock.stat,
+            `${choice.owner} ${choice.slot} already meets the vendor floor`
+        );
+    }
+
+    state.vendorMenu.pendingBasket = {
+        id: `${state.vendorMenu.inquiryId}-trade`,
+        settlementId: settlement.id,
+        zone: state.zone,
+        buy,
+        sell,
+        cost,
+        proceeds,
+        purseBefore: state.crew.purse,
+        purseAfter
+    };
+
+    return {
+        ok: true,
+        action: 'stage',
+        basket: clone(state.vendorMenu.pendingBasket),
+        state
+    };
+}
+
 function resolveVendorAction(test) {
 
     assert(
@@ -12687,13 +12866,13 @@ function resolveBatch(args) {
                             ? 'list'
                             : test.action
                     });
-                    break;
                 case 'vendor':
                     result = test.action === 'open'
                         ? resolveVendorMenuOpen(test)
-                        : resolveVendorAction(test);
+                        : ['stage', 'discard'].includes(test.action)
+                            ? resolveVendorSelection(test)
+                            : resolveVendorAction(test);
                     break;
-
                     
                 case 'shadows':
                     result = resolveShadowDeckAction(test);
@@ -15831,6 +16010,8 @@ function registerTools() {
                                     'list',
                                     'settle',
                                     'stock',
+                                    'stage',
+                                    'discard',
                                     'buy',
                                     'spend',
                                     'earn',
@@ -15894,7 +16075,14 @@ function registerTools() {
                                     'Fully specified gear item to place unbound in Bag Reserves'
                             },
 
+                            basket: {
+                                type: 'object',
+                                description:
+                                    'Engine-validated pending vendor selection; not a purchase'
+                            },
+
                             recipient: {
+
                                 type: 'string',
                                 enum: ['qtik', 'tansy']
                             },
@@ -16596,6 +16784,73 @@ function addAethermoorPanelStyles() {
             color: #f87171;
         }
 
+        .aethermoor-trade-columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .aethermoor-trade-column {
+            min-width: 0;
+            padding: 10px;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.25);
+        }
+
+        .aethermoor-trade-column > h3 {
+            margin: 0 0 8px;
+            color: #ffffff;
+            font-size: 12px;
+        }
+
+        .aethermoor-trade-option {
+            display: block;
+            width: 100%;
+            margin-top: 6px;
+            padding: 8px;
+            color: #d0d7de;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            text-align: left;
+            white-space: pre-wrap;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        .aethermoor-trade-option:hover,
+        .aethermoor-trade-option:focus-visible {
+            border-color: #4da6ff;
+        }
+
+        .aethermoor-trade-option[aria-pressed="true"] {
+            border-color: #4ade80;
+            box-shadow: 0 0 0 1px #4ade80,
+                0 0 12px rgba(74, 222, 128, 0.16);
+        }
+
+        .aethermoor-trade-option:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .aethermoor-trade-ledger {
+            position: sticky;
+            bottom: -12px;
+            margin: 12px -12px -12px;
+            padding: 12px;
+            color: #ffd166;
+            background: #101419;
+            border-top: 1px solid #2b3542;
+            box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.45);
+        }
+
+        @media (max-width: 600px) {
+            .aethermoor-trade-columns {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .aethermoor-knowledge {
 
             padding: 10px;
@@ -17255,9 +17510,10 @@ function renderCrewKnowledge(state) {
 }
 
 /*
- * ASK_WARES opens this independent read-only window after the saved
- * operation succeeds. It reads the authoritative stock at render time.
- * It does not buy, equip, or create a vendor inventory record.
+ * A shop visit presents both sides of a possible exchange. Clicks are
+ * local UI selection only. Close stages a quote; Discard cancels it.
+ * Neither action commits a trade. The player must agree in the fiction
+ * before a later engine operation may exchange money or gear.
  */
 async function openAethermoorShopWindow() {
     const metadata = getContext().chatMetadata;
@@ -17288,6 +17544,31 @@ async function openAethermoorShopWindow() {
         state
     });
 
+    const selectedBuys = new Map();
+    const selectedSales = new Map();
+    const saved = state.vendorMenu.pendingBasket;
+
+    if (saved?.settlementId === settlement.id) {
+        for (const item of saved.buy || []) {
+            selectedBuys.set(
+                `${item.owner}:${item.slot}`,
+                {
+                    number: item.number,
+                    variant: item.variant
+                }
+            );
+        }
+
+        for (const item of saved.sell || []) {
+            selectedSales.set(
+                item.location === 'worn'
+                    ? `worn:${item.owner}:${item.slot}`
+                    : `bag:${item.index}`,
+                item
+            );
+        }
+    }
+
     document.getElementById('aethermoor_shop_window')?.remove();
 
     const windowElement = document.createElement('section');
@@ -17296,7 +17577,7 @@ async function openAethermoorShopWindow() {
     windowElement.setAttribute('role', 'dialog');
     windowElement.setAttribute(
         'aria-label',
-        `Vendor stock at ${settlement.label}`
+        `Trade at ${settlement.label}`
     );
 
     const header = document.createElement('div');
@@ -17304,25 +17585,98 @@ async function openAethermoorShopWindow() {
 
     const title = document.createElement('div');
     title.className = 'aethermoor-shop-title';
-    title.textContent =
-        `System Log // Vendor Stock · ${settlement.label}`;
+    title.textContent = `System Log // Trade · ${settlement.label}`;
 
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close';
-    close.addEventListener('click', () => windowElement.remove());
-
+    close.textContent = 'Close & stage selection';
     header.append(title, close);
     windowElement.appendChild(header);
 
     const summary = document.createElement('div');
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
-        `Zone ${state.zone} · Purse: ${state.crew.purse}s · ` +
-        `Stock floor: Stat ${stock.stat}\n` +
-        'Viewing wares does not buy or equip anything.';
+        `Zone ${state.zone} · Purse: ${state.crew.purse}s\n` +
+        'Selection only — trading is not yet enabled. ' +
+        'Closing does not buy, sell, or equip.';
     windowElement.appendChild(summary);
+
+    const columns = document.createElement('div');
+    columns.className = 'aethermoor-trade-columns';
+
+    const merchant = document.createElement('section');
+    merchant.className = 'aethermoor-trade-column';
+    const merchantTitle = document.createElement('h3');
+    merchantTitle.textContent = 'MERCHANT OFFERS';
+    merchant.appendChild(merchantTitle);
+
+    const crew = document.createElement('section');
+    crew.className = 'aethermoor-trade-column';
+    const crewTitle = document.createElement('h3');
+    crewTitle.textContent = 'CREW OFFERS';
+    crew.appendChild(crewTitle);
+
+    columns.append(merchant, crew);
+    windowElement.appendChild(columns);
+
+    const ledger = document.createElement('div');
+    ledger.className = 'aethermoor-trade-ledger';
+    windowElement.appendChild(ledger);
+
+    const buyButtons = [];
+    const saleButtons = [];
+
+    function totals() {
+        const cost = [...selectedBuys.values()].reduce(
+            (total, choice) => total +
+                stock.catalog.find(
+                    entry => entry.number === choice.number
+                ).price,
+            0
+        );
+
+        const proceeds = [...selectedSales.values()].reduce(
+            (total, choice) => total + choice.proceeds,
+            0
+        );
+
+        return {
+            cost,
+            proceeds,
+            remaining: state.crew.purse + proceeds - cost
+        };
+    }
+
+    function refresh() {
+        const { cost, proceeds, remaining } = totals();
+
+        ledger.textContent =
+            `Crew offers +${proceeds}s · Merchant offers −${cost}s\n` +
+            `Projected purse: ${remaining}s · ` +
+            'No transaction has occurred.';
+
+        ledger.style.color =
+            remaining < 0 ? '#f87171' : '#ffd166';
+
+        for (const { button, key, price } of buyButtons) {
+            const selected = selectedBuys.get(key);
+            button.setAttribute(
+                'aria-pressed',
+                String(selected?.button === button)
+            );
+            button.disabled =
+                !selected &&
+                remaining < price;
+        }
+
+        for (const { button, key } of saleButtons) {
+            button.setAttribute(
+                'aria-pressed',
+                String(selectedSales.has(key))
+            );
+        }
+    }
 
     const bonusNames = {
         crewAtk: 'Crew ATK',
@@ -17333,51 +17687,176 @@ async function openAethermoorShopWindow() {
     };
 
     for (const entry of stock.catalog) {
-        const row = document.createElement('div');
-        row.className = 'aethermoor-vendor-row';
-
-        const price = document.createElement('span');
-        price.className = 'aethermoor-vendor-price';
-        price.textContent = `${entry.price}s`;
-
-        const name = document.createElement('div');
-        name.className = 'aethermoor-vendor-name';
-        name.textContent =
-            `${entry.number}. ` +
-            `${entry.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
-            entry.slotName;
-        name.appendChild(price);
-        row.appendChild(name);
-
-        const comparison = document.createElement('div');
-        comparison.className = entry.skip
-            ? 'aethermoor-vendor-skip'
-            : 'aethermoor-vendor-detail';
-        comparison.textContent =
-            `Common · Stat ${entry.stat} · ` +
-            `Equipped Stat ${entry.equippedStat}` +
-            (entry.skip ? ' · Equal/worse: skip' : '');
-        row.appendChild(comparison);
+        const key = `${entry.owner}:${entry.slot}`;
+        const owner = entry.owner === 'qtik' ? "Q'tik" : 'Tansy';
 
         for (const option of entry.variants) {
-            const variant = document.createElement('div');
-            variant.className = 'aethermoor-vendor-bonus';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'aethermoor-trade-option';
 
             const effects = Object.entries(option.bonus)
                 .filter(([, amount]) => amount > 0)
-                .map(([key, amount]) =>
-                    `+${amount} ${bonusNames[key] || key}`
+                .map(([name, amount]) =>
+                    `+${amount} ${bonusNames[name] || name}`
                 );
 
-            variant.textContent =
-                `• ${option.label || 'Standard'}: ` +
-                (effects.join(', ') || 'No stat bonus');
-            row.appendChild(variant);
-        }
+            button.textContent =
+                `${owner} ${entry.slotName} · ` +
+                `${option.label || 'Standard'} · ${entry.price}s\n` +
+                `Common · Stat ${entry.stat} · ` +
+                `Equipped Stat ${entry.equippedStat}\n` +
+                (effects.join(' · ') || 'No stat bonus');
 
-        windowElement.appendChild(row);
+            button.addEventListener('click', () => {
+                if (selectedBuys.get(key)?.button === button) {
+                    selectedBuys.delete(key);
+                } else {
+                    selectedBuys.set(key, {
+                        number: entry.number,
+                        variant: option.variant,
+                        button
+                    });
+                }
+
+                refresh();
+            });
+
+            merchant.appendChild(button);
+            buyButtons.push({
+                button,
+                key,
+                price: entry.price
+            });
+        }
     }
 
+    function addSale(item, choice, label) {
+        const rawStat = item.rawStat ?? item.stat;
+        if (!Number.isInteger(rawStat) || rawStat <= 0) return;
+
+        const key = choice.location === 'worn'
+            ? `worn:${choice.owner}:${choice.slot}`
+            : `bag:${choice.index}`;
+
+        const proceeds = rawStat * 2;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'aethermoor-trade-option';
+        button.textContent =
+            `${item.name || label} · +${proceeds}s\n` +
+            `${label} · ${item.rarity || 'Common'} · Stat ${rawStat}`;
+
+        button.addEventListener('click', () => {
+            if (selectedSales.has(key)) {
+                selectedSales.delete(key);
+            } else {
+                selectedSales.set(key, {
+                    ...choice,
+                    proceeds
+                });
+            }
+
+            refresh();
+        });
+
+        crew.appendChild(button);
+        saleButtons.push({ button, key });
+    }
+
+    (state.inventory.bagReserves || []).forEach(
+        (item, index) => addSale(
+            item,
+            { location: 'bag', index },
+            'Bag Reserves'
+        )
+    );
+
+    for (const owner of ['tansy', 'qtik']) {
+        for (const [slot, item] of Object.entries(
+            state.crew.gear?.[owner] || {}
+        )) {
+            if (item && (item.stat ?? item.rawStat) > 0) {
+                addSale(
+                    item,
+                    { location: 'worn', owner, slot },
+                    `${owner === 'qtik' ? "Q'tik" : 'Tansy'} · worn ${slot}`
+                );
+            }
+        }
+    }
+
+    const discard = document.createElement('button');
+    discard.type = 'button';
+    discard.className = 'aethermoor-trade-option';
+    discard.textContent = 'Discard selection';
+    discard.addEventListener('click', async () => {
+        discard.disabled = true;
+
+        try {
+            await runStoredMechanic({
+                cases: [{
+                    name: 'discard_vendor_selection',
+                    kind: 'vendor',
+                    action: 'discard'
+                }]
+            });
+
+            windowElement.remove();
+        } catch (error) {
+            discard.disabled = false;
+            toastr.error(String(error), 'Aethermoor');
+        }
+    });
+
+    windowElement.appendChild(discard);
+
+    close.addEventListener('click', async () => {
+        close.disabled = true;
+
+        try {
+            if (selectedBuys.size || selectedSales.size) {
+                await runStoredMechanic({
+                    cases: [{
+                        name: 'stage_vendor_selection',
+                        kind: 'vendor',
+                        action: 'stage',
+                        basket: {
+                            buy: [...selectedBuys.values()].map(
+                                ({ number, variant }) => ({
+                                    number,
+                                    variant
+                                })
+                            ),
+                            sell: [...selectedSales.values()].map(
+                                ({ location, owner, slot, index }) => ({
+                                    location,
+                                    ...(location === 'worn'
+                                        ? { owner, slot }
+                                        : { index })
+                                })
+                            )
+                        }
+                    }]
+                });
+
+                toastr.info(
+                    'Selection staged; no items or silver exchanged.',
+                    'Aethermoor'
+                );
+            }
+
+            windowElement.remove();
+        } catch (error) {
+            close.disabled = false;
+            toastr.error(
+                error instanceof Error ? error.message : String(error),
+                'Aethermoor'
+            );
+        }
+    });
+
+    refresh();
     document.body.appendChild(windowElement);
     close.focus();
 }

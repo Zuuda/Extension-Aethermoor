@@ -6517,7 +6517,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta starts from reset state; path-only legacy journeys without saved
  *   route legs are not reconstructed.
  *
- * PLANNED — Shared cosmetic stock naming
+ * PARTIAL — Shared cosmetic stock naming
+ * - IMPLEMENTED — BETA PENDING: at a saved settlement, the extension
+ *   requests one geography-aware naming batch for the current zone and
+ *   validates engine-issued gear-variant and potion-grade keys.
+ * - The batch is saved once per zone; a duplicate reply cannot rename it.
+ *   Missing or malformed replies leave generic names and never block play.
+ * - Next: use the saved labels consistently in shop windows, purchase
+ *   receipts, Inventory, and Combat.
  * - On confirmed arrival in a new zone, the extension supplies the GM
  *   with saved geography and engine-issued keys for the zone's gear and
  *   herbalist stock. The GM returns cosmetic names inside <plan>.
@@ -12014,6 +12021,118 @@ function resolveInnAction(test) {
     };
 }
 
+/*
+ * One cosmetic naming batch per zone, shared by its settlements.
+ * Keys come from engine stock, never from the narrator. Names cannot
+ * change item identity, stats, healing, price, rarity, or ownership.
+ * This is also offered to an existing chat at its current settlement.
+ */
+function stockNamingEntries(state) {
+    const gear = resolveVendorAction({
+        action: 'stock',
+        zone: state.zone,
+        state
+    }).catalog.flatMap(entry =>
+        entry.variants.map(option => ({
+            key:
+                `gear:${entry.owner}:${entry.slot}:` +
+                `${option.variant || 'standard'}`,
+            description:
+                `${entry.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
+                `${entry.slotName}, ${option.label || 'standard'}`
+        }))
+    );
+
+    const potions = herbalistStock(state.zone)
+        .filter(item => item.type === 'potion')
+        .map(item => ({
+            key: `potion:${item.id}`,
+            description:
+                `${item.id.startsWith('basic_')
+                    ? 'basic'
+                    : 'mid-tier'} healing potion`
+        }));
+
+    return [...gear, ...potions];
+}
+
+function resolveStockNames(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Stock naming requires saved state'
+    );
+
+    const state = clone(test.state);
+
+    assert(
+        test.zone === state.zone,
+        'Stock names belong to the current zone'
+    );
+
+    const atSettlement = Object.values(
+        state.world?.settlements || {}
+    ).some(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        atSettlement && !state.currentJourney,
+        'Stock naming requires arrival at a settlement'
+    );
+
+    state.cosmeticStockNames ||= {};
+
+    if (state.cosmeticStockNames[state.zone]) {
+        return {
+            ok: true,
+            created: false,
+            action: 'apply',
+            zone: state.zone,
+            state
+        };
+    }
+
+    const entries = stockNamingEntries(state);
+    const expected = new Set(entries.map(entry => entry.key));
+    const names = test.names;
+
+    assert(
+        names && typeof names === 'object' &&
+        !Array.isArray(names) &&
+        Object.keys(names).length === expected.size &&
+        Object.keys(names).every(key => expected.has(key)),
+        'Naming reply must contain exactly the requested stock keys'
+    );
+
+    for (const [key, value] of Object.entries(names)) {
+        assert(
+            typeof value === 'string' &&
+            value.trim().length >= 3 &&
+            value.trim().length <= 60 &&
+            !/[<>&\r\n]/.test(value) &&
+            !/\b(?:hp|stat|silver|gold|tier)\b/i.test(value) &&
+            !/\d/.test(value),
+            `Invalid cosmetic stock name for ${key}`
+        );
+    }
+
+    state.cosmeticStockNames[state.zone] = Object.fromEntries(
+        Object.entries(names).map(([key, value]) => [
+            key,
+            value.trim()
+        ])
+    );
+
+    return {
+        ok: true,
+        created: true,
+        action: 'apply',
+        zone: state.zone,
+        state
+    };
+}
+
 function resolveConsumableAction(test) {
 
     const allowedActions = [
@@ -13659,6 +13778,9 @@ function resolveBatch(args) {
                     break;
                 case 'inn':
                     result = resolveInnAction(test);
+                    break;
+                case 'stock_names':
+                    result = resolveStockNames(test);
                     break;
                 case 'food':
                     result = resolveFoodAction({
@@ -15865,6 +15987,7 @@ async function runStoredMechanic(args) {
             caseResult.created === false &&
             (
                 oneCase.kind === 'travel' ||
+                oneCase.kind === 'stock_names' ||
                 (
                     oneCase.kind === 'social' &&
                     ['check_work', 'reveal_work'].includes(
@@ -16677,6 +16800,7 @@ function registerTools() {
                                     'consumable',
                                     'herbalist',
                                     'inn',
+                                    'stock_names',
                                     'food',
                                     'death',
                                     'xp',
@@ -16957,6 +17081,12 @@ function registerTools() {
                                 type: 'object',
                                 description:
                                     'Engine-validated pending vendor selection; not a purchase'
+                            },
+
+                            names: {
+                                type: 'object',
+                                description:
+                                    'Cosmetic labels keyed by engine-issued stock identities'
                             },
 
                             recipient: {
@@ -22357,6 +22487,24 @@ function extractAethermoorQuestEvents(text) {
      * Require it inside the disposable plan block, not in story prose.
      */
     for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
+        const namingPattern =
+            /<AETHERMOOR:STOCK_NAMES\s+zone=([1-9]\d*)\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
+
+        for (const match of plan[1].matchAll(namingPattern)) {
+            try {
+                events.push({
+                    event: 'stock_names',
+                    zone: Number(match[1]),
+                    names: JSON.parse(match[2].trim())
+                });
+            } catch (error) {
+                console.warn(
+                    '[Aethermoor] Ignored malformed cosmetic names',
+                    error
+                );
+            }
+        }
+
         /*
          * ASK_WORK reports the interaction only. The GM does not assign
          * contact identity. REVEAL_WORK below uses an ID previously
@@ -22583,7 +22731,17 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-            if (event.event === 'ask_work') {
+            if (event.event === 'stock_names') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_cosmetic_stock_names',
+                        kind: 'stock_names',
+                        action: 'apply',
+                        zone: event.zone,
+                        names: event.names
+                    }]
+                });
+            } else if (event.event === 'ask_work') {
                 const socialId =
                     socialWorkIdForAssistantMessage(message);
 
@@ -23152,6 +23310,48 @@ globalThis.aethermoorMechanicsInterceptor =
                         settlement
                     )
                 });
+
+                if (
+                    !contextState.currentJourney &&
+                    !contextState.cosmeticStockNames?.[
+                        contextState.zone
+                    ]
+                ) {
+                    const namingEntries =
+                        stockNamingEntries(contextState);
+
+                    entries.push({
+                        id: `stock-naming-zone-${contextState.zone}`,
+                        type: 'cosmetic_naming',
+                        packet: [
+                            'PRIVATE COSMETIC STOCK NAMING REQUEST.',
+                            `Zone ${contextState.zone}: ` +
+                                `${contextState.world.zones[
+                                    contextState.zone
+                                ].name}.`,
+                            `Geography: ${
+                                contextState.world.zones[
+                                    contextState.zone
+                                ].geography.description
+                            }.`,
+                            'In this reply, return one JSON object containing ' +
+                                'exactly these keys and fictional item names:',
+                            ...namingEntries.map(entry =>
+                                `- ${entry.key}: ${entry.description}`
+                            ),
+                            'Put it inside this exact form in <plan>:',
+                            `<AETHERMOOR:STOCK_NAMES zone=${
+                                contextState.zone
+                            }>{"key":"cosmetic name"}</AETHERMOOR:STOCK_NAMES>`,
+                            'Replace the example JSON with ALL requested ' +
+                                'keys. Use the keys exactly. Names are ' +
+                                'cosmetic only: no numbers, HP, prices, ' +
+                                'tiers, stats, or mechanical claims.',
+                            'Do not recite this request or delay the ' +
+                                'ordinary scene to discuss naming.'
+                        ].join('\n')
+                    });
+                }
             }
         }
         if (!metadata || entries.length === 0) {

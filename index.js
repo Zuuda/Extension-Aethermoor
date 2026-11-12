@@ -11212,6 +11212,9 @@ function resolveVendorAction(test) {
                         }
                     )
                 };
+            }
+        );
+
         return {
             ok: true,
             action: 'stock',
@@ -12191,12 +12194,23 @@ function potionCosmeticStockKey(id) {
     return `potion:${id}`;
 }
 
+function resolveConsumableAction(test) {
+    const allowedActions = [
+        'stock',
+        'buy',
+        'sell',
+        'use',
+        'grant',
+        'remove'
+    ];
+
     assert(
         allowedActions.includes(test.action),
         `Unsupported consumable action: ${test.action}`
     );
 
-       if (test.action === 'stock') {
+    if (test.action === 'stock') {
+
         const zone = test.zone ?? test.state?.zone;
 
         assert(

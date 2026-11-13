@@ -500,8 +500,96 @@ function ensureWorldRecords(state) {
         changed = true;
     }
 
-    return changed;
+    if (ensureKnownInstance(state)) {
+        changed = true;
+    }
 
+    return changed;
+}
+
+/*
+ * First instance foundation: one known, finite site per entered zone.
+ * Create only the CURRENT zone's instance, not instances in upcoming
+ * world-metadata zones. Its IDs and topology do not consume combat RNG.
+ *
+ * "Exhausted" means all three rooms have been visited. This first site
+ * has no room rewards or encounters; later content must be attached to
+ * saved rooms with its own once-only resolution contract.
+ */
+function ensureKnownInstance(state) {
+    state.instances ||= {};
+    state.places ||= {};
+    state.routeEdges ||= [];
+
+    const zone = state.zone;
+    const id = `instance-z${zone}-known`;
+    const entranceId = `${id}-entrance`;
+    const anchor = savedPrimarySettlement(state, zone);
+    const label = `Known local site, Zone ${zone}`;
+    let changed = false;
+
+    if (!state.instances[id]) {
+        state.instances[id] = {
+            id,
+            zone,
+            label,
+            entranceId,
+            status: 'open',
+            currentRoomId: null,
+            rooms: {
+                entrance: {
+                    id: 'entrance',
+                    label: 'Entrance',
+                    exits: ['work_chamber'],
+                    visited: false
+                },
+                work_chamber: {
+                    id: 'work_chamber',
+                    label: 'Work Chamber',
+                    exits: ['entrance', 'inner_chamber'],
+                    visited: false
+                },
+                inner_chamber: {
+                    id: 'inner_chamber',
+                    label: 'Inner Chamber',
+                    exits: ['work_chamber'],
+                    visited: false
+                }
+            }
+        };
+        changed = true;
+    }
+
+    if (!state.places[entranceId]) {
+        state.places[entranceId] = {
+            id: entranceId,
+            label,
+            zone,
+            kind: 'instance_entrance',
+            instanceId: id,
+            visited: false
+        };
+        changed = true;
+    }
+
+    if (!state.routeEdges.some(edge =>
+        (edge.fromId === anchor.locationId &&
+            edge.toId === entranceId) ||
+        (edge.fromId === entranceId &&
+            edge.toId === anchor.locationId)
+    )) {
+        state.routeEdges.push({
+            fromId: anchor.locationId,
+            toId: entranceId,
+            length: 2,
+            kind: 'known_instance_access',
+            fromZone: zone,
+            toZone: zone
+        });
+        changed = true;
+    }
+
+    return changed;
 }
 
 function savedZoneRecord(state, zone = state.zone) {
@@ -5057,11 +5145,140 @@ function resolveArrivedRumors(stateInput) {
     return { state, packets, resolutions };
 }
 
+/*
+ * Instance commands identify one saved user-message event. Their replay
+ * returns its locked result before checking the crew's current room.
+ * Local movement uses no overland segment or random travel-event roll.
+ */
+function resolveInstanceAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Instance movement requires saved state'
+    );
+    assert(
+        typeof test.stepId === 'string' && test.stepId.length > 0,
+        'Instance movement requires a stable message stepId'
+    );
+
+    const state = clone(test.state);
+    state.instanceSteps ||= {};
+
+    const prior = state.instanceSteps[test.stepId];
+    if (prior) {
+        assert(
+            prior.instanceId === test.instanceId &&
+            prior.action === test.action &&
+            prior.requestedRoomId === (test.roomId || null),
+            'Instance message ID was reused for another action'
+        );
+
+        return {
+            ok: true,
+            created: false,
+            ...clone(prior),
+            state
+        };
+    }
+
+    const instance = state.instances?.[test.instanceId];
+
+    assert(instance, 'Unknown saved instance');
+    assert(
+        instance.zone === state.zone &&
+        state.currentLocationId === instance.entranceId &&
+        state.currentPosition?.nodeId === instance.entranceId &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Reach the instance entrance and resolve travel or combat first'
+    );
+
+    let room;
+
+    if (test.action === 'enter') {
+        assert(
+            !state.activeInstanceId &&
+            instance.currentRoomId === null,
+            'Already inside an instance'
+        );
+        state.activeInstanceId = instance.id;
+        instance.currentRoomId = 'entrance';
+        room = instance.rooms.entrance;
+    } else if (test.action === 'move') {
+        assert(
+            state.activeInstanceId === instance.id &&
+            instance.currentRoomId,
+            'Enter this instance before moving between rooms'
+        );
+
+        const from = instance.rooms[instance.currentRoomId];
+        assert(
+            from?.exits.includes(test.roomId),
+            'That room is not an exit from the current room'
+        );
+
+        room = instance.rooms[test.roomId];
+        assert(room, 'The selected instance room is missing');
+        instance.currentRoomId = room.id;
+    } else if (test.action === 'exit') {
+        assert(
+            state.activeInstanceId === instance.id &&
+            instance.currentRoomId === 'entrance',
+            'Return to the entrance before leaving the instance'
+        );
+        instance.currentRoomId = null;
+        state.activeInstanceId = null;
+    } else {
+        throw new Error(`Unsupported instance action: ${test.action}`);
+    }
+
+    const firstVisit = Boolean(room && !room.visited);
+    if (room) room.visited = true;
+
+    if (
+        Object.values(instance.rooms).every(entry =>
+            entry.visited === true
+        )
+    ) {
+        instance.status = 'exhausted';
+    }
+
+    const outcome = {
+        stepId: test.stepId,
+        instanceId: instance.id,
+        action: test.action,
+        requestedRoomId: test.roomId || null,
+        roomId: room?.id || null,
+        roomLabel: room?.label || null,
+        firstVisit,
+        status: instance.status,
+        knownExits: room
+            ? room.exits.map(id => ({
+                id,
+                label: instance.rooms[id].label
+            }))
+            : []
+    };
+
+    state.instanceSteps[test.stepId] = clone(outcome);
+
+    return {
+        ok: true,
+        created: true,
+        ...outcome,
+        state
+    };
+}
+
 function resolveJourneyAction(test) {
     assert(test.state && typeof test.state === 'object',
         'Journey requires saved state');
     const state = clone(test.state);
     ensureWorldLocation(state);
+
+    assert(
+        !state.activeInstanceId,
+        'Leave the instance before starting overland travel'
+    );
 
     if (test.action === 'cancel') {
         assert(state.currentJourney, 'No journey to cancel');
@@ -5187,6 +5404,9 @@ function applyArrivalLocation(state, locationId, outcome) {
     state.zone = destinationZone;
     state.currentLocationId = locationId;
     state.currentPosition = { nodeId: locationId };
+
+    // The new zone's known instance becomes available on arrival.
+    ensureKnownInstance(state);
 
     if (state.places[locationId].kind === 'point_of_interest') {
         outcome.poiArrival = {
@@ -5558,6 +5778,11 @@ function resolveTravelStep(test) {
     );
 
     let state = clone(test.state);
+    assert(
+        !state.activeInstanceId,
+        'Leave the instance before using overland movement'
+    );
+
     state.travelSteps ||= {};
     state.inquiries ||= {};
     state.socialSeeds ||= {};
@@ -6703,10 +6928,17 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   Inspect button.
  * - Add consequential site content only through a separately authored,
  *   saved player-interaction contract.
- * - Do not implement fixed room counts in this movement pass.
- * - Later represent discovered local nodes and exits as saved site-session data.
- * - Prevent repeated visits to the same local node from rerolling encounters
- *   or discoveries indefinitely.
+ *
+ * - IMPLEMENTED — BETA PENDING: each entered zone has one known, finite
+ *   three-room instance with a saved entrance route and local room graph.
+ * - Enter, move, and exit require submitted instance commands. World shows
+ *   a schematic of visited rooms and exits known from visited rooms.
+ * - Revisits retain room state and cannot reroll content. After all three
+ *   rooms have been visited, the instance is marked exhausted.
+ * - This foundation contains no room encounters, loot, boss, or rewards.
+ *   Add those only as saved, once-only room modules after local movement
+ *   and replay have been exercised.
+ *
  * - Permit newly discovered areas, such as secret cellars or upper levels,
  *   to be added when established by authored mechanics.
  * - Distinguish local exploration from campaign-route travel.
@@ -14128,6 +14360,10 @@ function resolveBatch(args) {
                     result = resolveTravelStep(test);
                     break;
 
+                case 'instance':
+                    result = resolveInstanceAction(test);
+                    break;
+
                 case 'cleanup_test_data': {
                     const state = clone(test.state);
 
@@ -15345,6 +15581,37 @@ function stateSummary(state, revision) {
     };
 }
 
+function instanceNarrationPacket(result) {
+    if (result.action === 'exit') {
+        return [
+            'The crew left the instance through its entrance.',
+            'They are at the saved overland entrance; no travel segment ' +
+                'or random encounter was rolled.',
+            'Previously visited rooms remain visited.'
+        ].join('\n');
+    }
+
+    return [
+        `The crew ${result.action === 'enter'
+            ? 'entered'
+            : 'moved within'} the instance.`,
+        `Current room: ${result.roomLabel}.`,
+        result.firstVisit
+            ? 'This is the first visit to this room.'
+            : 'This room was already visited. Do not treat this revisit ' +
+                'as a new discovery or reward roll.',
+        `Visible exits: ${
+            result.knownExits.map(exit => exit.label).join(', ') || 'none'
+        }.`,
+        result.status === 'exhausted'
+            ? 'All authored rooms have now been visited. This first ' +
+                'instance contains no further mechanical content.'
+            : 'Other rooms may remain unvisited.',
+        'Describe only architecture and atmosphere fitting the saved ' +
+            'geography. Do not add foes, loot, hazards, quests, or rewards.'
+    ].join('\n');
+}
+
 function travelNarrationPacket(result) {
     const lines = [
         `One [moved] travel step was resolved in Zone ${result.zone}.`
@@ -16381,6 +16648,7 @@ async function runStoredMechanic(args) {
             caseResult.created === false &&
             (
                 oneCase.kind === 'travel' ||
+                oneCase.kind === 'instance' ||
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 (
@@ -16540,6 +16808,11 @@ async function runStoredMechanic(args) {
                         ? [travelNarrationPacket(caseResult)]
                         : [])
                 ].join('\n\n')
+
+            : batch &&
+              oneCase?.kind === 'instance' &&
+              caseResult.created
+                ? instanceNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'gear' &&
@@ -17197,6 +17470,7 @@ function registerTools() {
                                     'state',
                                     'spawn',
                                     'travel',
+                                    'instance',
                                     'journey',
                                     'quest_discovery_prepare',
                                     'quest_delivery',
@@ -17356,6 +17630,15 @@ function registerTools() {
                                 description:
                                     'Stable known destination ID for explicit movement'
                             },
+                            instanceId: {
+                                type: 'string'
+                            },
+                            roomId: {
+                                type: 'string'
+                            },
+                            stepId: {
+                                type: 'string'
+                            },
 
                             questItemId: {
                                 type: 'string',
@@ -17446,6 +17729,9 @@ function registerTools() {
                                     'settle',
                                     'stock',
                                     'open',
+                                    'enter',
+                                    'move',
+                                    'exit',
                                     'stage',
                                     'discard',
                                     'commit',
@@ -20647,10 +20933,9 @@ async function renderWorldTab(host) {
         routeNodeId(state.zone, 'outpost');
 
     // Shop reopening belongs to Inventory; World lists travel choices.
-    const movementBlocked = [
-        'active',
-        'spotted'
-    ].includes(state.encounter?.status);
+    const movementBlocked =
+        Boolean(state.activeInstanceId) ||
+        ['active', 'spotted'].includes(state.encounter?.status);
 
     function distanceLabel(destinationId) {
         const route = shortestRoute(state, destinationId);
@@ -20700,9 +20985,115 @@ async function renderWorldTab(host) {
         );
     }
 
+    const activeInstance =
+        state.instances?.[state.activeInstanceId];
+
+    if (activeInstance) {
+        const room =
+            activeInstance.rooms[activeInstance.currentRoomId];
+
+        const knownRoomIds = new Set(
+            Object.values(activeInstance.rooms)
+                .filter(entry => entry.visited)
+                .map(entry => entry.id)
+        );
+
+        for (const known of Object.values(activeInstance.rooms)) {
+            if (!known.visited) continue;
+            for (const exitId of known.exits) {
+                knownRoomIds.add(exitId);
+            }
+        }
+
+        const map = Object.values(activeInstance.rooms)
+            .filter(entry => knownRoomIds.has(entry.id))
+            .map(entry =>
+                `${entry.id === room.id ? '● ' : '○ '}` +
+                `${entry.label} · ` +
+                `${entry.visited ? 'Visited' : 'Known exit'}`
+            ).join('\n');
+
+        const section = makeAethermoorSection(
+            `INSTANCE · ${activeInstance.label}`,
+            `Current room: ${room.label}\n` +
+                `Status: ${activeInstance.status}\n\n${map}`,
+            'world'
+        );
+
+        for (const exitId of room.exits) {
+            const destination = activeInstance.rooms[exitId];
+
+            section.appendChild(
+                makeAethermoorAction(
+                    `Move to ${destination.label}`,
+                    'world',
+                    () => copyAethermoorCommand(
+                        instanceCommand(
+                            activeInstance.id,
+                            'move',
+                            exitId
+                        )
+                    )
+                )
+            );
+        }
+
+        if (room.id === 'entrance') {
+            section.appendChild(
+                makeAethermoorAction(
+                    'Leave instance',
+                    'world',
+                    () => copyAethermoorCommand(
+                        instanceCommand(activeInstance.id, 'exit')
+                    )
+                )
+            );
+        }
+
+        host.appendChild(section);
+        return;
+    }
+
+    const knownInstance =
+        state.instances?.[`instance-z${state.zone}-known`];
+
+    if (knownInstance) {
+        const atEntrance =
+            currentLocationId === knownInstance.entranceId;
+
+        const section = makeAethermoorSection(
+            'KNOWN INSTANCE',
+            `${knownInstance.label}\n` +
+                `Status: ${knownInstance.status}` +
+                (atEntrance ? '\nThe crew is at its entrance.' : ''),
+            'world'
+        );
+
+        if (atEntrance) {
+            const enter = makeAethermoorAction(
+                'Enter instance',
+                'world',
+                () => copyAethermoorCommand(
+                    instanceCommand(knownInstance.id, 'enter')
+                )
+            );
+            enter.disabled = movementBlocked;
+            section.appendChild(enter);
+        } else {
+            addTravelAction(
+                section,
+                `Travel to ${knownInstance.label}`,
+                knownInstance.entranceId
+            );
+        }
+
+        host.appendChild(section);
+    }
+
     const journey = state.currentJourney;
 
     if (journey) {
+
         /*
          * A final-segment encounter consumes the last route segment but
          * defers arrival. shortestRoute() then reports zero distance,
@@ -23490,6 +23881,39 @@ const AETHERMOOR_MOVE_COMMAND =
 const AETHERMOOR_EXPLORE_COMMAND =
     /\[\s*AETHERMOOR:EXPLORE_REGION\s*\]/i;
 
+const AETHERMOOR_INSTANCE_COMMAND =
+    /\[\s*AETHERMOOR:INSTANCE\s+instance="([A-Za-z0-9._:-]+)"\s+action="(enter|move|exit)"(?:\s+room="([A-Za-z0-9._:-]+)")?\s*\]/i;
+
+function instanceCommand(instanceId, action, roomId = null) {
+    return `[AETHERMOOR:INSTANCE instance="${instanceId}" ` +
+        `action="${action}"` +
+        (roomId ? ` room="${roomId}"` : '') +
+        ']';
+}
+
+function findLatestUserInstanceMovement(chat) {
+    const index = findLastUserMessage(chat);
+    const text = chat[index]?.mes;
+
+    if (typeof text !== 'string') return null;
+
+    const prose = text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`]*`/g, '');
+
+    const match = prose.match(AETHERMOOR_INSTANCE_COMMAND);
+
+    return match
+        ? {
+            index,
+            text: prose,
+            instanceId: match[1],
+            action: match[2].toLowerCase(),
+            roomId: match[3] || null
+        }
+        : null;
+}
+
 function findLatestUserMovement(chat) {
     for (let index = chat.length - 1; index >= 0; index--) {
         const message = chat[index];
@@ -23731,22 +24155,49 @@ globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
         if (!Array.isArray(chat)) return;
 
-        const movement = findLatestUserMovement(chat);
-        if (movement) {
+        const localMovement =
+            findLatestUserInstanceMovement(chat);
+
+        if (localMovement) {
             try {
                 await runStoredMechanic({
                     cases: [{
-                        name: 'resolve_movement_command',
-                        kind: 'travel',
-                        stepId: travelStepId(movement),
-                        destinationId: movement.destinationId || undefined
+                        name: 'resolve_instance_command',
+                        kind: 'instance',
+                        stepId: travelStepId(localMovement),
+                        instanceId: localMovement.instanceId,
+                        action: localMovement.action,
+                        ...(localMovement.roomId
+                            ? { roomId: localMovement.roomId }
+                            : {})
                     }]
                 });
             } catch (error) {
                 console.error(
-                    '[Aethermoor] [moved] travel check failed',
+                    '[Aethermoor] Instance movement failed',
                     error
                 );
+            }
+        } else {
+            const movement = findLatestUserMovement(chat);
+
+            if (movement) {
+                try {
+                    await runStoredMechanic({
+                        cases: [{
+                            name: 'resolve_movement_command',
+                            kind: 'travel',
+                            stepId: travelStepId(movement),
+                            destinationId:
+                                movement.destinationId || undefined
+                        }]
+                    });
+                } catch (error) {
+                    console.error(
+                        '[Aethermoor] [moved] travel check failed',
+                        error
+                    );
+                }
             }
         }
 

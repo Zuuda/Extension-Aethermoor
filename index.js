@@ -5330,18 +5330,20 @@ function resolveInstanceAction(test) {
             'That room is not an exit from the current room'
         );
 
-        assert(
-            !from.requiresCleared?.includes(test.roomId) ||
-            from.threatStatus === 'cleared',
-            `Clear the current room before entering ${test.roomId}`
-        );
-
         room = instance.rooms[test.roomId];
 
         assert(
             room,
             'The selected instance room is missing'
         );
+
+        for (const requiredId of room.requiresCleared || []) {
+            assert(
+                instance.rooms[requiredId]?.threatStatus === 'cleared',
+                `Clear ${instance.rooms[requiredId]?.label || requiredId} ` +
+                    `before entering ${room.label}`
+            );
+        }
 
         instance.currentRoomId = room.id;
     } else if (test.action === 'exit') {
@@ -5394,9 +5396,11 @@ function resolveInstanceAction(test) {
             ? room.exits.map(id => ({
                 id,
                 label: instance.rooms[id].label,
-                blocked:
-                    room.requiresCleared?.includes(id) === true &&
-                    room.threatStatus !== 'cleared'
+                blocked: (
+                    instance.rooms[id].requiresCleared || []
+                ).some(requiredId =>
+                    instance.rooms[requiredId]?.threatStatus !== 'cleared'
+                )
             }))
             : []
     };
@@ -21202,14 +21206,28 @@ async function renderInstanceTab(host) {
             const destination = instance.rooms[exitId];
             if (!destination) continue;
 
+            const unmet = (destination.requiresCleared || [])
+                .filter(requiredId =>
+                    instance.rooms[requiredId]?.threatStatus !== 'cleared'
+                );
+
             const button = makeAethermoorAction(
-                `Move to ${destination.label}`,
+                unmet.length
+                    ? `${destination.label} · blocked`
+                    : `Move to ${destination.label}`,
                 'world',
                 () => copyAethermoorCommand(
                     instanceCommand(instance.id, 'move', exitId)
                 )
             );
-            button.disabled = blocked;
+
+            button.disabled = blocked || unmet.length > 0;
+            if (unmet.length) {
+                button.title = `Clear ${
+                    unmet.map(id => instance.rooms[id]?.label || id)
+                        .join(', ')
+                } first.`;
+            }
             section.appendChild(button);
         }
 

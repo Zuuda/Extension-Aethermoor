@@ -6931,8 +6931,14 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * - IMPLEMENTED — BETA PENDING: each entered zone has one known, finite
  *   three-room instance with a saved entrance route and local room graph.
- * - Enter, move, and exit require submitted instance commands. World shows
- *   a schematic of visited rooms and exits known from visited rooms.
+ * - Enter, move, and exit require submitted instance commands. The Instance
+ *   tab shows visited rooms, known exits, and the entrance travel command.
+ * - Quest destination commands live on their Quests cards; World retains
+ *   rumors, POIs, settlements, onward travel, exploration, and a compact
+ *   pointer to available quest and instance destinations.
+ * - Every movement button remains clipboard-only. Submitted commands use
+ *   the existing saved overland or instance resolver, never a tab-specific
+ *   movement mechanic.
  * - Revisits retain room state and cannot reroll content. After all three
  *   rooms have been visited, the instance is marked exhausted.
  * - This foundation contains no room encounters, loot, boss, or rewards.
@@ -18339,6 +18345,11 @@ function addAethermoorPanelStyles() {
             border-top: 2px solid #4da6ff;
         }
 
+        .aethermoor-tab[data-tab="instances"].active {
+            color: #ffffff;
+            border-top: 2px solid #c084fc;
+        }
+
         .aethermoor-tab[data-tab="inventory"].active {
             color: #ffffff;
             border-top: 2px solid #4ade80;
@@ -18941,7 +18952,9 @@ function ensureAethermoorTabViews() {
 
     aethermoorTabViews = {};
 
-    for (const tab of ['combat', 'quests', 'world', 'inventory']) {
+    for (const tab of [
+        'combat', 'quests', 'world', 'instances', 'inventory'
+    ]) {
         const view = document.createElement('section');
         view.className = 'aethermoor-tab-view';
         view.dataset.tab = tab;
@@ -19036,6 +19049,9 @@ async function renderQuestTab(host) {
     }
 
     const state = snapshot.state;
+    const movementBlocked =
+        Boolean(state.activeInstanceId) ||
+        ['active', 'spotted'].includes(state.encounter?.status);
 
     /*
      * This snapshot is a detached export. Normalize legacy journal data
@@ -19147,6 +19163,50 @@ async function renderQuestTab(host) {
                     'quest'
                 )
             );
+        }
+
+        const destinationId =
+            quest.objectiveResolution && quest.turnIn
+                ? quest.turnIn.locationId
+                : quest.destinationId;
+
+        if (
+            destinationId &&
+            destinationId !== state.currentLocationId
+        ) {
+            const journey =
+                state.currentJourney?.destinationId === destinationId
+                    ? state.currentJourney
+                    : null;
+
+            if (journey) {
+                const progress = document.createElement('div');
+                progress.className = 'aethermoor-ui-text';
+                progress.textContent =
+                    `Journey: ${journey.completedSegments}/` +
+                    `${journey.totalSegments} segments` +
+                    (journey.status === 'paused'
+                        ? ' · interrupted'
+                        : '');
+                section.appendChild(progress);
+            }
+
+            const move = makeAethermoorAction(
+                journey?.completedSegments === journey?.totalSegments
+                    ? 'Finish journey to quest destination'
+                    : journey
+                        ? 'Continue to quest destination'
+                        : quest.objectiveResolution
+                            ? 'Travel to issuer'
+                            : 'Travel to quest objective',
+                'quest',
+                () => copyAethermoorCommand(
+                    destinationCommand(destinationId)
+                )
+            );
+
+            move.disabled = movementBlocked;
+            section.appendChild(move);
         }
 
         addQuestAction(section, quest, 'Cancel Quest', 'cancel');
@@ -20855,6 +20915,170 @@ async function renderInventoryTab(host) {
     if (hasShop) host.appendChild(shopSection);
 }
 
+/*
+ * Instance navigation is a view over saved room state. Its buttons copy
+ * commands; they never enter a room or resolve its contents on click.
+ * Overland travel to the entrance uses the ordinary route resolver.
+ */
+async function renderInstanceTab(host) {
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.replaceChildren();
+        host.appendChild(
+            makeAethermoorSection(
+                'INSTANCE',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
+                'world'
+            )
+        );
+        return;
+    }
+
+    const state = snapshot.state;
+    host.replaceChildren();
+    markCampaignViewRendered(snapshot);
+
+    const instance = state.activeInstanceId
+        ? state.instances?.[state.activeInstanceId]
+        : state.instances?.[`instance-z${state.zone}-known`];
+
+    if (!instance) {
+        host.appendChild(
+            makeAethermoorSection(
+                'INSTANCE',
+                'No known instance in the current zone.',
+                'world'
+            )
+        );
+        return;
+    }
+
+    const blocked = ['active', 'spotted']
+        .includes(state.encounter?.status);
+
+    if (state.activeInstanceId) {
+        const room = instance.rooms?.[instance.currentRoomId];
+
+        if (!room) {
+            host.appendChild(
+                makeAethermoorSection(
+                    'INSTANCE',
+                    'Saved instance room is unavailable.',
+                    'world'
+                )
+            );
+            return;
+        }
+
+        const known = new Set();
+
+        for (const visited of Object.values(instance.rooms)) {
+            if (!visited.visited) continue;
+            known.add(visited.id);
+            for (const exitId of visited.exits) known.add(exitId);
+        }
+
+        const map = Object.values(instance.rooms)
+            .filter(entry => known.has(entry.id))
+            .map(entry =>
+                `${entry.id === room.id ? '● ' : '○ '}` +
+                `${entry.label} · ` +
+                `${entry.visited ? 'Visited' : 'Known exit'}`
+            ).join('\n');
+
+        const section = makeAethermoorSection(
+            `INSTANCE · ${instance.label}`,
+            `Current room: ${room.label}\n` +
+                `Status: ${instance.status}\n\n${map}` +
+                (blocked
+                    ? '\n\nResolve or avoid the encounter before moving.'
+                    : ''),
+            'world'
+        );
+
+        for (const exitId of room.exits) {
+            const destination = instance.rooms[exitId];
+            if (!destination) continue;
+
+            const button = makeAethermoorAction(
+                `Move to ${destination.label}`,
+                'world',
+                () => copyAethermoorCommand(
+                    instanceCommand(instance.id, 'move', exitId)
+                )
+            );
+            button.disabled = blocked;
+            section.appendChild(button);
+        }
+
+        if (room.id === 'entrance') {
+            const leave = makeAethermoorAction(
+                'Leave instance',
+                'world',
+                () => copyAethermoorCommand(
+                    instanceCommand(instance.id, 'exit')
+                )
+            );
+            leave.disabled = blocked;
+            section.appendChild(leave);
+        }
+
+        host.appendChild(section);
+        return;
+    }
+
+    const atEntrance =
+        state.currentLocationId === instance.entranceId &&
+        !state.currentJourney;
+
+    const journey =
+        state.currentJourney?.destinationId === instance.entranceId
+            ? state.currentJourney
+            : null;
+
+    const section = makeAethermoorSection(
+        'KNOWN INSTANCE',
+        `${instance.label}\nStatus: ${instance.status}\n` +
+            (atEntrance
+                ? 'The crew is at its entrance.'
+                : journey
+                    ? `Journey: ${journey.completedSegments}/` +
+                        `${journey.totalSegments} segments` +
+                        (journey.status === 'paused'
+                            ? ' · interrupted'
+                            : '')
+                    : 'The entrance is a known destination.'),
+        'world'
+    );
+
+    const command = atEntrance
+        ? instanceCommand(instance.id, 'enter')
+        : destinationCommand(instance.entranceId);
+
+    const button = makeAethermoorAction(
+        atEntrance
+            ? 'Enter instance'
+            : journey?.completedSegments === journey?.totalSegments
+                ? 'Finish journey to instance entrance'
+                : journey
+                    ? 'Continue to instance entrance'
+                    : 'Travel to instance entrance',
+        'world',
+        () => copyAethermoorCommand(command)
+    );
+
+    button.disabled = blocked;
+    section.appendChild(button);
+    host.appendChild(section);
+}
+
 async function renderWorldTab(host) {
 
     let snapshot;
@@ -20985,72 +21209,15 @@ async function renderWorldTab(host) {
         );
     }
 
-    const activeInstance =
-        state.instances?.[state.activeInstanceId];
-
-    if (activeInstance) {
-        const room =
-            activeInstance.rooms[activeInstance.currentRoomId];
-
-        const knownRoomIds = new Set(
-            Object.values(activeInstance.rooms)
-                .filter(entry => entry.visited)
-                .map(entry => entry.id)
+    if (state.activeInstanceId) {
+        host.appendChild(
+            makeAethermoorSection(
+                'INSIDE AN INSTANCE',
+                'Open the Instance tab for the room map and exits. ' +
+                    'Leave through its entrance before overland travel.',
+                'world'
+            )
         );
-
-        for (const known of Object.values(activeInstance.rooms)) {
-            if (!known.visited) continue;
-            for (const exitId of known.exits) {
-                knownRoomIds.add(exitId);
-            }
-        }
-
-        const map = Object.values(activeInstance.rooms)
-            .filter(entry => knownRoomIds.has(entry.id))
-            .map(entry =>
-                `${entry.id === room.id ? '● ' : '○ '}` +
-                `${entry.label} · ` +
-                `${entry.visited ? 'Visited' : 'Known exit'}`
-            ).join('\n');
-
-        const section = makeAethermoorSection(
-            `INSTANCE · ${activeInstance.label}`,
-            `Current room: ${room.label}\n` +
-                `Status: ${activeInstance.status}\n\n${map}`,
-            'world'
-        );
-
-        for (const exitId of room.exits) {
-            const destination = activeInstance.rooms[exitId];
-
-            section.appendChild(
-                makeAethermoorAction(
-                    `Move to ${destination.label}`,
-                    'world',
-                    () => copyAethermoorCommand(
-                        instanceCommand(
-                            activeInstance.id,
-                            'move',
-                            exitId
-                        )
-                    )
-                )
-            );
-        }
-
-        if (room.id === 'entrance') {
-            section.appendChild(
-                makeAethermoorAction(
-                    'Leave instance',
-                    'world',
-                    () => copyAethermoorCommand(
-                        instanceCommand(activeInstance.id, 'exit')
-                    )
-                )
-            );
-        }
-
-        host.appendChild(section);
         return;
     }
 
@@ -21058,37 +21225,19 @@ async function renderWorldTab(host) {
         state.instances?.[`instance-z${state.zone}-known`];
 
     if (knownInstance) {
-        const atEntrance =
-            currentLocationId === knownInstance.entranceId;
-
-        const section = makeAethermoorSection(
-            'KNOWN INSTANCE',
-            `${knownInstance.label}\n` +
-                `Status: ${knownInstance.status}` +
-                (atEntrance ? '\nThe crew is at its entrance.' : ''),
-            'world'
+        host.appendChild(
+            makeAethermoorSection(
+                'KNOWN INSTANCE',
+                `${knownInstance.label} · ${knownInstance.status}\n` +
+                    'Its entrance and room controls are in the Instance tab.',
+                'world'
+            )
         );
-
-        if (atEntrance) {
-            const enter = makeAethermoorAction(
-                'Enter instance',
-                'world',
-                () => copyAethermoorCommand(
-                    instanceCommand(knownInstance.id, 'enter')
-                )
-            );
-            enter.disabled = movementBlocked;
-            section.appendChild(enter);
-        } else {
-            addTravelAction(
-                section,
-                `Travel to ${knownInstance.label}`,
-                knownInstance.entranceId
-            );
-        }
-
-        host.appendChild(section);
     }
+
+    const journey = state.currentJourney;
+
+    if (journey) {
 
     const journey = state.currentJourney;
 
@@ -21138,56 +21287,23 @@ async function renderWorldTab(host) {
         host.appendChild(section);
     }
 
-       /*
-     * Render every accepted quest, not only the compatibility-selected
-     * activeQuest. Each destination remains bound to its own quest record.
-     */
     const journal = ensureQuestJournal(state);
-    const acceptedQuests = journal.accepted.filter(
+    const acceptedCount = journal.accepted.filter(
         quest => quest?.status === 'in_progress'
-    );
+    ).length;
 
-    for (const quest of acceptedQuests) {
-        const questDestinationId =
-            quest.objectiveResolution && quest.turnIn
-                ? quest.turnIn.locationId
-                : quest.destinationId;
-
-        const questDestination =
-            state.places?.[questDestinationId] ||
-            Object.values(world.settlements || {})
-                .find(item =>
-                    item.locationId === questDestinationId
-                );
-
-        if (!questDestination) continue;
-
-        const isReturn =
-            Boolean(quest.objectiveResolution && quest.turnIn);
-
-        const section = makeAethermoorSection(
-            isReturn ? 'QUEST RETURN' : 'ACTIVE QUEST DESTINATION',
-            `${quest.title}\n` +
-                `${questDestination.label || questDestinationId}`,
-            'quest'
+    if (acceptedCount > 0) {
+        host.appendChild(
+            makeAethermoorSection(
+                'QUEST DESTINATIONS',
+                `${acceptedCount} quest(s) in progress. ` +
+                    'Open Quests for their objectives and travel commands.',
+                'quest'
+            )
         );
-
-        if (questDestinationId === currentLocationId) {
-            const atDestination = document.createElement('div');
-            atDestination.className = 'aethermoor-ui-text';
-            atDestination.textContent =
-                'The crew is at this location.';
-            section.appendChild(atDestination);
-        } else {
-            addTravelAction(
-                section,
-                `Travel to ${questDestination.label || questDestinationId}`,
-                questDestinationId
-            );
-        }
-
-        host.appendChild(section);
     }
+
+    const leads = Object.values(state.leads || {})
 
     const leads = Object.values(state.leads || {})
         .filter(lead =>
@@ -21441,6 +21557,8 @@ function renderAethermoorTab(tab) {
         renderQuestTab(views.quests);
     } else if (tab === 'world') {
         renderWorldTab(views.world);
+    } else if (tab === 'instances') {
+        renderInstanceTab(views.instances);
     } else if (tab === 'inventory') {
         renderInventoryTab(views.inventory);
     }
@@ -21674,6 +21792,7 @@ function openAethermoorPanel() {
             ['combat', 'Combat'],
             ['quests', 'Quests'],
             ['world', 'World'],
+            ['instances', 'Instance'],
             ['inventory', 'Inventory']
         ]) {
             const button = document.createElement('button');
@@ -22043,7 +22162,7 @@ function registerAethermoorCampaignAutoRefresh() {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            !['quests', 'world', 'inventory']
+            !['quests', 'world', 'instances', 'inventory']
                 .includes(aethermoorActiveTab) ||
             aethermoorCampaignRefreshBusy ||
             !aethermoorTabViews
@@ -22071,9 +22190,11 @@ function registerAethermoorCampaignAutoRefresh() {
         const refresh =
             aethermoorActiveTab === 'quests'
                 ? renderQuestTab(host)
-                : aethermoorActiveTab === 'inventory'
-                    ? renderInventoryTab(host)
-                    : renderWorldTab(host);
+                : aethermoorActiveTab === 'instances'
+                    ? renderInstanceTab(host)
+                    : aethermoorActiveTab === 'inventory'
+                        ? renderInventoryTab(host)
+                        : renderWorldTab(host);
 
         Promise.resolve(refresh)
             .catch(error => {

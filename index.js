@@ -6573,6 +6573,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Eligible Bag Reserve gear can be equipped through the existing engine
  *   action. Healing potions can be used outside combat on a selected
  *   protagonist. Cleansing Tonic remains combat-only for now.
+ * - Equip and outside-combat healing now queue the saved result for the
+ *   next GM reply; UI actions do not require an assistant protocol tag.
  * - Verify equip replacement, HP/stat changes, potion use, and duplicate
  *   button events during beta.
  *
@@ -12450,6 +12452,7 @@ function resolveConsumableAction(test) {
             `Not enough ${test.item} in shared stock`
         );
 
+        const itemName = entry.name || definition.name;
         const recipient = test.recipient || null;
 
         assert(
@@ -12492,12 +12495,8 @@ function resolveConsumableAction(test) {
                     other => other.id !== test.item
                 );
         }
-
         result.quantity = quantity;
-        result.itemName =
-            state.inventory.consumables.find(
-                entry => entry.id === test.item
-            )?.name || definition.name;
+        result.itemName = itemName;
         result.recipient = recipient;
         result.healing = healing;
         result.reason = test.reason || null;
@@ -15448,6 +15447,32 @@ function questOfferNarrationPacket(quest) {
             'Do not reveal hidden truth or replace the objective.'
     ].join('\n');
 }
+
+function inventoryActionNarrationPacket(result, action) {
+    if (action === 'equip') {
+        return [
+            'PRIVATE EQUIPMENT RESULT — do not recite this heading.',
+            `${result.equipped.owner === 'qtik' ? "Q'tik" : 'Tansy'} ` +
+                `equipped ${result.equipped.name}.`,
+            ...(result.replaced?.name
+                ? [`Replaced ${result.replaced.name}; it is now in Bag Reserves.`]
+                : []),
+            'The engine has already applied the equipment and stat changes. ' +
+                'Describe the change naturally; do not apply it again.'
+        ].join('\n');
+    }
+
+    return [
+        'PRIVATE CONSUMABLE RESULT — do not recite this heading.',
+        `${result.itemName} was used on ` +
+            `${result.recipient === 'qtik' ? "Q'tik" : 'Tansy'}.`,
+        `Actual HP restored: ${result.healing}.`,
+        `Bottles remaining: ${result.stockAfter}.`,
+        'The bottle and healing have already been applied. ' +
+            'Describe the use naturally; do not consume or heal again.'
+    ].join('\n');
+}
+
 function innServiceNarrationPacket(receipt) {
     return [
         'PRIVATE INN SERVICE RECEIPT — do not recite this heading.',
@@ -16337,6 +16362,17 @@ async function runStoredMechanic(args) {
                 ].join('\n\n')
 
             : batch &&
+              oneCase?.kind === 'gear' &&
+              oneCase.action === 'equip'
+                ? inventoryActionNarrationPacket(caseResult, 'equip')
+
+            : batch &&
+              oneCase?.kind === 'consumable' &&
+              oneCase.action === 'use' &&
+              caseResult.recipient
+                ? inventoryActionNarrationPacket(caseResult, 'use')
+
+            : batch &&
               oneCase?.kind === 'vendor' &&
               oneCase.action === 'commit' &&
               caseResult.created
@@ -16344,6 +16380,7 @@ async function runStoredMechanic(args) {
 
             : batch &&
               oneCase?.kind === 'herbalist' &&
+
               oneCase.action === 'commit' &&
               caseResult.created
                 ? herbalistTradeNarrationPacket(caseResult.receipt)

@@ -21655,6 +21655,19 @@ async function renderWorldTab(host) {
             if (settlement.locationId === currentLocationId) return false;
 
             /*
+             * The next primary settlement already has its own ONWARD entry.
+             * Do not render the same saved destination again under Known
+             * Settlements. One location ID must produce one ordinary travel
+             * command in World.
+             */
+            if (
+                settlement.locationId ===
+                nextSettlement?.locationId
+            ) {
+                return false;
+            }
+
+            /*
              * Ordinary World travel moves forward. Accepted quests have
              * their own destination/return entries above, so an earlier
              * settlement can still be reached when that quest warrants it.

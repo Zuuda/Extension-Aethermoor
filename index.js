@@ -1435,13 +1435,47 @@ function resolveClearedPackDrop(state) {
     }
 
     if (value === 10) {
-        encounter.questSeed = {
-            source: 'pack_drop',
-            roll: value,
-            result: 'diegetic_quest_breadcrumb'
+        const breadcrumbId = `breadcrumb-${encounter.id}`;
+        const issuer = questIssuerSettlement(state);
+
+        state.breadcrumbs ||= {};
+
+        assert(
+            !state.breadcrumbs[breadcrumbId],
+            `Breadcrumb ${breadcrumbId} already exists`
+        );
+
+        state.breadcrumbs[breadcrumbId] = {
+            id: breadcrumbId,
+            encounterId: encounter.id,
+            zone: encounter.zone,
+            settlementId: issuer.id,
+            locationId: state.currentLocationId,
+            position: clone(
+                state.currentPosition ||
+                { nodeId: state.currentLocationId }
+            ),
+            questSeed: {
+                source: 'pack_drop',
+                roll: value,
+                result: 'diegetic_quest_breadcrumb'
+            },
+            questSeedConsumed: false,
+            questId: null
         };
+
+        // Preserve the encounter's existing drop metadata, but the
+        // independent breadcrumb is now the offer's authority.
+        encounter.questSeed = clone(
+            state.breadcrumbs[breadcrumbId].questSeed
+        );
         encounter.questSeedConsumed = false;
-        return { roll: value, result: 'diegetic_quest_breadcrumb' };
+
+        return {
+            roll: value,
+            result: 'diegetic_quest_breadcrumb',
+            breadcrumbId
+        };
     }
 
     encounter.lootSeed = {
@@ -6809,6 +6843,17 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Do not enable spawn-rich explorable-site outcomes until persistent local
  *   exploration can prevent repeated visits from generating unlimited rolls.
  *
+ * IMPLEMENTED — BETA PENDING: Cleared-pack quest breadcrumbs
+ * - A qualifying pack's existing breadcrumb roll creates a durable,
+ *   engine-ID'd clue at the saved fight position, independent of the
+ *   replaceable current encounter.
+ * - The player may pursue it there through ordinary fiction; the GM
+ *   reports the engine-issued ID, and the extension generates one offer.
+ * - Finding, pursuing, offering, and accepting remain separate events.
+ *   No Inspect button or extra journey is required.
+ * - Lore, hazards, and chests are separate outcomes to design later;
+ *   this breadcrumb currently means a possible quest offer only.
+ *
  * TENTATIVE — Diegetic opportunities and conditional connections
  * - Aspirational vision: quests are relatively rare discoveries, not a
  *   settlement quest board or an exclamation mark over every NPC. Wandering,
@@ -8168,12 +8213,18 @@ function resolveQuestSeed(test) {
               ]
             : null;
 
-    if (inquiryRecord) {
-        assert(
-            zone === inquiryRecord.zone,
-            'Quest zone does not match its locked trigger'
-        );
-    }
+    const breadcrumb = test.breadcrumbId !== undefined
+        ? state.breadcrumbs?.[test.breadcrumbId]
+        : null;
+
+    assert(
+        [
+            test.inquiryId,
+            test.socialId,
+            test.breadcrumbId
+        ].filter(value => value !== undefined).length <= 1,
+        'Quest offer requires only one named trigger'
+    );
 
     assert(
         (test.inquiryId === undefined &&
@@ -8182,7 +8233,28 @@ function resolveQuestSeed(test) {
         'Unknown locked quest trigger'
     );
 
-    const trigger = inquiryRecord || state.encounter;
+    assert(
+        test.breadcrumbId === undefined || breadcrumb,
+        'Unknown saved breadcrumb'
+    );
+
+    const namedTrigger = inquiryRecord || breadcrumb;
+
+    if (namedTrigger) {
+        assert(
+            zone === namedTrigger.zone,
+            'Quest zone does not match its locked trigger'
+        );
+    }
+
+    if (breadcrumb) {
+        assert(
+            breadcrumb.settlementId === issuerSettlement.id,
+            'Breadcrumb issuer does not match its saved settlement'
+        );
+    }
+
+    const trigger = namedTrigger || state.encounter;
 
     assert(
     trigger && typeof trigger === 'object',
@@ -8393,12 +8465,15 @@ function resolveQuestSeed(test) {
 
     const quest = {
         id:
-            `quest-${inquiryRecord
-                ? test.socialId !== undefined
-                    ? `social-${issuerSettlement.id}-${inquiryRecord.id}`
-                    : `rumor-${inquiryRecord.id}`
-                : state.encounter.id}-` +
-            `${row.rank}-${questRoll}-${archetype.id}`,
+            `quest-${
+                breadcrumb
+                    ? breadcrumb.id
+                    : inquiryRecord
+                        ? test.socialId !== undefined
+                            ? `social-${issuerSettlement.id}-${inquiryRecord.id}`
+                            : `rumor-${inquiryRecord.id}`
+                        : state.encounter.id
+            }-${row.rank}-${questRoll}-${archetype.id}`,
         title:
             `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
@@ -8509,6 +8584,15 @@ function resolveQuestSeed(test) {
     validateRetrievalQuestDiscoveries(quest);
 
     trigger.questSeedConsumed = true;
+
+    if (breadcrumb) {
+        breadcrumb.questId = quest.id;
+
+        if (state.encounter?.id === breadcrumb.encounterId) {
+            state.encounter.questSeedConsumed = true;
+        }
+    }
+
     return {
         ok: true,
         created: true,
@@ -14513,40 +14597,75 @@ function resolveBatch(args) {
 
                 case 'follow_breadcrumb': {
                     const state = test.state;
-                    const encounter = state?.encounter;
-                    const seed = encounter?.questSeed;
+                    const breadcrumb = state?.breadcrumbs?.[
+                        test.breadcrumbId
+                    ];
 
                     assert(
-                        encounter?.status === 'cleared' &&
-                        seed?.result === 'diegetic_quest_breadcrumb',
-                        'No cleared-pack quest breadcrumb is available'
+                        breadcrumb?.questSeed?.source === 'pack_drop' &&
+                        breadcrumb.questSeed.result ===
+                            'diegetic_quest_breadcrumb',
+                        'Unknown saved pack breadcrumb'
+                    );
+
+                    if (breadcrumb.questSeedConsumed) {
+                        const existing = findQuestById(
+                            state,
+                            breadcrumb.questId
+                        );
+
+                        assert(
+                            existing,
+                            'Consumed breadcrumb lost its quest offer'
+                        );
+
+                        result = {
+                            ok: true,
+                            created: false,
+                            action: 'follow_breadcrumb',
+                            breadcrumbId: breadcrumb.id,
+                            questId: existing.id,
+                            state
+                        };
+                        break;
+                    }
+
+                    assert(
+                        !['active', 'spotted'].includes(
+                            state.encounter?.status
+                        ),
+                        'Resolve or avoid the encounter before following the clue'
                     );
 
                     assert(
-                        seed.source === 'pack_drop',
-                        'Breadcrumb is not from this pack'
+                        breadcrumb.locationId ===
+                            state.currentLocationId &&
+                        JSON.stringify(breadcrumb.position) ===
+                            JSON.stringify(
+                                state.currentPosition ||
+                                { nodeId: state.currentLocationId }
+                            ),
+                        'Return to where this breadcrumb was found'
                     );
 
-                    const issuer =
-                        questIssuerSettlement(state, test);
-
-                    const repTier =
-                        state.reputation?.[issuer.reputationKey]?.tier;
+                    const issuer = state.world?.settlements?.[
+                        breadcrumb.settlementId
+                    ];
 
                     assert(
-                        repTier,
-                        `No saved reputation tier for ` +
-                        `${issuer.label}`
+                        issuer?.zone === breadcrumb.zone,
+                        'Breadcrumb has no saved local issuer'
                     );
 
                     result = resolveQuestSeed({
                         state,
-                        zone: encounter.zone,
-                        repTier,
-                        town: issuer.reputationKey,
+                        breadcrumbId: breadcrumb.id,
+                        zone: breadcrumb.zone,
                         settlementId: issuer.id
                     });
 
+                    result.action = 'follow_breadcrumb';
+                    result.breadcrumbId = breadcrumb.id;
                     break;
                 }
 
@@ -15831,7 +15950,17 @@ function combatNarrationPacket(result, actions) {
             result.rewards.packDrop?.result ===
             'diegetic_quest_breadcrumb'
         ) {
-            lines.push('A quest breadcrumb was found.');
+            lines.push(
+                'The cleared pack left a visible quest breadcrumb.',
+                `Breadcrumb reference: ${
+                    result.rewards.packDrop.breadcrumbId
+                }.`,
+                'Give it a modest, setting-fitting physical form. ' +
+                    'Do not invent its eventual quest, sponsor, objective, ' +
+                    'destination, or reward.',
+                'Finding it is not the decision to pursue it. Leave ' +
+                    'that choice to the protagonists.'
+            );
         }
     } else if (result.packCleared) {
         lines.push(
@@ -16090,8 +16219,10 @@ async function runStoredMechanic(args) {
             (
                 oneCase.kind === 'travel' ||
                 oneCase.kind === 'stock_names' ||
+                oneCase.kind === 'follow_breadcrumb' ||
                 (
                     oneCase.kind === 'social' &&
+
                     ['check_work', 'reveal_work'].includes(
                         oneCase.action
                     )
@@ -17020,6 +17151,11 @@ function registerTools() {
                             
                             leadId: {
                                 type: 'string'
+                            },
+                            breadcrumbId: {
+                                type: 'string',
+                                description:
+                                    'Engine-issued ID of a saved pack breadcrumb'
                             },
                             destinationId: {
                                 type: 'string',
@@ -22672,9 +22808,18 @@ function extractAethermoorQuestEvents(text) {
         for (const _match of plan[1].matchAll(
             /<AETHERMOOR:TRADE_AGREED\s*>/g
         )) {
-
             events.push({
                 event: 'trade_agreed'
+            });
+        }
+
+        const breadcrumbPattern =
+            /<AETHERMOOR:FOLLOW_BREADCRUMB\s+id=([A-Za-z0-9._:-]+)\s*>/g;
+
+        for (const match of plan[1].matchAll(breadcrumbPattern)) {
+            events.push({
+                event: 'follow_breadcrumb',
+                breadcrumbId: match[1]
             });
         }
 
@@ -22860,6 +23005,14 @@ async function processAethermoorAssistantEvents(data) {
                         action: 'apply',
                         zone: event.zone,
                         names: event.names
+                    }]
+                });
+            } else if (event.event === 'follow_breadcrumb') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_follow_breadcrumb',
+                        kind: 'follow_breadcrumb',
+                        breadcrumbId: event.breadcrumbId
                     }]
                 });
             } else if (event.event === 'ask_work') {
@@ -23405,6 +23558,55 @@ globalThis.aethermoorMechanicsInterceptor =
                         });
                     }
                 }
+            }
+        }
+
+        /*
+         * Breadcrumbs survive replacement of the encounter. Supply
+         * only unresolved clues at the crew's actual saved position.
+         * The GM reports the player's pursuit; it does not choose or
+         * generate the resulting quest.
+         */
+        if (
+            contextState &&
+            !['active', 'spotted'].includes(
+                contextState.encounter?.status
+            )
+        ) {
+            const position = contextState.currentPosition ||
+                { nodeId: contextState.currentLocationId };
+
+            for (const breadcrumb of Object.values(
+                contextState.breadcrumbs || {}
+            )) {
+                if (
+                    breadcrumb.questSeedConsumed ||
+                    breadcrumb.locationId !==
+                        contextState.currentLocationId ||
+                    JSON.stringify(breadcrumb.position) !==
+                        JSON.stringify(position)
+                ) {
+                    continue;
+                }
+
+                entries.push({
+                    id: `breadcrumb-context-${breadcrumb.id}`,
+                    type: 'breadcrumb_context',
+                    packet: [
+                        'PRIVATE BREADCRUMB CONTEXT — do not recite.',
+                        `A cleared pack left clue ${breadcrumb.id} here.`,
+                        'Its specific quest has NOT been established.',
+                        'If the player actually chooses to examine or ' +
+                            'pursue this clue, narrate that first beat ' +
+                            'without promising a particular job. Put ' +
+                            'this exact tag inside <plan>:',
+                        `<AETHERMOOR:FOLLOW_BREADCRUMB id=${
+                            breadcrumb.id
+                        }>`,
+                        'The engine will lock an offer after this reply. ' +
+                            'Do not accept the offer for the crew.'
+                    ].join('\n')
+                });
             }
         }
 

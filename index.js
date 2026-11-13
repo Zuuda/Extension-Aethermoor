@@ -541,19 +541,36 @@ function ensureKnownInstance(state) {
                     id: 'entrance',
                     label: 'Entrance',
                     exits: ['work_chamber'],
-                    visited: false
+                    visited: false,
+                    threatStatus: 'none'
                 },
                 work_chamber: {
                     id: 'work_chamber',
                     label: 'Work Chamber',
                     exits: ['entrance', 'inner_chamber'],
-                    visited: false
+                    requiresCleared: [],
+                    visited: false,
+                    threat: {
+                        type: 'normal_pack',
+                        bracket: 'mid',
+                        composition: 2
+                    },
+                    threatStatus: 'unresolved',
+                    encounterId: null,
+                    encounterBlueprint: null
                 },
                 inner_chamber: {
                     id: 'inner_chamber',
                     label: 'Inner Chamber',
                     exits: ['work_chamber'],
-                    visited: false
+                    requiresCleared: ['work_chamber'],
+                    visited: false,
+                    threat: {
+                        type: 'elite'
+                    },
+                    threatStatus: 'unresolved',
+                    encounterId: null,
+                    encounterBlueprint: null
                 }
             }
         };
@@ -3835,6 +3852,7 @@ if (frontliners.length > 0) {
 
     if (live(s).length === 0) {
         encounter.status = 'cleared';
+        markInstanceRoomThreatCleared(s);
     } else if (
         eliteBossFoes.some(foe => foe.hp > 0) &&
         c.qtik.hp > 0 &&
@@ -5145,6 +5163,98 @@ function resolveArrivedRumors(stateInput) {
     return { state, packets, resolutions };
 }
 
+function refreshInstanceStatus(instance) {
+    const requiredRooms = Object.values(instance.rooms)
+        .filter(room => room.threat);
+
+    instance.status = requiredRooms.every(room =>
+        room.threatStatus === 'cleared'
+    )
+        ? 'exhausted'
+        : 'open';
+
+    return instance.status;
+}
+
+/*
+ * A room encounter is created once and then owned by the room. The global
+ * state.encounter is only the currently active presentation of that saved
+ * room threat. Re-entry restores the original locked encounter instead of
+ * rolling a new one.
+ */
+function ensureInstanceRoomEncounter(state, instance, room) {
+    if (!room.threat || room.threatStatus === 'cleared') {
+        return null;
+    }
+
+    if (room.encounterBlueprint) {
+        state.encounter = clone(room.encounterBlueprint);
+        state.encounter.status = 'spotted';
+        state.encounter.instanceId = instance.id;
+        state.encounter.instanceRoomId = room.id;
+
+        return state.encounter;
+    }
+
+    const threat = room.threat;
+    const spawned = spawnEncounter({
+        state,
+        zone: instance.zone,
+        encounterType: threat.type,
+        bracket: threat.bracket,
+        composition: threat.composition,
+        encounterId:
+            `${instance.id}-${room.id}-threat`
+    });
+
+    state.rngState = spawned.state.rngState;
+    state.encounter = spawned.encounter;
+    state.encounter.status = 'spotted';
+    state.encounter.instanceId = instance.id;
+    state.encounter.instanceRoomId = room.id;
+
+    room.encounterId = state.encounter.id;
+    room.encounterBlueprint = clone(state.encounter);
+    room.threatStatus = 'unresolved';
+
+    return state.encounter;
+}
+
+function markInstanceRoomThreatCleared(state) {
+    const encounter = state.encounter;
+
+    if (
+        encounter?.status !== 'cleared' ||
+        !encounter.instanceId ||
+        !encounter.instanceRoomId
+    ) {
+        return null;
+    }
+
+    const instance = state.instances?.[encounter.instanceId];
+    const room = instance?.rooms?.[encounter.instanceRoomId];
+
+    if (!instance || !room || !room.threat) {
+        return null;
+    }
+
+    assert(
+        room.encounterId === encounter.id,
+        'Cleared instance encounter does not match its room threat'
+    );
+
+    room.threatStatus = 'cleared';
+    room.clearedEncounterId = encounter.id;
+    refreshInstanceStatus(instance);
+
+    return {
+        instanceId: instance.id,
+        roomId: room.id,
+        status: room.threatStatus,
+        instanceStatus: instance.status
+    };
+}
+
 /*
  * Instance commands identify one saved user-message event. Their replay
  * returns its locked result before checking the crew's current room.
@@ -5164,6 +5274,7 @@ function resolveInstanceAction(test) {
     state.instanceSteps ||= {};
 
     const prior = state.instanceSteps[test.stepId];
+
     if (prior) {
         assert(
             prior.instanceId === test.instanceId &&
@@ -5192,7 +5303,8 @@ function resolveInstanceAction(test) {
         'Reach the instance entrance and resolve travel or combat first'
     );
 
-    let room;
+    let room = null;
+    let encounter = null;
 
     if (test.action === 'enter') {
         assert(
@@ -5200,6 +5312,7 @@ function resolveInstanceAction(test) {
             instance.currentRoomId === null,
             'Already inside an instance'
         );
+
         state.activeInstanceId = instance.id;
         instance.currentRoomId = 'entrance';
         room = instance.rooms.entrance;
@@ -5211,13 +5324,25 @@ function resolveInstanceAction(test) {
         );
 
         const from = instance.rooms[instance.currentRoomId];
+
         assert(
             from?.exits.includes(test.roomId),
             'That room is not an exit from the current room'
         );
 
+        assert(
+            !from.requiresCleared?.includes(test.roomId) ||
+            from.threatStatus === 'cleared',
+            `Clear the current room before entering ${test.roomId}`
+        );
+
         room = instance.rooms[test.roomId];
-        assert(room, 'The selected instance room is missing');
+
+        assert(
+            room,
+            'The selected instance room is missing'
+        );
+
         instance.currentRoomId = room.id;
     } else if (test.action === 'exit') {
         assert(
@@ -5225,22 +5350,27 @@ function resolveInstanceAction(test) {
             instance.currentRoomId === 'entrance',
             'Return to the entrance before leaving the instance'
         );
+
         instance.currentRoomId = null;
         state.activeInstanceId = null;
     } else {
-        throw new Error(`Unsupported instance action: ${test.action}`);
+        throw new Error(
+            `Unsupported instance action: ${test.action}`
+        );
     }
 
     const firstVisit = Boolean(room && !room.visited);
-    if (room) room.visited = true;
 
-    if (
-        Object.values(instance.rooms).every(entry =>
-            entry.visited === true
-        )
-    ) {
-        instance.status = 'exhausted';
+    if (room) {
+        room.visited = true;
+        encounter = ensureInstanceRoomEncounter(
+            state,
+            instance,
+            room
+        );
     }
+
+    refreshInstanceStatus(instance);
 
     const outcome = {
         stepId: test.stepId,
@@ -5251,10 +5381,22 @@ function resolveInstanceAction(test) {
         roomLabel: room?.label || null,
         firstVisit,
         status: instance.status,
+        roomThreatStatus: room?.threatStatus || 'none',
+        encounter: encounter
+            ? {
+                id: encounter.id,
+                type: encounter.type,
+                status: encounter.status,
+                roomId: room.id
+            }
+            : null,
         knownExits: room
             ? room.exits.map(id => ({
                 id,
-                label: instance.rooms[id].label
+                label: instance.rooms[id].label,
+                blocked:
+                    room.requiresCleared?.includes(id) === true &&
+                    room.threatStatus !== 'cleared'
             }))
             : []
     };
@@ -6931,19 +7073,29 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * - IMPLEMENTED — BETA PENDING: each entered zone has one known, finite
  *   three-room instance with a saved entrance route and local room graph.
+ *
+ * - IMPLEMENTED — BETA PENDING: newly created instances assign one locked
+ *   normal-pack threat to the Work Chamber and one locked Elite threat to
+ *   the Inner Chamber.
+ * - Entering a threat room spots its saved encounter without engaging it.
+ *   Avoiding, fleeing, or dying leaves the room unresolved; returning
+ *   restores the same encounter rather than rolling another.
+ * - The Inner Chamber exit is blocked until the Work Chamber threat is
+ *   actually cleared. Room clearance is owned by the room, not by the
+ *   replaceable global encounter record.
  * - Enter, move, and exit require submitted instance commands. The Instance
- *   tab shows visited rooms, known exits, and the entrance travel command.
+ *   tab shows visited rooms, known exits, threats, and the entrance command.
  * - Quest destination commands live on their Quests cards; World retains
  *   rumors, POIs, settlements, onward travel, exploration, and a compact
  *   pointer to available quest and instance destinations.
  * - Every movement button remains clipboard-only. Submitted commands use
  *   the existing saved overland or instance resolver, never a tab-specific
  *   movement mechanic.
- * - Revisits retain room state and cannot reroll content. After all three
- *   rooms have been visited, the instance is marked exhausted.
- * - This foundation contains no room encounters, loot, boss, or rewards.
- *   Add those only as saved, once-only room modules after local movement
- *   and replay have been exercised.
+ * - Revisits retain room state and cannot reroll content. The instance is
+ *   exhausted only after all required room threats are cleared.
+ * - This first combat slice contains no chest, puzzle, or boss. The Inner
+ *   Chamber Elite is the initial deeper-room payoff; later instance modules
+ *   may add bosses, loot, puzzles, alternate routes, and larger layouts.
  *
  * - Permit newly discovered areas, such as secret cellars or upper levels,
  *   to be added when established by authored mechanics.
@@ -15593,11 +15745,11 @@ function instanceNarrationPacket(result) {
             'The crew left the instance through its entrance.',
             'They are at the saved overland entrance; no travel segment ' +
                 'or random encounter was rolled.',
-            'Previously visited rooms remain visited.'
+            'Previously visited rooms and room threats remain saved.'
         ].join('\n');
     }
 
-    return [
+    const lines = [
         `The crew ${result.action === 'enter'
             ? 'entered'
             : 'moved within'} the instance.`,
@@ -15605,17 +15757,46 @@ function instanceNarrationPacket(result) {
         result.firstVisit
             ? 'This is the first visit to this room.'
             : 'This room was already visited. Do not treat this revisit ' +
-                'as a new discovery or reward roll.',
+                'as a new discovery or reward roll.'
+    ];
+
+    if (result.encounter) {
+        lines.push(
+            `The room contains its saved ${result.encounter.type} threat.`,
+            `Encounter ${result.encounter.id} is spotted, not engaged.`,
+            'Describe signs of the threat and leave engagement, avoidance, ' +
+                'or retreat to the protagonists.',
+            'Do not create another encounter if the protagonists return ' +
+                'to this room.'
+        );
+    } else if (result.roomThreatStatus === 'cleared') {
+        lines.push(
+            'This room’s saved threat has already been cleared.',
+            'Do not create another encounter or reward here.'
+        );
+    } else {
+        lines.push(
+            'This room has no combat threat in the current instance plan.'
+        );
+    }
+
+    lines.push(
         `Visible exits: ${
-            result.knownExits.map(exit => exit.label).join(', ') || 'none'
+            result.knownExits.map(exit =>
+                exit.blocked
+                    ? `${exit.label} (blocked until this room is cleared)`
+                    : exit.label
+            ).join(', ') || 'none'
         }.`,
         result.status === 'exhausted'
-            ? 'All authored rooms have now been visited. This first ' +
-                'instance contains no further mechanical content.'
-            : 'Other rooms may remain unvisited.',
-        'Describe only architecture and atmosphere fitting the saved ' +
-            'geography. Do not add foes, loot, hazards, quests, or rewards.'
-    ].join('\n');
+            ? 'All required instance threats have been cleared. The ' +
+                'instance is exhausted.'
+            : 'Other instance content may remain unresolved.',
+        'Describe only architecture, atmosphere, and the engine-established ' +
+            'threat. Do not add loot, puzzles, quests, bosses, or rewards.'
+    );
+
+    return lines.join('\n');
 }
 
 function travelNarrationPacket(result) {
@@ -16770,7 +16951,7 @@ async function runStoredMechanic(args) {
             ['active', 'spotted'].includes(nextEncounter?.status) &&
             nextEncounter.id !== previousEncounter?.id;
 
-         const discoveryPacket =
+        const discoveryPacket =
             batch &&
             oneCase?.kind === 'quest_reveal_terminal' &&
             caseResult.created !== false
@@ -16781,6 +16962,20 @@ async function runStoredMechanic(args) {
                         nextState.encounter.questTerminal.questId
                     )
                 )
+
+            : batch &&
+              oneCase?.kind === 'instance' &&
+              caseResult.created
+                ? [
+                    instanceNarrationPacket(caseResult),
+                    ...(caseResult.encounter
+                        ? [
+                            discoveryNarrationPacket(
+                                nextState.encounter
+                            )
+                        ]
+                        : [])
+                ].join('\n\n')
 
             : beganNewEncounter
                 ? [

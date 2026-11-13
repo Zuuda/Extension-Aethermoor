@@ -15217,11 +15217,11 @@ function travelNarrationPacket(result) {
         lines.push(
             `The crew noticed a point of interest: ${site.label} ` +
                 `(reference: ${site.id}).`,
-            'It is now a known, reachable place. The crew has not ' +
-                'necessarily arrived there or searched it.',
+            'It is a known, reachable scenic place; the crew has not ' +
+                'necessarily arrived there.',
             'Give it modest, setting-appropriate visible features. ' +
-                'A scenic place with no reward is valid. Do not reveal ' +
-                'hidden content or add an encounter, quest, or reward.'
+                'This travel result establishes no hidden content, ' +
+                'encounter, quest, or reward.'
         );
 
     } else if (result.event === 'wild_encounter') {
@@ -15298,11 +15298,11 @@ function travelNarrationPacket(result) {
     if (result.poiArrival) {
         lines.push(
             `Confirmed arrival at ${result.poiArrival.label}.`,
-            'The crew may observe and describe the site’s visible features. ' +
-                'It may simply be scenic.',
-            'Arrival did not search the site or reveal its privately locked ' +
-                'curiosity result. Do not add loot, hazards, encounters, ' +
-                'quests, or rewards.'
+            'Describe the visible site in a way that fits the saved ' +
+                'geography. This ordinary point of interest is scenic.',
+            'Arrival does not grant loot, reveal a hidden result, start ' +
+                'an encounter, or create a quest. Do not imply that ' +
+                'searching it will unlock an unestablished reward.'
         );
     }
 

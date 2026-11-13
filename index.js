@@ -12648,8 +12648,17 @@ function resolveFoodAction(test) {
         });
     }
 
+    return {
+        ok: true,
+        action: 'apply',
+        recipe: clone(recipe),
+        state
+    };
+}
+
 /*
  * Variable fictional expenses use a quote-and-agreement handshake.
+
  * The narrator may propose a diegetic amount, but quote creation never
  * changes silver. Commit reads only the saved quote and applies it once.
  */
@@ -12784,6 +12793,7 @@ function resolveExpenseAction(test) {
     };
 }
 
+function resolveBossGearCheck(test) {
     assert(
         test.state &&
         typeof test.state === 'object',

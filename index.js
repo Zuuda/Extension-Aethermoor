@@ -3916,6 +3916,26 @@ if (frontliners.length > 0) {
         derived: finalStats
     };
 
+    /*
+     * Rewards were already applied by finalizeEncounterRewards() and the
+     * XP/silver updates above. This is a read-only receipt attached to the
+     * cleared encounter, not another claimable drop or payout operation.
+     * It survives panel refresh and reload; a later encounter has its own
+     * record instead of inheriting this receipt.
+     */
+    if (encounterRewards.resolved) {
+        encounter.victoryReceipt = {
+            encounterId: encounter.id,
+            xp: encounterRewards.xp,
+            silver: encounterRewards.silver,
+            loot: clone(encounterRewards.loot),
+            packDrop: encounterRewards.packDrop
+                ? clone(encounterRewards.packDrop)
+                : null,
+            levelUps: clone(levelUps)
+        };
+    }
+
     function assertNoNonFinite(value, path = 'result') {
         if (typeof value === 'number') {
             assert(
@@ -6667,6 +6687,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
  *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
  * - Preserve locked combat outcomes and prevent duplicate reward resolution.
+ * - IMPLEMENTED — BETA PENDING: a cleared encounter retains a read-only
+ *   victory receipt. Combat displays applied XP, silver, loot, breadcrumbs,
+ *   and level-ups after refresh; no fictional search is required to claim
+ *   rewards. Verify persistence and replacement by a later encounter.
  *
  * - IMPLEMENTED — BETA PENDING: healing potions have fixed purchase-zone
  *   grades. Basic heals 50 × zone HP for 10 × zone silver; Mid-Tier heals
@@ -22997,6 +23021,42 @@ async function openCombatPanel(inlineHost) {
                 'combat'
             )
         );
+
+        const receipt = encounter?.status === 'cleared'
+            ? encounter.victoryReceipt
+            : null;
+
+        if (receipt?.encounterId === encounter.id) {
+            const lines = [
+                `+${receipt.xp} XP · +${receipt.silver}s`,
+                ...(receipt.loot || []).map(item =>
+                    `Loot: ${item.name || 'Unnamed item'}`
+                ),
+                ...(receipt.packDrop?.result ===
+                    'diegetic_quest_breadcrumb'
+                    ? ['A quest breadcrumb was found.']
+                    : []),
+                ...(receipt.levelUps || []).map(change =>
+                    `Reached level ${change.level}.`
+                )
+            ];
+
+            if (
+                !receipt.loot?.length &&
+                receipt.packDrop?.result !==
+                    'diegetic_quest_breadcrumb'
+            ) {
+                lines.push('No additional item dropped.');
+            }
+
+            inlineHost.appendChild(
+                makeAethermoorSection(
+                    'VICTORY · REWARDS RECEIVED',
+                    lines.join('\n'),
+                    'combat'
+                )
+            );
+        }
 
         return;
     }

@@ -5244,6 +5244,94 @@ function resolveArrivedRumors(stateInput) {
     return { state, packets, resolutions };
 }
 
+/*
+ * The narrator supplies presentation only after the crew reaches a
+ * saved instance. The engine supplies the ID and owns its topology,
+ * encounters, clearance, and rewards. A theme cannot rewrite those facts.
+ */
+function resolveInstanceTheme(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Instance theme requires saved state'
+    );
+
+    const state = clone(test.state);
+    const instance = state.instances?.[test.instanceId];
+
+    assert(instance, 'Unknown instance theme target');
+
+    const crewIsHere =
+        state.zone === instance.zone &&
+        state.currentLocationId === instance.entranceId &&
+        !state.currentJourney &&
+        (
+            state.activeInstanceId === instance.id ||
+            !state.activeInstanceId
+        );
+
+    assert(
+        crewIsHere,
+        'Reach this instance entrance before naming it'
+    );
+
+    if (instance.presentation?.established === true) {
+        return {
+            ok: true,
+            created: false,
+            action: 'theme',
+            instanceId: instance.id,
+            presentation: clone(instance.presentation),
+            state
+        };
+    }
+
+    const names = test.names;
+
+    assert(
+        names && typeof names === 'object' &&
+        !Array.isArray(names) &&
+        Object.keys(names).sort().join(',') ===
+            'atmosphere,kind,name',
+        'Instance theme requires exactly name, kind, and atmosphere'
+    );
+
+    for (const key of ['name', 'kind', 'atmosphere']) {
+        assert(
+            typeof names[key] === 'string' &&
+            names[key].trim().length >= 3 &&
+            names[key].trim().length <= 100 &&
+            !/[<>\r\n]/.test(names[key]),
+            `Invalid instance ${key}`
+        );
+    }
+
+    instance.presentation = {
+        established: true,
+        name: names.name.trim(),
+        kind: names.kind.trim(),
+        atmosphere: names.atmosphere.trim()
+    };
+
+    // Keep the entrance's saved place label consistent with the map.
+    const entrance = state.places?.[instance.entranceId];
+    assert(
+        entrance?.instanceId === instance.id,
+        'Instance entrance place is missing'
+    );
+
+    instance.label = instance.presentation.name;
+    entrance.label = instance.presentation.name;
+
+    return {
+        ok: true,
+        created: true,
+        action: 'theme',
+        instanceId: instance.id,
+        presentation: clone(instance.presentation),
+        state
+    };
+}
+
 function refreshInstanceStatus(instance) {
     const requiredRooms = Object.values(instance.rooms)
         .filter(room => room.threat);
@@ -7172,6 +7260,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   rooms: three or four guarded normal-pack chambers, optionally one
  *   quiet chamber, and a final Elite chamber. The layout is saved once;
  *   room rosters are locked on first entry and reused on revisits.
+ * - IMPLEMENTED — BETA PENDING: on reaching the entrance, the extension
+ *   requests a locally fitting cosmetic instance name, kind, and atmosphere.
+ *   It saves a valid identity once, shows the name in the Instance tab,
+ *   and resends the identity while exploring. Missing names never block
+ *   entry. The GM cannot change rooms, encounters, or rewards through it.
  * - Forward passages past guarded chambers require actual clearance.
  *   Backtracking remains possible; visiting alone never clears a threat.
  * - Entering a threat room spots its saved encounter without engaging it.
@@ -14616,7 +14709,9 @@ function resolveBatch(args) {
                     break;
 
                 case 'instance':
-                    result = resolveInstanceAction(test);
+                    result = test.action === 'theme'
+                        ? resolveInstanceTheme(test)
+                        : resolveInstanceAction(test);
                     break;
 
                 case 'cleanup_test_data': {
@@ -18030,6 +18125,7 @@ function registerTools() {
                                     'enter',
                                     'move',
                                     'exit',
+                                    'theme',
                                     'stage',
                                     'discard',
                                     'commit',
@@ -23930,6 +24026,24 @@ function extractAethermoorQuestEvents(text) {
      * Require it inside the disposable plan block, not in story prose.
      */
     for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
+        const themePattern =
+            /<AETHERMOOR:INSTANCE_THEME\s+instance=([A-Za-z0-9._:-]+)\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
+
+        for (const match of plan[1].matchAll(themePattern)) {
+            try {
+                events.push({
+                    event: 'instance_theme',
+                    instanceId: match[1],
+                    names: JSON.parse(match[2].trim())
+                });
+            } catch (error) {
+                console.warn(
+                    '[Aethermoor] Ignored malformed instance theme',
+                    error
+                );
+            }
+        }
+
         const namingPattern =
             /<AETHERMOOR:STOCK_NAMES\s+zone=([1-9]\d*)\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
 
@@ -24205,7 +24319,17 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-            if (event.event === 'stock_names') {
+            if (event.event === 'instance_theme') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_instance_theme',
+                        kind: 'instance',
+                        action: 'theme',
+                        instanceId: event.instanceId,
+                        names: event.names
+                    }]
+                });
+            } else if (event.event === 'stock_names') {
                 result = await runStoredMechanic({
                     cases: [{
                         name: 'assistant_cosmetic_stock_names',
@@ -24862,6 +24986,83 @@ globalThis.aethermoorMechanicsInterceptor =
                             packet
                         });
                     }
+                }
+            }
+        }
+
+        /*
+         * Ask for a site's cosmetic identity only when the crew reaches
+         * its entrance or is exploring it. Resend an established identity
+         * during exploration so the GM need not remember a consumed
+         * handoff or infer the theme from generic room labels.
+         */
+        if (contextState && !contextState.currentJourney) {
+            const instance = contextState.activeInstanceId
+                ? contextState.instances?.[
+                    contextState.activeInstanceId
+                  ]
+                : Object.values(
+                    contextState.instances || {}
+                  ).find(site =>
+                    site.entranceId ===
+                        contextState.currentLocationId
+                  );
+
+            if (
+                instance &&
+                contextState.zone === instance.zone &&
+                contextState.currentLocationId === instance.entranceId
+            ) {
+                if (instance.presentation?.established === true) {
+                    entries.push({
+                        id: `instance-identity-${instance.id}`,
+                        type: 'instance_identity',
+                        packet: [
+                            'PRIVATE SAVED INSTANCE IDENTITY — do not recite.',
+                            `Instance: ${instance.presentation.name}.`,
+                            `Kind: ${instance.presentation.kind}.`,
+                            `Atmosphere: ${
+                                instance.presentation.atmosphere
+                            }.`,
+                            'Keep later room descriptions consistent with ' +
+                                'this identity and the saved geography.',
+                            'Room count, exits, threats, rewards, and ' +
+                                'clearance still come only from the engine.'
+                        ].join('\n')
+                    });
+                } else {
+                    const geography =
+                        contextState.world?.zones?.[
+                            instance.zone
+                        ]?.geography?.description ||
+                        'the local region';
+
+                    entries.push({
+                        id: `instance-theme-request-${instance.id}`,
+                        type: 'instance_theme_request',
+                        packet: [
+                            'PRIVATE INSTANCE IDENTITY REQUEST.',
+                            `Engine-issued instance ID: ${instance.id}.`,
+                            `Saved geography: ${geography}.`,
+                            'This is a finite fixed site. Choose a short ' +
+                                'locally fitting name, a kind of place, ' +
+                                'and one sentence of atmosphere.',
+                            'The kind may be a ruin, camp, catacomb, ' +
+                                'worksite, cave complex, or another form ' +
+                                'that makes sense here. Do not assume ' +
+                                'one particular culture or biome.',
+                            'In this reply, place exactly this form ' +
+                                'inside <plan>, replacing the JSON values:',
+                            `<AETHERMOOR:INSTANCE_THEME instance=${
+                                instance.id
+                            }>{"name":"Local site name","kind":"kind of place","atmosphere":"Short atmospheric description"}</AETHERMOOR:INSTANCE_THEME>`,
+                            'You are naming presentation only. Do not ' +
+                                'add rooms, exits, enemies, puzzles, ' +
+                                'loot, bosses, or rewards.',
+                            'Describe the arrival or current room ' +
+                                'naturally; do not discuss this request.'
+                        ].join('\n')
+                    });
                 }
             }
         }

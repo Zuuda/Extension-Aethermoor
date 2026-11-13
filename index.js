@@ -5819,51 +5819,14 @@ function resolveTravelStep(test) {
             signs[roll(state, signs.length) - 1];
     }
 
-      /*
-     * A POI is a place noticed directly during travel; a rumor is an
-     * unverified claim heard from someone. Neither guarantees content.
-     *
-     * Lock the private curiosity seed once, but expose only the place at
-     * this stage. Noticing, traveling to, and arriving at a POI are not
-     * searches. Do not add an Inspect button. Consequential outcomes need
-     * their own player-action and saved-resolution contracts.
+     /*
+     * A POI is noticed directly during travel, unlike a rumor, which is
+     * an unverified claim heard from someone. Ordinary POIs are scenic
+     * places only: this travel event creates no hidden loot, hazard,
+     * lore, encounter, or quest result. Visiting is not searching.
      */
     if (event === 'point_of_interest') {
         const siteId = `site-${test.stepId}`;
-        const inquiryKey = `site:${siteId}`;
-        let siteRecord = state.inquiries[inquiryKey];
-
-        if (!siteRecord) {
-            const curiosityRoll = roll(state, 10);
-            const curiosity =
-                curiosityRoll <= 7
-                    ? 'nothing_hidden'
-                    : curiosityRoll === 8
-                        ? 'hidden_lore_or_shortcut'
-                        : curiosityRoll === 9
-                            ? 'trap_or_ambush_hazard'
-                            : 'hidden_loot_stash';
-
-            siteRecord = {
-                id: siteId,
-                type: 'site',
-                zone: state.zone,
-                roll: curiosityRoll,
-                result: curiosity,
-                lootSeed: curiosity === 'hidden_loot_stash'
-                    ? {
-                        source: 'curiosity',
-                        roll: curiosityRoll,
-                        result: curiosity,
-                        claimed: false
-                    }
-                    : null,
-                questSeed: null,
-                questSeedConsumed: false
-            };
-
-            state.inquiries[inquiryKey] = siteRecord;
-        }
 
         state.places[siteId] ||= {
             id: siteId,
@@ -5872,8 +5835,7 @@ function resolveTravelStep(test) {
             kind: 'point_of_interest',
             knownFrom: 'direct_observation',
             visited: false,
-            sourceStepId: test.stepId,
-            inquiryId: siteId
+            sourceStepId: test.stepId
         };
 
         state.routeEdges ||= [];
@@ -5899,7 +5861,6 @@ function resolveTravelStep(test) {
             });
         }
 
-        // Do not put the locked curiosity result in the travel packet.
         outcome.site = {
             id: siteId,
             zone: state.zone,
@@ -6721,15 +6682,16 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Beta verification remains part of the travel interruption regression pass.
  *
  * PLANNED — Local site exploration sessions
- * - IMPLEMENTED — BETA PENDING: travel establishes a directly noticed
- *   POI with a stable place ID and saved route; World offers Travel to it.
- * - Confirmed POI arrival records one source-linked visit observation and
- *   authorizes visible, potentially scenic description. It does not search
- *   the site or reveal its privately locked curiosity outcome.
- * - A POI is not a rumor and need not contain a reward.
- * - Do not add a generic Inspect button. Player-described interaction
- *   needs an eligible, saved resolution contract before a stash, hazard,
- *   NPC, or dungeon can become consequential.
+ * - IMPLEMENTED — BETA PENDING: travel establishes a directly noticed,
+ *   scenic-only POI with a stable place ID and saved route; World offers
+ *   Travel to it.
+ * - Confirmed arrival records one source-linked visit observation and
+ *   authorizes description of visible features. Ordinary POIs have no
+ *   hidden curiosity roll, loot, hazard, lore, encounter, or quest result.
+ * - A POI is not a rumor and need not contain a reward. Do not add an
+ *   Inspect button.
+ * - Add consequential site content only through a separately authored,
+ *   saved player-interaction contract.
  * - Do not implement fixed room counts in this movement pass.
  * - Later represent discovered local nodes and exits as saved site-session data.
  * - Prevent repeated visits to the same local node from rerolling encounters

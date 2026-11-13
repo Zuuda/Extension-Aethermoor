@@ -6691,6 +6691,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   victory receipt. Combat displays applied XP, silver, loot, breadcrumbs,
  *   and level-ups after refresh; no fictional search is required to claim
  *   rewards. Verify persistence and replacement by a later encounter.
+ * - IMPLEMENTED — BETA PENDING: World and Instance show spotted-encounter
+ *   decisions in context. Engage opens the one Combat UI; a finished turn
+ *   returns to the originating tab, where victory shows that saved receipt.
+ *   No second combat resolver or reward claim path was added.
  *
  * - IMPLEMENTED — BETA PENDING: healing potions have fixed purchase-zone
  *   grades. Basic heals 50 × zone HP for 10 × zone silver; Mid-Tier heals
@@ -21139,11 +21143,112 @@ async function renderInventoryTab(host) {
 }
 
 /*
+ * Present one saved encounter in the tab where it arose. Decisions call
+ * the existing engage/avoid operations; combat turns still use the single
+ * Combat UI. Victory displays the already-applied receipt, never claims
+ * rewards a second time.
+ */
+function appendEncounterCard(host, state, originTab) {
+    const encounter = state.encounter;
+
+    if (encounter?.status === 'spotted') {
+        const section = makeAethermoorSection(
+            'ENCOUNTER SPOTTED',
+            encounter.foes
+                .filter(foe => foe.hp > 0)
+                .map((foe, index) =>
+                    `${combatFoeLabel(foe, index)} · ` +
+                    `${foe.hp}/${foe.maxHp} HP`
+                )
+                .join('\n') +
+                '\nCombat has not begun.',
+            'combat'
+        );
+
+        for (const [label, kind] of [
+            ['Engage', 'engage'],
+            ['Avoid', 'avoid']
+        ]) {
+            const button = makeAethermoorAction(
+                label,
+                'combat',
+                async () => {
+                    button.disabled = true;
+
+                    try {
+                        const output = await runStoredMechanic({
+                            cases: [{
+                                name: `${kind}_spotted_encounter`,
+                                kind
+                            }]
+                        });
+
+                        assert(
+                            output?.ok === true &&
+                            output.results?.[0]?.ok !== false,
+                            output?.results?.[0]?.error ||
+                                `Could not ${kind} encounter`
+                        );
+
+                        if (kind === 'engage') {
+                            openAethermoorTab('combat');
+                        } else {
+                            renderAethermoorTab(originTab);
+                        }
+                    } catch (error) {
+                        button.disabled = false;
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        );
+                    }
+                }
+            );
+
+            section.appendChild(button);
+        }
+
+        host.appendChild(section);
+        return;
+    }
+
+    const receipt = encounter?.status === 'cleared'
+        ? encounter.victoryReceipt
+        : null;
+
+    if (receipt?.encounterId !== encounter.id) return;
+
+    const lines = [
+        `+${receipt.xp} XP · +${receipt.silver}s`,
+        ...(receipt.loot || []).map(item =>
+            `Loot: ${item.name || 'Unnamed item'}`
+        ),
+        ...(receipt.packDrop?.result === 'diegetic_quest_breadcrumb'
+            ? ['A quest breadcrumb was found.']
+            : []),
+        ...(receipt.levelUps || []).map(change =>
+            `Reached level ${change.level}.`
+        )
+    ];
+
+    host.appendChild(
+        makeAethermoorSection(
+            'VICTORY · REWARDS RECEIVED',
+            lines.join('\n'),
+            'combat'
+        )
+    );
+}
+
+/*
  * Instance navigation is a view over saved room state. Its buttons copy
  * commands; they never enter a room or resolve its contents on click.
  * Overland travel to the entrance uses the ordinary route resolver.
  */
 async function renderInstanceTab(host) {
+
     let snapshot;
 
     try {
@@ -21187,6 +21292,10 @@ async function renderInstanceTab(host) {
         .includes(state.encounter?.status);
 
     if (state.activeInstanceId) {
+        if (state.encounter?.instanceId === instance.id) {
+            appendEncounterCard(host, state, 'instances');
+        }
+
         const room = instance.rooms?.[instance.currentRoomId];
 
         if (!room) {
@@ -21456,6 +21565,10 @@ async function renderWorldTab(host) {
             )
         );
         return;
+    }
+
+    if (!state.encounter?.instanceId) {
+        appendEncounterCard(host, state, 'world');
     }
 
     const knownInstance =
@@ -23214,8 +23327,22 @@ async function openCombatPanel(inlineHost) {
                 aethermoorLastCombatLog;
             resultBox.scrollTop = 0;
 
-            await renderAethermoorTab('combat');
+            const finished =
+                result.summary?.encounter?.status === 'cleared' ||
+                Boolean(result.death) ||
+                result.flee?.success === true;
+
+            if (finished) {
+                const destination =
+                    state.activeInstanceId ? 'instances' : 'world';
+
+                aethermoorActiveTab = destination;
+                renderAethermoorTab(destination);
+            } else {
+                renderAethermoorTab('combat');
+            }
         } catch (error) {
+
             resultBox.hidden = false;
             resultBox.textContent =
                 `Turn was not resolved: ${

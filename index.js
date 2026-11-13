@@ -508,13 +508,18 @@ function ensureWorldRecords(state) {
 }
 
 /*
- * First instance foundation: one known, finite site per entered zone.
- * Create only the CURRENT zone's instance, not instances in upcoming
- * world-metadata zones. Its IDs and topology do not consume combat RNG.
+ * Create only the CURRENT zone's known instance. Its finite layout is
+ * saved once; worldHash chooses its size without advancing combat RNG.
+ * Existing instances are never regenerated or expanded by this helper.
  *
- * "Exhausted" means all three rooms have been visited. This first site
- * has no room rewards or encounters; later content must be attached to
- * saved rooms with its own once-only resolution contract.
+ * This is a linear small-site template, not a physical floor plan:
+ * entrance, three or four guarded chambers, optionally one quiet
+ * chamber, and an Elite chamber. A forward passage past a guarded room
+ * requires that room's threat to be cleared. Backtracking does not.
+ *
+ * Enemy rosters are still locked on FIRST ENTRY to their room by
+ * ensureInstanceRoomEncounter(), not at site creation. Do not describe
+ * them as pre-rolled until that separate contract is implemented.
  */
 function ensureKnownInstance(state) {
     state.instances ||= {};
@@ -529,50 +534,88 @@ function ensureKnownInstance(state) {
     let changed = false;
 
     if (!state.instances[id]) {
+        const roomCount = 5 + (
+            worldHash(
+                `${state.world.seed}:known-instance-size:${zone}`
+            ) % 3
+        );
+
+        const packCount = roomCount >= 6 ? 4 : 3;
+        const quietCount = roomCount - packCount - 2;
+        const sequence = ['entrance'];
+
+        for (let number = 1; number <= packCount; number++) {
+            sequence.push(`chamber_${number}`);
+
+            // The seven-room version gets one place to pause between
+            // guarded chambers. It has no reward or search roll.
+            if (number === 2 && quietCount > 0) {
+                sequence.push('quiet_chamber');
+            }
+        }
+
+        sequence.push('inner_chamber');
+
+        assert(
+            sequence.length === roomCount,
+            'Generated instance room count does not match its plan'
+        );
+
+        const rooms = {};
+
+        for (const [index, roomId] of sequence.entries()) {
+            const previousId = sequence[index - 1] || null;
+            const nextId = sequence[index + 1] || null;
+            const isPack = roomId.startsWith('chamber_');
+            const isElite = roomId === 'inner_chamber';
+            const guarded = isPack || isElite;
+
+            rooms[roomId] = {
+                id: roomId,
+                label:
+                    roomId === 'entrance'
+                        ? 'Entrance'
+                        : roomId === 'quiet_chamber'
+                            ? 'Quiet Chamber'
+                            : isElite
+                                ? 'Inner Chamber'
+                                : `Chamber ${roomId.split('_')[1]}`,
+                exits: [previousId, nextId].filter(Boolean),
+                requiresCleared: previousId &&
+                    (
+                        previousId.startsWith('chamber_') ||
+                        previousId === 'inner_chamber'
+                    )
+                    ? [previousId]
+                    : [],
+                visited: false,
+                ...(guarded
+                    ? {
+                        threat: isElite
+                            ? { type: 'elite' }
+                            : {
+                                type: 'normal_pack',
+                                bracket: 'mid',
+                                composition: 2
+                            },
+                        threatStatus: 'unresolved',
+                        encounterId: null,
+                        encounterBlueprint: null
+                    }
+                    : { threatStatus: 'none' })
+            };
+        }
+
         state.instances[id] = {
             id,
             zone,
             label,
             entranceId,
+            size: 'small',
+            roomCount,
             status: 'open',
             currentRoomId: null,
-            rooms: {
-                entrance: {
-                    id: 'entrance',
-                    label: 'Entrance',
-                    exits: ['work_chamber'],
-                    visited: false,
-                    threatStatus: 'none'
-                },
-                work_chamber: {
-                    id: 'work_chamber',
-                    label: 'Work Chamber',
-                    exits: ['entrance', 'inner_chamber'],
-                    requiresCleared: [],
-                    visited: false,
-                    threat: {
-                        type: 'normal_pack',
-                        bracket: 'mid',
-                        composition: 2
-                    },
-                    threatStatus: 'unresolved',
-                    encounterId: null,
-                    encounterBlueprint: null
-                },
-                inner_chamber: {
-                    id: 'inner_chamber',
-                    label: 'Inner Chamber',
-                    exits: ['work_chamber'],
-                    requiresCleared: ['work_chamber'],
-                    visited: false,
-                    threat: {
-                        type: 'elite'
-                    },
-                    threatStatus: 'unresolved',
-                    encounterId: null,
-                    encounterBlueprint: null
-                }
-            }
+            rooms
         };
         changed = true;
     }
@@ -4499,12 +4542,30 @@ const eliteChance =
             rewards
         };
     } else if (kind === 'normal_pack') {
+        /*
+         * Ordinary packs retain their random bracket and composition.
+         * An instance room may instead supply an engine-saved plan.
+         * In either case, the created roster is saved on first spawn.
+         */
+        assert(
+            test.bracket === undefined ||
+            bracketNames.includes(test.bracket),
+            'Invalid locked normal-pack bracket'
+        );
 
-        const bracketRoll =
-            roll(state, bracketNames.length);
+        assert(
+            test.composition === undefined ||
+            PACK_COMPOSITIONS[test.composition],
+            'Invalid locked normal-pack composition'
+        );
 
-        const compositionRoll =
-            roll(state, 6);
+        const bracketRoll = test.bracket === undefined
+            ? roll(state, bracketNames.length)
+            : bracketNames.indexOf(test.bracket) + 1;
+
+        const compositionRoll = test.composition === undefined
+            ? roll(state, 6)
+            : test.composition;
 
         const bracket =
             bracketNames[bracketRoll - 1];
@@ -7103,12 +7164,16 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Add consequential site content only through a separately authored,
  *   saved player-interaction contract.
  *
- * - IMPLEMENTED — BETA PENDING: each entered zone has one known, finite
- *   three-room instance with a saved entrance route and local room graph.
+ * - IMPLEMENTED — BETA PENDING: each entered zone has one known instance
+ *   with a saved entrance route and finite local room graph. Older
+ *   three-room instances retain their saved topology.
  *
- * - IMPLEMENTED — BETA PENDING: newly created instances assign one locked
- *   normal-pack threat to the Work Chamber and one locked Elite threat to
- *   the Inner Chamber.
+ * - IMPLEMENTED — BETA PENDING: newly created small instances have 5–7
+ *   rooms: three or four guarded normal-pack chambers, optionally one
+ *   quiet chamber, and a final Elite chamber. The layout is saved once;
+ *   room rosters are locked on first entry and reused on revisits.
+ * - Forward passages past guarded chambers require actual clearance.
+ *   Backtracking remains possible; visiting alone never clears a threat.
  * - Entering a threat room spots its saved encounter without engaging it.
  *   Avoiding, fleeing, or dying leaves the room unresolved; returning
  *   restores the same encounter rather than rolling another.

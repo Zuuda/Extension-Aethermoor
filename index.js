@@ -6550,6 +6550,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Inn purchases currently grant no buffs, healing, inventory items,
  *   or automatic passage of time. Verify staging, payment, and replay.
  *
+ * IMPLEMENTED — BETA PENDING: Variable expense quote handshake
+ * - For diegetic fares, bribes, and similar unscripted costs, the GM may
+ *   propose an amount in fiction and report it privately as EXPENSE_QUOTE.
+ * - The extension saves the quote without charging. Only explicit player
+ *   agreement to the same amount/purpose commits it; the extension deducts
+ *   the saved amount once and supplies a receipt.
+ * - Negotiation or refusal is not payment. A changed amount requires a
+ *   new quote. Test insufficient funds and duplicate agreement events.
+ *
  * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
  * - ASK_WARES opens the extension-rendered, two-sided trade window.
  * - Clicks select stock variants, Bag Reserves, or worn gear. Close stages
@@ -12639,14 +12648,142 @@ function resolveFoodAction(test) {
         });
     }
 
+/*
+ * Variable fictional expenses use a quote-and-agreement handshake.
+ * The narrator may propose a diegetic amount, but quote creation never
+ * changes silver. Commit reads only the saved quote and applies it once.
+ */
+function resolveExpenseAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Expense action requires saved state'
+    );
+
+    const state = clone(test.state);
+    state.expenseReceipts ||= {};
+
+    if (test.action === 'quote') {
+        assert(
+            typeof test.socialId === 'string' &&
+            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+            'Expense quote requires an engine-issued message reference'
+        );
+
+        int(test.amount, 'expense quote amount', 1);
+        assert(
+            test.amount <= 1000000,
+            'Expense quote exceeds the supported limit'
+        );
+        assert(
+            typeof test.reason === 'string' &&
+            test.reason.trim().length > 0 &&
+            test.reason.trim().length <= 160,
+            'Expense quote requires a brief reason'
+        );
+
+        const existing = state.pendingExpense;
+
+        if (existing?.id === test.socialId) {
+            return {
+                ok: true,
+                created: false,
+                action: 'quote',
+                quote: clone(existing),
+                state
+            };
+        }
+
+        assert(
+            !existing,
+            'Another expense quote is awaiting the players’ decision'
+        );
+
+        state.pendingExpense = {
+            id: test.socialId,
+            amount: test.amount,
+            reason: test.reason.trim(),
+            locationId: state.currentLocationId || null,
+            zone: state.zone
+        };
+
+        return {
+            ok: true,
+            created: true,
+            action: 'quote',
+            quote: clone(state.pendingExpense),
+            state
+        };
+    }
+
+    assert(
+        test.action === 'commit',
+        `Unsupported expense action: ${test.action}`
+    );
+
+    assert(
+        typeof test.socialId === 'string' &&
+        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+        'Expense agreement requires an engine-issued message reference'
+    );
+
+    const previous = state.expenseReceipts[test.socialId];
+
+    if (previous) {
+        return {
+            ok: true,
+            created: false,
+            action: 'commit',
+            receipt: clone(previous),
+            state
+        };
+    }
+
+    const quote = state.pendingExpense;
+
+    assert(
+        quote &&
+        quote.id === test.quoteId,
+        'No matching expense quote awaits agreement'
+    );
+
+    assert(
+        quote.locationId === (state.currentLocationId || null) &&
+        quote.zone === state.zone,
+        'The crew has moved since this expense was quoted'
+    );
+
+    assert(
+        Number.isInteger(state.crew.purse) &&
+        state.crew.purse >= quote.amount,
+        `Insufficient silver: need ${quote.amount}s, ` +
+            `have ${state.crew.purse}s`
+    );
+
+    const purseBefore = state.crew.purse;
+    state.crew.purse -= quote.amount;
+
+    const receipt = {
+        id: test.socialId,
+        quoteId: quote.id,
+        amount: quote.amount,
+        reason: quote.reason,
+        locationId: quote.locationId,
+        purseBefore,
+        purseAfter: state.crew.purse
+    };
+
+    delete state.pendingExpense;
+    state.expenseReceipts[test.socialId] = clone(receipt);
+
     return {
         ok: true,
-        action: 'apply',
-        recipe: clone(recipe),
+        created: true,
+        action: 'commit',
+        receipt,
         state
     };
 }
-function resolveBossGearCheck(test) {
+
     assert(
         test.state &&
         typeof test.state === 'object',
@@ -13915,7 +14052,9 @@ function resolveBatch(args) {
                     result = resolveXpAction(test);
                     break;
                 case 'currency':
-                    result = resolveCurrencyAction(test);
+                    result = ['quote', 'commit'].includes(test.action)
+                        ? resolveExpenseAction(test)
+                        : resolveCurrencyAction(test);
                     break;
                 case 'consumable':
                     result = resolveConsumableAction(test);
@@ -15473,6 +15612,33 @@ function inventoryActionNarrationPacket(result, action) {
     ].join('\n');
 }
 
+function expenseQuoteNarrationPacket(quote) {
+    return [
+        'PRIVATE EXPENSE QUOTE — do not recite this heading.',
+        `Engine-issued quote ID: ${quote.id}.`,
+        `Proposed expense: ${quote.amount}s for ${quote.reason}.`,
+        `Current purse: ${quote.purseBefore ?? 'check current state'}s.`,
+        'This is a proposal only; no silver has been deducted.',
+        'If the players explicitly agree to THIS amount and reason, ' +
+            'place this exact tag inside the disposable <plan> block:',
+        `<AETHERMOOR:EXPENSE_AGREED quote_id=${quote.id}>`,
+        'Do not emit the tag if they refuse, negotiate, change the service, ' +
+            'or have not clearly agreed. A changed amount requires a new quote.',
+        'Do not mention tags, the extension, or internal accounting.'
+    ].join('\n');
+}
+
+function expenseReceiptNarrationPacket(receipt) {
+    return [
+        'PRIVATE EXPENSE RECEIPT — do not recite this heading.',
+        `Paid ${receipt.amount}s for ${receipt.reason}.`,
+        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
+        'The charge was applied once. Narrate the agreed payment naturally; ' +
+            'do not deduct silver again.',
+        'The receipt does not establish any service effect beyond the agreed expense.'
+    ].join('\n');
+}
+
 function innServiceNarrationPacket(receipt) {
     return [
         'PRIVATE INN SERVICE RECEIPT — do not recite this heading.',
@@ -16217,6 +16383,10 @@ async function runStoredMechanic(args) {
                 (
                     ['vendor', 'herbalist', 'inn'].includes(oneCase.kind) &&
                     ['open', 'commit'].includes(oneCase.action)
+                ) ||
+                (
+                    oneCase.kind === 'currency' &&
+                    ['quote', 'commit'].includes(oneCase.action)
                 )
             )
         ) {
@@ -16371,6 +16541,21 @@ async function runStoredMechanic(args) {
               oneCase.action === 'use' &&
               caseResult.recipient
                 ? inventoryActionNarrationPacket(caseResult, 'use')
+
+            : batch &&
+              oneCase?.kind === 'currency' &&
+              oneCase.action === 'quote' &&
+              caseResult.created
+                ? expenseQuoteNarrationPacket({
+                    ...caseResult.quote,
+                    purseBefore: savedState.crew.purse
+                })
+
+            : batch &&
+              oneCase?.kind === 'currency' &&
+              oneCase.action === 'commit' &&
+              caseResult.created
+                ? expenseReceiptNarrationPacket(caseResult.receipt)
 
             : batch &&
               oneCase?.kind === 'vendor' &&
@@ -17257,6 +17442,7 @@ function registerTools() {
                                     'buy',
                                     'spend',
                                     'earn',
+                                    'quote',
                                     'sell',
                                     'grant',
                                     'use',
@@ -17385,10 +17571,17 @@ function registerTools() {
                             socialId: {
                                 type: 'string',
                                 description:
-                                    'Stable NPC or consequential-deal ID; choose before rolling'
+                                    'Engine-issued assistant-message reference'
+                            },
+
+                            quoteId: {
+                                type: 'string',
+                                description:
+                                    'Engine-issued ID of the saved expense quote'
                             },
 
                             objectiveCompleted: {
+
                                 type: 'boolean',
                                 description:
                                     'Must be true when the final quest objective has been completed in the fiction'
@@ -22798,9 +22991,31 @@ function extractAethermoorQuestEvents(text) {
             events.push({ event: 'inn_agreed' });
         }
 
+        const expenseQuotePattern =
+            /<AETHERMOOR:EXPENSE_QUOTE\s+amount=([1-9]\d*)\s+reason="([^"]{1,160})"\s*>/g;
+
+        for (const match of plan[1].matchAll(expenseQuotePattern)) {
+            events.push({
+                event: 'expense_quote',
+                amount: Number(match[1]),
+                reason: match[2]
+            });
+        }
+
+        const expenseAgreementPattern =
+            /<AETHERMOOR:EXPENSE_AGREED\s+quote_id=(work-[0-9]+-[a-z0-9]+)\s*>/g;
+
+        for (const match of plan[1].matchAll(expenseAgreementPattern)) {
+            events.push({
+                event: 'expense_agreed',
+                quoteId: match[1]
+            });
+        }
+
         for (const _match of plan[1].matchAll(
             /<AETHERMOOR:HERBALIST_AGREED\s*>/g
         )) {
+
             events.push({ event: 'herbalist_agreed' });
         }
 
@@ -23012,6 +23227,43 @@ async function processAethermoorAssistantEvents(data) {
                         name: 'assistant_follow_breadcrumb',
                         kind: 'follow_breadcrumb',
                         breadcrumbId: event.breadcrumbId
+                    }]
+                });
+            } else if (event.event === 'expense_quote') {
+                const socialId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    socialId,
+                    'Expense quote awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_expense_quote',
+                        kind: 'currency',
+                        action: 'quote',
+                        socialId,
+                        amount: event.amount,
+                        reason: event.reason
+                    }]
+                });
+            } else if (event.event === 'expense_agreed') {
+                const socialId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    socialId,
+                    'Expense agreement awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_expense_commit',
+                        kind: 'currency',
+                        action: 'commit',
+                        socialId,
+                        quoteId: event.quoteId
                     }]
                 });
             } else if (event.event === 'ask_work') {
@@ -23684,11 +23936,33 @@ globalThis.aethermoorMechanicsInterceptor =
                 }
             }
         }
+        if (contextState?.pendingExpense) {
+            const quote = contextState.pendingExpense;
+
+            entries.push({
+                id: `expense-quote-context-${quote.id}`,
+                type: 'expense_quote_context',
+                packet: [
+                    'PRIVATE PENDING EXPENSE QUOTE — do not recite.',
+                    `Quote ID: ${quote.id}.`,
+                    `Purpose: ${quote.reason}.`,
+                    `Amount: ${quote.amount}s.`,
+                    'No silver has been deducted.',
+                    'The player must explicitly agree to this exact amount ' +
+                        'and purpose before payment.',
+                    'If they agree in this reply, place this exact tag inside <plan>:',
+                    `<AETHERMOOR:EXPENSE_AGREED quote_id=${quote.id}>`,
+                    'If they decline or negotiate, do not emit the tag. ' +
+                        'A changed price requires a new quote.',
+                    'Do not mention the tag, extension, or internal accounting.'
+                ].join('\n')
+            });
+        }
+
         if (!metadata || entries.length === 0) {
             console.log('[Aethermoor] No handoff queued');
             return;
         }
-
 
         // The handoff is inserted for generation. Retain its exact object
         // and metadata reference so cleanup cannot affect another chat.

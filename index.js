@@ -21239,10 +21239,6 @@ async function renderWorldTab(host) {
 
     if (journey) {
 
-    const journey = state.currentJourney;
-
-    if (journey) {
-
         /*
          * A final-segment encounter consumes the last route segment but
          * defers arrival. shortestRoute() then reports zero distance,
@@ -21302,8 +21298,6 @@ async function renderWorldTab(host) {
             )
         );
     }
-
-    const leads = Object.values(state.leads || {})
 
     const leads = Object.values(state.leads || {})
         .filter(lead =>

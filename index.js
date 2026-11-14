@@ -16285,6 +16285,61 @@ function queueAethermoor(task) {
 const AETHERMOOR_METADATA_KEY = 'aethermoorV2';
 
 /*
+ * Manual reset replaces this chat's mechanics state, not its transcript
+ * or another chat's metadata. Serialize it with ordinary operations so
+ * an in-flight save cannot restore the old campaign afterward.
+ */
+async function resetAethermoorCampaign() {
+    return queueAethermoor(async () => {
+        const context = getContext();
+        const metadata = context.chatMetadata;
+        const stored = metadata?.[AETHERMOOR_METADATA_KEY];
+
+        assert(
+            metadata && stored?.state &&
+            typeof context.saveMetadata === 'function',
+            'This chat has no saved campaign to reset'
+        );
+
+        assert(
+            !aethermoorInjectedHandoff ||
+            aethermoorInjectedHandoff.metadata !== metadata ||
+            aethermoorInjectedHandoff.consumed,
+            'Wait for the current GM reply and handoff to finish before resetting'
+        );
+
+        const freshState = createInitialCampaignState();
+        const previous = stored;
+
+        assert(
+            getContext().chatMetadata === metadata,
+            'Chat changed; campaign was not reset'
+        );
+
+        metadata[AETHERMOOR_METADATA_KEY] = {
+            revision: stored.revision + 1,
+            state: freshState,
+            handoffQueue: []
+        };
+
+        try {
+            await context.saveMetadata();
+        } catch (error) {
+            metadata[AETHERMOOR_METADATA_KEY] = previous;
+            throw error;
+        }
+
+        return {
+            ok: true,
+            summary: stateSummary(
+                freshState,
+                metadata[AETHERMOOR_METADATA_KEY].revision
+            )
+        };
+    });
+}
+
+/*
  * A fresh chat must be playable without a manually supplied state export.
  * Start with no encounter or opportunities: the crew discovers those
  * through play. Initialization consumes no campaign RNG rolls.
@@ -24649,7 +24704,63 @@ function openNarrationDebug() {
         }
     );
 
-    controls.append(toggle, refreshButton, clear, createTestRumor);
+    const resetCampaign = makeAethermoorAction(
+        'Reset This Chat’s Campaign',
+        'world',
+        async () => {
+            const confirmation = window.prompt(
+                'This permanently replaces this chat’s Aethermoor ' +
+                'campaign state. The chat messages will remain. ' +
+                'Type RESET to continue.'
+            );
+
+            if (confirmation !== 'RESET') return;
+
+            resetCampaign.disabled = true;
+
+            try {
+                await resetAethermoorCampaign();
+
+                for (const id of [
+                    'aethermoor_shop_window',
+                    'aethermoor_herbalist_window',
+                    'aethermoor_inn_window'
+                ]) {
+                    document.getElementById(id)?.remove();
+                }
+
+                aethermoorLastCombatLog = '';
+                aethermoorLastCombatLogKey = null;
+                combatSelections.target = null;
+                aethermoorActiveTab = 'world';
+
+                if (aethermoorPanelOpen) {
+                    renderAethermoorTab('world');
+                }
+
+                panel.remove();
+                toastr.success(
+                    'This chat’s campaign reset to its level-1 start. ' +
+                    'Earlier chat messages were not deleted.',
+                    'Aethermoor'
+                );
+            } catch (error) {
+                resetCampaign.disabled = false;
+                reportAethermoorError(
+                    error,
+                    'Campaign reset failed'
+                );
+            }
+        }
+    );
+
+    controls.append(
+        toggle,
+        refreshButton,
+        clear,
+        createTestRumor,
+        resetCampaign
+    );
     body.append(
         status,
         developerToolsLabel,

@@ -19497,10 +19497,15 @@ function addAethermoorPanelStyles() {
             text-align: left;
         }
 
-        .aethermoor-ui-action:hover,
-        .aethermoor-ui-action:focus-visible {
+        .aethermoor-ui-action:hover:not(:disabled),
+        .aethermoor-ui-action:focus-visible:not(:disabled) {
             color: #ffffff;
             border-color: #4da6ff;
+        }
+
+        .aethermoor-ui-action:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
         }
 
         .aethermoor-ui-action[data-accent="quest"]:hover,
@@ -22108,12 +22113,7 @@ async function renderWorldTab(host) {
     }
 
     function addTravelAction(container, label, destinationId) {
-        if (
-            movementBlocked ||
-            destinationId === currentLocationId
-        ) {
-            return;
-        }
+        if (destinationId === currentLocationId) return;
 
         const distance = distanceLabel(destinationId);
 
@@ -22127,17 +22127,12 @@ async function renderWorldTab(host) {
             )
         );
 
-        container.appendChild(button);
-    }
+        button.disabled = movementBlocked;
+        if (state.activeInstanceId) {
+            button.title = 'Leave the instance before overland travel.';
+        }
 
-    if (movementBlocked) {
-        host.appendChild(
-            makeAethermoorSection(
-                'TRAVEL PAUSED',
-                'Resolve or avoid the spotted encounter before starting or changing a journey.',
-                'world'
-            )
-        );
+        container.appendChild(button);
     }
 
     if (state.activeInstanceId) {
@@ -22145,11 +22140,20 @@ async function renderWorldTab(host) {
             makeAethermoorSection(
                 'INSIDE AN INSTANCE',
                 'Open the Instance tab for the room map and exits. ' +
-                    'Leave through its entrance before overland travel.',
+                    'World destinations remain visible, but overland ' +
+                    'travel is unavailable until you leave.',
                 'world'
             )
         );
-        return;
+    } else if (movementBlocked) {
+        host.appendChild(
+            makeAethermoorSection(
+                'TRAVEL PAUSED',
+                'Resolve or avoid the encounter before starting or ' +
+                    'changing a journey.',
+                'world'
+            )
+        );
     }
 
     if (!state.encounter?.instanceId) {

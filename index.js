@@ -570,6 +570,24 @@ function ensureKnownInstance(state) {
             const isElite = roomId === 'inner_chamber';
             const guarded = isPack || isElite;
 
+            const composition = isPack
+                ? 1 + (
+                    worldHash(
+                        `${state.world.seed}:instance-composition:` +
+                        `${zone}:${roomId}`
+                    ) % 6
+                )
+                : null;
+
+            const tactic = isPack
+                ? chooseInstancePackTactic(
+                    state,
+                    zone,
+                    composition,
+                    roomId
+                )
+                : null;
+
             rooms[roomId] = {
                 id: roomId,
                 label:
@@ -596,7 +614,8 @@ function ensureKnownInstance(state) {
                             : {
                                 type: 'normal_pack',
                                 bracket: 'mid',
-                                composition: 2
+                                composition,
+                                tactic
                             },
                         threatStatus: 'unresolved',
                         encounterId: null,
@@ -4381,6 +4400,77 @@ const NORMAL_BRACKETS = new Proxy({}, {
     }
 });
 
+/*
+ * Pack tactics are encounter-level modifiers, separate from composition.
+ *
+ * The registry is intentionally declarative. A tactic may later define
+ * player-visible instructions, eligibility, and turn hooks, but it must
+ * never create an untracked foe, reward, or objective. The encounter saves
+ * the selected tactic ID so revisits and narration use the same result.
+ *
+ * Elites and bosses can eventually use a parallel registry or explicitly
+ * opt into compatible pack tactics. Do not make every combat role inspect
+ * ad hoc tactic strings.
+ */
+const PACK_TACTICS = {
+    none: {
+        id: 'none',
+        label: 'No special tactic',
+        description: 'The group uses its ordinary role behavior.',
+        minZone: 1,
+        eligible: () => true
+    },
+
+    opening_pressure: {
+        id: 'opening_pressure',
+        label: 'Opening Pressure',
+        description:
+            'The group coordinates its first response aggressively.',
+        minZone: 3,
+        eligible: composition =>
+            composition !== 1
+    }
+};
+
+function packTacticDefinition(id = 'none') {
+    const tactic = PACK_TACTICS[id];
+
+    assert(
+        tactic,
+        `Unknown pack tactic: ${id}`
+    );
+
+    return tactic;
+}
+
+function chooseInstancePackTactic(state, zone, composition, roomId) {
+    const candidates = Object.values(PACK_TACTICS)
+        .filter(tactic =>
+            tactic.id !== 'none' &&
+            zone >= tactic.minZone &&
+            tactic.eligible(composition)
+        );
+
+    /*
+     * Tactics are presentation/combat-plan selection, not combat events.
+     * Use worldHash so creating an instance never advances the combat RNG.
+     */
+    if (candidates.length === 0) return 'none';
+
+    const rollValue = worldHash(
+        `${state.world.seed}:instance-tactic:${zone}:${roomId}`
+    ) % 4;
+
+    return rollValue === 0
+        ? candidates[
+            worldHash(
+                `${state.world.seed}:instance-tactic-choice:` +
+                `${zone}:${roomId}`
+            ) % candidates.length
+        ].id
+        : 'none';
+}
+
 const PACK_COMPOSITIONS = {
     1: ['brute', 'brute', 'brute'],
     2: ['brute', 'mender', 'archer'],
@@ -4855,6 +4945,11 @@ const eliteChance =
         const bracket =
             bracketNames[bracketRoll - 1];
 
+        const tactic =
+            test.tactic || 'none';
+
+        packTacticDefinition(tactic);
+
         spawned = spawnNormalPack({
             zone: test.zone,
             bracket,
@@ -4866,10 +4961,17 @@ const eliteChance =
 
         spawned.encounter.composition =
             compositionRoll;
+        spawned.encounter.packTactic = {
+            id: tactic,
+            label: packTacticDefinition(tactic).label,
+            description: packTacticDefinition(tactic).description
+        };
+
         spawned.encounter.spawnRolls = {
             encounterTypeRoll,
             bracketRoll,
-            compositionRoll
+            compositionRoll,
+            tactic: spawned.encounter.packTactic.id
         };
 
     } else {
@@ -5663,12 +5765,23 @@ function ensureInstanceRoomEncounter(state, instance, room) {
         encounterType: threat.type,
         bracket: threat.bracket,
         composition: threat.composition,
+        tactic: threat.tactic,
         encounterId:
             `${instance.id}-${room.id}-threat`
     });
 
     state.rngState = spawned.state.rngState;
     state.encounter = spawned.encounter;
+        const tactic = packTacticDefinition(
+        threat.tactic || 'none'
+    );
+
+    state.encounter.packTactic = {
+        id: tactic.id,
+        label: tactic.label,
+        description: tactic.description
+    };
+
     state.encounter.status = 'spotted';
     state.encounter.instanceId = instance.id;
     state.encounter.instanceRoomId = room.id;
@@ -16468,6 +16581,13 @@ function discoveryNarrationPacket(encounter) {
         'A new encounter has been discovered.',
         `Zone: ${encounter.zone}.`,
         `Enemies present: ${foes.join('; ')}.`,
+        ...(encounter.type === 'normal_pack' &&
+            encounter.packTactic?.id !== 'none'
+            ? [
+                `Pack tactic: ${encounter.packTactic.label}.`,
+                encounter.packTactic.description
+            ]
+            : []),
         'The enemies have been spotted, but combat has not begun.',
         'Do not narrate an attack or resolve combat yet.',
         'Narrate what the crew can hear, see, smell, or infer about the group, then leave the decision to engage, avoid, investigate, negotiate, or retreat to the protagonists.'
@@ -21946,11 +22066,22 @@ async function renderInstanceTab(host) {
 
         const map = Object.values(instance.rooms)
             .filter(entry => known.has(entry.id))
-            .map(entry =>
-                `${entry.id === room.id ? '● ' : '○ '}` +
-                `${entry.label} · ` +
-                `${entry.visited ? 'Visited' : 'Known exit'}`
-            ).join('\n');
+            .map(entry => {
+                const threat = entry.threat;
+                const tactic =
+                    threat?.tactic && threat.tactic !== 'none'
+                        ? ` · ${packTacticDefinition(
+                            threat.tactic
+                        ).label}`
+                        : '';
+
+                return (
+                    `${entry.id === room.id ? '● ' : '○ '}` +
+                    `${entry.label} · ` +
+                    `${entry.visited ? 'Visited' : 'Known exit'}` +
+                    `${tactic}`
+                );
+            }).join('\n');
 
         const section = makeAethermoorSection(
             `INSTANCE · ${instance.label}`,

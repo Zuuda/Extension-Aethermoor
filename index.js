@@ -5550,11 +5550,17 @@ function resolveInstanceTheme(test) {
         'Instance theme requires exactly name, kind, and atmosphere'
     );
 
+    const themeLimits = {
+        name: 80,
+        kind: 80,
+        atmosphere: 240
+    };
+
     for (const key of ['name', 'kind', 'atmosphere']) {
         assert(
             typeof names[key] === 'string' &&
             names[key].trim().length >= 3 &&
-            names[key].trim().length <= 100 &&
+            names[key].trim().length <= themeLimits[key] &&
             !/[<>\r\n]/.test(names[key]),
             `Invalid instance ${key}`
         );

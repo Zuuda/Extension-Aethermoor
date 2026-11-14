@@ -2500,6 +2500,95 @@ function combatNarrativeTurn(encounter, actions, exchanges, kills) {
     };
 }
 
+/*
+ * Death and respawn are different transitions. Record the first death
+ * immediately, including one shared XP penalty, but leave the fallen
+ * protagonist at 0 HP until combat ends. A second death in this
+ * encounter never charges XP again.
+ */
+function recordEncounterCasualties(state) {
+    const encounter = state.encounter;
+    const fallen = ['qtik', 'tansy'].filter(
+        owner => state.crew[owner].hp === 0
+    );
+
+    if (!fallen.length) return null;
+
+    if (!encounter.casualties) {
+        const threshold = nextXp(state.crew.level);
+        const requestedPenalty = Math.floor(threshold / 10);
+        const xpLost = Math.min(state.crew.xp, requestedPenalty);
+
+        state.crew.xp -= xpLost;
+        encounter.casualties = {
+            fallen: [],
+            requestedPenalty,
+            xpLost,
+            respawned: false
+        };
+    }
+
+    for (const owner of fallen) {
+        if (!encounter.casualties.fallen.includes(owner)) {
+            encounter.casualties.fallen.push(owner);
+        }
+    }
+
+    return encounter.casualties;
+}
+
+function finishEncounterRespawns(state, totalDefeat = false) {
+    const casualties = state.encounter.casualties;
+    if (!casualties || casualties.respawned) return null;
+
+    const stats = derived(state.crew);
+
+    for (const owner of casualties.fallen) {
+        state.crew[owner].hp = owner === 'qtik'
+            ? stats.qtikMaxHp
+            : stats.tansyMaxHp;
+    }
+
+    casualties.respawned = true;
+
+    if (totalDefeat) {
+        const settlement = savedPrimarySettlement(
+            state,
+            state.zone
+        );
+
+        state.currentJourney = null;
+        state.activeInstanceId = null;
+
+        for (const instance of Object.values(
+            state.instances || {}
+        )) {
+            if (instance.currentRoomId !== null) {
+                instance.currentRoomId = null;
+            }
+        }
+
+        state.currentLocationId = settlement.locationId;
+        state.currentPosition = {
+            nodeId: settlement.locationId
+        };
+
+        state.encounter.status = 'dead';
+        state.encounter.deathResolved = true;
+        state.encounter.rewards.resolved = true;
+    }
+
+    return {
+        fallen: [...casualties.fallen],
+        xpLost: casualties.xpLost,
+        respawned: true,
+        totalDefeat,
+        respawnSettlementId: totalDefeat
+            ? savedPrimarySettlement(state, state.zone).id
+            : null
+    };
+}
+
 function resolveTurn({
     state,
     actions,
@@ -2527,17 +2616,24 @@ function resolveTurn({
     );
 
     assert(
-        c.qtik.hp > 0 && c.tansy.hp > 0,
-        'Cannot resolve a combat turn after a crew member has fallen; resolve death or respawn first'
-    );
-
-    assert(
         actions && typeof actions === 'object',
         'Turn actions are required'
     );
 
-    const fleeing =
-        actions.flee === true;
+    const fleeing = actions.flee === true;
+    const fallenAtStart = ['qtik', 'tansy'].filter(
+        owner => c[owner].hp === 0
+    );
+
+    assert(
+        fallenAtStart.length < 2,
+        'Both protagonists have fallen; combat must end'
+    );
+
+    assert(
+        fallenAtStart.length === 0 || fleeing,
+        'A surviving protagonist can only attempt Flee'
+    );
 
     if (fleeing) {
         assert(
@@ -2596,10 +2692,13 @@ function resolveTurn({
             encounter.fledOnAttempt =
                 encounter.fleeAttempts;
 
+            const death = finishEncounterRespawns(s);
+
             return {
                 ok: true,
                 turn: encounter.turn,
                 action: 'flee',
+                death,
                 flee: {
                     roll: fleeRoll,
                     lukBonus: fleeBonus,
@@ -3005,12 +3104,16 @@ function visorDisrupts(foe, enemyRoll) {
 
     for (
         let ex = 0;
-        ex < 3 &&
+        ex < (fleeing ? 1 : 3) &&
         live(s).length > 0 &&
-        c.qtik.hp > 0 &&
-        c.tansy.hp > 0;
+        (
+            fleeing
+                ? c.qtik.hp > 0 || c.tansy.hp > 0
+                : c.qtik.hp > 0 && c.tansy.hp > 0
+        );
         ex++
     ) {
+
         const p = tape.player[ex];
         const e = tape.enemy[ex];
         const effects = [];
@@ -3084,15 +3187,18 @@ function visorDisrupts(foe, enemyRoll) {
             iceDefenseBonus
         );
 
-        let target = live(s).find(
-            foe => foe.id === actions.target
-        );
+        let target = fleeing
+            ? lowestHpFoe()
+            : live(s).find(
+                foe => foe.id === actions.target
+            );
 
-        // Once the declared target dies, continue against lowest HP.
+        // Once a declared target dies, continue against lowest HP.
         if (!target) {
             target = lowestHpFoe();
             effects.push(`Retargeted to ${target.id}`);
         }
+
         if (stunnedFoeId && target.id !== stunnedFoeId) {
             target = live(s).find(
                 foe => foe.id === stunnedFoeId
@@ -3804,6 +3910,19 @@ if (frontliners.length > 0) {
                 }
             }
         }
+        /*
+         * During a survivor's failed escape, enemies threaten the one
+         * still standing. Never absorb another hit with the companion
+         * already at 0 HP.
+         */
+        if (fleeing && c.qtik.hp === 0) {
+            backlineDamage += frontlineDamage;
+            frontlineDamage = 0;
+        } else if (fleeing && c.tansy.hp === 0) {
+            frontlineDamage += backlineDamage;
+            backlineDamage = 0;
+        }
+
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
         c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
 
@@ -3939,35 +4058,33 @@ if (frontliners.length > 0) {
         )
     );
 
-        /*
-     * Resolve incapacitation automatically after the turn's exchanges.
-     * If all foes were defeated, normal victory/reward resolution takes
-     * precedence; otherwise the existing death penalty and respawn apply.
-     */
-    const fallenCrewMember =
-        c.qtik.hp <= 0
-            ? 'qtik'
-            : c.tansy.hp <= 0
-                ? 'tansy'
-                : null;
+    const casualties = recordEncounterCasualties(s);
 
-    if (fallenCrewMember && live(s).length > 0) {
-        const deathResult = resolveDeathPenalty({
-            state: s
-        });
+    if (casualties && live(s).length > 0) {
+        const totalDefeat =
+            c.qtik.hp === 0 && c.tansy.hp === 0;
 
-        const deathState = deathResult.state;
+        const death = totalDefeat
+            ? finishEncounterRespawns(s, true)
+            : {
+                fallen: [...casualties.fallen],
+                xpLost: casualties.xpLost,
+                respawned: false,
+                totalDefeat: false
+            };
 
         return {
             ok: true,
-            turn: deathState.encounter.turn,
+            turn: encounter.turn,
             rolls: tape,
             flee: fleeing ? tape.flee : null,
             itemUse,
             exchanges: logs,
             turnEffects: [
                 ...turnEffects,
-                `${fallenCrewMember} fell; death penalty and respawn applied`
+                totalDefeat
+                    ? 'Both protagonists fell; the encounter ended'
+                    : 'One protagonist fell; only Flee remains available'
             ],
             weaselsDestroyed,
             momentum,
@@ -3985,14 +4102,9 @@ if (frontliners.length > 0) {
             levelUps: [],
             questGate: null,
             packCleared: false,
-            death: {
-                fallenCrewMember,
-                xpLost: deathResult.xpLost,
-                respawned: deathResult.respawned,
-                encounterAbandoned: deathResult.encounterAbandoned
-            },
-            state: deathState,
-            derived: derived(deathState.crew)
+            death,
+            state: s,
+            derived: derived(s.crew)
         };
     }
 
@@ -4054,6 +4166,12 @@ if (frontliners.length > 0) {
 
     c.weasels.max = 3 + Math.floor(c.level / 2);
 
+    // The last foe may fall in the same exchange as a protagonist.
+    // Keep the victory and its rewards, but respawn the fallen member.
+    const victoryDeath = encounterRewards.resolved
+        ? finishEncounterRespawns(s)
+        : null;
+
     const finalStats = derived(c);
     c.qtik.maxHp = finalStats.qtikMaxHp;
     c.qtik.def = finalStats.def;
@@ -4087,6 +4205,7 @@ if (frontliners.length > 0) {
 
         levelUps,
         questGate,
+        death: victoryDeath,
         packCleared:
             startingCount > 0 && live(s).length === 0,
         state: s,
@@ -4110,6 +4229,7 @@ if (frontliners.length > 0) {
                 ? clone(encounterRewards.packDrop)
                 : null,
             levelUps: clone(levelUps),
+            death: victoryDeath ? clone(victoryDeath) : null,
             narrativeTurns: clone(encounter.narrativeTurns || [])
         };
     }
@@ -13638,9 +13758,10 @@ function resolveDeathPenalty(test) {
     );
 
     assert(
-        state.crew?.qtik?.hp === 0 ||
+        state.crew?.qtik?.hp === 0 &&
         state.crew?.tansy?.hp === 0,
-        'Death requires a protagonist at 0 HP'
+        'Direct death resolution requires both protagonists down; ' +
+            'a survivor must attempt Flee through combat'
     );
 
     assert(
@@ -16791,6 +16912,31 @@ function avoidEncounterNarrationPacket(encounter) {
 }
 
 function combatNarrationPacket(result, actions) {
+    if (actions?.flee === true) {
+        return [
+            'COMBAT ESCAPE RESULT — narrate naturally.',
+            result.flee?.success
+                ? 'The surviving crew member escaped.'
+                : 'Escape failed; one enemy response was resolved.',
+            ...(result.death
+                ? [
+                    `Death XP penalty for this encounter: ` +
+                        `${result.death.xpLost}.`,
+                    result.death.totalDefeat
+                        ? 'Both protagonists fell and respawned at the ' +
+                            'zone’s primary settlement.'
+                        : result.death.respawned
+                            ? 'The fallen protagonist respawned at the ' +
+                                'stone when the survivor escaped. The ' +
+                                'survivor did not respawn.'
+                            : 'One protagonist remains at 0 HP; the ' +
+                                'survivor may try to flee again.'
+                ]
+                : []),
+            'No combat rewards were granted for fleeing.'
+        ].join('\n');
+    }
+
     const qtikActions = {
         fire_melee: 'Fire Melee',
         ice_melee: 'Ice Melee',
@@ -16839,8 +16985,18 @@ function combatNarrationPacket(result, actions) {
 
     if (result.death) {
         lines.push(
-            `${result.death.fallenCrewMember === 'qtik' ? "Q'tik" : 'Tansy'} fell.`,
-            'The crew respawned and the encounter ended without rewards.'
+            `${result.death.fallen.map(owner =>
+                owner === 'qtik' ? "Q'tik" : 'Tansy'
+            ).join(' and ')} fell.`,
+            `Shared XP death penalty: ${result.death.xpLost}.`,
+            result.death.respawned
+                ? result.death.totalDefeat
+                    ? 'Both respawned at the zone’s primary settlement. ' +
+                        'The encounter ended without victory rewards.'
+                    : 'The fallen protagonist respawned at the stone ' +
+                        'when combat ended. The survivor did not respawn.'
+                : 'The fallen protagonist remains at 0 HP. Combat is ' +
+                    'still active; the survivor can attempt to flee.'
         );
     }
 
@@ -21522,7 +21678,14 @@ function appendVictoryReceipt(host, receipt) {
             : []),
         ...(receipt.levelUps || []).map(change =>
             `Reached level ${change.level}.`
-        )
+        ),
+        ...(receipt.death
+            ? [
+                `${receipt.death.fallen.join(' and ')} fell; ` +
+                    `${receipt.death.xpLost} XP death penalty applied. ` +
+                    'The fallen protagonist respawned after victory.'
+            ]
+            : [])
     ];
 
     if (
@@ -23509,6 +23672,75 @@ async function openCombatPanel(inlineHost) {
     }
 
     if (
+        encounter?.status === 'active' &&
+        (
+            state.crew.qtik.hp === 0 ||
+            state.crew.tansy.hp === 0
+        )
+    ) {
+        const survivor = state.crew.qtik.hp > 0
+            ? "Q'tik"
+            : 'Tansy';
+
+        const section = makeAethermoorSection(
+            'COMPANION DOWN',
+            `${state.crew.qtik.hp === 0 ? "Q'tik" : 'Tansy'} ` +
+                'is at 0 HP. Their commands are unavailable.\n' +
+                `${survivor} can attempt to flee. A failed escape ` +
+                'allows one enemy response. The death XP penalty ' +
+                'has already been applied once.',
+            'combat'
+        );
+
+        const flee = makeAethermoorAction(
+            `${survivor}: Attempt Flee`,
+            'combat',
+            async () => {
+                if (aethermoorCombatBusy) return;
+                aethermoorCombatBusy = true;
+                flee.disabled = true;
+
+                try {
+                    const result = await runStoredMechanic({
+                        actions: { flee: true }
+                    });
+
+                    assert(result?.ok === true,
+                        result?.error || 'Flee failed to resolve');
+
+                    if (
+                        result.flee?.success ||
+                        result.death?.totalDefeat
+                    ) {
+                        openAethermoorTab(
+                            state.activeInstanceId &&
+                            !result.death?.totalDefeat
+                                ? 'instances'
+                                : 'world'
+                        );
+                    } else {
+                        await openCombatPanel(inlineHost);
+                    }
+                } catch (error) {
+                    flee.disabled = false;
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor'
+                    );
+                } finally {
+                    aethermoorCombatBusy = false;
+                }
+            }
+        );
+
+        section.appendChild(flee);
+        inlineHost.appendChild(section);
+        return;
+    }
+
+    if (
         !encounter ||
         encounter.status !== 'active' ||
         state.crew.qtik.hp <= 0 ||
@@ -23698,10 +23930,9 @@ async function openCombatPanel(inlineHost) {
             resultBox.scrollTop = 0;
 
             const finished =
-                result.summary?.encounter?.status === 'cleared' ||
-                Boolean(result.death) ||
-                result.flee?.success === true;
-
+                ['cleared', 'fled', 'dead'].includes(
+                    result.summary?.encounter?.status
+                );
             if (finished) {
                 const destination =
                     state.activeInstanceId ? 'instances' : 'world';
@@ -23729,6 +23960,52 @@ async function openCombatPanel(inlineHost) {
 
     actions.appendChild(resolveButton);
 
+    const fleeButton = makeAethermoorAction(
+        'Attempt Flee',
+        'combat',
+        async () => {
+            if (aethermoorCombatBusy) return;
+            aethermoorCombatBusy = true;
+            fleeButton.disabled = true;
+
+            try {
+                const result = await runStoredMechanic({
+                    actions: { flee: true }
+                });
+
+                assert(
+                    result?.ok === true,
+                    result?.error || 'Flee failed to resolve'
+                );
+
+                if (
+                    result.flee?.success ||
+                    result.death?.totalDefeat
+                ) {
+                    openAethermoorTab(
+                        state.activeInstanceId &&
+                        !result.death?.totalDefeat
+                            ? 'instances'
+                            : 'world'
+                    );
+                } else {
+                    await openCombatPanel(inlineHost);
+                }
+            } catch (error) {
+                fleeButton.disabled = false;
+                toastr.error(
+                    error instanceof Error
+                        ? error.message
+                        : String(error),
+                    'Aethermoor'
+                );
+            } finally {
+                aethermoorCombatBusy = false;
+            }
+        }
+    );
+
+    actions.appendChild(fleeButton);
     controls.append(
         status,
         qtikGroup,

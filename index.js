@@ -22817,13 +22817,6 @@ async function renderWorldTab(host) {
 
     host.appendChild(settlementSection);
     host.appendChild(renderCrewKnowledge(state));
-    host.appendChild(
-        makeAethermoorAction(
-            'Debug: Narration Recorder',
-            'world',
-            openNarrationDebug
-        )
-    );
 
     if (!journey) {
         const exploreSection = makeAethermoorSection(
@@ -23093,7 +23086,14 @@ function openAethermoorPanel() {
             aethermoorPanelOpen = false;
         });
 
-        header.append(title, close);
+        const debug = document.createElement('button');
+        debug.type = 'button';
+        debug.className = 'aethermoor-panel-close';
+        debug.textContent = 'Debug';
+        debug.title = 'Open Aethermoor diagnostics and campaign reset';
+        debug.addEventListener('click', openNarrationDebug);
+
+        header.append(title, debug, close);
 
         const tabs = document.createElement('nav');
         tabs.className = 'aethermoor-tabs';

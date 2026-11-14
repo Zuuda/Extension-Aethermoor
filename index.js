@@ -13230,7 +13230,7 @@ function resolveStockNames(test) {
             typeof value === 'string' &&
             value.trim().length >= 3 &&
             value.trim().length <= 60 &&
-            !/[<>&\r\n]/.test(value) &&
+            !/[<>\r\n]/.test(value) &&
             !/\b(?:hp|stat|silver|gold|tier)\b/i.test(value) &&
             !/\d/.test(value),
             `Invalid cosmetic stock name for ${key}`

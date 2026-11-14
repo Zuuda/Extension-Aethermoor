@@ -743,6 +743,36 @@ function assert(condition, message) {
     if (!condition) throw new Error(message);
 }
 
+/* Reporting must never change campaign state or prevent a later retry. */
+const aethermoorReportedErrors = new WeakMap();
+
+function reportAethermoorError(error, context, eventKey = null) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Aethermoor] ${context}: ${message}`, error);
+
+    const metadata = getContext().chatMetadata;
+    if (metadata && typeof metadata === 'object') {
+        let reported = aethermoorReportedErrors.get(metadata);
+        if (!reported) {
+            reported = new Set();
+            aethermoorReportedErrors.set(metadata, reported);
+        }
+
+        const key = eventKey ||
+            `${context}:${metadata.aethermoorV2?.revision ?? 'none'}:${message}`;
+        if (reported.has(key)) return;
+        reported.add(key);
+        if (reported.size > 100) {
+            reported.delete(reported.values().next().value);
+        }
+    }
+
+    globalThis.toastr?.error(
+        `${context}: ${message.slice(0, 300)}`,
+        'Aethermoor'
+    );
+}
+
 function int(value, label, minimum = 0) {
     assert(Number.isInteger(value) && value >= minimum,
         `${label} must be an integer >= ${minimum}`);
@@ -23095,10 +23125,7 @@ function registerAethermoorCombatAutoRefresh() {
 
         Promise.resolve(openCombatPanel(aethermoorTabViews.combat))
             .catch(error => {
-                console.error(
-                    '[Aethermoor] Combat tab refresh failed',
-                    error
-                );
+                reportAethermoorError(error, 'Combat tab refresh failed');
             })
             .finally(() => {
                 aethermoorCombatBusy = false;
@@ -23150,10 +23177,7 @@ function registerAethermoorCampaignAutoRefresh() {
 
         Promise.resolve(refresh)
             .catch(error => {
-                console.error(
-                    '[Aethermoor] Campaign tab refresh failed',
-                    error
-                );
+                reportAethermoorError(error, 'Campaign tab refresh failed');
             })
             .finally(() => {
                 aethermoorCampaignRefreshBusy = false;
@@ -23977,14 +24001,12 @@ async function openCombatPanel(inlineHost) {
                 renderAethermoorTab('combat');
             }
         } catch (error) {
-
             resultBox.hidden = false;
             resultBox.textContent =
                 `Turn was not resolved: ${
-                    error instanceof Error
-                        ? error.message
-                        : String(error)
+                    error instanceof Error ? error.message : String(error)
                 }`;
+            reportAethermoorError(error, 'Combat turn failed');
         } finally {
             aethermoorCombatBusy = false;
             resolveButton.disabled = false;
@@ -24598,9 +24620,10 @@ function extractAethermoorQuestEvents(text) {
                     names: JSON.parse(match[2].trim())
                 });
             } catch (error) {
-                console.warn(
-                    '[Aethermoor] Ignored malformed instance theme',
-                    error
+                reportAethermoorError(
+                    error,
+                    'Instance theme JSON rejected',
+                    `theme-json:${worldHash(text)}:${match.index}`
                 );
             }
         }
@@ -24616,9 +24639,10 @@ function extractAethermoorQuestEvents(text) {
                     names: JSON.parse(match[2].trim())
                 });
             } catch (error) {
-                console.warn(
-                    '[Aethermoor] Ignored malformed cosmetic names',
-                    error
+                reportAethermoorError(
+                    error,
+                    'Stock names JSON rejected',
+                    `stock-json:${worldHash(text)}:${match.index}`
                 );
             }
         }
@@ -25123,15 +25147,12 @@ async function processAethermoorAssistantEvents(data) {
                 { messageId: message.messageId, event, result }
             );
         } catch (error) {
-            console.warn(
-                '[Aethermoor] Ignored assistant quest event',
-                {
-                    messageId: message.messageId,
-                    event,
-                    reason: error instanceof Error
-                        ? error.message
-                        : String(error)
-                }
+            reportAethermoorError(
+                error,
+                `Assistant event rejected (${event.event})`,
+                `assistant:${worldHash(message.text)}:` +
+                    `${event.event}:${JSON.stringify(event)}:` +
+                    `${error instanceof Error ? error.message : String(error)}`
             );
         }
     }
@@ -25451,9 +25472,11 @@ globalThis.aethermoorMechanicsInterceptor =
                     }]
                 });
             } catch (error) {
-                console.error(
-                    '[Aethermoor] Instance movement failed',
-                    error
+                reportAethermoorError(
+                    error,
+                    'Instance movement failed',
+                    `instance-move:${travelStepId(localMovement)}:` +
+                        `${error instanceof Error ? error.message : String(error)}`
                 );
             }
         } else {
@@ -25471,9 +25494,11 @@ globalThis.aethermoorMechanicsInterceptor =
                         }]
                     });
                 } catch (error) {
-                    console.error(
-                        '[Aethermoor] [moved] travel check failed',
-                        error
+                    reportAethermoorError(
+                        error,
+                        'Travel failed',
+                        `travel:${travelStepId(movement)}:` +
+                            `${error instanceof Error ? error.message : String(error)}`
                     );
                 }
             }

@@ -3939,10 +3939,6 @@ if (frontliners.length > 0) {
         )
     );
 
-    const fallenCrewMember =
-        c.qtik.hp <= 0
-            ? 'qtik'
-
         /*
      * Resolve incapacitation automatically after the turn's exchanges.
      * If all foes were defeated, normal victory/reward resolution takes
@@ -17347,11 +17343,6 @@ async function runStoredMechanic(args) {
                         ? [travelNarrationPacket(caseResult)]
                         : [])
                 ].join('\n\n')
-
-            : batch &&
-              oneCase?.kind === 'instance' &&
-              caseResult.created
-                ? instanceNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'gear' &&

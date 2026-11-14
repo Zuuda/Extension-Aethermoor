@@ -1092,6 +1092,17 @@ function validate(state) {
 
     assert(
         [
+            'spotted',
+            'active',
+            'cleared',
+            'fled',
+            'dead'
+        ].includes(encounter.status),
+        `Unsupported encounter status: ${encounter.status}`
+    );
+
+    assert(
+        [
             'normal_pack',
             'declared',
             'elite',
@@ -2402,6 +2413,18 @@ function resolveTurn({
     const initial = validate(s);
     const c = s.crew;
     const encounter = s.encounter;
+
+    /*
+     * The UI normally exposes turn controls only after Engage, but this
+     * assertion is the actual mechanics boundary. A spotted encounter is
+     * discovered, not combat; fled, cleared, and dead encounters are over.
+     */
+    assert(
+        encounter.status === 'active',
+        `Combat turn requires an active encounter; current status is ` +
+            `${encounter.status}`
+    );
+
     assert(
         c.qtik.hp > 0 && c.tansy.hp > 0,
         'Cannot resolve a combat turn after a crew member has fallen; resolve death or respawn first'
@@ -6835,7 +6858,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * DONE — Combat systems
  * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
  *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
- * - Preserve locked combat outcomes and prevent duplicate reward resolution.
+ *
+ * - IMPLEMENTED — BETA PENDING: resolveTurn() requires
+ *   encounter.status === 'active'. Spotted encounters must be engaged
+ *   first, and cleared/fled/dead encounters cannot receive another turn.
+ *   The UI remains a convenience layer; the mechanics assertion is the
+ *   authoritative boundary.
+ *
  * - IMPLEMENTED — BETA PENDING: a cleared encounter retains a read-only
  *   victory receipt. Combat displays applied XP, silver, loot, breadcrumbs,
  *   and level-ups after refresh; no fictional search is required to claim

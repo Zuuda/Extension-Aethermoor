@@ -22180,7 +22180,7 @@ function appendEncounterCard(host, state, originTab) {
         ? encounter.victoryReceipt
         : null;
 
-    if (receipt?.encounterId !== encounter.id) return;
+    if (!receipt || receipt.encounterId !== encounter.id) return;
 
     appendVictoryReceipt(host, receipt);
 }

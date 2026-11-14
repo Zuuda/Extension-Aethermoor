@@ -17491,6 +17491,7 @@ async function runStoredMechanic(args) {
 
             : batch &&
               oneCase?.kind === 'instance' &&
+              ['enter', 'move', 'exit'].includes(oneCase.action) &&
               caseResult.created
                 ? [
                     instanceNarrationPacket(caseResult),

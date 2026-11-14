@@ -18697,7 +18697,31 @@ function registerTools() {
     );
 }
 
+/*
+ * Tool exposure is a device-local developer preference, not campaign
+ * state. Ordinary UI, movement, and assistant-tag handling call the
+ * mechanics directly and remain available when tools are hidden.
+ * Registration happens at startup; changing this setting needs a reload.
+ */
+const AETHERMOOR_DEVELOPER_TOOLS_KEY =
+    'aethermoorDeveloperToolsEnabled';
+
+function aethermoorDeveloperToolsEnabled() {
+    try {
+        return localStorage.getItem(
+            AETHERMOOR_DEVELOPER_TOOLS_KEY
+        ) === 'true';
+    } catch (error) {
+        console.warn(
+            '[Aethermoor] Could not read developer tool setting',
+            error
+        );
+        return false;
+    }
+}
+
 function registerAethermoorTools() {
+
     try {
         registerTools();
         console.log(
@@ -24119,6 +24143,41 @@ function openNarrationDebug() {
     status.className = 'aethermoor-ui-text';
     const controls = document.createElement('div');
     controls.className = 'aethermoor-ui-actions';
+
+    const developerToolsLabel = document.createElement('label');
+    developerToolsLabel.className = 'aethermoor-ui-text';
+    const developerTools = document.createElement('input');
+    developerTools.type = 'checkbox';
+    developerTools.checked = aethermoorDeveloperToolsEnabled();
+    developerToolsLabel.append(
+        developerTools,
+        document.createTextNode(' Expose developer function tools')
+    );
+
+    const developerToolsStatus = document.createElement('div');
+    developerToolsStatus.className = 'aethermoor-ui-text';
+    developerToolsStatus.textContent =
+        'Tool exposure changes after reloading SillyTavern.';
+
+    developerTools.addEventListener('change', () => {
+        try {
+            localStorage.setItem(
+                AETHERMOOR_DEVELOPER_TOOLS_KEY,
+                String(developerTools.checked)
+            );
+            developerToolsStatus.textContent =
+                'Setting saved. Reload SillyTavern to change which ' +
+                'tools the model can see.';
+        } catch (error) {
+            developerTools.checked =
+                aethermoorDeveloperToolsEnabled();
+            toastr.error(
+                'Could not save developer tool setting.',
+                'Aethermoor Debug'
+            );
+        }
+    });
+
     const output = document.createElement('div');
     output.className = 'aethermoor-debug-records';
 
@@ -24286,7 +24345,13 @@ function openNarrationDebug() {
     );
 
     controls.append(toggle, refreshButton, clear, createTestRumor);
-    body.append(status, controls, output);
+    body.append(
+        status,
+        developerToolsLabel,
+        developerToolsStatus,
+        controls,
+        output
+    );
     panel.append(header, body);
     document.body.appendChild(panel);
     refresh();
@@ -25975,12 +26040,18 @@ function registerAethermoorGenerationCleanup() {
 }
 
 jQuery(function () {
-    try {
-        registerAethermoorTools();
-    } catch (error) {
-        console.error(
-            'Aethermoor: Function-tool registration failed',
-            error
+    if (aethermoorDeveloperToolsEnabled()) {
+        try {
+            registerAethermoorTools();
+        } catch (error) {
+            console.error(
+                'Aethermoor: Function-tool registration failed',
+                error
+            );
+        }
+    } else {
+        console.log(
+            '[Aethermoor] Developer function tools disabled'
         );
     }
 

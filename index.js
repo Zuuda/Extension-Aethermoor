@@ -2399,6 +2399,107 @@ function completeLinkedCombatQuestGate(state) {
     };
 }
 
+/*
+ * Preserve story-useful combat facts without damage, HP, regeneration,
+ * or roll values. The GM can dramatize these beats later, but cannot
+ * change which actions landed or which foes were defeated.
+ */
+function combatNarrativeTurn(encounter, actions, exchanges, kills) {
+    const labels = new Map(
+        encounter.foes.map((foe, index) => [
+            foe.id,
+            combatFoeLabel(foe, index)
+        ])
+    );
+
+    const actionLabels = {
+        fire_melee: 'Fire Melee',
+        ice_melee: 'Ice Melee',
+        stun: 'Stun',
+        ice_patch: 'Ice Patch',
+        frost_stomp: 'Frost Stomp',
+        drink: 'Drink',
+        visor: 'Visor',
+        vitals: 'Vitals',
+        hamstring: 'Hamstring',
+        recall: 'Recall',
+        surge: 'Surge',
+        raise_shadow: 'Raise Shadow'
+    };
+
+    const slain = new Set(kills.map(kill => kill.id));
+
+    return {
+        turn: encounter.turn,
+        actions: {
+            qtik: actionLabels[actions.qtik] || actions.qtik,
+            tansy: actionLabels[actions.tansy] || actions.tansy,
+            target: labels.get(actions.target) || null
+        },
+        exchanges: exchanges.map(exchange => {
+            const events = [];
+            const hitTargets = [
+                ...new Set(
+                    (exchange.hits || [])
+                        .map(hit => labels.get(hit.id))
+                        .filter(Boolean)
+                )
+            ];
+
+            if (hitTargets.length) {
+                events.push(`The crew struck ${hitTargets.join(', ')}.`);
+            }
+
+            const defeated = [
+                ...new Set(
+                    (exchange.hits || [])
+                        .filter(hit =>
+                            hit.hp === 0 && slain.has(hit.id)
+                        )
+                        .map(hit => labels.get(hit.id))
+                        .filter(Boolean)
+                )
+            ];
+
+            for (const foe of defeated) {
+                events.push(`${foe} was defeated.`);
+            }
+
+            if (exchange.enemyMiss === true) {
+                events.push('An enemy attack missed.');
+            }
+            if (exchange.frontlineDamage > 0) {
+                events.push("Q'tik was struck by the enemy.");
+            }
+            if (exchange.backlineDamage > 0) {
+                events.push('Tansy was struck by the enemy.');
+            }
+
+            for (const effect of exchange.effects || []) {
+                if (effect.includes('intercepted')) {
+                    events.push('A Brute intercepted an attack with Guard.');
+                } else if (
+                    effect.includes('interrupted') ||
+                    effect.includes('disrupted')
+                ) {
+                    events.push('An enemy action was disrupted.');
+                } else if (effect.includes('reflected')) {
+                    events.push('Spiked Carapace reflected an attack.');
+                } else if (effect.includes('destroyed')) {
+                    events.push('A melee summon was destroyed.');
+                } else if (effect.includes('reinforcements')) {
+                    events.push('Enemy reinforcements arrived.');
+                }
+            }
+
+            return {
+                exchange: exchange.exchange,
+                events
+            };
+        })
+    };
+}
+
 function resolveTurn({
     state,
     actions,
@@ -3828,6 +3929,20 @@ if (frontliners.length > 0) {
         }
     }
 
+        encounter.narrativeTurns ||= [];
+    encounter.narrativeTurns.push(
+        combatNarrativeTurn(
+            encounter,
+            actions,
+            logs,
+            kills
+        )
+    );
+
+    const fallenCrewMember =
+        c.qtik.hp <= 0
+            ? 'qtik'
+
         /*
      * Resolve incapacitation automatically after the turn's exchanges.
      * If all foes were defeated, normal victory/reward resolution takes
@@ -3998,7 +4113,8 @@ if (frontliners.length > 0) {
             packDrop: encounterRewards.packDrop
                 ? clone(encounterRewards.packDrop)
                 : null,
-            levelUps: clone(levelUps)
+            levelUps: clone(levelUps),
+            narrativeTurns: clone(encounter.narrativeTurns || [])
         };
     }
 
@@ -6866,9 +6982,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   authoritative boundary.
  *
  * - IMPLEMENTED — BETA PENDING: a cleared encounter retains a read-only
- *   victory receipt. Combat displays applied XP, silver, loot, breadcrumbs,
- *   and level-ups after refresh; no fictional search is required to claim
- *   rewards. Verify persistence and replacement by a later encounter.
+ *   victory receipt and a concise, number-free log of established combat
+ *   beats. The receipt displays applied XP, silver, loot, breadcrumbs,
+ *   and level-ups. Players may copy a recap prompt for optional GM
+ *   dramatization; copying does not rerun combat or grant rewards.
+ *
  * - IMPLEMENTED — BETA PENDING: World and Instance show spotted-encounter
  *   decisions in context. Engage opens the one Combat UI; a finished turn
  *   returns to the originating tab, where victory shows that saved receipt.
@@ -6879,7 +6997,6 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   120 × zone HP for 20 × zone silver. An old bottle never scales up.
  *   Cleansing Tonic retains its fixed effect. Verify use in combat and
  *   outside combat before expanding the catalog.
-
  *
  * DONE — Quest delivery foundation
  * - Lock the quest issuer and return location.
@@ -21332,6 +21449,125 @@ async function renderInventoryTab(host) {
     if (hasShop) host.appendChild(shopSection);
 }
 
+function combatRecapPrompt(receipt) {
+    const lines = [
+        'Please narrate the completed fight as a concise, cinematic scene.',
+        'Use only the actions and events listed below. Do not add attacks, injuries, enemy behavior, decisions, or outcomes.',
+        'Combat rewards have already been applied. Present them as the aftermath; do not invent a search or claim that rewards still need to be collected.',
+        ''
+    ];
+
+    for (const turn of receipt.narrativeTurns || []) {
+        lines.push(
+            `Turn ${turn.turn}: Q'tik chose ${turn.actions.qtik}; ` +
+                `Tansy chose ${turn.actions.tansy}.` +
+                (turn.actions.target
+                    ? ` Their selected target was ${turn.actions.target}.`
+                    : '')
+        );
+
+        for (const exchange of turn.exchanges || []) {
+            for (const event of exchange.events || []) {
+                lines.push(`- ${event}`);
+            }
+        }
+    }
+
+    lines.push(
+        '',
+        `Result: victory. ${receipt.xp} XP and ${receipt.silver} silver were received.`
+    );
+
+    for (const item of receipt.loot || []) {
+        lines.push(`Loot received: ${item.name || 'Unnamed item'}.`);
+    }
+
+    if (
+        receipt.packDrop?.result ===
+        'diegetic_quest_breadcrumb'
+    ) {
+        lines.push('A quest breadcrumb was found.');
+    }
+
+    for (const levelUp of receipt.levelUps || []) {
+        lines.push(`The crew reached level ${levelUp.level}.`);
+    }
+
+    return lines.join('\n');
+}
+
+async function copyCombatRecapPrompt(receipt) {
+    const text = combatRecapPrompt(receipt);
+
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_error) {
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+    }
+
+    toastr.info(
+        'Combat recap copied. Paste and send it to invite the GM to narrate the fight.',
+        'Aethermoor'
+    );
+}
+
+function appendVictoryReceipt(host, receipt) {
+    const lines = [
+        `+${receipt.xp} XP · +${receipt.silver}s`,
+        ...(receipt.loot || []).map(item =>
+            `Loot: ${item.name || 'Unnamed item'}`
+        ),
+        ...(receipt.packDrop?.result ===
+            'diegetic_quest_breadcrumb'
+            ? ['A quest breadcrumb was found.']
+            : []),
+        ...(receipt.levelUps || []).map(change =>
+            `Reached level ${change.level}.`
+        )
+    ];
+
+    if (
+        !receipt.loot?.length &&
+        receipt.packDrop?.result !==
+            'diegetic_quest_breadcrumb'
+    ) {
+        lines.push('No additional item dropped.');
+    }
+
+    const section = makeAethermoorSection(
+        'VICTORY · REWARDS RECEIVED',
+        lines.join('\n'),
+        'combat'
+    );
+
+    section.appendChild(
+        makeAethermoorAction(
+            'Copy fight recap prompt',
+            'combat',
+            () => {
+                void copyCombatRecapPrompt(receipt).catch(error =>
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor'
+                    )
+                );
+            }
+        )
+    );
+
+    host.appendChild(section);
+}
+
 /*
  * Present one saved encounter in the tab where it arose. Decisions call
  * the existing engage/avoid operations; combat turns still use the single
@@ -21410,26 +21646,7 @@ function appendEncounterCard(host, state, originTab) {
 
     if (receipt?.encounterId !== encounter.id) return;
 
-    const lines = [
-        `+${receipt.xp} XP · +${receipt.silver}s`,
-        ...(receipt.loot || []).map(item =>
-            `Loot: ${item.name || 'Unnamed item'}`
-        ),
-        ...(receipt.packDrop?.result === 'diegetic_quest_breadcrumb'
-            ? ['A quest breadcrumb was found.']
-            : []),
-        ...(receipt.levelUps || []).map(change =>
-            `Reached level ${change.level}.`
-        )
-    ];
-
-    host.appendChild(
-        makeAethermoorSection(
-            'VICTORY · REWARDS RECEIVED',
-            lines.join('\n'),
-            'combat'
-        )
-    );
+    appendVictoryReceipt(host, receipt);
 }
 
 /*
@@ -23330,35 +23547,7 @@ async function openCombatPanel(inlineHost) {
             : null;
 
         if (receipt?.encounterId === encounter.id) {
-            const lines = [
-                `+${receipt.xp} XP · +${receipt.silver}s`,
-                ...(receipt.loot || []).map(item =>
-                    `Loot: ${item.name || 'Unnamed item'}`
-                ),
-                ...(receipt.packDrop?.result ===
-                    'diegetic_quest_breadcrumb'
-                    ? ['A quest breadcrumb was found.']
-                    : []),
-                ...(receipt.levelUps || []).map(change =>
-                    `Reached level ${change.level}.`
-                )
-            ];
-
-            if (
-                !receipt.loot?.length &&
-                receipt.packDrop?.result !==
-                    'diegetic_quest_breadcrumb'
-            ) {
-                lines.push('No additional item dropped.');
-            }
-
-            inlineHost.appendChild(
-                makeAethermoorSection(
-                    'VICTORY · REWARDS RECEIVED',
-                    lines.join('\n'),
-                    'combat'
-                )
-            );
+            appendVictoryReceipt(inlineHost, receipt);
         }
 
         return;

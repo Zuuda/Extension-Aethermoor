@@ -7626,7 +7626,18 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   inspect retained records, disable, and verify further replies add none.
  * - Regression pending: ordinary reply, leaked packet containing an example
  *   tag, and duplicate received/rendered notifications.
- * - Build every narration packet from the authoritative saved result.
+ *
+ * - IMPLEMENTED — BETA PENDING: the narrator may introduce fictional
+ *   complications and request one engine-resolved normal pack or Elite
+ *   through a narrow plan tag.
+ * - The request is bound to the saved assistant reply, valid only during a
+ *   free non-travel, non-instance scene, and cannot supply stats, roster,
+ *   levels, rewards, loot, or quest facts.
+ * - The resulting encounter uses the existing spotted -> engage/avoid ->
+ *   combat flow. It creates no quest or fictional reward by itself.
+ * - Verify duplicate notifications, insufficiently free scenes, normal-pack
+ *   requests, Elite requests, and narration after the combat receipt.
+ * 
  * - Travel rolls 98–100 resolve as quiet travel until significant discoveries
  *   and rare events have authored saved outcomes and narration contracts.
  *   Do not present an undefined roll as an invitation to invent an event.
@@ -14612,6 +14623,128 @@ function resolveSocialSeed(test) {
     };
 }
 
+/*
+ * The narrator may request a fight when a fictional complication needs
+ * real opponents. This is deliberately narrower than unrestricted spawn:
+ *
+ * - The narrator chooses only normal_pack or elite.
+ * - The engine chooses roster, level, passive, rewards, and RNG.
+ * - The request is valid only in a free overland or settlement scene.
+ * - Instances are excluded until their room-content contract supports
+ *   narrator-created complications.
+ * - One assistant message can create at most one saved encounter.
+ *
+ * The request itself does not create a quest, loot objective, reward, or
+ * narrative premise. It only creates a spotted encounter for the player
+ * to engage or avoid.
+ */
+function resolveNarrativeEncounterRequest(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Narrative encounter request requires saved state'
+    );
+
+    assert(
+        typeof test.socialId === 'string' &&
+        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+        'Narrative encounter request requires an engine-issued message reference'
+    );
+
+    assert(
+        ['normal_pack', 'elite'].includes(test.encounterType),
+        'Narrative encounter request supports only normal_pack or elite'
+    );
+
+    const state = clone(test.state);
+
+    state.narrativeEncounterRequests ||= {};
+
+    const previous =
+        state.narrativeEncounterRequests[test.socialId];
+
+    if (previous) {
+        assert(
+            previous.encounterType === test.encounterType,
+            'Narrative request ID was reused for another encounter type'
+        );
+
+        return {
+            ok: true,
+            created: false,
+            action: 'request_encounter',
+            request: clone(previous),
+            state
+        };
+    }
+
+    assert(
+        !state.currentJourney,
+        'Narrative encounter requests are unavailable during travel'
+    );
+
+    assert(
+        !state.activeInstanceId,
+        'Narrative encounter requests are unavailable inside instances'
+    );
+
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the current encounter first'
+    );
+
+    assert(
+        state.currentLocationId &&
+        state.currentPosition,
+        'Narrative encounter request requires a saved current location'
+    );
+
+    const encounterId =
+        `narrative-${test.socialId}`;
+
+    const spawned = spawnEncounter({
+        state,
+        zone: state.zone,
+        encounterType: test.encounterType,
+        encounterId
+    });
+
+    const nextState = spawned.state;
+    const encounter = nextState.encounter;
+
+    assert(
+        encounter.id === encounterId &&
+        encounter.status === 'spotted',
+        'Narrative encounter did not enter the spotted state'
+    );
+
+    encounter.narrativeRequestId = test.socialId;
+    encounter.narrativeRequestType = test.encounterType;
+
+    const request = {
+        id: test.socialId,
+        encounterId: encounter.id,
+        encounterType: encounter.type,
+        zone: state.zone,
+        locationId: state.currentLocationId,
+        position: clone(
+            state.currentPosition ||
+            { nodeId: state.currentLocationId }
+        )
+    };
+
+    nextState.narrativeEncounterRequests[test.socialId] =
+        clone(request);
+
+    return {
+        ok: true,
+        created: true,
+        action: 'request_encounter',
+        request,
+        encounter: clone(encounter),
+        state: nextState
+    };
+}
+
 function resolveBatch(args) {
     function resolveWorldSeeds(test) {
         assert(
@@ -15114,6 +15247,10 @@ function resolveBatch(args) {
                     
                 case 'spawn':
                     result = spawnEncounter(test);
+                    break;
+
+                case 'encounter_request':
+                    result = resolveNarrativeEncounterRequest(test);
                     break;
 
                 case 'travel':
@@ -17482,6 +17619,7 @@ async function runStoredMechanic(args) {
             (
                 oneCase.kind === 'travel' ||
                 oneCase.kind === 'instance' ||
+                oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 (
@@ -18312,6 +18450,7 @@ function registerTools() {
                                 enum: [
                                     'state',
                                     'spawn',
+                                    'encounter_request',
                                     'travel',
                                     'instance',
                                     'journey',
@@ -18412,7 +18551,9 @@ function registerTools() {
                                     'declared',
                                     'elite',
                                     'boss'
-                                ]
+                                ],
+                                description:
+                                    'Narrator encounter requests may use only normal_pack or elite'
                             },
 
                             siteAffinity: {
@@ -24567,8 +24708,14 @@ function makeAethermoorHandoffMessage(entries) {
             'instruction lists, private context, or handoff markers.\n' +
             '- Do not expose hidden facts or internal truth merely because ' +
             'they appear in engine context.\n' +
-            '- Do not invent attacks, encounters, discoveries, travel events, ' +
-            'quest acceptance, item acquisition, or rewards.\n' +
+            '- Do not invent mechanically established attacks, encounters, ' +
+            'discoveries, travel events, quest acceptance, item acquisition, ' +
+            'or rewards.\n' +
+            '- A fictional complication may be introduced freely. If the ' +
+            'scene genuinely requires real opponents, use one of the exact ' +
+            'encounter-request tags supplied in the current narrator context. ' +
+            'The tag requests only a normal pack or Elite; the extension ' +
+            'chooses all stats, roles, levels, rewards, and outcomes.\n' +
             '- An offered quest is not accepted. A spotted encounter is not ' +
             'engaged. Arrival is not a search or a delivery.\n' +
             '- A concluded rumor has no further objective attached to that ' +
@@ -24798,9 +24945,22 @@ function extractAethermoorQuestEvents(text) {
             events.push({ event: 'ask_wares' });
         }
 
+        const encounterRequestPattern =
+            /<AETHERMOOR:REQUEST_ENCOUNTER\s+type="(normal_pack|elite)"\s*>/g;
+
+        for (const match of plan[1].matchAll(
+            encounterRequestPattern
+        )) {
+            events.push({
+                event: 'request_encounter',
+                encounterType: match[1]
+            });
+        }
+
         for (const _match of plan[1].matchAll(
             /<AETHERMOOR:ASK_HERBALIST\s*>/g
         )) {
+
             events.push({ event: 'ask_herbalist' });
         }
 
@@ -25036,7 +25196,25 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-            if (event.event === 'instance_theme') {
+            if (event.event === 'request_encounter') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    messageId,
+                    'Narrative encounter request awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_narrative_encounter_request',
+                        kind: 'encounter_request',
+                        action: 'request',
+                        socialId: messageId,
+                        encounterType: event.encounterType
+                    }]
+                });
+            } else if (event.event === 'instance_theme') {
                 result = await runStoredMechanic({
                     cases: [{
                         name: 'assistant_instance_theme',
@@ -25783,6 +25961,48 @@ globalThis.aethermoorMechanicsInterceptor =
                     });
                 }
             }
+        }
+
+        /*
+         * The narrator may create fictional complications, but only a
+         * restricted request can turn one into an engine encounter.
+         * Keep this unavailable during travel, inside instances, or while
+         * another encounter is unresolved.
+         */
+        if (
+            contextState &&
+            !contextState.currentJourney &&
+            !contextState.activeInstanceId &&
+            !['active', 'spotted'].includes(
+                contextState.encounter?.status
+            )
+        ) {
+            entries.push({
+                id: 'narrative-encounter-request-context',
+                type: 'narrative_encounter_request',
+                packet: [
+                    'PRIVATE NARRATIVE COMPLICATION CONTEXT — do not recite.',
+                    'You may introduce an ordinary fictional complication ' +
+                        'such as a traveler needing help, dangerous tracks, ' +
+                        'or a hostile group interfering with the scene.',
+                    'Fictional trouble does not automatically create a ' +
+                        'mechanical encounter, quest, reward, or loot result.',
+                    'If the scene genuinely requires real opponents, put ' +
+                        'exactly one of these tags inside the disposable ' +
+                        '<plan> block:',
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack">',
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="elite">',
+                    'Use normal_pack for an ordinary short fight. Use elite ' +
+                        'only when the scene genuinely warrants an exceptional ' +
+                        'single opponent.',
+                    'The extension chooses the roster, levels, roles, ' +
+                        'passives, rewards, and outcome. Do not put stats, ' +
+                        'enemy identities, composition, loot, or quest facts ' +
+                        'in the tag.',
+                    'Do not emit a request merely because a scene mentions ' +
+                        'danger. Emit it only when actual opponents are needed.'
+                ].join('\n')
+            });
         }
 
         /*

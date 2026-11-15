@@ -16664,7 +16664,7 @@ function travelNarrationPacket(result) {
             'Give any consequential hidden truth a plausible, ' +
             'scene-specific one-line <template> precommit. ' +
             'If the inclination is no_hidden_complication, do not invent a secret ' +
-            'or create a <template> merely to fill the profile.'
+            'or create a <template> merely to fill the profile.',
             'This traveler has already been seeded. Do not report them ' +
             'again with INTRODUCE_NPC if they acquire a name.'
         );

@@ -14537,13 +14537,16 @@ function resolveSocialWorkOpportunity(test) {
     };
 }
 
+/*
+ * Surface manner and private inclination are independent. This seeds
+ * characterization, not an NPC's actions, a quest, or a guaranteed
+ * betrayal. Older traveler seeds retain their original locked results.
+ */
 function resolveSocialSeed(test) {
     assert(
-        test.state &&
-        typeof test.state === 'object',
+        test.state && typeof test.state === 'object',
         'social seed requires state'
     );
-
     assert(
         typeof test.socialId === 'string' &&
         test.socialId.trim().length > 0,
@@ -14564,13 +14567,26 @@ function resolveSocialSeed(test) {
     const existing = state.socialSeeds[id];
 
     if (existing) {
-        assert(
+        const oldSeed =
             Number.isInteger(existing.sincerityRoll) &&
             existing.sincerityRoll >= 1 &&
             existing.sincerityRoll <= 10 &&
             Number.isInteger(existing.demeanorRoll) &&
             existing.demeanorRoll >= 1 &&
-            existing.demeanorRoll <= 10,
+            existing.demeanorRoll <= 10;
+
+        const newSeed =
+            Number.isInteger(existing.surfaceRoll) &&
+            existing.surfaceRoll >= 1 &&
+            existing.surfaceRoll <= 10 &&
+            Number.isInteger(existing.inclinationRoll) &&
+            existing.inclinationRoll >= 1 &&
+            existing.inclinationRoll <= 100 &&
+            typeof existing.demeanor === 'string' &&
+            typeof existing.inclination === 'string';
+
+        assert(
+            oldSeed || newSeed,
             `Invalid locked social seed: ${id}`
         );
 
@@ -14578,38 +14594,46 @@ function resolveSocialSeed(test) {
             ok: true,
             created: false,
             socialId: id,
-            seed: existing,
+            seed: clone(existing),
             state
         };
     }
 
-    const sincerityRoll = roll(state, 10);
-    const demeanorRoll = roll(state, 10);
+    const surfaces = [
+        'curt',
+        'nosy',
+        'distracted',
+        'boastful',
+        'nervous',
+        'weary',
+        'theatrical',
+        'competitive',
+        'dry-witted',
+        'pompous'
+    ];
 
-    const sincerity =
-        sincerityRoll <= 8
-            ? 'genuine'
-            : sincerityRoll === 9
-                ? 'self_interested_exaggeration'
-                : 'deceptive';
+    const surfaceRoll = roll(state, surfaces.length);
+    const inclinationRoll = roll(state, 100);
 
-    const demeanor =
-        demeanorRoll <= 2
-            ? 'warm'
-            : demeanorRoll <= 5
-                ? 'businesslike'
-                : demeanorRoll <= 7
-                    ? 'guarded'
-                    : demeanorRoll <= 9
-                        ? 'indifferent'
-                        : 'abrasive';
+    const inclination =
+        inclinationRoll <= 55
+            ? 'no_hidden_complication'
+            : inclinationRoll <= 72
+                ? 'self_interested'
+                : inclinationRoll <= 84
+                    ? 'mistaken_about_something_consequential'
+                    : inclinationRoll <= 93
+                        ? 'under_pressure_or_divided_loyalty'
+                        : inclinationRoll <= 98
+                            ? 'limited_deliberate_deception'
+                            : 'concealing_serious_harmful_agenda';
 
     const seed = {
         socialId: id,
-        sincerityRoll,
-        sincerity,
-        demeanorRoll,
-        demeanor
+        surfaceRoll,
+        demeanor: surfaces[surfaceRoll - 1],
+        inclinationRoll,
+        inclination
     };
 
     state.socialSeeds[id] = seed;
@@ -14618,7 +14642,7 @@ function resolveSocialSeed(test) {
         ok: true,
         created: true,
         socialId: id,
-        seed,
+        seed: clone(seed),
         state
     };
 }
@@ -16630,7 +16654,18 @@ function travelNarrationPacket(result) {
     } else if (result.event === 'social_opportunity') {
         lines.push(
             'The crew has encountered a traveler.',
-            `The traveler appears ${result.social.demeanor}.`
+            `First-meeting manner: ${result.social.demeanor}.`,
+            `Private inclination: ${
+                result.social.inclination ||
+                result.social.sincerity ||
+                'not recorded'
+            }.`,
+            'The manner is observable; the inclination is not. ' +
+                'Give any consequential hidden truth a plausible, ' +
+                'scene-specific one-line <template> precommit. ' +
+                'No hidden complication needs no invented secret.',
+            'This traveler has already been seeded. Do not report them ' +
+                'again with INTRODUCE_NPC if they acquire a name.'
         );
 
         if (result.rumor) {
@@ -16956,6 +16991,39 @@ function vendorTradeNarrationPacket(receipt) {
             'naturally from the handover; do not charge, grant, or sell ' +
             'these items again.',
         'Do not mention the tag, extension, or state management.'
+    ].join('\n');
+}
+
+function npcProfileNarrationPacket(result) {
+    const seed = result.seed;
+    const number = Number(
+        result.socialId.match(/-npc-(\d+)$/)?.[1]
+    );
+
+    return [
+        'PRIVATE NEW NPC PROFILE — do not recite this heading.',
+        `Introduction ${number}: the ${
+            number === 1 ? 'first' : 'next'
+        } newly introduced named NPC in the preceding reply.`,
+        `Observable first-meeting manner: ${seed.demeanor}.`,
+        `Private inclination: ${
+            seed.inclination.replaceAll('_', ' ')
+        }.`,
+        'Apply these independently. A pleasant manner does not imply ' +
+            'honesty; an unpleasant manner does not imply malice.',
+        'Use the established scene to give this person a plausible, ' +
+            'specific characterization. The manner is a first impression, ' +
+            'not a permanent restriction on every line of dialogue.',
+        seed.inclination === 'no_hidden_complication'
+            ? 'Do not manufacture a secret or a <template> precommit ' +
+                'merely to fill a slot.'
+            : 'If this inclination establishes a consequential hidden ' +
+                'truth, lock its scene-specific meaning in one physical ' +
+                'line of <template>. Do not reveal that truth to the ' +
+                'characters merely because it was seeded.',
+        'This profile creates no quest, encounter, reward, item, ' +
+            'betrayal event, or obligation to pursue a subplot.',
+        'Do not mention the roll, seed, tag, or extension.'
     ].join('\n');
 }
 
@@ -17678,9 +17746,9 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 (
+                (
                     oneCase.kind === 'social' &&
-
-                    ['check_work', 'reveal_work'].includes(
+                    ['check_work', 'reveal_work', 'seed_npc'].includes(
                         oneCase.action
                     )
                 ) ||
@@ -17894,6 +17962,12 @@ async function runStoredMechanic(args) {
               oneCase.action === 'commit' &&
               caseResult.created
                 ? innServiceNarrationPacket(caseResult.receipt)
+
+            : batch &&
+              oneCase?.kind === 'social' &&
+              oneCase.action === 'seed_npc' &&
+              caseResult.created
+                ? npcProfileNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'social' &&
@@ -18752,6 +18826,7 @@ function registerTools() {
                                     'import',
                                     'check_work',
                                     'reveal_work',
+                                    'seed_npc',
                                     'status',
                                     'export',
                                     'accept',
@@ -24998,7 +25073,18 @@ function extractAethermoorQuestEvents(text) {
      * A work check is a report of an already narrated interaction.
      * Require it inside the disposable plan block, not in story prose.
      */
+    let npcIntroductionNumber = 0;
+
     for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
+        for (const _match of plan[1].matchAll(
+            /<AETHERMOOR:INTRODUCE_NPC\s*>/g
+        )) {
+            events.push({
+                event: 'introduce_npc',
+                introductionNumber: ++npcIntroductionNumber
+            });
+        }
+
         const themePattern =
             /<AETHERMOOR:INSTANCE_THEME\s+instance=([A-Za-z0-9._:-]+)\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
 
@@ -25307,7 +25393,26 @@ async function processAethermoorAssistantEvents(data) {
         for (const event of events) {
         try {
             let result;
-            if (event.event === 'request_encounter') {
+            if (event.event === 'introduce_npc') {
+                const messageId =
+                    socialWorkIdForAssistantMessage(message);
+
+                assert(
+                    messageId,
+                    'NPC introduction awaits a saved assistant message'
+                );
+
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_npc_profile',
+                        kind: 'social',
+                        action: 'seed_npc',
+                        socialId:
+                            `${messageId}-npc-` +
+                            `${event.introductionNumber}`
+                    }]
+                });
+            } else if (event.event === 'request_encounter') {
                 const messageId =
                     socialWorkIdForAssistantMessage(message);
 
@@ -26112,6 +26217,37 @@ globalThis.aethermoorMechanicsInterceptor =
                         'in the tag.',
                     'Do not emit a request merely because a scene mentions ' +
                         'danger. Emit it only when actual opponents are needed.'
+                ].join('\n')
+            });
+        }
+
+        /*
+         * The GM reports new named NPC introductions. The seed is
+         * resolved after that reply, so the GM receives it on the next
+         * reply rather than retroactively changing the introduction.
+         */
+        if (contextState) {
+            entries.push({
+                id: 'npc-introduction-context',
+                type: 'npc_introduction_context',
+                packet: [
+                    'PRIVATE NPC INTRODUCTION RULE — do not recite.',
+                    'When you introduce a NEW identifiable, named NPC ' +
+                        'who directly interacts with the crew, place ' +
+                        '<AETHERMOOR:INTRODUCE_NPC> inside <plan>.',
+                    'Use one tag per new NPC, in their order of ' +
+                        'introduction. Supply no name or traits in the tag.',
+                    'Do not tag unnamed background people or a returning ' +
+                        'NPC. A traveler already introduced by an ' +
+                        'engine-reported travel social opportunity has ' +
+                        'already received a seed; naming that traveler ' +
+                        'does not require another tag.',
+                    'Give the person an ordinary first beat. The extension ' +
+                        'supplies their first-meeting manner and private ' +
+                        'inclination on a later reply. Do not establish a ' +
+                        'contradictory hidden truth before that result.',
+                    'The seed is characterization, not a quest or ' +
+                        'betrayal event.'
                 ].join('\n')
             });
         }

@@ -571,12 +571,7 @@ function ensureKnownInstance(state) {
             const guarded = isPack || isElite;
 
             const composition = isPack
-                ? 1 + (
-                    worldHash(
-                        `${state.world.seed}:instance-composition:` +
-                        `${zone}:${roomId}`
-                    ) % 6
-                )
+                ? instancePackComposition(state, zone, roomId)
                 : null;
 
             const tactic = isPack
@@ -1325,44 +1320,32 @@ function validate(state) {
     }
 
     if (encounter.type === 'normal_pack') {
+        const roles = PACK_COMPOSITIONS[encounter.composition];
+
         assert(
-            encounter.foes.length === 3,
-            'Normal packs must contain exactly three foes'
+            Array.isArray(roles),
+            'Normal pack composition must identify a saved roster'
         );
 
         assert(
-            encounter.composition >= 1 &&
-            encounter.composition <= 6,
-            'Normal pack composition must be 1-6'
+            encounter.foes.length === roles.length,
+            'Normal pack size does not match its composition'
         );
 
-        if (encounter.composition === 1) {
-            assert(
-                encounter.foes.every(
-                    foe => foe.role === 'brute'
-                ),
-                'Pure Fodder packs must contain three Brutes'
-            );
-        } else {
-            assert(
-                encounter.foes.filter(
-                    foe => foe.role === 'brute'
-                ).length === 1,
-                'Mixed packs must contain one Brute'
-            );
+        /*
+         * Compare role counts, not foe order. Existing three-foe
+         * encounters retain their original composition identities.
+         */
+        const expectedRoles = [...roles].sort();
+        const actualRoles = encounter.foes
+            .map(foe => foe.role)
+            .sort();
 
-            assert(
-                encounter.foes.filter(
-                    foe => [
-                        'mender',
-                        'archer',
-                        'hexer',
-                        'buffer'
-                    ].includes(foe.role)
-                ).length === 2,
-                'Mixed packs must contain two Specialists'
-            );
-        }
+        assert(
+            JSON.stringify(actualRoles) ===
+                JSON.stringify(expectedRoles),
+            'Normal pack roles do not match its composition'
+        );
 
         assert(
             encounter.rewards &&
@@ -1371,8 +1354,8 @@ function validate(state) {
         );
 
         assert(
-            encounter.rewards.foeCount === 3,
-            'Normal pack reward foeCount must be 3'
+            encounter.rewards.foeCount === encounter.foes.length,
+            'Normal pack reward foeCount does not match its roster'
         );
 
         int(
@@ -4471,14 +4454,43 @@ function chooseInstancePackTactic(state, zone, composition, roomId) {
         : 'none';
 }
 
+/*
+ * Compositions 1–6 retain their saved three-foe identities. New
+ * compositions 7–12 have four foes. Zone selects the chance of a
+ * four-foe pack; the crew's level never changes local pack size.
+ */
 const PACK_COMPOSITIONS = {
     1: ['brute', 'brute', 'brute'],
     2: ['brute', 'mender', 'archer'],
     3: ['brute', 'archer', 'archer'],
     4: ['brute', 'hexer', 'mender'],
     5: ['brute', 'buffer', 'archer'],
-    6: ['brute', 'hexer', 'archer']
+    6: ['brute', 'hexer', 'archer'],
+
+    7: ['brute', 'mender', 'archer', 'buffer'],
+    8: ['brute', 'archer', 'archer', 'mender'],
+    9: ['brute', 'hexer', 'archer', 'buffer'],
+    10: ['brute', 'mender', 'hexer', 'archer'],
+    11: ['brute', 'buffer', 'archer', 'archer'],
+    12: ['brute', 'hexer', 'mender', 'buffer']
 };
+
+function fourFoeChanceSides(zone) {
+    int(zone, 'pack zone', 1);
+
+    // 1-in-6, then 1-in-3, then 1-in-2.
+    return zone <= 2 ? 6 : zone <= 5 ? 3 : 2;
+}
+
+function instancePackComposition(state, zone, roomId) {
+    const key =
+        `${state.world.seed}:instance-composition:${zone}:${roomId}`;
+    const fourFoes =
+        worldHash(`${key}:size`) % fourFoeChanceSides(zone) === 0;
+    const variant = worldHash(`${key}:variant`) % 6;
+
+    return (fourFoes ? 7 : 1) + variant;
+}
 
 function spawnNormalPack({
     zone,
@@ -4501,7 +4513,7 @@ function spawnNormalPack({
     assert(
         Number.isInteger(composition) &&
         PACK_COMPOSITIONS[composition],
-        'Pack composition must be an integer from 1 to 6'
+        'Pack composition must identify a supported roster (1–12)'
     );
 
     const zoneData =
@@ -4559,7 +4571,9 @@ function spawnNormalPack({
             compositionName:
                 pureFodder
                     ? 'Pure Fodder Swarm'
-                    : 'Mixed Tactical Squad',
+                    : foes.length === 4
+                        ? 'Four-Foe Tactical Pack'
+                        : 'Mixed Tactical Squad',
             enemyTier: zoneData.tier,
             foes,
 
@@ -4938,8 +4952,17 @@ const eliteChance =
             ? roll(state, bracketNames.length)
             : bracketNames.indexOf(test.bracket) + 1;
 
+        /*
+         * A room-supplied composition is already locked and consumes no
+         * size or composition roll. Ordinary packs roll size first,
+         * then one of the six rosters of that size.
+         */
+        const sizeRoll = test.composition === undefined
+            ? roll(state, fourFoeChanceSides(test.zone))
+            : null;
+
         const compositionRoll = test.composition === undefined
-            ? roll(state, 6)
+            ? (sizeRoll === 1 ? 7 : 1) + roll(state, 6) - 1
             : test.composition;
 
         const bracket =
@@ -4970,6 +4993,7 @@ const eliteChance =
         spawned.encounter.spawnRolls = {
             encounterTypeRoll,
             bracketRoll,
+            sizeRoll,
             compositionRoll,
             tactic: spawned.encounter.packTactic.id
         };
@@ -7239,6 +7263,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * DONE — Combat systems
  * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
  *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
+ *
+ * - IMPLEMENTED — BETA PENDING: ordinary normal packs retain the original
+ *   six three-foe compositions and gain six four-foe compositions. Four-foe
+ *   odds rise from 1-in-6 (Zones 1–2), to 1-in-3 (Zones 3–5), to 1-in-2
+ *   (Zone 6 onward). New instance rooms save a zone-weighted composition;
+ *   existing rooms and encounters are not regenerated.
+ * - XP and silver use the actual slain roster. Quest XP keeps its separate
+ *   three-foe reference. Test four-foe incoming pressure, specialist
+ *   stacking, and Frost Stomp before changing combat formulas.
  *
  * - IMPLEMENTED — BETA PENDING: resolveTurn() requires
  *   encounter.status === 'active'. Spotted encounters must be engaged

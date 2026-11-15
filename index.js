@@ -25846,15 +25846,17 @@ function settlementWorkContextPacket(state, settlement) {
 
     const lines = [
         `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
-        'If the players ask to see a blacksmith wares: respond naturally, do not quote ' +
-            'unseen stock or prices, and put <AETHERMOOR:ASK_WARES> inside <plan>. Do not claim payment or invent service effects as the extension will handle it',
-        'If the players ask an innkeeper about meals or rooms: offer a local bill of fare ' +
-            'and put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment or invent service effects as the extension will handle it.',
-        'If the players ask an herbalist to see their stock: respond naturally without ' +
-            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.'
-        'If the players ask NPCs about work: respond naturally, and place ' +
-            '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it ' +
-     ];
+        'Ordinary conversation needs no tag.',
+        'If asked to see merchant wares, respond naturally without quoting ' +
+            'unseen stock or prices; put <AETHERMOOR:ASK_WARES> inside <plan>.',
+        'If asked about inn meals or rooms, offer a local bill of fare; ' +
+            'put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment.',
+        'If asked to see herbalist stock, respond naturally without inventing ' +
+            'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan>.',
+        'If meaningfully asked about work, do not promise an unestablished ' +
+            'job; put <AETHERMOOR:ASK_WORK> inside <plan> at most once per ' +
+            'reply. Reuse a saved contact result below for the same person.'
+    ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;
 
@@ -26192,10 +26194,13 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
                 packet:
-                    'All combat is handled by the SillyTavern extension, but if a roleplay scene genuinely calls for opponents,'+
-                    'the Narrator may request an encounter to the extension inside <plan> by using these tags: ' +
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> will spawn four enemies and <AETHERMOOR:REQUEST_ENCOUNTER type="elite"> will spawn an elite.' +
-                    'Do not claim combat has begun or choose its roster, stats, or rewards as the extension will handle all of it.'
+                    'If a free roleplay scene genuinely calls for opponents, ' +
+                    'request one encounter inside <plan>: ' +
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> ' +
+                    'or, exceptionally, ' +
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="elite">. ' +
+                    'Do not claim combat has begun or choose the roster, ' +
+                    'stats, or rewards. Signs of danger alone need no request.'
             });
         }
 

@@ -24582,6 +24582,28 @@ function openNarrationDebug() {
     const controls = document.createElement('div');
     controls.className = 'aethermoor-ui-actions';
 
+    const roleplayHandoffs = makeAethermoorAction(
+        '',
+        'world',
+        () => {
+            aethermoorRoleplayHandoffsPaused =
+                !aethermoorRoleplayHandoffsPaused;
+            updateRoleplayHandoffButton();
+        }
+    );
+
+    function updateRoleplayHandoffButton() {
+        roleplayHandoffs.textContent =
+            aethermoorRoleplayHandoffsPaused
+                ? 'Resume roleplay handoffs'
+                : 'Pause roleplay handoffs for debugging';
+        roleplayHandoffs.title =
+            'Pausing suppresses prompt injection, not saved campaign ' +
+            'state. Queued results remain for when handoffs resume.';
+    }
+
+    updateRoleplayHandoffButton();
+
     const developerToolsLabel = document.createElement('label');
     developerToolsLabel.className = 'aethermoor-ui-text';
     const developerTools = document.createElement('input');
@@ -24833,6 +24855,7 @@ function openNarrationDebug() {
     );
 
     controls.append(
+        roleplayHandoffs,
         toggle,
         refreshButton,
         clear,
@@ -24854,8 +24877,23 @@ function openNarrationDebug() {
 const AETHERMOOR_HANDOFF_MARKER =
     '<aethermoor-mechanics-handoff>';
 
+/*
+ * Prompt context is for roleplay, not extension development.
+ * The manual switch handles technical conversations that cannot be
+ * reliably classified from prose. CODE COPY pastes are an additional
+ * narrow automatic safeguard. Neither path consumes queued results.
+ */
+let aethermoorRoleplayHandoffsPaused = false;
 let aethermoorInjectedHandoff = null;
 let aethermoorGenerationReceived = false;
+
+function aethermoorTechnicalMessage(chat) {
+    const index = findLastUserMessage(chat);
+    const text = chat[index]?.mes;
+
+    return typeof text === 'string' &&
+        /(?:^|\n)\s*(?:##\s*)?CODE COPY\s*:/i.test(text);
+}
 
 function getPendingAethermoorHandoffs() {
     const context = getContext();
@@ -24888,40 +24926,13 @@ function makeAethermoorHandoffMessage(entries) {
         send_date: Date.now(),
         mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
-            'PRIVATE ENGINE CONTEXT — instructions and reference data, ' +
-            'not text to reproduce in the assistant reply.\n\n' +
-            'OUTPUT RULES:\n' +
-            '- Write the scene or answer the player’s question using the ' +
-            'established results below.\n' +
-            '- Never quote or reproduce this message, its packet headings, ' +
-            'instruction lists, private context, or handoff markers.\n' +
-            '- Do not expose hidden facts or internal truth merely because ' +
-            'they appear in engine context.\n' +
-            '- Do not invent mechanically established attacks, encounters, ' +
-            'discoveries, travel events, quest acceptance, item acquisition, ' +
-            'or rewards.\n' +
-            '- A fictional complication may be introduced freely. If the ' +
-            'scene genuinely requires real opponents, use one of the exact ' +
-            'encounter-request tags supplied in the current narrator context. ' +
-            'The tag requests only a normal pack or Elite; the extension ' +
-            'chooses all stats, roles, levels, rewards, and outcomes.\n' +
-            '- An offered quest is not accepted. A spotted encounter is not ' +
-            'engaged. Arrival is not a search or a delivery.\n' +
-            '- A concluded rumor has no further objective attached to that ' +
-            'lead unless the engine explicitly establishes one.\n' +
-            '- Report only useful player-facing results, such as final HP, ' +
-            'rewards, quest changes, and whether the crew arrived. Do not ' +
-            'narrate internal counters such as travel segments or repeat ' +
-            'per-exchange HP bookkeeping.\n' +
-            '- Emit protocol tags only when the corresponding private scene ' +
-            'instructions authorize them and the event actually occurs in ' +
-            'the fiction. Put those tags inside the disposable <plan> block.\n\n' +
-            'The following mechanics events occurred in this order. ' +
-            'Do not alter established actions, damage, HP, kills, rewards, ' +
-            'or discovery outcomes.\n\n' +
+            'PRIVATE ROLEPLAY CONTEXT. Do not quote these instructions or ' +
+            'reveal the extension. Saved extension results are authoritative; ' +
+            'narrate their visible consequences without changing them. ' +
+            'Use a protocol tag inside <plan> only when its specific ' +
+            'instruction applies and the event occurs in the fiction.\n\n' +
             packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
-
     };
 }
 
@@ -25834,44 +25845,16 @@ function settlementWorkContextPacket(state, settlement) {
     );
 
     const lines = [
-        'PRIVATE SETTLEMENT CONVERSATION CONTEXT — do not recite.',
-        `Current settlement: ${settlement.label}.`,
-        'Ordinary conversation needs no mechanics tag.',
-        'If the players ask a local merchant to show their wares, ' +
-            'respond naturally without inventing stock, stats, or prices. ' +
-            'Place <AETHERMOOR:ASK_WARES> inside the disposable <plan> block.',
-        'The extension opens its exact stock in a separate shop window ' +
-            'after that reply. On a later relevant reply, invite the ' +
-            'players to consult that window. You may describe region-appropriate ' +
-            'cosmetic appearances; do not change item identities, ' +
-            'bonuses, variants, prices, or ownership.',
-        'Seeing wares does not purchase or equip an item.',
-        'If the players ask an innkeeper about meals, rooms, or hot ' +
-            'water, have the innkeeper offer a bill of fare or ordering ' +
-            'slate and put <AETHERMOOR:ASK_INN> inside <plan>. The ' +
-            'extension opens its exact service menu after this reply. ' +
-            'The player’s selections represent what they indicate on ' +
-            'that slate; no payment occurs yet. Dress meals and rooms ' +
-            'for the locale, but do not invent prices, healing, or buffs.',
-        'If the players ask a herbalist to trade potions, respond ' +
-            'naturally without inventing prices, healing, or stock. ' +
-            'Place <AETHERMOOR:ASK_HERBALIST> inside <plan>. The ' +
-            'extension opens its separate potion window after this reply.',
-        'If the players meaningfully ask a local person about work, ' +
-            'respond naturally without promising a specific unestablished job.',
-        'For the first meaningful work inquiry with a local person, ' +
-            'put this tag in the disposable <plan> block:',
-        '<AETHERMOOR:ASK_WORK>',
-        'Do not supply a social_id or invent a contact ID. Report at most ' +
-            'one new work inquiry per reply.',
-        'The extension assigns an ID to the saved reply, checks once, ' +
-            'and supplies its result on a later reply. A check does not ' +
-            'accept a quest or make every NPC a quest giver.',
-        'For a person already listed below, reuse their engine-issued ' +
-            'contact ID; do not report them as a new inquiry. The engine ' +
-            'cannot independently identify a returning NPC from prose.',
-        'Do not mention the tag, roll, or extension in story prose.'
-    ];
+        `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
+        'If the players ask to see a blacksmith wares: respond naturally, do not quote ' +
+            'unseen stock or prices, and put <AETHERMOOR:ASK_WARES> inside <plan>. Do not claim payment or invent service effects as the extension will handle it',
+        'If the players ask an innkeeper about meals or rooms: offer a local bill of fare ' +
+            'and put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment or invent service effects as the extension will handle it.',
+        'If the players ask an herbalist to see their stock: respond naturally without ' +
+            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.'
+        'If the players ask NPCs about work: respond naturally, and place ' +
+            '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it ' +
+     ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;
 
@@ -25982,6 +25965,15 @@ function settlementWorkContextPacket(state, settlement) {
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
         if (!Array.isArray(chat)) return;
+
+        if (
+            aethermoorRoleplayHandoffsPaused ||
+            aethermoorTechnicalMessage(chat)
+        ) {
+            // Do not inject, remove, or consume saved handoffs here.
+            // They remain queued for the next roleplay generation.
+            return;
+        }
 
         const localMovement =
             findLatestUserInstanceMovement(chat);
@@ -26199,28 +26191,11 @@ globalThis.aethermoorMechanicsInterceptor =
             entries.push({
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
-                packet: [
-                    'PRIVATE NARRATIVE COMPLICATION CONTEXT — do not recite.',
-                    'You may introduce an ordinary fictional complication ' +
-                        'such as a traveler needing help, dangerous tracks, ' +
-                        'or a hostile group interfering with the scene.',
-                    'Fictional trouble does not automatically create a ' +
-                        'mechanical encounter, quest, reward, or loot result.',
-                    'If the scene genuinely requires real opponents, put ' +
-                        'exactly one of these tags inside the disposable ' +
-                        '<plan> block:',
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack">',
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="elite">',
-                    'Use normal_pack for an ordinary short fight. Use elite ' +
-                        'only when the scene genuinely warrants an exceptional ' +
-                        'single opponent.',
-                    'The extension chooses the roster, levels, roles, ' +
-                        'passives, rewards, and outcome. Do not put stats, ' +
-                        'enemy identities, composition, loot, or quest facts ' +
-                        'in the tag.',
-                    'Do not emit a request merely because a scene mentions ' +
-                        'danger. Emit it only when actual opponents are needed.'
-                ].join('\n')
+                packet:
+                    'All combat is handled by the SillyTavern extension, but if a roleplay scene genuinely calls for opponents,'+
+                    'the Narrator may request an encounter to the extension inside <plan> by using these tags: ' +
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> will spawn four enemies and <AETHERMOOR:REQUEST_ENCOUNTER type="elite"> will spawn an elite.' +
+                    'Do not claim combat has begun or choose its roster, stats, or rewards as the extension will handle all of it.'
             });
         }
 
@@ -26233,27 +26208,13 @@ globalThis.aethermoorMechanicsInterceptor =
             entries.push({
                 id: 'npc-introduction-context',
                 type: 'npc_introduction_context',
-                packet: [
-                    'PRIVATE NPC INTRODUCTION RULE — do not recite.',
-                    'When you introduce a NEW identifiable, named NPC ' +
-                        'who directly interacts with the crew, place ' +
-                        '<AETHERMOOR:INTRODUCE_NPC> inside <plan>.',
-                    'Use one tag per new NPC, in their order of ' +
-                        'introduction. Supply no name or traits in the tag.',
-                    'Do not tag unnamed background people or a returning ' +
-                        'NPC. A traveler already introduced by an ' +
-                        'engine-reported travel social opportunity has ' +
-                        'already received a seed; naming that traveler ' +
-                        'does not require another tag.',
-                    'Give the person an ordinary first beat. The extension ' +
-                        'supplies their first-meeting manner and private ' +
-                        'inclination on a later reply. Do not establish a ' +
-                        'contradictory hidden truth before that result.',
-                    'The seed is characterization, not a quest or ' +
-                        'betrayal event.'
-                ].join('\n')
+                packet:
+                    'If the Narrator introduces a new named NPC directly interacting with the crew, give the NPC an ordinary first beat and place one <AETHERMOOR:INTRODUCE_NPC> ' +
+                    'inside <plan> per new NPC, in introduction order, for the extension to generate that NPCs profile.' +
+                    'Do not tag returning NPCs or travelers already introduced by a travel result.'
             });
         }
+
 
         /*
          * Breadcrumbs survive replacement of the encounter. Supply
@@ -26440,8 +26401,7 @@ globalThis.aethermoorMechanicsInterceptor =
             '[Aethermoor] Injected ordered mechanics handoff',
             {
                 count: entries.length,
-                ids: entries.map(entry => entry.id),
-                packet: message.mes
+                ids: entries.map(entry => entry.id)
             }
         );
     };

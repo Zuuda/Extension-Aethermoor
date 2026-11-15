@@ -24416,8 +24416,25 @@ async function openCombatPanel(inlineHost) {
                 result?.error || 'Combat turn failed'
             );
 
-            aethermoorLastCombatLog =
-                formatCombatTurnResult(result);
+            aethermoorLastCombatLog = [
+                `Turn ${result.turn}`,
+                ...(result.exchanges || []).map(exchange =>
+                    `Exchange ${exchange.exchange}: ` +
+                    `${exchange.damage} damage dealt; ` +
+                    `Q'tik ${exchange.qtikHp} HP, ` +
+                    `Tansy ${exchange.tansyHp} HP.` +
+                    (exchange.effects?.length
+                        ? ` ${exchange.effects.join('; ')}.`
+                        : '')
+                ),
+                ...(result.turnEffects || []),
+                ...(result.rewards?.applied
+                    ? [
+                        `Victory: +${result.rewards.xp} XP, ` +
+                        `+${result.rewards.silver}s.`
+                    ]
+                    : [])
+            ].join('\n');
 
             aethermoorLastCombatLogKey =
                 `${result.summary.encounter.id}:${result.turn}`;

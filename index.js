@@ -25887,9 +25887,8 @@ function settlementWorkContextPacket(state, settlement) {
         'If the players ask to see an herbalists stock, respond naturally without inventing ' +
             'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan> so that the extension will handle it.',
         'If the players ask about quests or jobs, do not invent an unestablished ' +
-            'job; put <AETHERMOOR:ASK_WORK> inside <plan> so that the extension will roll the dice.',
-        'Story tags: irreverent funny/humor narration; profanity-laced.'
-    ];
+            'job; put <AETHERMOOR:ASK_WORK> inside <plan> so that the extension will roll the dice.'
+            ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;
 

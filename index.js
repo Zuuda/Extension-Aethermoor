@@ -25880,15 +25880,15 @@ function settlementWorkContextPacket(state, settlement) {
     const lines = [
         `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
         'Ordinary conversation needs no tag.',
-        'If asked to see merchant wares, respond naturally without quoting ' +
-            'unseen stock or prices; put <AETHERMOOR:ASK_WARES> inside <plan>.',
-        'If asked about inn meals or rooms, offer a local bill of fare; ' +
-            'put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment.',
-        'If asked to see herbalist stock, respond naturally without inventing ' +
-            'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan>.',
-        'If meaningfully asked about work, do not promise an unestablished ' +
-            'job; put <AETHERMOOR:ASK_WORK> inside <plan> at most once per ' +
-            'reply. Reuse a saved contact result below for the same person.'
+        'If the players ask to see merchant wares then respond naturally without quoting ' +
+            'stock or prices; put <AETHERMOOR:ASK_WARES> inside <plan> so that the extension will handle it.',
+        'If the players ask about inn meals or rooms then offer a local slate/menu,' +
+            'put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment since the extension will handle it.',
+        'If the players ask to see an herbalists stock, respond naturally without inventing ' +
+            'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan> so that the extension will handle it.',
+        'If the players ask about quests or jobs, do not invent an unestablished ' +
+            'job; put <AETHERMOOR:ASK_WORK> inside <plan> so that the extension will roll the dice.'
+        'Story tags: irreverent funny/humor narration; profanity-laced.'
     ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;

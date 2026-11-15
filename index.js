@@ -25882,7 +25882,7 @@ function settlementWorkContextPacket(state, settlement) {
         'Ordinary conversation needs no tag.',
         'If the players ask to see merchant wares then respond naturally without quoting ' +
             'stock or prices; put <AETHERMOOR:ASK_WARES> inside <plan> so that the extension will handle it.',
-        'If the players ask about inn meals or rooms then offer a local slate/menu,' +
+        'If the players ask about inn meals or rooms then offer a local slate/menu, ' +
             'put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment since the extension will handle it.',
         'If the players ask to see an herbalists stock, respond naturally without inventing ' +
             'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan> so that the extension will handle it.',

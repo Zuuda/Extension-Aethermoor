@@ -17747,14 +17747,16 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 (
-                (
                     oneCase.kind === 'social' &&
-                    ['check_work', 'reveal_work', 'seed_npc'].includes(
-                        oneCase.action
-                    )
+                    [
+                        'check_work',
+                        'reveal_work',
+                        'seed_npc'
+                    ].includes(oneCase.action)
                 ) ||
                 (
-                    ['vendor', 'herbalist', 'inn'].includes(oneCase.kind) &&
+                    ['vendor', 'herbalist', 'inn']
+                        .includes(oneCase.kind) &&
                     ['open', 'commit'].includes(oneCase.action)
                 ) ||
                 (

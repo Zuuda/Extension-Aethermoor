@@ -571,7 +571,12 @@ function ensureKnownInstance(state) {
             const guarded = isPack || isElite;
 
             const composition = isPack
-                ? instancePackComposition(state, zone, roomId)
+                ? 1 + (
+                    worldHash(
+                        `${state.world.seed}:instance-composition:` +
+                        `${zone}:${roomId}`
+                    ) % 6
+                )
                 : null;
 
             const tactic = isPack
@@ -1320,32 +1325,44 @@ function validate(state) {
     }
 
     if (encounter.type === 'normal_pack') {
-        const roles = PACK_COMPOSITIONS[encounter.composition];
-
         assert(
-            Array.isArray(roles),
-            'Normal pack composition must identify a saved roster'
+            encounter.foes.length === 3,
+            'Normal packs must contain exactly three foes'
         );
 
         assert(
-            encounter.foes.length === roles.length,
-            'Normal pack size does not match its composition'
+            encounter.composition >= 1 &&
+            encounter.composition <= 6,
+            'Normal pack composition must be 1-6'
         );
 
-        /*
-         * Compare role counts, not foe order. Existing three-foe
-         * encounters retain their original composition identities.
-         */
-        const expectedRoles = [...roles].sort();
-        const actualRoles = encounter.foes
-            .map(foe => foe.role)
-            .sort();
+        if (encounter.composition === 1) {
+            assert(
+                encounter.foes.every(
+                    foe => foe.role === 'brute'
+                ),
+                'Pure Fodder packs must contain three Brutes'
+            );
+        } else {
+            assert(
+                encounter.foes.filter(
+                    foe => foe.role === 'brute'
+                ).length === 1,
+                'Mixed packs must contain one Brute'
+            );
 
-        assert(
-            JSON.stringify(actualRoles) ===
-                JSON.stringify(expectedRoles),
-            'Normal pack roles do not match its composition'
-        );
+            assert(
+                encounter.foes.filter(
+                    foe => [
+                        'mender',
+                        'archer',
+                        'hexer',
+                        'buffer'
+                    ].includes(foe.role)
+                ).length === 2,
+                'Mixed packs must contain two Specialists'
+            );
+        }
 
         assert(
             encounter.rewards &&
@@ -1354,8 +1371,8 @@ function validate(state) {
         );
 
         assert(
-            encounter.rewards.foeCount === encounter.foes.length,
-            'Normal pack reward foeCount does not match its roster'
+            encounter.rewards.foeCount === 3,
+            'Normal pack reward foeCount must be 3'
         );
 
         int(
@@ -4454,43 +4471,14 @@ function chooseInstancePackTactic(state, zone, composition, roomId) {
         : 'none';
 }
 
-/*
- * Compositions 1–6 retain their saved three-foe identities. New
- * compositions 7–12 have four foes. Zone selects the chance of a
- * four-foe pack; the crew's level never changes local pack size.
- */
 const PACK_COMPOSITIONS = {
     1: ['brute', 'brute', 'brute'],
     2: ['brute', 'mender', 'archer'],
     3: ['brute', 'archer', 'archer'],
     4: ['brute', 'hexer', 'mender'],
     5: ['brute', 'buffer', 'archer'],
-    6: ['brute', 'hexer', 'archer'],
-
-    7: ['brute', 'mender', 'archer', 'buffer'],
-    8: ['brute', 'archer', 'archer', 'mender'],
-    9: ['brute', 'hexer', 'archer', 'buffer'],
-    10: ['brute', 'mender', 'hexer', 'archer'],
-    11: ['brute', 'buffer', 'archer', 'archer'],
-    12: ['brute', 'hexer', 'mender', 'buffer']
+    6: ['brute', 'hexer', 'archer']
 };
-
-function fourFoeChanceSides(zone) {
-    int(zone, 'pack zone', 1);
-
-    // 1-in-6, then 1-in-3, then 1-in-2.
-    return zone <= 2 ? 6 : zone <= 5 ? 3 : 2;
-}
-
-function instancePackComposition(state, zone, roomId) {
-    const key =
-        `${state.world.seed}:instance-composition:${zone}:${roomId}`;
-    const fourFoes =
-        worldHash(`${key}:size`) % fourFoeChanceSides(zone) === 0;
-    const variant = worldHash(`${key}:variant`) % 6;
-
-    return (fourFoes ? 7 : 1) + variant;
-}
 
 function spawnNormalPack({
     zone,
@@ -4513,7 +4501,7 @@ function spawnNormalPack({
     assert(
         Number.isInteger(composition) &&
         PACK_COMPOSITIONS[composition],
-        'Pack composition must identify a supported roster (1–12)'
+        'Pack composition must be an integer from 1 to 6'
     );
 
     const zoneData =
@@ -4571,9 +4559,7 @@ function spawnNormalPack({
             compositionName:
                 pureFodder
                     ? 'Pure Fodder Swarm'
-                    : foes.length === 4
-                        ? 'Four-Foe Tactical Pack'
-                        : 'Mixed Tactical Squad',
+                    : 'Mixed Tactical Squad',
             enemyTier: zoneData.tier,
             foes,
 
@@ -4952,17 +4938,8 @@ const eliteChance =
             ? roll(state, bracketNames.length)
             : bracketNames.indexOf(test.bracket) + 1;
 
-        /*
-         * A room-supplied composition is already locked and consumes no
-         * size or composition roll. Ordinary packs roll size first,
-         * then one of the six rosters of that size.
-         */
-        const sizeRoll = test.composition === undefined
-            ? roll(state, fourFoeChanceSides(test.zone))
-            : null;
-
         const compositionRoll = test.composition === undefined
-            ? (sizeRoll === 1 ? 7 : 1) + roll(state, 6) - 1
+            ? roll(state, 6)
             : test.composition;
 
         const bracket =
@@ -4993,7 +4970,6 @@ const eliteChance =
         spawned.encounter.spawnRolls = {
             encounterTypeRoll,
             bracketRoll,
-            sizeRoll,
             compositionRoll,
             tactic: spawned.encounter.packTactic.id
         };
@@ -7263,15 +7239,6 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * DONE — Combat systems
  * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
  *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
- *
- * - IMPLEMENTED — BETA PENDING: ordinary normal packs retain the original
- *   six three-foe compositions and gain six four-foe compositions. Four-foe
- *   odds rise from 1-in-6 (Zones 1–2), to 1-in-3 (Zones 3–5), to 1-in-2
- *   (Zone 6 onward). New instance rooms save a zone-weighted composition;
- *   existing rooms and encounters are not regenerated.
- * - XP and silver use the actual slain roster. Quest XP keeps its separate
- *   three-foe reference. Test four-foe incoming pressure, specialist
- *   stacking, and Frost Stomp before changing combat formulas.
  *
  * - IMPLEMENTED — BETA PENDING: resolveTurn() requires
  *   encounter.status === 'active'. Spotted encounters must be engaged
@@ -25879,17 +25846,15 @@ function settlementWorkContextPacket(state, settlement) {
 
     const lines = [
         `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
-        'Ordinary conversation needs no tag.',
-        'If the players ask to see merchant wares then respond naturally without quoting ' +
-            'stock or prices; put <AETHERMOOR:ASK_WARES> inside <plan> so that the extension will handle it.',
-        'If the players ask about inn meals or rooms then offer a local slate/menu,' +
-            'put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment since the extension will handle it.',
-        'If the players ask to see an herbalists stock, respond naturally without inventing ' +
-            'stock or prices; put <AETHERMOOR:ASK_HERBALIST> inside <plan> so that the extension will handle it.',
-        'If the players ask about quests or jobs, do not invent an unestablished ' +
-            'job; put <AETHERMOOR:ASK_WORK> inside <plan> so that the extension will roll the dice.',
-        'Story tags: irreverent funny/humor narration; profanity-laced.'
-    ];
+        'If the players ask to see a blacksmith wares: respond naturally, do not quote ' +
+            'unseen stock or prices, and put <AETHERMOOR:ASK_WARES> inside <plan>. Do not claim payment or invent service effects as the extension will handle it',
+        'If the players ask an innkeeper about meals or rooms: offer a local bill of fare ' +
+            'and put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment or invent service effects as the extension will handle it.',
+        'If the players ask an herbalist to see their stock: respond naturally without ' +
+            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.'
+        'If the players ask NPCs about work: respond naturally, and place ' +
+            '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it ' +
+     ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;
 
@@ -26227,13 +26192,10 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
                 packet:
-                    'If a free roleplay scene genuinely calls for opponents, ' +
-                    'request one encounter inside <plan>: ' +
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> ' +
-                    'or, exceptionally, ' +
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="elite">. ' +
-                    'Do not claim combat has begun or choose the roster, ' +
-                    'stats, or rewards. Signs of danger alone need no request.'
+                    'All combat is handled by the SillyTavern extension, but if a roleplay scene genuinely calls for opponents,'+
+                    'the Narrator may request an encounter to the extension inside <plan> by using these tags: ' +
+                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> will spawn four enemies and <AETHERMOOR:REQUEST_ENCOUNTER type="elite"> will spawn an elite.' +
+                    'Do not claim combat has begun or choose its roster, stats, or rewards as the extension will handle all of it.'
             });
         }
 

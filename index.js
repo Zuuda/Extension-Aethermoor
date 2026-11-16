@@ -19611,15 +19611,32 @@ function addAethermoorPanelStyles() {
         }
 
         .aethermoor-shop-header {
+            position: sticky;
+            top: -12px;
+            z-index: 2;
             display: flex;
             justify-content: space-between;
-            align-items: start;
+            align-items: center;
             gap: 12px;
-            padding-bottom: 8px;
+            margin: -12px -12px 0;
+            padding: 12px 12px 8px;
+            background: #12161c;
             border-bottom: 1px solid #1f2730;
             cursor: move;
             user-select: none;
             touch-action: none;
+        }
+
+        .aethermoor-shop-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .aethermoor-shop-confirm {
+            color: #4ade80;
+            border-color: #4ade80;
         }
 
         .aethermoor-shop-title {
@@ -20655,11 +20672,21 @@ async function openAethermoorShopWindow() {
     title.className = 'aethermoor-shop-title';
     title.textContent = `System Log // Trade · ${settlement.label}`;
 
+    const headerActions = document.createElement('div');
+    headerActions.className = 'aethermoor-shop-header-actions';
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
+    confirm.textContent = 'Confirm';
+
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
     close.textContent = 'Cancel';
-    header.append(title, close);
+
+    headerActions.append(confirm, close);
+    header.append(title, headerActions);
     windowElement.appendChild(header);
 
     const summary = document.createElement('div');
@@ -20908,10 +20935,6 @@ async function openAethermoorShopWindow() {
         }
     }
 
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-trade-option';
-    confirm.textContent = 'Confirm & Complete Trade';
     confirm.addEventListener('click', async () => {
         if (!selectedBuys.size && !selectedSales.size) {
             toastr.warning('Select at least one item first.', 'Aethermoor');
@@ -20979,8 +21002,6 @@ async function openAethermoorShopWindow() {
             );
         }
     });
-
-    windowElement.appendChild(confirm);
 
     close.addEventListener('click', () => {
         windowElement.remove();
@@ -21077,11 +21098,21 @@ async function openAethermoorHerbalistWindow() {
     title.textContent =
         `System Log // Herbalist · ${settlement.label}`;
 
+    const headerActions = document.createElement('div');
+    headerActions.className = 'aethermoor-shop-header-actions';
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
+    confirm.textContent = 'Confirm';
+
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
     close.textContent = 'Cancel';
-    header.append(title, close);
+
+    headerActions.append(confirm, close);
+    header.append(title, headerActions);
     panel.appendChild(header);
 
     const summary = document.createElement('div');
@@ -21224,10 +21255,6 @@ async function openAethermoorHerbalistWindow() {
         }
     }
 
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-trade-option';
-    confirm.textContent = 'Confirm & Complete Trade';
     confirm.addEventListener('click', async () => {
         const choices = [...quantities].map(([key, quantity]) => {
             const [side, id] = key.split(':');
@@ -21288,8 +21315,6 @@ async function openAethermoorHerbalistWindow() {
             );
         }
     });
-
-    panel.appendChild(confirm);
 
     close.addEventListener('click', () => {
         panel.remove();
@@ -21382,12 +21407,21 @@ async function openAethermoorInnWindow() {
     title.textContent =
         `System Log // Inn Services · ${settlement.label}`;
 
+    const headerActions = document.createElement('div');
+    headerActions.className = 'aethermoor-shop-header-actions';
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
+    confirm.textContent = 'Confirm';
+
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
     close.textContent = 'Cancel';
 
-    header.append(title, close);
+    headerActions.append(confirm, close);
+    header.append(title, headerActions);
     panel.appendChild(header);
 
     const summary = document.createElement('div');
@@ -21518,11 +21552,6 @@ async function openAethermoorInnWindow() {
         columns.appendChild(column);
     }
 
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-trade-option';
-    confirm.textContent = 'Confirm & Pay';
-
     confirm.addEventListener('click', async () => {
         const choices = [...quantities].map(
             ([id, quantity]) => ({ id, quantity })
@@ -21583,49 +21612,8 @@ async function openAethermoorInnWindow() {
         }
     });
 
-    panel.appendChild(confirm);
-
     close.addEventListener('click', () => {
         panel.remove();
-    });
-
-    panel.appendChild(discard);
-
-    close.addEventListener('click', async () => {
-        close.disabled = true;
-
-        try {
-            const choices = [...quantities].map(
-                ([id, quantity]) => ({ id, quantity })
-            );
-
-            const output = await runStoredMechanic({
-                cases: [{
-                    name: choices.length
-                        ? 'stage_inn_selection'
-                        : 'discard_inn_selection',
-                    kind: 'inn',
-                    action: choices.length ? 'stage' : 'discard',
-                    ...(choices.length
-                        ? { basket: { choices } }
-                        : {})
-                }]
-            });
-
-            assert(
-                output?.ok === true,
-                output?.results?.[0]?.error ||
-                    'Could not stage inn selection'
-            );
-
-            panel.remove();
-        } catch (error) {
-            close.disabled = false;
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
-        }
     });
 
     refresh();

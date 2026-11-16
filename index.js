@@ -26339,7 +26339,6 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
                 packet:
-                packet:
                     'All combat is handled by the SillyTavern extension. If a roleplay scene genuinely calls for opponents, ' +
                     'request a normal pack with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan> ' +
                     'or an elite with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan>. ' +

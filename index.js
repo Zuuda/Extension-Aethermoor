@@ -26340,9 +26340,9 @@ globalThis.aethermoorMechanicsInterceptor =
                 type: 'narrative_encounter_request',
                 packet:
                     'All combat is handled by the SillyTavern extension, but if a roleplay scene genuinely calls for opponents,'+
-                    'the Narrator may request an encounter to the extension inside <plan> by using these tags: ' +
-                    '<AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"> will spawn four enemies and <AETHERMOOR:REQUEST_ENCOUNTER type="elite"> will spawn an elite.' +
-                    'Do not claim combat has begun or choose its roster, stats, or rewards as the extension will handle all of it.'
+                    'the Narrator may request an encounter to the extension by writing <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan> which will spawn four enemies,'+
+                    'or <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan> which will spawn an elite.' +
+                    'Do not engage in roleplay combat, do not claim combat has begun, do not choose its roster, stats, or rewards, as the extension will handle all the specifics.'
             });
         }
 
@@ -26356,9 +26356,15 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'npc-introduction-context',
                 type: 'npc_introduction_context',
                 packet:
-                    'If the Narrator introduces a new named NPC directly interacting with the crew, give the NPC an ordinary first beat and place one <AETHERMOOR:INTRODUCE_NPC> ' +
-                    'inside <plan> per new NPC, in introduction order, for the extension to generate that NPCs profile.' +
-                    'Do not tag returning NPCs or travelers already introduced by a travel result.'
+                    'If the Narrator introduces a new named NPC directly interacting ' +
+                    'with the crew, then give the NPC an ordinary first beat. ' +
+                    'Immediately report the introduction to the extension ' +
+                    'by writting <plan><AETHERMOOR:INTRODUCE_NPC></plan> ' +
+                    'per new NPC, in introduction order. The extension ' +
+                    'will provide their profile. Do not report ' +
+                    'returning NPCs or travelers already introduced by ' +
+                    'a travel result.'
+
             });
         }
 
@@ -26398,15 +26404,10 @@ globalThis.aethermoorMechanicsInterceptor =
                         'PRIVATE BREADCRUMB CONTEXT — do not recite.',
                         `A cleared pack left clue ${breadcrumb.id} here.`,
                         'Its specific quest has NOT been established.',
-                        'If the player actually chooses to examine or ' +
-                            'pursue this clue, narrate that first beat ' +
-                            'without promising a particular job. Put ' +
-                            'this exact tag inside <plan>:',
-                        `<AETHERMOOR:FOLLOW_BREADCRUMB id=${
-                            breadcrumb.id
-                        }>`,
-                        'The engine will lock an offer after this reply. ' +
-                            'Do not accept the offer for the crew.'
+                        'If the player actually chooses to examine or pursue this clue, narrate that first beat ' +
+                            'without entering in specifics and immediately report ' +
+                            'to the extension by writing <plan><AETHERMOOR:FOLLOW_BREADCRUMB id=${breadcrumb.id}></plan>.`,
+                        'The engine will lock an offer after this reply. Do not accept the offer for the crew.'
                     ].join('\n')
                 });
             }

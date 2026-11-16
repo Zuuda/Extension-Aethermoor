@@ -25851,11 +25851,11 @@ function settlementWorkContextPacket(state, settlement) {
         'If the players ask an innkeeper about meals or rooms: offer a local bill of fare ' +
             'and put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment or invent service effects as the extension will handle it.',
         'If the players ask an herbalist to see their stock: respond naturally without ' +
-            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.'
+            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.',
         'If the players ask NPCs about work: respond naturally, and place ' +
             '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it.'
      ];
-}
+
     const stagedTrade = state.vendorMenu?.pendingBasket;
 
     if (

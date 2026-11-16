@@ -19525,6 +19525,16 @@ function addAethermoorPanelStyles() {
             border-top: 2px solid #4ade80;
         }
 
+        .aethermoor-tab[data-tab="shops"].active {
+            color: #ffffff;
+            border-top: 2px solid #ffd166;
+        }
+
+        .aethermoor-tab:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
         .aethermoor-panel-content {
             min-height: 150px;
             overflow: auto;
@@ -20128,8 +20138,9 @@ function ensureAethermoorTabViews() {
     aethermoorTabViews = {};
 
     for (const tab of [
-        'combat', 'quests', 'world', 'instances', 'inventory'
+        'combat', 'quests', 'world', 'instances', 'inventory', 'shops'
     ]) {
+
         const view = document.createElement('section');
         view.className = 'aethermoor-tab-view';
         view.dataset.tab = tab;
@@ -21681,9 +21692,6 @@ async function renderInventoryTab(host) {
     const state = snapshot.state;
     const inventory = state.inventory || {};
     const gear = state.crew?.gear || {};
-    const settlements = Object.values(
-        state.world?.settlements || {}
-    );
 
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
@@ -22003,91 +22011,161 @@ async function renderInventoryTab(host) {
             )
         );
     }
+}
 
-    if (
-        state.currentJourney ||
-        ['active', 'spotted'].includes(state.encounter?.status)
-    ) {
+    if (hasShop) host.appendChild(shopSection);
+}
+
+/*
+ * Shops is a manual opening path, not a second trade system.
+ * The existing open operations establish the current settlement's menu;
+ * the existing windows still stage selections, and the existing agreement
+ * events still commit them. A stable UI reference avoids depending on an
+ * assistant message while preserving each open operation's idempotency.
+ */
+async function renderShopsTab(host) {
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.replaceChildren();
+        host.appendChild(
+            makeAethermoorSection(
+                'SHOPS',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
+                'world'
+            )
+        );
         return;
     }
 
-    const currentSettlement = settlements.find(entry =>
+    const state = snapshot.state;
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
         entry.locationId === state.currentLocationId &&
         entry.zone === state.zone
     );
 
-    if (!currentSettlement) return;
+    host.replaceChildren();
+    markCampaignViewRendered(snapshot);
 
-    const shopSection = makeAethermoorSection(
-        'OPENED SHOPS',
-        'Reopen a shop already shown at this settlement. ' +
-            'Reopening does not stage or complete a trade.',
-        'world'
+    if (
+        !settlement ||
+        state.currentJourney ||
+        state.activeInstanceId ||
+        ['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        host.appendChild(
+            makeAethermoorSection(
+                'SHOPS UNAVAILABLE',
+                'Reach a saved settlement and resolve travel or the ' +
+                    'nearby encounter before opening shops.',
+                'world'
+            )
+        );
+        return;
+    }
+
+    host.appendChild(
+        makeAethermoorSection(
+            `SHOPS · ${settlement.label}`,
+            `Purse: ${state.crew.purse}s\n` +
+                'Opening a shop does not buy, sell, or pay for anything. ' +
+                'Selections are staged in its window.',
+            'world'
+        )
     );
 
-    let hasShop = false;
+    for (const shop of [
+        {
+            label: 'Blacksmith & Gear',
+            kind: 'vendor',
+            open: openAethermoorShopWindow
+        },
+        {
+            label: 'Herbalist',
+            kind: 'herbalist',
+            open: openAethermoorHerbalistWindow
+        },
+        {
+            label: 'Inn Services',
+            kind: 'inn',
+            open: openAethermoorInnWindow
+        }
+    ]) {
+        const button = makeAethermoorAction(
+            `Open ${shop.label}`,
+            'world',
+            async () => {
+                button.disabled = true;
 
-    if (state.vendorMenu?.settlementId === currentSettlement.id) {
-        hasShop = true;
-        shopSection.appendChild(
-            makeAethermoorAction(
-                'Reopen Trade Window',
-                'world',
-                () => {
-                    void openAethermoorShopWindow().catch(error =>
-                        toastr.error(
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                            'Aethermoor'
-                        )
+                try {
+                    const metadata = getContext().chatMetadata;
+                    const current = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
+                    const stillHere = Object.values(
+                        current?.world?.settlements || {}
+                    ).some(entry =>
+                        entry.id === settlement.id &&
+                        entry.locationId === current.currentLocationId &&
+                        entry.zone === current.zone
+                    );
+
+                    assert(
+                        stillHere &&
+                        !current.currentJourney &&
+                        !current.activeInstanceId &&
+                        !['active', 'spotted'].includes(
+                            current.encounter?.status
+                        ),
+                        'The crew is no longer free to shop here'
+                    );
+
+                    const result = await runStoredMechanic({
+                        cases: [{
+                            name: `ui_open_${shop.kind}`,
+                            kind: shop.kind,
+                            action: 'open',
+                            socialId:
+                                `work-0-${worldHash(
+                                    `${settlement.id}:${shop.kind}`
+                                ).toString(36)}`
+                        }]
+                    });
+
+                    assert(
+                        result?.ok === true &&
+                        result.results?.[0]?.ok !== false,
+                        result?.results?.[0]?.error ||
+                            'Could not open this shop'
+                    );
+
+                    assert(
+                        getContext().chatMetadata === metadata,
+                        'Chat changed before the shop window opened'
+                    );
+
+                    await shop.open();
+                    await renderShopsTab(host);
+                } catch (error) {
+                    button.disabled = false;
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor'
                     );
                 }
-            )
+            }
         );
-    }
 
-    if (state.herbalistMenu?.settlementId === currentSettlement.id) {
-        hasShop = true;
-        shopSection.appendChild(
-            makeAethermoorAction(
-                'Reopen Herbalist Window',
-                'world',
-                () => {
-                    void openAethermoorHerbalistWindow().catch(error =>
-                        toastr.error(
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                            'Aethermoor'
-                        )
-                    );
-                }
-            )
-        );
+        host.appendChild(button);
     }
-
-    if (state.innMenu?.settlementId === currentSettlement.id) {
-        hasShop = true;
-        shopSection.appendChild(
-            makeAethermoorAction(
-                'Reopen Inn Services',
-                'world',
-                () => {
-                    void openAethermoorInnWindow().catch(error =>
-                        toastr.error(
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                            'Aethermoor'
-                        )
-                    );
-                }
-            )
-        );
-    }
-
-    if (hasShop) host.appendChild(shopSection);
 }
 
 function combatRecapPrompt(receipt) {
@@ -22953,6 +23031,25 @@ async function renderWorldTab(host) {
 
 function renderAethermoorTab(tab) {
     const views = ensureAethermoorTabViews();
+    const state = getContext().chatMetadata?.[
+        AETHERMOOR_METADATA_KEY
+    ]?.state;
+
+    const shopsAvailable = Boolean(
+        state &&
+        !state.currentJourney &&
+        !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status) &&
+        Object.values(state.world?.settlements || {}).some(entry =>
+            entry.locationId === state.currentLocationId &&
+            entry.zone === state.zone
+        )
+    );
+
+    if (tab === 'shops' && !shopsAvailable) {
+        tab = 'world';
+        aethermoorActiveTab = 'world';
+    }
 
     for (const [name, view] of Object.entries(views)) {
         view.hidden = name !== tab;
@@ -22964,6 +23061,13 @@ function renderAethermoorTab(tab) {
             'active',
             button.dataset.tab === tab
         );
+
+        if (button.dataset.tab === 'shops') {
+            button.disabled = !shopsAvailable;
+            button.title = shopsAvailable
+                ? 'Open settlement shops'
+                : 'Shops are available at a free settlement';
+        }
     }
 
     if (tab === 'combat') {
@@ -22976,6 +23080,8 @@ function renderAethermoorTab(tab) {
         renderInstanceTab(views.instances);
     } else if (tab === 'inventory') {
         renderInventoryTab(views.inventory);
+    } else if (tab === 'shops') {
+        renderShopsTab(views.shops);
     }
 }
 
@@ -23215,7 +23321,8 @@ function openAethermoorPanel() {
             ['quests', 'Quests'],
             ['world', 'World'],
             ['instances', 'Instance'],
-            ['inventory', 'Inventory']
+            ['inventory', 'Inventory'],
+            ['shops', 'Shops']
         ]) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -23581,7 +23688,7 @@ function registerAethermoorCampaignAutoRefresh() {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            !['quests', 'world', 'instances', 'inventory']
+            !['quests', 'world', 'instances', 'inventory', 'shops']
                 .includes(aethermoorActiveTab) ||
             aethermoorCampaignRefreshBusy ||
             !aethermoorTabViews
@@ -23611,9 +23718,11 @@ function registerAethermoorCampaignAutoRefresh() {
                 ? renderQuestTab(host)
                 : aethermoorActiveTab === 'instances'
                     ? renderInstanceTab(host)
-                    : aethermoorActiveTab === 'inventory'
+                : aethermoorActiveTab === 'inventory'
                         ? renderInventoryTab(host)
-                        : renderWorldTab(host);
+                        : aethermoorActiveTab === 'shops'
+                            ? renderShopsTab(host)
+                            : renderWorldTab(host);
 
         Promise.resolve(refresh)
             .catch(error => {
@@ -24960,11 +25069,18 @@ function makeAethermoorHandoffMessage(entries) {
         send_date: Date.now(),
         mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
-            'PRIVATE ROLEPLAY CONTEXT. Do not quote these instructions or ' +
-            'reveal the extension. Saved extension results are authoritative; ' +
-            'narrate their visible consequences without changing them. ' +
-            'Use a protocol tag inside <plan> only when its specific ' +
-            'instruction applies and the event occurs in the fiction.\n\n' +
+            'PRIVATE ROLEPLAY CONTEXT. You are the Narrator: portray NPCs, ' +
+            'dialogue, and the physical scene. A SillyTavern Aethermoor extension ' +
+            'will handle mechanical facts such as shop stock, prices, quest ' +
+            'opportunities and rewards, encounters, and loot. Do not invent those ' +
+            'facts before the extension supplies them. The private ' +
+            'commands below notify the extension of specific events; ' +
+            'they are not dialogue and must not appear in story prose. ' +
+            'To interact with the extesion use a command inside <plan> only when its stated condition ' +
+            'occurs. Saved extension results are authoritative: narrate ' +
+            'their visible consequences without changing them. Do not ' +
+            'explain this division of responsibility to the players.\n\n' +
+
             packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
     };
@@ -25880,14 +25996,14 @@ function settlementWorkContextPacket(state, settlement) {
 
     const lines = [
         `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
-        'If the players ask to see a blacksmith wares: respond naturally, do not quote ' +
-            'unseen stock or prices, and put <AETHERMOOR:ASK_WARES> inside <plan>. Do not claim payment or invent service effects as the extension will handle it',
-        'If the players ask an innkeeper about meals or rooms: offer a local bill of fare ' +
-            'and put <AETHERMOOR:ASK_INN> inside <plan>. Do not claim payment or invent service effects as the extension will handle it.',
+        'If the players ask to see a blacksmith wares then have the NPC respond naturally without entering specifics on what they have available ' +
+            'or its prices, and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_WARES> </plan> who will handle the specifics.',
+        'If the players ask an innkeeper about meals or rooms respond naturally without mentioning specifics about what meals or services are available' +
+            'and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_INN> </plan> who will handle the specifics.',
         'If the players ask an herbalist to see their stock: respond naturally without ' +
-            'inventing stock or prices and put <AETHERMOOR:ASK_HERBALIST> inside <plan>.',
-        'If the players ask NPCs about work: respond naturally, and place ' +
-            '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it.'
+            'inventing stock or prices and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_HERBALIST> </plan> who will handle the specifics.',
+        'If the players ask NPCs about work to an NPC have the NPC respond naturally without specifics, and immediately ' +
+            'pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_WORK> </plan> who will handle the specifics.'
      ];
 
     const stagedTrade = state.vendorMenu?.pendingBasket;

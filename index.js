@@ -26339,10 +26339,12 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
                 packet:
-                    'All combat is handled by the SillyTavern extension, but if a roleplay scene genuinely calls for opponents,'+
-                    'the Narrator may request an encounter to the extension by writing <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan> which will spawn four enemies,'+
-                    'or <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan> which will spawn an elite.' +
-                    'Do not engage in roleplay combat, do not claim combat has begun, do not choose its roster, stats, or rewards, as the extension will handle all the specifics.'
+                packet:
+                    'All combat is handled by the SillyTavern extension. If a roleplay scene genuinely calls for opponents, ' +
+                    'request a normal pack with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan> ' +
+                    'or an elite with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan>. ' +
+                    'The extension determines the actual opponents and leaves the encounter spotted, not engaged. ' +
+                    'Do not narrate combat beginning or choose the roster, stats, or rewards.'
             });
         }
 
@@ -26405,9 +26407,10 @@ globalThis.aethermoorMechanicsInterceptor =
                         `A cleared pack left clue ${breadcrumb.id} here.`,
                         'Its specific quest has NOT been established.',
                         'If the player actually chooses to examine or pursue this clue, narrate that first beat ' +
-                        'without entering in specifics and immediately report to the extension by writing '+
-                        '<plan><AETHERMOOR:FOLLOW_BREADCRUMB id=${breadcrumb.id}></plan>.' +
-                        'The engine will lock an offer after this reply. Do not accept the offer for the crew.'
+                        'without entering into specifics and immediately report it to the extension by writing ' +
+                        `<plan><AETHERMOOR:FOLLOW_BREADCRUMB id=${breadcrumb.id}></plan>. ` +
+                        'The extension will lock an offer after this reply. Do not accept it for the crew.'
+
                     ].join('\n')
                 });
             }

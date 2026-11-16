@@ -7543,14 +7543,15 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Inn purchases currently grant no buffs, healing, inventory items,
  *   or automatic passage of time. Verify staging, payment, and replay.
  *
- * IMPLEMENTED — BETA PENDING: Variable expense quote handshake
- * - For diegetic fares, bribes, and similar unscripted costs, the GM may
- *   propose an amount in fiction and report it privately as EXPENSE_QUOTE.
- * - The extension saves the quote without charging. Only explicit player
- *   agreement to the same amount/purpose commits it; the extension deducts
- *   the saved amount once and supplies a receipt.
- * - Negotiation or refusal is not payment. A changed amount requires a
- *   new quote. Test insufficient funds and duplicate agreement events.
+ * IMPLEMENTED — BETA PENDING: Incidental expense accounting
+ * - For expenses outside extension shops, EXPENSE_PAID reports silver
+ *   already paid in the fiction. A proposed price is not a payment.
+ * - The extension deducts the reported amount once and retains an internal
+ *   receipt for duplicate protection. It sends no receipt to the narrator:
+ *   the payment has already been described.
+ * - Shop transactions remain on their separate engine-owned paths.
+ * - Verify duplicate notifications, insufficient saved silver, and
+ *   multiple payments reported in one assistant reply during beta.
  *
  * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
  * - ASK_WARES opens the extension-rendered, two-sided trade window.
@@ -16901,17 +16902,6 @@ function inventoryActionNarrationPacket(result, action) {
     ].join('\n');
 }
 
-function expenseReceiptNarrationPacket(receipt) {
-    return [
-        'PRIVATE EXPENSE RECEIPT — do not recite this heading.',
-        `Paid ${receipt.amount}s for ${receipt.reason}.`,
-        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
-        'The charge was applied once. Narrate the agreed payment naturally; ' +
-            'do not deduct silver again.',
-        'The receipt does not establish any service effect beyond the agreed expense.'
-    ].join('\n');
-}
-
 function innServiceNarrationPacket(receipt) {
     return [
         'PRIVATE INN SERVICE RECEIPT — do not recite this heading.',
@@ -17903,13 +17893,8 @@ async function runStoredMechanic(args) {
                 ? inventoryActionNarrationPacket(caseResult, 'use')
 
             : batch &&
-              oneCase?.kind === 'currency' &&
-              oneCase.action === 'paid' &&
-              caseResult.created
-                ? expenseReceiptNarrationPacket(caseResult.receipt)
-
-            : batch &&
               oneCase?.kind === 'vendor' &&
+
               oneCase.action === 'commit' &&
               caseResult.created
                 ? vendorTradeNarrationPacket(caseResult.receipt)
@@ -18947,12 +18932,6 @@ function registerTools() {
                                 type: 'string',
                                 description:
                                     'Engine-issued assistant-message reference'
-                            },
-
-                            quoteId: {
-                                type: 'string',
-                                description:
-                                    'Engine-issued ID of the saved expense quote'
                             },
 
                             objectiveCompleted: {

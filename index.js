@@ -17946,26 +17946,6 @@ async function runStoredMechanic(args) {
                 ? inventoryActionNarrationPacket(caseResult, 'use')
 
             : batch &&
-              oneCase?.kind === 'vendor' &&
-
-              oneCase.action === 'commit' &&
-              caseResult.created
-                ? vendorTradeNarrationPacket(caseResult.receipt)
-
-            : batch &&
-              oneCase?.kind === 'herbalist' &&
-
-              oneCase.action === 'commit' &&
-              caseResult.created
-                ? herbalistTradeNarrationPacket(caseResult.receipt)
-
-            : batch &&
-              oneCase?.kind === 'inn' &&
-              oneCase.action === 'commit' &&
-              caseResult.created
-                ? innServiceNarrationPacket(caseResult.receipt)
-
-            : batch &&
               oneCase?.kind === 'social' &&
               oneCase.action === 'seed_npc' &&
               caseResult.created
@@ -20678,7 +20658,7 @@ async function openAethermoorShopWindow() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close & stage selection';
+    close.textContent = 'Cancel';
     header.append(title, close);
     windowElement.appendChild(header);
 
@@ -20686,9 +20666,7 @@ async function openAethermoorShopWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Zone ${state.zone} · Purse: ${state.crew.purse}s\n` +
-        'Select either side of the trade. Close stages a quote; it ' +
-        'does not buy, sell, or equip. Agree with the merchant in ' +
-        'the story to complete the exchange.';
+        'Select items to buy or sell, then click Confirm & Complete Trade.';
     windowElement.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -20930,74 +20908,82 @@ async function openAethermoorShopWindow() {
         }
     }
 
-    const discard = document.createElement('button');
-    discard.type = 'button';
-    discard.className = 'aethermoor-trade-option';
-    discard.textContent = 'Discard selection';
-    discard.addEventListener('click', async () => {
-        discard.disabled = true;
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-trade-option';
+    confirm.textContent = 'Confirm & Complete Trade';
+    confirm.addEventListener('click', async () => {
+        if (!selectedBuys.size && !selectedSales.size) {
+            toastr.warning('Select at least one item first.', 'Aethermoor');
+            return;
+        }
+
+        confirm.disabled = true;
 
         try {
-            await runStoredMechanic({
+            const staged = await runStoredMechanic({
                 cases: [{
-                    name: 'discard_vendor_selection',
+                    name: 'stage_vendor_selection',
                     kind: 'vendor',
-                    action: 'discard'
+                    action: 'stage',
+                    basket: {
+                        buy: [...selectedBuys.values()].map(
+                            ({ number, variant }) => ({ number, variant })
+                        ),
+                        sell: [...selectedSales.values()].map(
+                            ({ location, owner, slot, index }) => ({
+                                location,
+                                ...(location === 'worn'
+                                    ? { owner, slot }
+                                    : { index })
+                            })
+                        )
+                    }
                 }]
             });
 
+            assert(
+                staged?.ok === true && staged.results?.[0]?.ok !== false,
+                staged?.results?.[0]?.error || 'Could not stage trade'
+            );
+
+            const committed = await runStoredMechanic({
+                cases: [{
+                    name: 'ui_commit_vendor_trade',
+                    kind: 'vendor',
+                    action: 'commit',
+                    socialId: `work-0-${Date.now().toString(36)}`
+                }]
+            });
+
+            assert(
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not complete trade'
+            );
+
+            const receipt = committed.results[0].result.receipt;
+            toastr.success(
+                `Trade recorded. Purse: ${receipt.purseAfter}s`,
+                'Aethermoor'
+            );
             windowElement.remove();
-        } catch (error) {
-            discard.disabled = false;
-            toastr.error(String(error), 'Aethermoor');
-        }
-    });
 
-    windowElement.appendChild(discard);
-
-    close.addEventListener('click', async () => {
-        close.disabled = true;
-
-        try {
-            if (selectedBuys.size || selectedSales.size) {
-                await runStoredMechanic({
-                    cases: [{
-                        name: 'stage_vendor_selection',
-                        kind: 'vendor',
-                        action: 'stage',
-                        basket: {
-                            buy: [...selectedBuys.values()].map(
-                                ({ number, variant }) => ({
-                                    number,
-                                    variant
-                                })
-                            ),
-                            sell: [...selectedSales.values()].map(
-                                ({ location, owner, slot, index }) => ({
-                                    location,
-                                    ...(location === 'worn'
-                                        ? { owner, slot }
-                                        : { index })
-                                })
-                            )
-                        }
-                    }]
-                });
-
-                toastr.info(
-                    'Selection staged; no items or silver exchanged.',
-                    'Aethermoor'
-                );
+            if (aethermoorPanelOpen) {
+                renderAethermoorTab(aethermoorActiveTab);
             }
-
-            windowElement.remove();
         } catch (error) {
-            close.disabled = false;
+            confirm.disabled = false;
             toastr.error(
                 error instanceof Error ? error.message : String(error),
                 'Aethermoor'
             );
         }
+    });
+
+    windowElement.appendChild(confirm);
+
+    close.addEventListener('click', () => {
+        windowElement.remove();
     });
 
     refresh();
@@ -21094,7 +21080,7 @@ async function openAethermoorHerbalistWindow() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close & stage selection';
+    close.textContent = 'Cancel';
     header.append(title, close);
     panel.appendChild(header);
 
@@ -21102,8 +21088,7 @@ async function openAethermoorHerbalistWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Purse: ${state.crew.purse}s\n` +
-        'Choose quantities. Closing stages only; agree in the story ' +
-        'to buy or sell. Potions retain their original healing grade.';
+        'Choose quantities, then click Confirm & Complete Trade.';
     panel.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -21239,68 +21224,75 @@ async function openAethermoorHerbalistWindow() {
         }
     }
 
-    const discard = document.createElement('button');
-    discard.type = 'button';
-    discard.className = 'aethermoor-trade-option';
-    discard.textContent = 'Discard selection';
-    discard.addEventListener('click', async () => {
-        discard.disabled = true;
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-trade-option';
+    confirm.textContent = 'Confirm & Complete Trade';
+    confirm.addEventListener('click', async () => {
+        const choices = [...quantities].map(([key, quantity]) => {
+            const [side, id] = key.split(':');
+            return { side, id, quantity };
+        });
 
-        try {
-            const output = await runStoredMechanic({
-                cases: [{
-                    name: 'discard_herbalist_basket',
-                    kind: 'herbalist',
-                    action: 'discard'
-                }]
-            });
-
-            assert(output?.ok === true, 'Could not discard selection');
-            panel.remove();
-        } catch (error) {
-            discard.disabled = false;
-            toastr.error(String(error), 'Aethermoor');
+        if (choices.length === 0) {
+            toastr.warning('Select at least one potion first.', 'Aethermoor');
+            return;
         }
-    });
 
-    panel.appendChild(discard);
-
-    close.addEventListener('click', async () => {
-        close.disabled = true;
+        confirm.disabled = true;
 
         try {
-            const choices = [...quantities].map(([key, quantity]) => {
-                const [side, id] = key.split(':');
-                return { side, id, quantity };
-            });
-
-            const output = await runStoredMechanic({
+            const staged = await runStoredMechanic({
                 cases: [{
-                    name: choices.length
-                        ? 'stage_herbalist_basket'
-                        : 'discard_herbalist_basket',
+                    name: 'stage_herbalist_basket',
                     kind: 'herbalist',
-                    action: choices.length ? 'stage' : 'discard',
-                    ...(choices.length
-                        ? { basket: { choices } }
-                        : {})
+                    action: 'stage',
+                    basket: { choices }
                 }]
             });
 
             assert(
-                output?.ok === true,
-                output?.results?.[0]?.error ||
-                    'Could not stage herbalist selection'
+                staged?.ok === true && staged.results?.[0]?.ok !== false,
+                staged?.results?.[0]?.error || 'Could not stage selection'
             );
 
+            const committed = await runStoredMechanic({
+                cases: [{
+                    name: 'ui_commit_herbalist_trade',
+                    kind: 'herbalist',
+                    action: 'commit',
+                    socialId: `work-0-${Date.now().toString(36)}`
+                }]
+            });
+
+            assert(
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not complete trade'
+            );
+
+            const receipt = committed.results[0].result.receipt;
+            toastr.success(
+                `Herbalist trade recorded. Purse: ${receipt.purseAfter}s`,
+                'Aethermoor'
+            );
             panel.remove();
+
+            if (aethermoorPanelOpen) {
+                renderAethermoorTab(aethermoorActiveTab);
+            }
         } catch (error) {
-            close.disabled = false;
+            confirm.disabled = false;
             toastr.error(
                 error instanceof Error ? error.message : String(error),
                 'Aethermoor'
             );
         }
+    });
+
+    panel.appendChild(confirm);
+
+    close.addEventListener('click', () => {
+        panel.remove();
     });
 
     refresh();
@@ -21393,7 +21385,7 @@ async function openAethermoorInnWindow() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close & stage selection';
+    close.textContent = 'Cancel';
 
     header.append(title, close);
     panel.appendChild(header);
@@ -21402,8 +21394,7 @@ async function openAethermoorInnWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Purse: ${state.crew.purse}s\n` +
-        'Meals and lodging are expenses only. Close stages a quote; ' +
-        'agree in the story to pay. No healing or buffs are included.';
+        'Meals and lodging are expenses only. Choose services, then click Confirm & Pay.';
     panel.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -21527,32 +21518,75 @@ async function openAethermoorInnWindow() {
         columns.appendChild(column);
     }
 
-    const discard = document.createElement('button');
-    discard.type = 'button';
-    discard.className = 'aethermoor-trade-option';
-    discard.textContent = 'Discard selection';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'aethermoor-trade-option';
+    confirm.textContent = 'Confirm & Pay';
 
-    discard.addEventListener('click', async () => {
-        discard.disabled = true;
+    confirm.addEventListener('click', async () => {
+        const choices = [...quantities].map(
+            ([id, quantity]) => ({ id, quantity })
+        );
+
+        if (choices.length === 0) {
+            toastr.warning('Select at least one service first.', 'Aethermoor');
+            return;
+        }
+
+        confirm.disabled = true;
 
         try {
-            const output = await runStoredMechanic({
+            const staged = await runStoredMechanic({
                 cases: [{
-                    name: 'discard_inn_selection',
+                    name: 'stage_inn_selection',
                     kind: 'inn',
-                    action: 'discard'
+                    action: 'stage',
+                    basket: { choices }
                 }]
             });
 
-            assert(output?.ok === true, 'Could not discard inn selection');
+            assert(
+                staged?.ok === true && staged.results?.[0]?.ok !== false,
+                staged?.results?.[0]?.error || 'Could not stage inn selection'
+            );
+
+            const committed = await runStoredMechanic({
+                cases: [{
+                    name: 'ui_commit_inn_services',
+                    kind: 'inn',
+                    action: 'commit',
+                    socialId: `work-0-${Date.now().toString(36)}`
+                }]
+            });
+
+            assert(
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not record payment'
+            );
+
+            const receipt = committed.results[0].result.receipt;
+            toastr.success(
+                `Inn expense recorded (−${receipt.cost}s). Purse: ${receipt.purseAfter}s`,
+                'Aethermoor'
+            );
             panel.remove();
+
+            if (aethermoorPanelOpen) {
+                renderAethermoorTab(aethermoorActiveTab);
+            }
         } catch (error) {
-            discard.disabled = false;
+            confirm.disabled = false;
             toastr.error(
                 error instanceof Error ? error.message : String(error),
                 'Aethermoor'
             );
         }
+    });
+
+    panel.appendChild(confirm);
+
+    close.addEventListener('click', () => {
+        panel.remove();
     });
 
     panel.appendChild(discard);
@@ -21663,6 +21697,55 @@ async function renderInventoryTab(host) {
             'world'
         )
     );
+
+    const expenseSection = makeAethermoorSection(
+        'INCIDENTAL EXPENSE',
+        'Deduct silver spent in fiction (ferries, bribes, tolls, sundries).',
+        'world'
+    );
+
+    const expenseAmount = document.createElement('input');
+    expenseAmount.type = 'number';
+    expenseAmount.min = '1';
+    expenseAmount.placeholder = 'Silver amount';
+    expenseAmount.className = 'text_pole';
+
+    const expenseReason = document.createElement('input');
+    expenseReason.type = 'text';
+    expenseReason.maxLength = 160;
+    expenseReason.placeholder = 'Reason (optional, e.g. ferry fare)';
+    expenseReason.className = 'text_pole';
+
+    const spendButton = makeAethermoorAction(
+        'Deduct Silver',
+        'world',
+        async () => {
+            const amount = Number(expenseAmount.value);
+            if (!Number.isInteger(amount) || amount < 1) {
+                toastr.warning('Enter a whole silver amount of at least 1.', 'Aethermoor');
+                return;
+            }
+
+            spendButton.disabled = true;
+
+            await runAethermoorPanelCase(
+                host,
+                'inventory',
+                {
+                    name: 'manual_incidental_expense',
+                    kind: 'currency',
+                    action: 'spend',
+                    amount,
+                    reason: expenseReason.value.trim() || 'Incidental expense'
+                },
+                `Deducted ${amount}s.`
+            );
+        }
+    );
+
+    expenseSection.append(expenseAmount, expenseReason, spendButton);
+    host.appendChild(expenseSection);
+
 
     const potionSection = makeAethermoorSection(
         'POTIONS & TONICS',
@@ -25940,6 +26023,50 @@ function travelStepId(message) {
  * whether a job exists. Apply the same delayed-handshake principle to
  * future vendor and site interactions.
  */
+function settlementShopBriefingPacket(state, settlement) {
+    const stock = resolveVendorAction({
+        action: 'stock',
+        zone: state.zone,
+        state
+    });
+
+    const gearNames = stock.catalog.flatMap(entry =>
+        entry.variants.map(option => option.displayName)
+    );
+
+    const potions = herbalistStock(state.zone).map(item => {
+        const name = cosmeticStockName(
+            state,
+            potionCosmeticStockKey(item.id),
+            item.name
+        );
+        const effect = item.type === 'potion'
+            ? `heals ${item.heal} HP`
+            : 'clears debuffs';
+
+        return `${name} (${effect}): ${item.buyPrice}s`;
+    });
+
+    const inn = INN_SERVICES.map(service => {
+        const name = cosmeticStockName(
+            state,
+            `inn:${service.id}`,
+            service.label
+        );
+        return `${name}: ${service.price}s`;
+    });
+
+    return [
+        `PRIVATE SHOP MENU BRIEFING — ${settlement.label} (Zone ${state.zone}).`,
+        `Blacksmith (Stat ${stock.stat}, ${stock.price}s each; pawn value ${stock.pawnValue}s): ` +
+            gearNames.join('; ') + '.',
+        `Herbalist: ${potions.join('; ')}.`,
+        `Inn Services: ${inn.join('; ')}.`,
+        'Write a compact <template> note recording these exact shop menus, item names, and prices so they stay in chat memory.',
+        'Use these saved menus and prices whenever the crew visits a shop here. Do not emit shop or expense tags.'
+    ].join('\n');
+}
+
 function settlementWorkContextPacket(state, settlement) {
     const contacts = Object.values(
         state.socialOpportunities?.contacts || {}
@@ -25949,83 +26076,11 @@ function settlementWorkContextPacket(state, settlement) {
 
     const lines = [
         `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
-        'If the players ask to see a blacksmith wares then have the NPC respond naturally without entering specifics on what they have available ' +
-            'or its prices, and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_WARES> </plan> who will handle the specifics.',
-        'If the players ask an innkeeper about meals or rooms respond naturally without mentioning specifics about what meals or services are available' +
-            'and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_INN> </plan> who will handle the specifics.',
-        'If the players ask an herbalist to see their stock: respond naturally without ' +
-            'inventing stock or prices and immediately pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_HERBALIST> </plan> who will handle the specifics.',
-        'If the players ask NPCs about work to an NPC have the NPC respond naturally without specifics, and immediately ' +
-            'pass on the request to the extension by writing <plan> <AETHERMOOR:ASK_WORK> </plan> who will handle the specifics.'
-     ];
-
-    const stagedTrade = state.vendorMenu?.pendingBasket;
-
-    if (
-        stagedTrade?.settlementId === settlement.id &&
-        stagedTrade.zone === state.zone
-    ) {
-        lines.push(
-            'A trade selection is staged, but NOTHING has been sold, ' +
-                'bought, paid, or equipped yet.',
-            `Merchant asks ${stagedTrade.cost}s; crew offers items ` +
-                `valued at ${stagedTrade.proceeds}s. ` +
-                `Projected purse after exchange: ${stagedTrade.purseAfter}s.`,
-            'Only if the players agree to this staged exchange AND the ' +
-                'merchant agrees in the fiction, place this exact tag ' +
-                'inside the disposable <plan> block:',
-            '<AETHERMOOR:TRADE_AGREED>',
-            'The tag supplies no prices or item identities. The engine ' +
-                'rechecks the saved basket and commits it atomically ' +
-                'after this reply. Do not claim an item is equipped.'
-        );
-    }
-
-    const stagedHerbs = state.herbalistMenu?.pendingBasket;
-
-    if (
-        stagedHerbs?.settlementId === settlement.id &&
-        stagedHerbs.zone === state.zone
-    ) {
-        lines.push(
-            'A herbalist exchange is staged but has NOT happened.',
-            `Potion purchases: ${stagedHerbs.cost}s; ` +
-                `potion sales: ${stagedHerbs.proceeds}s; ` +
-                `projected purse: ${stagedHerbs.purseAfter}s.`,
-            'Only after the players and herbalist agree to that ' +
-                'exchange in the fiction, put ' +
-                '<AETHERMOOR:HERBALIST_AGREED> inside <plan>. ' +
-                'The engine will validate and apply the saved basket.'
-        );
-    }
-
-    const stagedInn = state.innMenu?.pendingBasket;
-
-    if (stagedInn?.settlementId === settlement.id) {
-        lines.push(
-            'Inn services are selected but NOT paid for yet.',
-            ...stagedInn.choices.map(choice =>
-                `${choice.label} ×${choice.quantity}: ` +
-                    `${choice.unitPrice * choice.quantity}s.`
-            ),
-            `Total ${stagedInn.cost}s; projected purse ` +
-                `${stagedInn.purseAfter}s.`,
-            'The staged services are what the crew indicated on the ' +
-                'innkeeper’s bill of fare, not a payment already made. ' +
-                'If their spoken order differs, have the innkeeper point ' +
-                'to the specific mismatch and ask which they want. ' +
-            'The player can reopen Inn Services and correct the ' +
-                'selection. Do not invent a prior order, treat the ' +
-                'difference as money paid or owed, silently substitute ' +
-                'services, charge a difference, or emit INN_AGREED.',
-            'Only after the players and innkeeper agree to the SAME ' +
-                'staged services in the fiction, put ' +
-                '<AETHERMOOR:INN_AGREED> inside <plan>. ' +
-                'The engine will deduct the saved expense after this reply.'
-        );
-    }
+        'If the players ask an NPC about work for the first time (not already noted in <template> or listed below), have the NPC respond without specifics and emit <plan><AETHERMOOR:ASK_WORK></plan>.'
+    ];
 
     for (const contact of contacts) {
+
          if (contact.result === 'offer') {
             const quest = contact.pendingQuest ||
                 Object.values(state.quests || {})
@@ -26411,7 +26466,6 @@ globalThis.aethermoorMechanicsInterceptor =
                     !contextState.currentJourney &&
                     missingNamingEntries.length > 0
                 ) {
-
                     entries.push({
                         id: `stock-naming-zone-${contextState.zone}`,
                         type: 'cosmetic_naming',
@@ -26443,25 +26497,21 @@ globalThis.aethermoorMechanicsInterceptor =
                                 'ordinary scene to discuss naming.'
                         ].join('\n')
                     });
+                } else if (
+                    !contextState.currentJourney &&
+                    missingNamingEntries.length === 0 &&
+                    !contextState.shopBriefedZones?.[contextState.zone]
+                ) {
+                    entries.push({
+                        id: `shop-briefing-zone-${contextState.zone}`,
+                        type: 'shop_briefing',
+                        packet: settlementShopBriefingPacket(
+                            contextState,
+                            settlement
+                        )
+                    });
                 }
             }
-        }
-        if (contextState) {
-            entries.push({
-                id: 'incidental-expense-context',
-                type: 'incidental_expense_context',
-                packet:
-                    'If the players ACTUALLY paid silver in the fiction for an incidental expense (buying a sundry, a snack, a bribe, a ferry ride, etc) outside the extension’s ' +
-                    'inn, blacksmith, and herbalist shops then immediately report the completed ' +
-                    'payment with <plan><AETHERMOOR:EXPENSE_PAID ' +
-                    'amount=3 reason="ferry fare"></plan>, replacing ' +
-                    'the example amount and reason with what was paid.' +
-                    'A quoted price, proposed bribe, negotiation, or ' +
-                    'refusal is NOT a payment: emit no tag for those. ' +
-                    'The extension records the expense after this reply. ' +
-                    'Do not use this tag for transactions handled by ' +
-                    'the extension’s shop windows.'
-            });
         }
 
         if (!metadata || entries.length === 0) {
@@ -26537,6 +26587,14 @@ async function consumeAethermoorHandoff(injected) {
 
         if (consumedIds.has('legacy-discovery')) {
             delete stored.pendingDiscovery;
+        }
+
+        for (const id of consumedIds) {
+            const match = /^shop-briefing-zone-([1-9]\d*)$/.exec(id);
+            if (match && stored.state) {
+                stored.state.shopBriefedZones ||= {};
+                stored.state.shopBriefedZones[Number(match[1])] = true;
+            }
         }
 
         if (getContext().chatMetadata === injected.metadata) {

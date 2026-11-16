@@ -22013,9 +22013,6 @@ async function renderInventoryTab(host) {
     }
 }
 
-    if (hasShop) host.appendChild(shopSection);
-}
-
 /*
  * Shops is a manual opening path, not a second trade system.
  * The existing open operations establish the current settlement's menu;

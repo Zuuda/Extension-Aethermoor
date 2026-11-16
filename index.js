@@ -26372,13 +26372,11 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'incidental-expense-context',
                 type: 'incidental_expense_context',
                 packet:
-                    'For an incidental expense outside the extension’s ' +
-                    'inn, blacksmith, and herbalist shops: if the crew ' +
-                    'ACTUALLY pays silver in the fiction, state the amount ' +
-                    'and purpose, then immediately report the completed ' +
+                    'If the players ACTUALLY paid silver in the fiction for an incidental expense (buying a sundry, a snack, a bribe, a ferry ride, etc) outside the extension’s ' +
+                    'inn, blacksmith, and herbalist shops then immediately report the completed ' +
                     'payment with <plan><AETHERMOOR:EXPENSE_PAID ' +
                     'amount=3 reason="ferry fare"></plan>, replacing ' +
-                    'the example amount and reason with what was paid. ' +
+                    'the example amount and reason with what was paid.' +
                     'A quoted price, proposed bribe, negotiation, or ' +
                     'refusal is NOT a payment: emit no tag for those. ' +
                     'The extension records the expense after this reply. ' +

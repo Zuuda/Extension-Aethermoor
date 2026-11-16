@@ -26406,7 +26406,7 @@ globalThis.aethermoorMechanicsInterceptor =
                         'Its specific quest has NOT been established.',
                         'If the player actually chooses to examine or pursue this clue, narrate that first beat ' +
                             'without entering in specifics and immediately report ' +
-                            'to the extension by writing <plan><AETHERMOOR:FOLLOW_BREADCRUMB id=${breadcrumb.id}></plan>.`,
+                            'to the extension by writing <plan><AETHERMOOR:FOLLOW_BREADCRUMB id=${breadcrumb.id}></plan>.` +
                         'The engine will lock an offer after this reply. Do not accept the offer for the crew.'
                     ].join('\n')
                 });

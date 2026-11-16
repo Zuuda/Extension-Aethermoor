@@ -25855,7 +25855,7 @@ function settlementWorkContextPacket(state, settlement) {
         'If the players ask NPCs about work: respond naturally, and place ' +
             '<AETHERMOOR:ASK_WORK> inside <plan> (at most one per reply). Do not invent quest effects as the extension will handle it.'
      ];
-
+}
     const stagedTrade = state.vendorMenu?.pendingBasket;
 
     if (

@@ -6737,6 +6737,59 @@ function resolveTravelStep(test) {
 
     }
 
+    /*
+     * Exploring from a settlement leaves its streets. Save a nearby
+     * outskirts node and route back before resolving the exploration
+     * event. Otherwise the fiction can move outside while settlement
+     * shops and conversations still treat the crew as being in town.
+     *
+     * Only destinationless exploration from a settlement does this.
+     * An existing journey and exploration from another place retain
+     * their current movement rules.
+     */
+    if (!journey && !test.destinationId) {
+        const settlement = Object.values(
+            state.world?.settlements || {}
+        ).find(entry =>
+            entry.locationId === state.currentLocationId &&
+            entry.zone === state.zone
+        );
+
+        if (settlement) {
+            const outskirtsId = `outskirts-${settlement.id}`;
+
+            state.places[outskirtsId] ||= {
+                id: outskirtsId,
+                label: `${settlement.label} Outskirts`,
+                zone: settlement.zone,
+                kind: 'settlement_outskirts',
+                visited: false
+            };
+
+            state.routeEdges ||= [];
+
+            if (!state.routeEdges.some(edge =>
+                (edge.fromId === settlement.locationId &&
+                    edge.toId === outskirtsId) ||
+                (edge.fromId === outskirtsId &&
+                    edge.toId === settlement.locationId)
+            )) {
+                state.routeEdges.push({
+                    fromId: settlement.locationId,
+                    toId: outskirtsId,
+                    length: 1,
+                    kind: 'settlement_outskirts_access',
+                    fromZone: settlement.zone,
+                    toZone: settlement.zone
+                });
+            }
+
+            state.currentLocationId = outskirtsId;
+            state.currentPosition = { nodeId: outskirtsId };
+            state.places[outskirtsId].visited = true;
+        }
+    }
+
     const travelRoll = roll(state, 100);
 
     let event;
@@ -22612,9 +22665,35 @@ async function renderWorldTab(host) {
             )
         );
     }
-
     if (!state.encounter?.instanceId) {
         appendEncounterCard(host, state, 'world');
+    }
+
+    const nearbySettlement = Object.values(
+        world.settlements || {}
+    ).find(settlement =>
+        currentLocationId === `outskirts-${settlement.id}`
+    );
+
+    if (nearbySettlement) {
+        const returnSection = makeAethermoorSection(
+            'RETURN TO SETTLEMENT',
+            `The crew is outside ${nearbySettlement.label}. ` +
+                'Returning uses the saved nearby route.',
+            'world'
+        );
+
+        const returnButton = makeAethermoorAction(
+            `Return to ${nearbySettlement.label}`,
+            'world',
+            () => copyAethermoorCommand(
+                destinationCommand(nearbySettlement.locationId)
+            )
+        );
+
+        returnButton.disabled = movementBlocked;
+        returnSection.appendChild(returnButton);
+        host.appendChild(returnSection);
     }
 
     const knownInstance =

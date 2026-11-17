@@ -6581,36 +6581,39 @@ function resolveTravelStep(test) {
         }
     }
 
-     /*
-     * Explicit movement and an existing journey take precedence.
-     * With no chosen destination, auto-return only when exactly one
-     * accepted quest has a secured objective awaiting its issuer.
-     * Multiple possible returns require a player choice in World.
+    /*
+     * Only a rescued person still needs a journey after the field
+     * objective. Other V2 quests are already paid at their final
+     * objective. An explicit player destination or existing journey
+     * always takes precedence.
      */
     if (!state.currentJourney && !test.destinationId) {
         const returnCandidates = ensureQuestJournal(state)
             .accepted.filter(quest =>
                 quest.status === 'in_progress' &&
+                quest.structureV2?.family === 'rescue_person' &&
                 Boolean(quest.objectiveResolution) &&
-                Boolean(quest.turnIn?.locationId) &&
-                state.currentLocationId !== quest.turnIn.locationId
+                Boolean(quest.originLocationId) &&
+                state.currentLocationId !== quest.originLocationId
             );
 
         if (returnCandidates.length === 1) {
             const returnQuest = returnCandidates[0];
-            const turnInPlace =
-                state.places?.[returnQuest.turnIn.locationId];
+            const safetyId = returnQuest.originLocationId;
+            const safetySettlement = Object.values(
+                state.world?.settlements || {}
+            ).find(entry => entry.locationId === safetyId);
 
             assert(
-                turnInPlace,
-                'Quest turn-in location is missing from the place registry'
+                safetySettlement,
+                'Missing person origin settlement is unavailable'
             );
 
-            const route = shortestRoute(state, turnInPlace.id);
+            const route = shortestRoute(state, safetyId);
 
             assert(
                 route && route.totalSegments > 0,
-                `No return route to ${turnInPlace.label}`
+                `No return route to ${safetySettlement.label}`
             );
 
             state.currentJourney = {
@@ -6618,8 +6621,8 @@ function resolveTravelStep(test) {
                 type: 'quest_return',
                 questId: returnQuest.id,
                 leadId: `quest-return-${returnQuest.id}`,
-                destinationId: turnInPlace.id,
-                destinationLabel: turnInPlace.label,
+                destinationId: safetyId,
+                destinationLabel: safetySettlement.label,
                 originId: route.originId,
                 route: route.path,
                 legs: route.legs,
@@ -16811,8 +16814,8 @@ function travelNarrationPacket(result) {
             questGate.next
                 ? `Next gate ${questGate.next.step}: ` +
                     `${questGate.next.objective}`
-                : 'The field objective is now secured; delivery remains separate.',
-            'No quest reward has been granted by this arrival.'
+                : 'This gate has no further field objective.',
+            'This gate clearance alone granted no quest payout.'
         );
     }
 
@@ -17349,29 +17352,20 @@ function questActionNarrationPacket(result, questAction) {
 
     if (questAction === 'complete') {
         const rewards = result.rewards;
-        const recipient =
-            quest.turnIn?.recipient ||
-            quest.facts?.sponsor ||
-            quest.town;
-        const cargoDelivery =
-            Boolean(quest.turnIn?.discoveryId);
 
         return [
-            cargoDelivery
-                ? `The crew delivered the quest cargo to ${recipient}.`
-                : quest.structureV2?.family === 'rescue_person'
-                    ? `The crew returned ${quest.facts.person} to ${recipient}.`
-                    : `The crew reported the completed objective to ${recipient}.`,
-            `Quest completed: ${quest.title}.`,
-            `Rewards paid: ${rewards.xp} XP, ${rewards.silver} silver, ` +
+            `System contract completed: ${quest.title}.`,
+            quest.structureV2?.family === 'rescue_person'
+                ? `${quest.facts.person} reached the origin settlement safely.`
+                : 'The final field objective was validated.',
+            `Rewards already applied: ${rewards.xp} XP, ` +
+                `${rewards.silver} silver, ` +
                 `${rewards.repSteps} reputation steps.`,
             ...rewards.loot.map(item =>
-                `Salvage received: ${item.name} (${item.rarity}).`
+                `System salvage received: ${item.name} (${item.rarity}).`
             ),
-            ...(cargoDelivery
-                ? ['Quest cargo contents were not added to the crew purse.']
-                : []),
-            'Narrate the handover naturally without mentioning software, event tags, or state management.'
+            'NPC reactions may be narrated separately. No NPC handover ' +
+                'or additional reward is required.'
         ].join('\n');
     }
 

@@ -10668,8 +10668,6 @@ function resolveQuestAction(test) {
         }
 
         saveQuestToJournal(state, quest);
-
-
         return result;
 
     }
@@ -14412,7 +14410,15 @@ function resolveSocialWorkReveal(test) {
     saveQuestToJournal(state, quest);
     delete contact.pendingQuest;
 
+    const counter =
+        state.socialOpportunities.settlements?.[settlement.id];
+
+    if (counter?.pendingSocialId === contact.id) {
+        counter.pendingSocialId = null;
+    }
+
     return {
+
         ok: true,
         created: true,
         action: 'reveal_work',
@@ -14489,19 +14495,34 @@ function resolveSocialWorkOpportunity(test) {
         offers: 0
     };
 
-    const firstContact = counter.checks === 0;
-    const eligible = counter.offers < 2;
-    const chance = firstContact ? 2 : 10;
-    const value = eligible ? roll(state, chance) : null;
-    const hasWork = eligible && value === 1;
+    /*
+     * A saved offer waits for disclosure. Do not roll another merely
+     * because the conversation takes another reply.
+     */
+    assert(
+        !counter.pendingSocialId ||
+            !contacts[
+                `${settlement.id}:${counter.pendingSocialId}`
+            ]?.pendingQuest,
+        'This settlement already has an unpublished opportunity'
+    );
 
+    /*
+     * One settlement opportunity check per saved user reply. The
+     * interceptor supplies that reply's stable ID; this is not a roll
+     * for a particular NPC. An unpublished success remains pending,
+     * so subsequent replies cannot pile up hidden offers.
+     */
+    const chance = 20;
+    const value = roll(state, chance);
+    const hasWork = value === 1;
     const contact = {
         id: test.socialId,
         settlementId: settlement.id,
         locationId: settlement.locationId,
         zone: state.zone,
         roll: value,
-        sides: eligible ? chance : null,
+        sides: chance,
         result: hasWork ? 'offer' : 'no_work',
         questSeed: hasWork
             ? {
@@ -14561,8 +14582,11 @@ function resolveSocialWorkOpportunity(test) {
     savedContact.questId = offered.quest.id;
     savedContact.pendingQuest = offered.quest;
 
-    offered.state.socialOpportunities
-        .settlements[settlement.id].offers++;
+    const savedCounter =
+        offered.state.socialOpportunities.settlements[settlement.id];
+
+    savedCounter.offers++;
+    savedCounter.pendingSocialId = contact.id;
 
     return {
 
@@ -17950,12 +17974,6 @@ async function runStoredMechanic(args) {
               oneCase.action === 'seed_npc' &&
               caseResult.created
                 ? npcProfileNarrationPacket(caseResult)
-
-            : batch &&
-              oneCase?.kind === 'social' &&
-              oneCase.action === 'check_work' &&
-              caseResult.created
-                ? socialWorkNarrationPacket(caseResult)
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
@@ -25684,22 +25702,9 @@ async function processAethermoorAssistantEvents(data) {
                     }]
                 });
             } else if (event.event === 'ask_work') {
-                const socialId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(
-                    socialId,
-                    'Work inquiry awaits a saved assistant message'
-                );
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_social_work_inquiry',
-                        kind: 'social',
-                        action: 'check_work',
-                        socialId
-                    }]
-                });
+                // Retired reporting tag. Opportunity checks now happen
+                // before narration, once per saved user reply.
+                continue;
             } else if (event.event === 'reveal_work') {
                 result = await runStoredMechanic({
                     cases: [{
@@ -26056,57 +26061,47 @@ function settlementShopBriefingPacket(state, settlement) {
 }
 
 function settlementWorkContextPacket(state, settlement) {
-    const contacts = Object.values(
+    const pending = Object.values(
         state.socialOpportunities?.contacts || {}
-    ).filter(contact =>
-        contact.settlementId === settlement.id
+    ).find(contact =>
+        contact.settlementId === settlement.id &&
+        contact.result === 'offer' &&
+        contact.pendingQuest
     );
 
-    const lines = [
-        `PRIVATE SETTLEMENT CONTEXT: ${settlement.label}.`,
-        'If the players ask an NPC about work for the first time (not already noted in <template> or listed below), have the NPC respond without specifics and emit <plan><AETHERMOOR:ASK_WORK></plan>.'
-    ];
-
-    for (const contact of contacts) {
-
-         if (contact.result === 'offer') {
-            const quest = contact.pendingQuest ||
-                Object.values(state.quests || {})
-                    .flatMap(bucket =>
-                        Array.isArray(bucket) ? bucket : []
-                    )
-                    .find(entry => entry?.id === contact.questId);
-
-            if (quest) {
-                lines.push(
-                    `Previously checked contact ${contact.id}: ` +
-                        `quest ${quest.id} (${quest.status}).`,
-                    questOfferNarrationPacket(quest),
-                    'Use this information only if conversation with THAT ' +
-                        'contact resumes. Do not announce their job while ' +
-                        'speaking to someone else or after the crew leaves.',
-                    ...(contact.pendingQuest
-                        ? [
-                            'After actually revealing this request to the ' +
-                                'players, place this exact tag inside <plan>:',
-                            `<AETHERMOOR:REVEAL_WORK social_id=${contact.id}>`,
-                            'This publishes the locked offer; it does not ' +
-                                'accept the quest or grant rewards.'
-                        ]
-                        : [])
-                );
-            }
-
-        } else {
-            lines.push(
-                `Previously checked contact ${contact.id}: no job. ` +
-                    'Conversation may continue; do not reroll this contact.'
-            );
-        }
+    if (!pending) {
+        return [
+            `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
+            'No System-authorized local quest is available for this reply.',
+            'NPCs may discuss ordinary concerns, but do not turn one ' +
+                'into a quest or promise a quest reward. Do not emit ' +
+                'ASK_WORK or REVEAL_WORK.'
+        ].join('\n');
     }
 
-    return lines.join('\n');
+    const quest = pending.pendingQuest;
+
+    return [
+        `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
+        `Saved offer reference: ${pending.id}.`,
+        `Local concern: ${quest.pitch}`,
+        ...publicQuestFactLines(quest),
+        `First objective: ${quest.currentGate.objective}`,
+        'An NPC already in this scene may mention this concern. An ' +
+            'appropriate nearby NPC may also approach and mention it. ' +
+            'They know the local problem, not the System reward.',
+        'Only if an NPC actually mentions this saved concern in this ' +
+            'reply, emit this exact tag inside <plan>:',
+        `<AETHERMOOR:REVEAL_WORK social_id=${pending.id}>`,
+        'That opens the saved offer in the Quests UI for the players to ' +
+            'accept or decline. Do not have the NPC award XP, silver, ' +
+            'gear, or a mechanically separate quest.',
+        'Do not emit ASK_WORK. If this is an older pending contact ' +
+            'offer, it may be shared by a plausible local referral; ' +
+            'it is not restricted to speaking with the original contact.'
+    ].join('\n');
 }
+
 
 globalThis.aethermoorMechanicsInterceptor =
     async function (chat) {
@@ -26166,6 +26161,75 @@ globalThis.aethermoorMechanicsInterceptor =
                         'Travel failed',
                         `travel:${travelStepId(movement)}:` +
                             `${error instanceof Error ? error.message : String(error)}`
+                    );
+                }
+            }
+        }
+
+        /*
+         * Resolve one NPC-agnostic local opportunity check BEFORE the
+         * GM writes this reply. Identity comes from the saved user
+         * message, so regenerating the same reply cannot reroll it.
+         *
+         * Do not check while an unpublished opportunity already exists.
+         * The roll is made only in a free settlement scene.
+         */
+        const currentMetadata = getContext().chatMetadata;
+        const currentState =
+            currentMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
+        const currentSettlement = currentState &&
+            Object.values(
+                currentState.world?.settlements || {}
+            ).find(entry =>
+                entry.locationId === currentState.currentLocationId &&
+                entry.zone === currentState.zone
+            );
+
+        if (
+            currentSettlement &&
+            !currentState.currentJourney &&
+            !currentState.activeInstanceId &&
+            !['active', 'spotted'].includes(
+                currentState.encounter?.status
+            )
+        ) {
+            const userIndex = findLastUserMessage(chat);
+            const userText = chat[userIndex]?.mes;
+            const pendingContact = Object.values(
+                currentState.socialOpportunities?.contacts || {}
+            ).some(contact =>
+                contact.settlementId === currentSettlement.id &&
+                Boolean(contact.pendingQuest)
+            );
+
+            if (
+                userIndex >= 0 &&
+                typeof userText === 'string' &&
+                !pendingContact
+            ) {
+                const savedPosition = chat
+                    .slice(0, userIndex)
+                    .filter(item => item?.is_system !== true)
+                    .length;
+
+                const socialId =
+                    `work-${savedPosition}-` +
+                    worldHash(userText).toString(36);
+
+                try {
+                    await runStoredMechanic({
+                        cases: [{
+                            name: 'prepare_local_opportunity',
+                            kind: 'social',
+                            action: 'check_work',
+                            socialId
+                        }]
+                    });
+                } catch (error) {
+                    reportAethermoorError(
+                        error,
+                        'Local opportunity check failed',
+                        `local-work:${socialId}`
                     );
                 }
             }

@@ -2450,7 +2450,7 @@ function combatNarrativeTurn(encounter, actions, exchanges, kills) {
     const labels = new Map(
         encounter.foes.map((foe, index) => [
             foe.id,
-            combatFoeLabel(foe, index)
+            narrativeFoeLabel(foe, index)
         ])
     );
 
@@ -2519,14 +2519,14 @@ function combatNarrativeTurn(encounter, actions, exchanges, kills) {
 
             for (const effect of exchange.effects || []) {
                 if (effect.includes('intercepted')) {
-                    events.push('A Brute intercepted an attack with Guard.');
+                    events.push('An opponent intercepted an attack.');
                 } else if (
                     effect.includes('interrupted') ||
                     effect.includes('disrupted')
                 ) {
                     events.push('An enemy action was disrupted.');
                 } else if (effect.includes('reflected')) {
-                    events.push('Spiked Carapace reflected an attack.');
+                    events.push('A defensive effect reflected an attack.');
                 } else if (effect.includes('destroyed')) {
                     events.push('A melee summon was destroyed.');
                 } else if (effect.includes('reinforcements')) {
@@ -8712,7 +8712,7 @@ const QUEST_V2_STAGES = {
         defeat: {
             mode: 'combat_twist_showdown',
             trigger: 'linked_combat',
-            objective: 'Defeat the quest’s linked Elite encounter.',
+            objective: 'Defeat the quest’s linked threat.',
             decisive: true
         }
     }
@@ -9466,6 +9466,44 @@ function resolveQuestSeed(test) {
         selectedArchetype.scenarios,
         rank
     );
+
+    /*
+     * The threat type was locked above, before the quest structure is
+     * built. Its fictional target must agree with the encounter's
+     * cardinality: normal_pack has several foes; elite has one.
+     */
+    if (archetype.id === 'territorial_beast') {
+        const group = terminalThreat.kind === 'normal_pack';
+        const nuisance = rank === 'F';
+
+        authored.facts.beast = group
+            ? nuisance
+                ? 'the nuisance animals'
+                : 'the territorial animals'
+            : nuisance
+                ? 'the nuisance animal'
+                : 'the territorial animal';
+
+        authored.pitch = nuisance
+            ? group
+                ? 'A small group of nuisance animals has been disrupting a local work area.'
+                : 'A nuisance animal has been disrupting a local work area.'
+            : group
+                ? 'Territorial animals are threatening a regularly used local area.'
+                : 'A territorial animal is threatening a regularly used local area.';
+
+        authored.truth = group
+            ? 'Several animals have established themselves around the affected area.'
+            : 'One animal has established itself around the affected area.';
+
+        authored.facts.stakes = group
+            ? nuisance
+                ? 'nuisance animals disrupting routine local work'
+                : 'territorial animals threatening local travel or work'
+            : nuisance
+                ? 'a nuisance animal disrupting routine local work'
+                : 'a territorial animal threatening local travel or work';
+    }
 
     const structureV2 = buildQuestV2PlanForOffer(
         state,
@@ -16863,29 +16901,16 @@ function travelNarrationPacket(result) {
 }
 
 function discoveryNarrationPacket(encounter) {
-
-    const roleNames = {
-        brute: 'Brute',
-        archer: 'Archer',
-        mender: 'Mender',
-        hexer: 'Hexer',
-        buffer: 'Buffer',
-        elite: 'Elite',
-        boss: 'Boss'
-    };
-
-    const counts = {};
-    const foes = encounter.foes.map(foe => {
-        counts[foe.role] = (counts[foe.role] || 0) + 1;
-
-        return `${roleNames[foe.role] || foe.role} ` +
-            `${counts[foe.role]} (level ${foe.level})`;
-    });
+    const foes = encounter.foes
+        .map((foe, index) => narrativeFoeLabel(foe, index));
 
     return [
         'A new encounter has been discovered.',
         `Zone: ${encounter.zone}.`,
-        `Enemies present: ${foes.join('; ')}.`,
+        `${foes.length} distinct opponent(s): ${foes.join(', ')}.`,
+        'These references identify combatants, not species, weapons, ' +
+            'jobs, or visible abilities. Dress them to fit the saved ' +
+            'quest and location. Keep the number of opponents consistent.',
         ...(encounter.type === 'normal_pack' &&
             encounter.packTactic?.id !== 'none'
             ? [
@@ -16893,9 +16918,10 @@ function discoveryNarrationPacket(encounter) {
                 encounter.packTactic.description
             ]
             : []),
-        'The enemies have been spotted, but combat has not begun.',
-        'Do not narrate an attack or resolve combat yet.',
-        'Narrate what the crew can hear, see, smell, or infer about the group, then leave the decision to engage, avoid, investigate, negotiate, or retreat to the protagonists.'
+        'They are spotted, not engaged. Do not narrate an attack or ' +
+            'assume a special ability was used before combat records it.',
+        'Leave the choice to engage, avoid, investigate, negotiate, ' +
+            'or retreat to the protagonists.'
     ].join('\n');
 }
 
@@ -17196,16 +17222,19 @@ function questDiscoveryContextPacket(quest) {
     return lines.join('\n');
 }
 function questTerminalNarrationPacket(encounter, quest) {
-    const foes = encounter.foes || [];
-    const roster = foes.map((foe, index) =>
-        `${foe.role} ${index + 1} (level ${foe.level})`
-    );
-
     return [
-        `The quest threat for ${quest.title} has been spotted.`,
-        `Engine-established encounter: ${roster.join('; ')}.`,
-        'The encounter is spotted but not engaged. Combat has not begun.',
-        'Narrate this threat in relation to the established quest objective. Do not add foes or abilities. Leave the decision to engage, avoid, or try another approach to the protagonists.'
+        `The linked threat for ${quest.title} has been spotted.`,
+        `It has ${encounter.foes.length} distinct opponent(s).`,
+        `Quest target: ${
+            quest.structureV2?.facts?.target ||
+            quest.facts?.beast ||
+            quest.facts?.threat ||
+            'the established threat'
+        }.`,
+        'Use the encounter’s opponent references consistently. ' +
+            'The linked fight is spotted, not engaged. Do not add ' +
+            'opponents or preemptively narrate abilities. Leave the ' +
+            'decision to engage or avoid to the protagonists.'
     ].join('\n');
 }
 
@@ -17429,15 +17458,11 @@ function combatNarrationPacket(result, actions) {
     const foeNames = new Map(
         roster.map((foe, index) => [
             foe.id,
-            combatFoeLabel(foe, index)
+            narrativeFoeLabel(foe, index)
         ])
     );
 
     const foeName = id => foeNames.get(id) || id;
-    const slainIds = new Set(
-        (result.kills || []).map(kill => kill.id)
-    );
-
     const lines = [
         'COMBAT SCENE RESULT.',
         `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
@@ -17469,40 +17494,16 @@ function combatNarrationPacket(result, actions) {
         );
     }
 
-    const notableBeats = [];
+    const narrativeTurn =
+        result.state?.encounter?.narrativeTurns?.at(-1);
 
-    for (const exchange of result.exchanges || []) {
-        for (const hit of exchange.hits || []) {
-            if (hit.hp === 0 && slainIds.has(hit.id)) {
-                notableBeats.push(`${foeName(hit.id)} was slain`);
-            }
-        }
-
-        if (exchange.enemyMiss === true) {
-            notableBeats.push('an enemy attack missed');
-        }
-
-        for (const effect of exchange.effects || []) {
-            if (
-                effect.includes('destroyed') ||
-                effect.includes('intercepted') ||
-                effect.includes('sacrificed') ||
-                effect.includes('reflected') ||
-                effect.includes('interrupted') ||
-                effect.includes('disrupted') ||
-                effect.includes('reinforcements') ||
-                effect.includes('telegraph')
-            ) {
-                notableBeats.push(effect);
-            }
-        }
-    }
+    const notableBeats = (narrativeTurn?.exchanges || [])
+        .flatMap(exchange => exchange.events || []);
 
     if (notableBeats.length > 0) {
         lines.push(
-            'Notable battle beats: ' +
-            notableBeats.join('; ') +
-            '.'
+            'Established battle beats: ' +
+            notableBeats.join(' ')
         );
     }
 
@@ -19200,7 +19201,12 @@ function combatFoeLabel(foe, index) {
     return `${roleNames[foe.role] || foe.role} ${index + 1}`;
 }
 
+function narrativeFoeLabel(_foe, index) {
+    return `Opponent ${index + 1}`;
+}
+
 function formatQuestStatus(quest) {
+
     if (!quest) {
         return 'No active quest offer.';
     }

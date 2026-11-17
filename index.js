@@ -20731,11 +20731,13 @@ async function showAethermoorContractOffer(
 
         try {
             assert(
-                getContext().chatMetadata === metadata,
-                'Chat changed; reopen this offer in its original chat'
+                getContext().chatMetadata === expectedMetadata &&
+                expectedEpoch === aethermoorContractNotificationEpoch,
+                'Chat or campaign changed; reopen this offer in its original chat'
             );
 
             const output = await runStoredMechanic({
+
                 cases: [{
                     name: `contract_popup_${action}`,
                     kind: 'quest',

@@ -19549,7 +19549,88 @@ function addAethermoorPanelStyles() {
             border-left-color: #d99b26;
         }
 
+        .aethermoor-contract-popup {
+            position: fixed;
+            z-index: 10003;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: min(450px, calc(100vw - 24px));
+            box-sizing: border-box;
+            padding: 12px;
+            color: #d0d7de;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #d99b26;
+            border-radius: 2px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
+            font: 11px/1.45 'Segoe UI', Tahoma, sans-serif;
+        }
+
+        .aethermoor-contract-popup-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding-bottom: 5px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #1f2730;
+        }
+
+        .aethermoor-contract-popup-heading {
+            color: #d99b26;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .aethermoor-contract-popup-rank {
+            color: #4ade80;
+            font-weight: 700;
+        }
+
+        .aethermoor-contract-popup-title {
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .aethermoor-contract-popup-rewards {
+            margin-top: 8px;
+        }
+
+        .aethermoor-contract-popup-salvage {
+            margin-top: 6px;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-contract-popup-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .aethermoor-contract-popup-actions button {
+            padding: 6px 9px;
+            color: #d0d7de;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        .aethermoor-contract-popup-actions button:hover,
+        .aethermoor-contract-popup-actions button:focus-visible {
+            border-color: #d99b26;
+            color: #ffffff;
+        }
+
+        .aethermoor-contract-popup-actions button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
         .aethermoor-panel-card[data-accent="world"] {
+
             border-left-color: #4da6ff;
         }
 
@@ -20183,6 +20264,182 @@ function makeAethermoorAction(label, accent, handler) {
     return button;
 }
 
+/*
+ * The System, not the narrator or NPC, displays mechanical contract
+ * details. This is a notification over the saved offered quest; closing
+ * it does not accept or decline anything. All text is added as text nodes,
+ * so quest names and cosmetic item names cannot inject HTML.
+ */
+async function showAethermoorContractOffer(questId) {
+    const metadata = getContext().chatMetadata;
+    const snapshot = await readStoredCombatState();
+
+    if (getContext().chatMetadata !== metadata) return;
+
+    const quest = ensureQuestJournal(snapshot.state).offered.find(
+        entry => entry.id === questId && entry.status === 'offered'
+    );
+
+    if (!quest) return;
+
+    addAethermoorPanelStyles();
+    document.getElementById('aethermoor_contract_popup')?.remove();
+
+    const popup = document.createElement('section');
+    popup.id = 'aethermoor_contract_popup';
+    popup.className = 'aethermoor-contract-popup';
+    popup.setAttribute('role', 'dialog');
+    popup.setAttribute('aria-label', `Contract offered: ${quest.title}`);
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-contract-popup-header';
+
+    const heading = document.createElement('span');
+    heading.className = 'aethermoor-contract-popup-heading';
+    heading.textContent = 'System Log // Contract Offered';
+
+    const rank = document.createElement('span');
+    rank.className = 'aethermoor-contract-popup-rank';
+    rank.textContent = `RANK ${quest.rank}`;
+
+    header.append(heading, rank);
+    popup.appendChild(header);
+
+    const title = document.createElement('div');
+    title.className = 'aethermoor-contract-popup-title';
+    title.textContent = quest.title;
+    popup.appendChild(title);
+
+    const premise = document.createElement('div');
+    premise.textContent = quest.pitch || '';
+    popup.appendChild(premise);
+
+    const objective = document.createElement('div');
+    objective.style.marginTop = '6px';
+    objective.textContent =
+        `First objective: ${quest.currentGate?.objective || 'Not recorded'}`;
+    popup.appendChild(objective);
+
+    const rewards = document.createElement('div');
+    rewards.className = 'aethermoor-contract-popup-rewards';
+
+    const xp = document.createElement('b');
+    xp.style.color = '#4ade80';
+    xp.textContent = `${quest.payout.xp} XP`;
+
+    const silver = document.createElement('b');
+    silver.style.color = '#ffd166';
+    silver.textContent = `${quest.payout.silver} silver`;
+
+    const reputation = document.createElement('b');
+    reputation.style.color = '#38bdf8';
+    reputation.textContent =
+        `${quest.payout.repSteps} reputation step(s)`;
+
+    rewards.append(xp, ' | ', silver, ' | ', reputation);
+    popup.appendChild(rewards);
+
+    const salvage = document.createElement('div');
+    salvage.className = 'aethermoor-contract-popup-salvage';
+
+    const item = document.createElement('b');
+    item.style.color = quest.salvage.rarityColor || '#d0d7de';
+    item.textContent =
+        `${quest.salvage.name} (${quest.salvage.rarity})`;
+
+    const bonuses = Object.entries(quest.salvage.bonus || {})
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => {
+            const label = {
+                crewAtk: 'Crew ATK',
+                tansyMaxHp: 'Tansy MaxHP',
+                qtikMaxHp: "Q'tik MaxHP",
+                frontlineDef: 'Frontline DEF',
+                crewLuk: 'Crew LUK'
+            }[key] || key;
+
+            return `+${value} ${label}`;
+        });
+
+    salvage.append(
+        'System salvage: ',
+        item,
+        ...(bonuses.length ? [` — ${bonuses.join(', ')}`] : [])
+    );
+    popup.appendChild(salvage);
+
+    const actions = document.createElement('div');
+    actions.className = 'aethermoor-contract-popup-actions';
+
+    const accept = document.createElement('button');
+    accept.type = 'button';
+    accept.textContent = 'Accept';
+
+    const decline = document.createElement('button');
+    decline.type = 'button';
+    decline.textContent = 'Decline';
+
+    const later = document.createElement('button');
+    later.type = 'button';
+    later.textContent = 'Close / Later';
+    later.addEventListener('click', () => popup.remove());
+
+    async function decide(action) {
+        accept.disabled = true;
+        decline.disabled = true;
+
+        try {
+            assert(
+                getContext().chatMetadata === metadata,
+                'Chat changed; reopen this offer in its original chat'
+            );
+
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: `contract_popup_${action}`,
+                    kind: 'quest',
+                    action,
+                    questId
+                }]
+            });
+
+            assert(
+                output?.ok === true &&
+                output.results?.[0]?.ok !== false,
+                output?.results?.[0]?.error ||
+                    `Could not ${action} the contract`
+            );
+
+            popup.remove();
+            toastr.info(
+                action === 'accept'
+                    ? 'Contract accepted.'
+                    : 'Contract declined.',
+                'Aethermoor'
+            );
+
+            if (aethermoorPanelOpen) {
+                renderAethermoorTab(aethermoorActiveTab);
+            }
+        } catch (error) {
+            accept.disabled = false;
+            decline.disabled = false;
+            toastr.error(
+                error instanceof Error ? error.message : String(error),
+                'Aethermoor'
+            );
+        }
+    }
+
+    accept.addEventListener('click', () => void decide('accept'));
+    decline.addEventListener('click', () => void decide('decline'));
+
+    actions.append(accept, decline, later);
+    popup.appendChild(actions);
+    document.body.appendChild(popup);
+    accept.focus();
+}
+
 async function runAethermoorPanelCase(host, tab, caseData, successText) {
     try {
         const output = await runStoredMechanic({
@@ -20408,6 +20665,88 @@ async function renderQuestTab(host) {
         addQuestAction(section, quest, 'Accept Quest', 'accept');
         addQuestAction(section, quest, 'Decline Quest', 'decline');
         host.appendChild(section);
+    }
+
+    /*
+     * Recovery for a narrated concern whose REVEAL_WORK tag was missed.
+     * This deliberately publishes the existing locked quest, not a new
+     * roll. The player should use it only after the concern was mentioned.
+     */
+    const currentSettlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    const pendingOffer = currentSettlement &&
+        Object.values(state.socialOpportunities?.contacts || {})
+            .find(contact =>
+                contact.settlementId === currentSettlement.id &&
+                contact.result === 'offer' &&
+                contact.pendingQuest
+            );
+
+    if (
+        pendingOffer &&
+        !state.currentJourney &&
+        !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        const recovery = makeAethermoorSection(
+            'UNPUBLISHED LOCAL CONCERN',
+            'If an NPC already described a job but its System offer ' +
+                'did not appear, publish that saved offer here. ' +
+                'This does not roll or invent another quest.',
+            'quest'
+        );
+
+        const publish = makeAethermoorAction(
+            'Publish mentioned offer',
+            'quest',
+            async () => {
+                publish.disabled = true;
+
+                try {
+                    const output = await runStoredMechanic({
+                        cases: [{
+                            name: 'ui_recover_work_reveal',
+                            kind: 'social',
+                            action: 'reveal_work',
+                            socialId: pendingOffer.id
+                        }]
+                    });
+
+                    assert(
+                        output?.ok === true &&
+                        output.results?.[0]?.ok !== false,
+                        output?.results?.[0]?.error ||
+                            'Could not publish saved offer'
+                    );
+
+                    const revealed = output.results[0].result;
+
+                    await renderQuestTab(host);
+
+                    if (revealed?.questId) {
+                        await showAethermoorContractOffer(
+                            revealed.questId
+                        );
+                    }
+                } catch (error) {
+                    publish.disabled = false;
+                    toastr.error(
+                        error instanceof Error
+                            ? error.message
+                            : String(error),
+                        'Aethermoor'
+                    );
+                }
+            }
+        );
+
+        recovery.appendChild(publish);
+        host.appendChild(recovery);
     }
 
     if (accepted.length === 0 && offered.length === 0) {
@@ -25739,6 +26078,14 @@ async function processAethermoorAssistantEvents(data) {
                         socialId: event.socialId
                     }]
                 });
+
+                const reveal = result.results?.[0]?.result;
+
+                // SillyTavern may notify twice for one reply. Only the
+                // first successful publication opens the notification.
+                if (reveal?.created === true && reveal.questId) {
+                    await showAethermoorContractOffer(reveal.questId);
+                }
             } else if (event.event === 'ask_wares') {
                 const messageId =
                     socialWorkIdForAssistantMessage(message);

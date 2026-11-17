@@ -7956,10 +7956,11 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   site interactions, and other results the engine cannot supply midway
  *   through a reply. Saved state, not a <template> note or one-use packet,
  *   remains authoritative if the conversation resumes later.
- * - Beta starting odds for social job inquiries: first checked contact at
- *   a settlement 1-in-2; later contacts 1-in-10; at most two offers from
- *   this channel per settlement. A successful first check weights F work
- *   three times as strongly as E for an Unknown crew; it guarantees neither.
+ * - Social job inquiries have a 1-in-2 chance until two offers have been
+ *   locked at that settlement; subsequent inquiries have a 1-in-20 chance.
+ *   Failed conversations do not consume the introductory offer allowance.
+ *   A successful first check weights F work three times as strongly as E
+ *   for an Unknown crew; it guarantees neither.
  * - Social offer packets identify a contact as a possible referral to the
  *   locked sponsor, not necessarily the quest giver. Tune scarcity and
  *   introductory rank weighting during beta.
@@ -11874,10 +11875,29 @@ function resolveVendorSelection(test) {
     );
 
     const state = clone(test.state);
+
+    if (test.action === 'commit') {
+        assert(
+            typeof test.socialId === 'string' &&
+            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
+            'Herbalist agreement requires an engine-issued message reference'
+        );
+
+        const previous = state.herbalistReceipts?.[test.socialId];
+        if (previous) {
+            return {
+                ok: true,
+                created: false,
+                action: 'commit',
+                receipt: clone(previous),
+                state
+            };
+        }
+    }
+
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
-        entry.id === state.vendorMenu?.settlementId &&
         entry.locationId === state.currentLocationId &&
         entry.zone === state.zone
     );
@@ -12821,26 +12841,6 @@ function resolveHerbalistAction(test) {
         };
 
         return { ok: true, created: true, action: 'open', state };
-    }
-
-    if (test.action === 'commit') {
-        assert(
-            typeof test.socialId === 'string' &&
-            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-            'Herbalist agreement requires an engine-issued message reference'
-        );
-
-        const previous = state.herbalistReceipts[test.socialId];
-
-        if (previous) {
-            return {
-                ok: true,
-                created: false,
-                action: 'commit',
-                receipt: clone(previous),
-                state
-            };
-        }
     }
 
     assert(
@@ -14548,7 +14548,9 @@ function resolveSocialWorkOpportunity(test) {
      * for a particular NPC. An unpublished success remains pending,
      * so subsequent replies cannot pile up hidden offers.
      */
-    const chance = 20;
+    // The first two successful local offers are easier to find. Failed
+    // conversations do not exhaust this introductory opportunity window.
+    const chance = counter.offers < 2 ? 2 : 20;
     const value = roll(state, chance);
     const hasWork = value === 1;
     const contact = {
@@ -16360,14 +16362,7 @@ function resolveBatch(args) {
                     break;
                 }
 
-                case 'quest':
-                    if (test.action) {
-                        result = resolveQuestAction(test);
-                    } else {
-                        result = resolveQuestSeed(test);
-                    }
-                    break;
-            }
+            case 'quest':
 
             if (test.expectError) {
                 results.push({
@@ -25117,7 +25112,7 @@ async function openCombatPanel(inlineHost) {
             ? encounter.victoryReceipt
             : null;
 
-        if (receipt?.encounterId === encounter.id) {
+        if (receipt && receipt.encounterId === encounter.id) {
             appendVictoryReceipt(inlineHost, receipt);
         }
 
@@ -25993,14 +25988,14 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const themePattern =
-            /<AETHERMOOR:INSTANCE_THEME\s+instance=([A-Za-z0-9._:-]+)\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
+            /<AETHERMOOR:INSTANCE_THEME\s+instance=(?:"([A-Za-z0-9._:-]+)"|([A-Za-z0-9._:-]+))\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
 
         for (const match of plan[1].matchAll(themePattern)) {
             try {
                 events.push({
                     event: 'instance_theme',
-                    instanceId: match[1],
-                    names: JSON.parse(match[2].trim())
+                    instanceId: match[1] || match[2],
+                    names: JSON.parse(match[3].trim())
                 });
             } catch (error) {
                 reportAethermoorError(
@@ -26012,15 +26007,16 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const namingPattern =
-            /<AETHERMOOR:STOCK_NAMES\s+zone=([1-9]\d*)\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
+            /<AETHERMOOR:STOCK_NAMES\s+zone=(?:"([1-9]\d*)"|([1-9]\d*))\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
 
         for (const match of plan[1].matchAll(namingPattern)) {
             try {
                 events.push({
                     event: 'stock_names',
-                    zone: Number(match[1]),
-                    names: JSON.parse(match[2].trim())
+                    zone: Number(match[1] || match[2]),
+                    names: JSON.parse(match[3].trim())
                 });
+
             } catch (error) {
                 reportAethermoorError(
                     error,

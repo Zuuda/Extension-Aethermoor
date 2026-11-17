@@ -2415,6 +2415,15 @@ function completeLinkedCombatQuestGate(state) {
 
     state.quests = progression.state.quests;
     state.leads = progression.state.leads;
+    state.inventory = progression.state.inventory;
+    state.reputation = progression.state.reputation;
+
+    /*
+     * resolveTurn retains a reference to state.crew. Update that object
+     * rather than replacing it, so its final stats and victory receipt
+     * see the System-paid quest XP and silver.
+     */
+    Object.assign(state.crew, progression.state.crew);
 
     // Remove the stale selection before consulting the copied journal.
     state.activeQuest = null;
@@ -2427,7 +2436,8 @@ function completeLinkedCombatQuestGate(state) {
         completed: progression.completedGate || clone(gate),
         next: progression.nextGate || null,
         objectiveSecured:
-            Boolean(updatedQuest.objectiveResolution)
+            Boolean(updatedQuest.objectiveResolution),
+        questCompletion: progression.questCompletion || null
     };
 }
 
@@ -4152,6 +4162,12 @@ if (frontliners.length > 0) {
         levelUps = applyXp(c, encounterRewards.xp);
         c.purse += encounterRewards.silver;
         questGate = completeLinkedCombatQuestGate(s);
+
+        if (questGate?.questCompletion?.levelUps?.length) {
+            levelUps.push(
+                ...questGate.questCompletion.levelUps
+            );
+        }
     }
 
     encounter.hexStacks = Object.fromEntries(
@@ -6218,8 +6234,9 @@ function questsForArrival(state, locationId) {
         if (quest?.status !== 'in_progress') return false;
 
         const arrivalLocationId =
-            quest.objectiveResolution && quest.turnIn
-                ? quest.turnIn.locationId
+            quest.objectiveResolution &&
+            quest.structureV2?.family === 'rescue_person'
+                ? quest.originLocationId
                 : quest.destinationId;
 
         return arrivalLocationId === locationId;
@@ -6276,62 +6293,42 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
     assert(
         nextState.currentLocationId ===
             (
-                quest.objectiveResolution && quest.turnIn
-                    ? quest.turnIn.locationId
+                quest.objectiveResolution &&
+                quest.structureV2?.family === 'rescue_person'
+                    ? quest.originLocationId
                     : quest.destinationId
             ),
         `Quest ${quest.id} is not associated with this arrival location`
     );
 
-    // Returning to the locked issuer location makes delivery eligible.
-    // It does not pay rewards until the narrator reports the handoff.
+    /*
+     * For Missing Person quests, safe arrival is the last condition.
+     * The System pays here; no sponsor meeting or DELIVERED tag follows.
+     */
     if (
-        quest?.status === 'in_progress' &&
+        quest.status === 'in_progress' &&
+        quest.structureV2?.family === 'rescue_person' &&
         quest.objectiveResolution &&
-        quest.turnIn &&
-        nextState.currentLocationId === quest.turnIn.locationId &&
-        !quest.deliveryReady
+        nextState.currentLocationId === quest.originLocationId
     ) {
-        const cargo = quest.discoveries?.find(
-            item => item.id === quest.turnIn.discoveryId
-        );
+        const completion = resolveQuestAction({
+            state: nextState,
+            questId: quest.id,
+            action: 'complete',
+            objectiveCompleted: true,
+            completionEvidence:
+                `${quest.facts.person} reached the origin settlement safely.`
+        });
 
-        assert(
-            !quest.turnIn.discoveryId ||
-            cargo?.state === 'acquired',
-            'Quest cargo must be acquired before delivery is ready'
-        );
-
-        quest.deliveryReady = true;
-        quest.deliveryReadyAt = nextState.currentLocationId;
-
-        const deliveryReady = {
+        outcome.questCompletions ||= [];
+        outcome.questCompletions.push({
             questId: quest.id,
             title: quest.title,
-            recipient: quest.turnIn.recipient,
-            deliveryType: quest.turnIn.discoveryId
-                ? 'cargo'
-                : 'report',
-            deliveryName: quest.turnIn.discoveryId
-                ? (
-                    cargo?.name ||
-                    quest.facts?.cargo ||
-                    'quest cargo'
-                )
-                : null
-        };
+            rewards: completion.rewards,
+            levelUps: completion.levelUps || []
+        });
 
-        outcome.deliveryReadyList.push(deliveryReady);
-
-        /*
-         * Preserve the old singular field for existing narration/UI code
-         * while the migration is in progress. It is valid only as a
-         * compatibility convenience; the list is authoritative.
-         */
-        outcome.deliveryReady =
-            outcome.deliveryReady || deliveryReady;
-
-        return nextState;
+        return completion.state;
     }
 
     const gate = quest.currentGate;
@@ -6473,28 +6470,12 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
         });
     }
 
-    if (quest.turnIn) {
-        nextState.leads ||= {};
-        const returnLeadId = `quest-return-${quest.id}`;
-
-        nextState.leads[returnLeadId] ||= {
-            id: returnLeadId,
-            kind: 'quest_return',
-            label: quest.turnIn.discoveryId
-                ? `Return cargo to ${quest.turnIn.recipient}`
-                : `Report to ${quest.turnIn.recipient}`,
-            claim: quest.turnIn.discoveryId
-                ? 'The recovered quest cargo is ready to return.'
-                : 'The completed field objective is ready to report.',
-            targetType: 'place',
-            targetId: quest.turnIn.locationId,
-            status: 'known'
-        };
-    }
-
+    // resolve_objective owns System payment or the Missing Person
+    // safety-return lead. Arrival must not manufacture an NPC turn-in.
     const questObjectiveSecured = {
         questId: quest.id,
-        evidence
+        evidence,
+        questCompletion: progression.questCompletion || null
     };
 
     outcome.questObjectiveSecuredList.push(
@@ -10184,33 +10165,16 @@ function advanceQuestFromDiscovery(state, discovery, questId) {
             completionEvidence: evidence
         });
     }
-
-    if (updatedQuest.turnIn) {
-        progression.state.leads ||= {};
-
-        const leadId = `quest-return-${updatedQuest.id}`;
-
-        progression.state.leads[leadId] ||= {
-            id: leadId,
-            kind: 'quest_return',
-            label: updatedQuest.turnIn.discoveryId
-                ? `Return cargo to ${updatedQuest.turnIn.recipient}`
-                : `Report to ${updatedQuest.turnIn.recipient}`,
-            claim: updatedQuest.turnIn.discoveryId
-                ? 'The recovered quest cargo is ready to return.'
-                : 'The completed field objective is ready to report.',
-            targetType: 'place',
-            targetId: updatedQuest.turnIn.locationId,
-            status: 'known'
-        };
-    }
-
+    // resolve_objective completes ordinary quests immediately and creates
+    // the safety-return lead itself for Missing Person quests.
     return {
         state: progression.state,
         questGate: {
+            questId,
             completed: clone(gate),
             next: null,
-            objectiveSecured: true
+            objectiveSecured: true,
+            questCompletion: progression.questCompletion || null
         }
     };
 }
@@ -10907,7 +10871,48 @@ function resolveQuestAction(test) {
             evidence: test.completionEvidence.trim()
         };
         result.objectiveResolution = quest.objectiveResolution;
-        return result;
+
+        /*
+         * The System pays after the decisive objective, except for a
+         * missing person: finding or freeing them is not yet getting
+         * them safely home. Arrival handles that final condition.
+         */
+        if (quest.structureV2?.family === 'rescue_person') {
+            state.leads ||= {};
+            const returnLeadId = `quest-return-${quest.id}`;
+
+            state.leads[returnLeadId] ||= {
+                id: returnLeadId,
+                kind: 'quest_return',
+                label: `Bring ${quest.facts.person} to safety`,
+                claim: `${quest.facts.person} must reach the origin settlement safely.`,
+                targetType: 'place',
+                targetId: quest.originLocationId,
+                status: 'known'
+            };
+
+            saveQuestToJournal(state, quest);
+            return result;
+        }
+
+        const completion = resolveQuestAction({
+            state,
+            questId: quest.id,
+            action: 'complete',
+            objectiveCompleted: true,
+            completionEvidence: quest.objectiveResolution.evidence
+        });
+
+        return {
+            ...result,
+            state: completion.state,
+            quest: completion.quest,
+            questCompletion: {
+                questId: quest.id,
+                rewards: completion.rewards,
+                levelUps: completion.levelUps || []
+            }
+        };
     }
 
     assert(
@@ -10956,44 +10961,33 @@ function resolveQuestAction(test) {
         'Quest salvage is missing'
     );
 
-    if (quest.turnIn) {
-        assert(
-            state.currentLocationId === quest.turnIn.locationId,
-            'Return to the quest turn-in location first'
+    /*
+     * NPCs are sources or beneficiaries, not reward dispensers. Cargo
+     * must actually have been recovered, but it need not be handed to
+     * an NPC for the System to recognize the completed objective.
+     */
+    if (quest.structureV2?.family === 'retrieve_item') {
+        const cargo = quest.discoveries?.find(
+            item => item.id === quest.turnIn?.discoveryId
         );
 
-        /*
-         * All quests return to their locked issuer, but only quests
-         * with a locked discoveryId require physical cargo. Defeat
-         * objectives turn in a report instead; never invent an item
-         * merely to satisfy the delivery system.
-         */
-        if (quest.turnIn.discoveryId) {
-            const cargo = quest.discoveries?.find(
-                item => item.id === quest.turnIn.discoveryId
-            );
-
-            assert(
-                cargo?.state === 'acquired',
-                'The required quest cargo is not in the crew possession'
-            );
-
-            cargo.state = 'delivered';
-        } else {
-            assert(
-                quest.structureV2?.family !== 'retrieve_item',
-                'Retrieval quest is missing its locked cargo discoveryId'
-            );
-        }
+        assert(
+            cargo?.state === 'acquired',
+            'The required quest item has not been recovered'
+        );
     }
 
+    if (quest.structureV2?.family === 'rescue_person') {
         assert(
-        quest.deliveryReady === true,
-        'The quest must arrive at its turn-in location before delivery'
-    );
+            state.currentLocationId === quest.originLocationId &&
+            !state.currentJourney,
+            'Bring the missing person to the origin settlement safely'
+        );
+    }
 
     quest.status = 'complete';
-    quest.turnInEvidence = test.completionEvidence.trim();
+    quest.completionEvidence = test.completionEvidence.trim();
+
     saveQuestToJournal(state, quest);
 
     if (state.activeQuest?.id === quest.id) {
@@ -16822,15 +16816,31 @@ function travelNarrationPacket(result) {
         );
     }
 
-    for (const delivery of result.deliveryReadyList || []) {
+    for (const completion of result.questCompletions || []) {
         lines.push(
-            delivery.deliveryType === 'cargo'
-                ? `The crew returned to the turn-in location with ` +
-                    `${delivery.deliveryName} for ${delivery.title}.`
-                : `The crew returned to ${delivery.recipient} to report ` +
-                    `the completed objective for ${delivery.title}.`,
-            `That quest is eligible for delivery to ${delivery.recipient}.`,
-            'Do not complete the quest mechanically until the fictional handoff occurs.'
+            `The missing person reached safety; the System completed ` +
+                `${completion.title}.`,
+            `Quest rewards applied: ${completion.rewards.xp} XP, ` +
+                `${completion.rewards.silver} silver, ` +
+                `${completion.rewards.repSteps} reputation steps.`,
+            ...completion.rewards.loot.map(item =>
+                `System salvage received: ${item.name}.`
+            )
+        );
+    }
+
+    for (const secured of result.questObjectiveSecuredList || []) {
+        if (!secured.questCompletion) continue;
+        const rewards = secured.questCompletion.rewards;
+
+        lines.push(
+            'The System completed the quest at its final objective.',
+            `Quest rewards applied: ${rewards.xp} XP, ` +
+                `${rewards.silver} silver, ` +
+                `${rewards.repSteps} reputation steps.`,
+            ...rewards.loot.map(item =>
+                `System salvage received: ${item.name}.`
+            )
         );
     }
 
@@ -17219,13 +17229,24 @@ function questDiscoveryNarrationPacket(result, quest) {
     }
 
     if (result.questGate?.objectiveSecured) {
+        const completion = result.questGate.questCompletion;
+
         lines.push(
-            'The final field objective is secured.',
-            quest.structureV2?.family === 'rescue_person'
-                ? `Return to ${quest.turnIn?.recipient || quest.facts.sponsor} with the rescued person. The handover is report-only; no person is quest cargo.`
-                : `Return the recovered cargo to ${quest.turnIn?.recipient || quest.facts.sponsor}.`,
-            'The quest payout has not been granted.'
+            completion
+                ? 'The System completed the quest and applied its saved rewards.'
+                : 'The missing person has been found or freed; bring them safely to the origin settlement before the System completes the quest.'
         );
+
+        if (completion) {
+            lines.push(
+                `${completion.rewards.xp} XP, ` +
+                `${completion.rewards.silver} silver, and ` +
+                `${completion.rewards.repSteps} reputation steps awarded.`,
+                ...completion.rewards.loot.map(item =>
+                    `System salvage: ${item.name}.`
+                )
+            );
+        }
 
     } else if (result.questGate?.next) {
         lines.push(
@@ -17556,8 +17577,22 @@ function combatNarrationPacket(result, actions) {
                 '.',
             questGate.next
                 ? `Next objective: ${questGate.next.objective}`
-                : 'The field objective is secured; delivery remains separate.'
+                : questGate.questCompletion
+                    ? 'The System completed this quest and applied its rewards.'
+                    : 'The missing person is free; bring them safely to the origin settlement.'
         );
+
+        if (questGate.questCompletion) {
+            const rewards = questGate.questCompletion.rewards;
+            lines.push(
+                `Quest rewards applied: ${rewards.xp} XP, ` +
+                `${rewards.silver} silver, ` +
+                `${rewards.repSteps} reputation steps.`,
+                ...rewards.loot.map(item =>
+                    `System salvage received: ${item.name}.`
+                )
+            );
+        }
     }
 
     lines.push(
@@ -19245,19 +19280,14 @@ function formatQuestStatus(quest) {
         );
     }
 
-    if (quest.deliveryReady && quest.turnIn) {
-        const handoverInstruction =
-            quest.turnIn.discoveryId
-                ? 'When the protagonists actually hand over the cargo in the fiction, place this exact tag inside the disposable <plan> block:'
-                : quest.structureV2?.family === 'rescue_person'
-                    ? 'When the protagonists actually return the rescued person and meet the sponsor, place this exact tag inside the disposable <plan> block:'
-                    : 'When the protagonists actually meet the sponsor and report the completed objective, place this exact tag inside the disposable <plan> block:';
-
+    if (
+        quest.status === 'in_progress' &&
+        quest.objectiveResolution &&
+        quest.structureV2?.family === 'rescue_person'
+    ) {
         lines.push(
-            `Turn-in is eligible with ${quest.turnIn.recipient}.`,
-            handoverInstruction,
-            `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
-            'Do not emit the delivery tag before the fictional handoff.'
+            'The person must reach the origin settlement safely. ' +
+            'Confirmed arrival completes the quest automatically.'
         );
     }
 
@@ -20304,31 +20334,25 @@ async function renderQuestTab(host) {
             );
         }
 
-        /*
-         * Arrival makes delivery eligible. The fictional handover and
-         * validated delivery tag still authorize payment; viewing the
-         * journal must not substitute for that handshake.
-         */
-        if (
+        const bringingPersonToSafety =
             quest.objectiveResolution &&
-            quest.deliveryReady === true &&
-            quest.turnIn?.locationId === state.currentLocationId
-        ) {
+            quest.structureV2?.family === 'rescue_person';
+
+        if (bringingPersonToSafety) {
             section.appendChild(
                 makeAethermoorSection(
-                    'TURN-IN ELIGIBLE',
-                    `The crew can meet ${quest.turnIn.recipient} to ` +
-                        'hand over the cargo or report the completed objective. ' +
-                        'Rewards follow the handover in the fiction.',
+                    'BRING PERSON TO SAFETY',
+                    `${quest.facts.person} must reach the origin ` +
+                        'settlement. The System completes and pays this ' +
+                        'quest on confirmed arrival; no NPC handover is required.',
                     'quest'
                 )
             );
         }
 
-        const destinationId =
-            quest.objectiveResolution && quest.turnIn
-                ? quest.turnIn.locationId
-                : quest.destinationId;
+        const destinationId = bringingPersonToSafety
+            ? quest.originLocationId
+            : quest.destinationId;
 
         if (
             destinationId &&
@@ -20356,9 +20380,10 @@ async function renderQuestTab(host) {
                     ? 'Finish journey to quest destination'
                     : journey
                         ? 'Continue to quest destination'
-                        : quest.objectiveResolution
-                            ? 'Travel to issuer'
+                        : bringingPersonToSafety
+                            ? 'Bring person to safety'
                             : 'Travel to quest objective',
+
                 'quest',
                 () => copyAethermoorCommand(
                     destinationCommand(destinationId)
@@ -25831,25 +25856,9 @@ async function processAethermoorAssistantEvents(data) {
                     }]
                 });
             } else if (event.event === 'delivered') {
-                const stateResult = await readStoredCombatState();
-                const quest = findQuestById(
-                    stateResult.state,
-                    event.questId
-                );
-
-                assert(
-                    quest?.status === 'in_progress',
-                    'Delivery tag does not match an in-progress quest'
-                );
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_quest_delivery',
-                        kind: 'quest_delivery',
-                        questId: event.questId
-                    }]
-                });
-
+                // Retired NPC turn-in tag. System completion is driven by
+                // validated final objectives or Missing Person safe arrival.
+                continue;
             } else {
                 result = await runStoredMechanic({
                     cases: [{
@@ -26273,21 +26282,6 @@ globalThis.aethermoorMechanicsInterceptor =
             )
         ) {
             for (const quest of relevantQuests) {
-                if (
-                    quest.deliveryReady === true &&
-                    contextState.currentLocationId ===
-                        quest.turnIn?.locationId
-                ) {
-                    const packet = questDeliveryContextPacket(quest);
-
-                    if (packet) {
-                        entries.push({
-                            id: `delivery-context-${quest.id}`,
-                            type: 'quest_delivery_context',
-                            packet
-                        });
-                    }
-                }
 
                 if (
                     contextState.currentLocationId === quest.destinationId

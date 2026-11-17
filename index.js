@@ -5791,10 +5791,15 @@ function ensureInstanceRoomEncounter(state, instance, room) {
     }
 
     if (room.encounterBlueprint) {
+        assert(
+            room.encounterId === room.encounterBlueprint.id &&
+            room.encounterBlueprint.instanceId === instance.id &&
+            room.encounterBlueprint.instanceRoomId === room.id,
+            'Saved room encounter does not match its instance room'
+        );
+
         state.encounter = clone(room.encounterBlueprint);
         state.encounter.status = 'spotted';
-        state.encounter.instanceId = instance.id;
-        state.encounter.instanceRoomId = room.id;
 
         return state.encounter;
     }
@@ -9369,14 +9374,14 @@ function resolveQuestSeed(test) {
      * Repeat entries affect this rank roll only; archetype and scenario
      * selection still use their existing eligible pools.
      */
-    const firstSocialCheck =
+    const firstSocialOffer =
         test.socialId !== undefined &&
         state.socialOpportunities?.settlements?.[
             issuerSettlement.id
-        ]?.checks === 1;
+        ]?.offers === 0;
 
     const rankPool =
-        firstSocialCheck &&
+        firstSocialOffer &&
         availableRanks.some(entry => entry.rank === 'F')
             ? [
                 ...availableRanks,
@@ -26693,18 +26698,21 @@ function settlementWorkContextPacket(state, settlement) {
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest),
         `First objective: ${quest.currentGate.objective}`,
-        'An NPC already in this scene may mention this concern. An ' +
-            'appropriate nearby NPC may also approach and mention it. ' +
-            'They know the local problem, not the System reward.',
-        'Only if an NPC actually mentions this saved concern in this ' +
-            'reply, emit this exact tag inside <plan>:',
+        'Reveal this saved concern through a plausible local event: ' +
+            'an NPC may approach, the crew may overhear a conversation, ' +
+            'or they may notice a notice, flyer, or physical clue. ' +
+            'No NPC conversation is required. Do not invent a different ' +
+            'objective or imply that an NPC pays the System reward.',
+        'Only after the concern is actually conveyed to the crew in ' +
+            'this reply, emit this exact tag inside <plan>:',
         `<AETHERMOOR:REVEAL_WORK social_id=${pending.id}>`,
         'That opens the saved offer in the Quests UI for the players to ' +
             'accept or decline. Do not have the NPC award XP, silver, ' +
             'gear, or a mechanically separate quest.',
-        'Do not emit ASK_WORK. If this is an older pending contact ' +
-            'offer, it may be shared by a plausible local referral; ' +
-            'it is not restricted to speaking with the original contact.'
+        'Do not emit ASK_WORK. This saved opportunity belongs to the ' +
+            'settlement, not to a required NPC or conversation. ' +
+            'A physical clue may introduce it without inventing loot, ' +
+            'an encounter, or another mechanically distinct quest.'
     ].join('\n');
 }
 

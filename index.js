@@ -14747,6 +14747,93 @@ function resolveSocialSeed(test) {
 }
 
 /*
+ * Reserve personality seeds before narration. Reporting an introduction
+ * consumes the first reserved seed; replaying the same assistant message
+ * returns its original claim. Names and fictional continuity belong in
+ * the GM's <template>, while these rolls remain saved mechanics state.
+ */
+function resolvePreparedNpcSeeds(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'NPC seed buffer requires saved state'
+    );
+
+    let state = clone(test.state);
+    state.pendingNpcSeeds ||= [];
+    state.npcSeedClaims ||= {};
+    state.nextNpcSeedNumber ||= 1;
+
+    assert(
+        Array.isArray(state.pendingNpcSeeds),
+        'NPC seed buffer must be an array'
+    );
+
+    if (test.action === 'prepare_npc_seeds') {
+        let created = false;
+
+        while (state.pendingNpcSeeds.length < 4) {
+            const id = `prepared-npc-${state.nextNpcSeedNumber++}`;
+            const rolled = resolveSocialSeed({
+                state,
+                socialId: id
+            });
+
+            state = rolled.state;
+            state.pendingNpcSeeds.push({
+                id,
+                seed: rolled.seed
+            });
+            created = true;
+        }
+
+        return {
+            ok: true,
+            created,
+            action: test.action,
+            state
+        };
+    }
+
+    assert(
+        test.action === 'claim_npc_seed',
+        `Unsupported NPC buffer action: ${test.action}`
+    );
+    assert(
+        typeof test.socialId === 'string' &&
+        test.socialId.length > 0,
+        'NPC seed claim requires an assistant-message ID'
+    );
+
+    const previous = state.npcSeedClaims[test.socialId];
+
+    if (previous) {
+        return {
+            ok: true,
+            created: false,
+            action: test.action,
+            socialId: test.socialId,
+            seed: clone(previous.seed),
+            state
+        };
+    }
+
+    const reserved = state.pendingNpcSeeds.shift();
+
+    assert(reserved, 'No pre-rolled NPC seed remains');
+
+    state.npcSeedClaims[test.socialId] = clone(reserved);
+
+    return {
+        ok: true,
+        created: true,
+        action: test.action,
+        socialId: test.socialId,
+        seed: clone(reserved.seed),
+        state
+    };
+}
+
+/*
  * The narrator may request a fight when a fictional complication needs
  * real opponents. This is deliberately narrower than unrestricted spawn:
  *
@@ -15901,11 +15988,14 @@ function resolveBatch(args) {
                     result = resolveWorldSeeds(test);
                     break;
                 case 'social':
-                    result = test.action === 'check_work'
-                        ? resolveSocialWorkOpportunity(test)
-                        : test.action === 'reveal_work'
-                            ? resolveSocialWorkReveal(test)
-                            : resolveSocialSeed(test);
+                    result = ['prepare_npc_seeds', 'claim_npc_seed']
+                        .includes(test.action)
+                        ? resolvePreparedNpcSeeds(test)
+                        : test.action === 'check_work'
+                            ? resolveSocialWorkOpportunity(test)
+                            : test.action === 'reveal_work'
+                                ? resolveSocialWorkReveal(test)
+                                : resolveSocialSeed(test);
                     break;
 
                 case 'loot':
@@ -17635,6 +17725,101 @@ function appendAethermoorHandoff(queue, entry, revision) {
     });
 }
 
+const aethermoorContractNotifications = [];
+let aethermoorContractNotificationBusy = false;
+
+function scheduleAethermoorContractNotifications(before, after, metadata) {
+    const oldJournal = ensureQuestJournal(clone(before));
+    const newJournal = ensureQuestJournal(clone(after));
+
+    const oldOffers = new Set(
+        oldJournal.offered.map(quest => quest.id)
+    );
+    const oldCompleted = new Set(
+        oldJournal.completed.map(quest => quest.id)
+    );
+    const oldAccepted = new Map(
+        oldJournal.accepted.map(quest => [quest.id, quest])
+    );
+
+    const notices = [];
+
+    for (const quest of newJournal.offered) {
+        if (!oldOffers.has(quest.id)) {
+            notices.push({
+                type: 'offered',
+                questId: quest.id
+            });
+        }
+    }
+
+    for (const quest of newJournal.accepted) {
+        const previous = oldAccepted.get(quest.id);
+        if (
+            previous &&
+            (quest.completedGates?.length || 0) >
+                (previous.completedGates?.length || 0)
+        ) {
+            notices.push({
+                type: 'gate',
+                quest: clone(quest),
+                gate: clone(quest.completedGates.at(-1))
+            });
+        }
+    }
+
+    for (const quest of newJournal.completed) {
+        if (!oldCompleted.has(quest.id)) {
+            notices.push({
+                type: 'complete',
+                quest: clone(quest)
+            });
+        }
+    }
+
+    if (!notices.length) return;
+
+    // Run after the save operation has returned from the mechanics queue.
+    setTimeout(() => {
+        if (getContext().chatMetadata !== metadata) return;
+        aethermoorContractNotifications.push(...notices);
+        void showNextAethermoorContractNotification();
+    }, 0);
+}
+
+async function showNextAethermoorContractNotification() {
+    if (
+        aethermoorContractNotificationBusy ||
+        !aethermoorContractNotifications.length
+    ) {
+        return;
+    }
+
+    aethermoorContractNotificationBusy = true;
+    const notice = aethermoorContractNotifications.shift();
+
+    try {
+        if (notice.type === 'offered') {
+            await showAethermoorContractOffer(notice.questId);
+        } else {
+            showAethermoorContractProgress(notice);
+        }
+    } catch (error) {
+        aethermoorContractNotificationBusy = false;
+        reportAethermoorError(
+            error,
+            'Contract notification failed'
+        );
+        void showNextAethermoorContractNotification();
+    }
+}
+
+function finishAethermoorContractNotification() {
+    document.getElementById('aethermoor_contract_popup')?.remove();
+    aethermoorContractNotificationBusy = false;
+    void showNextAethermoorContractNotification();
+}
+
 async function runStoredMechanic(args) {
     return queueAethermoor(async () => {
         const context = getContext();
@@ -17818,7 +18003,9 @@ async function runStoredMechanic(args) {
                     [
                         'check_work',
                         'reveal_work',
-                        'seed_npc'
+                        'seed_npc',
+                        'prepare_npc_seeds',
+                        'claim_npc_seed'
                     ].includes(oneCase.action)
                 ) ||
                 (
@@ -17999,12 +18186,6 @@ async function runStoredMechanic(args) {
               caseResult.recipient
                 ? inventoryActionNarrationPacket(caseResult, 'use')
 
-            : batch &&
-              oneCase?.kind === 'social' &&
-              oneCase.action === 'seed_npc' &&
-              caseResult.created
-                ? npcProfileNarrationPacket(caseResult)
-
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
               caseResult.quest
@@ -18126,6 +18307,12 @@ async function runStoredMechanic(args) {
             metadata[AETHERMOOR_METADATA_KEY] = previous;
             throw error;
         }
+
+        scheduleAethermoorContractNotifications(
+            savedState,
+            nextState,
+            metadata
+        );
 
         /*
          * The full machine state stays in chat metadata, rather than
@@ -20264,6 +20451,94 @@ function makeAethermoorAction(label, accent, handler) {
     return button;
 }
 
+function showAethermoorContractProgress(notice) {
+    addAethermoorPanelStyles();
+
+    const quest = notice.quest;
+    const complete = notice.type === 'complete';
+    const popup = document.createElement('section');
+
+    popup.id = 'aethermoor_contract_popup';
+    popup.className = 'aethermoor-contract-popup';
+    popup.setAttribute('role', 'dialog');
+    popup.setAttribute(
+        'aria-label',
+        complete
+            ? `Contract complete: ${quest.title}`
+            : `Gate cleared: ${quest.title}`
+    );
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-contract-popup-header';
+
+    const heading = document.createElement('b');
+    heading.className = 'aethermoor-contract-popup-heading';
+    heading.textContent = complete
+        ? 'System Log // Contract Complete'
+        : 'System Log // Gate Cleared';
+
+    const label = document.createElement('b');
+    label.className = 'aethermoor-contract-popup-rank';
+    label.textContent = complete
+        ? `RANK ${quest.rank}`
+        : `GATE ${notice.gate.step}/${quest.gates}`;
+
+    header.append(heading, label);
+
+    const description = document.createElement('div');
+    description.textContent = complete
+        ? `Completed: ${quest.title}`
+        : `${quest.title} — ${notice.gate.objective}`;
+
+    popup.append(header, description);
+
+    const detail = document.createElement('div');
+    detail.style.marginTop = '6px';
+
+    if (complete) {
+        detail.textContent =
+            `+${quest.payout.xp} XP | ` +
+            `+${quest.payout.silver} silver | ` +
+            `+${quest.payout.repSteps} reputation step(s)`;
+    } else {
+        detail.textContent =
+            `Next: ${quest.currentGate?.objective || 'Not recorded'}`;
+    }
+
+    popup.appendChild(detail);
+
+    if (complete && quest.salvage) {
+        const salvage = document.createElement('div');
+        salvage.className = 'aethermoor-contract-popup-salvage';
+        salvage.style.color =
+            quest.salvage.rarityColor || '#d0d7de';
+        salvage.textContent =
+            `System salvage: ${quest.salvage.name} ` +
+            `(${quest.salvage.rarity}) — ` +
+            Object.entries(quest.salvage.bonus || {})
+                .filter(([, value]) => Number(value) > 0)
+                .map(([key, value]) => `+${value} ${key}`)
+                .join(', ');
+        popup.appendChild(salvage);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'aethermoor-contract-popup-actions';
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    close.addEventListener(
+        'click',
+        finishAethermoorContractNotification
+    );
+
+    actions.appendChild(close);
+    popup.appendChild(actions);
+    document.body.appendChild(popup);
+    close.focus();
+}
+
 /*
  * The System, not the narrator or NPC, displays mechanical contract
  * details. This is a notification over the saved offered quest; closing
@@ -20280,7 +20555,10 @@ async function showAethermoorContractOffer(questId) {
         entry => entry.id === questId && entry.status === 'offered'
     );
 
-    if (!quest) return;
+    if (!quest) {
+        finishAethermoorContractNotification();
+        return;
+    }
 
     addAethermoorPanelStyles();
     document.getElementById('aethermoor_contract_popup')?.remove();
@@ -20382,7 +20660,10 @@ async function showAethermoorContractOffer(questId) {
     const later = document.createElement('button');
     later.type = 'button';
     later.textContent = 'Close / Later';
-    later.addEventListener('click', () => popup.remove());
+    later.addEventListener(
+        'click',
+        finishAethermoorContractNotification
+    );
 
     async function decide(action) {
         accept.disabled = true;
@@ -20410,7 +20691,7 @@ async function showAethermoorContractOffer(questId) {
                     `Could not ${action} the contract`
             );
 
-            popup.remove();
+            finishAethermoorContractNotification();
             toastr.info(
                 action === 'accept'
                     ? 'Contract accepted.'
@@ -20724,15 +21005,8 @@ async function renderQuestTab(host) {
                             'Could not publish saved offer'
                     );
 
-                    const revealed = output.results[0].result;
-
                     await renderQuestTab(host);
 
-                    if (revealed?.questId) {
-                        await showAethermoorContractOffer(
-                            revealed.questId
-                        );
-                    }
                 } catch (error) {
                     publish.disabled = false;
                     toastr.error(
@@ -25992,9 +26266,9 @@ async function processAethermoorAssistantEvents(data) {
 
                 result = await runStoredMechanic({
                     cases: [{
-                        name: 'assistant_npc_profile',
+                        name: 'assistant_npc_seed_claim',
                         kind: 'social',
-                        action: 'seed_npc',
+                        action: 'claim_npc_seed',
                         socialId:
                             `${messageId}-npc-` +
                             `${event.introductionNumber}`
@@ -26079,13 +26353,6 @@ async function processAethermoorAssistantEvents(data) {
                     }]
                 });
 
-                const reveal = result.results?.[0]?.result;
-
-                // SillyTavern may notify twice for one reply. Only the
-                // first successful publication opens the notification.
-                if (reveal?.created === true && reveal.questId) {
-                    await showAethermoorContractOffer(reveal.questId);
-                }
             } else if (event.event === 'ask_wares') {
                 const messageId =
                     socialWorkIdForAssistantMessage(message);
@@ -26523,6 +26790,28 @@ globalThis.aethermoorMechanicsInterceptor =
         }
 
         /*
+         * Give this reply four usable NPC profiles before the narrator
+         * invents any new named people. The operation is a saved no-op
+         * when the buffer is already full.
+         */
+        if (getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]?.state) {
+            try {
+                await runStoredMechanic({
+                    cases: [{
+                        name: 'prepare_named_npc_profiles',
+                        kind: 'social',
+                        action: 'prepare_npc_seeds'
+                    }]
+                });
+            } catch (error) {
+                reportAethermoorError(
+                    error,
+                    'NPC seed preparation failed'
+                );
+            }
+        }
+
+        /*
          * Resolve one NPC-agnostic local opportunity check BEFORE the
          * GM writes this reply. Identity comes from the saved user
          * message, so regenerating the same reply cannot reroll it.
@@ -26751,28 +27040,37 @@ globalThis.aethermoorMechanicsInterceptor =
             });
         }
 
-        /*
-         * The GM reports new named NPC introductions. The seed is
-         * resolved after that reply, so the GM receives it on the next
-         * reply rather than retroactively changing the introduction.
-         */
         if (contextState) {
+            const seeds = contextState.pendingNpcSeeds || [];
+
             entries.push({
                 id: 'npc-introduction-context',
                 type: 'npc_introduction_context',
-                packet:
-                    'If the Narrator introduces a new named NPC directly interacting ' +
-                    'with the crew, then give the NPC an ordinary first beat. ' +
-                    'Immediately report the introduction to the extension ' +
-                    'by writting <plan><AETHERMOOR:INTRODUCE_NPC></plan> ' +
-                    'per new NPC, in introduction order. The extension ' +
-                    'will provide their profile. Do not report ' +
-                    'returning NPCs or travelers already introduced by ' +
-                    'a travel result.'
-
+                packet: [
+                    'PRIVATE NAMED NPC SEEDS — use now, do not recite.',
+                    ...seeds.map((entry, index) =>
+                        `${index + 1}. First-meeting manner: ` +
+                        `${entry.seed.demeanor}; private inclination: ` +
+                        `${entry.seed.inclination.replaceAll('_', ' ')}.`
+                    ),
+                    'Use these in order ONLY for newly introduced NAMED ' +
+                        'NPCs directly interacting with the crew. Do not ' +
+                        'spend one on a nameless passerby or an already ' +
+                        'introduced traveler.',
+                    'For each such NPC, immediately write a concise ' +
+                        '<template> record with their name, identity, ' +
+                        'first-meeting manner, private inclination, and ' +
+                        '"INTRODUCE_NPC already reported; do not report ' +
+                        'this NPC again." Keep private facts out of ' +
+                        'character dialogue.',
+                    'Also emit one <AETHERMOOR:INTRODUCE_NPC> inside ' +
+                        '<plan> per newly named NPC, in the same order. ' +
+                        'Do not wait for a later profile handoff.',
+                    'These seeds create no quest, reward, encounter, ' +
+                        'or mandatory secret.'
+                ].join('\n')
             });
         }
-
 
         /*
          * Breadcrumbs survive replacement of the encounter. Supply

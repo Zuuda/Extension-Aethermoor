@@ -17032,56 +17032,26 @@ function publicQuestFactLines(quest) {
 
 function questOfferNarrationPacket(quest) {
     const sourceText = {
-        rumor: 'The crew followed a rumor lead.',
-        pack_drop:
-            'The crew followed a quest breadcrumb found on a cleared pack.',
-        social:
-            'A local contact knows of this request. They may introduce ' +
-            'or refer the crew to its saved sponsor; the contact need not ' +
-            'personally be the sponsor.',
-        debug_test: 'A test trigger created this quest offer.'
+        rumor: 'Following the rumor revealed a local concern.',
+        pack_drop: 'Following the pack breadcrumb revealed a local concern.',
+        social: 'A local concern was mentioned in conversation.',
+        debug_test: 'A test trigger created this offer.'
     }[quest.seed?.source] ||
-        'The crew discovered an engine-established quest offer.';
+        'A local concern has been established.';
 
-    const variantLabels = {
-        abandoned_transport: 'Abandoned Transport',
-        diverted_shipment: 'Diverted Shipment',
-        stolen_shipment: 'Stolen Shipment',
-        lost: 'Lost Person',
-        abducted: 'Abducted Person'
-    };
-
-    const variantLabel =
-        variantLabels[quest.variant?.id] || null;
-
-    const variantText = variantLabel
-        ? quest.archetype?.id === 'recover_cargo'
-            ? `Recover Cargo variant: ${variantLabel}.`
-            : quest.archetype?.id === 'missing_person'
-                ? `Missing Person variant: ${variantLabel}.`
-                : `Quest variant: ${variantLabel}.`
-        : null;
-
-    const factLines = publicQuestFactLines(quest);
     return [
+        'PRIVATE QUEST OFFER — use for the scene, do not recite.',
         sourceText,
-        ...(variantText ? [variantText] : []),
-
-        `Quest offered: ${quest.title}.`,
-        quest.pitch || 'A local request has been presented.',
-        ...factLines,
-        `It has ${quest.gates} gate(s).`,
-        `Completion would award ${quest.payout.xp} XP and ` +
-            `${quest.payout.silver} silver, plus ` +
-            `${quest.payout.repSteps} reputation step(s).`,
-        `Offered salvage: ${quest.salvage.name} ` +
-            `(${quest.salvage.rarity}).`,
-        `First gate: ${quest.currentGate.mode}: ` +
-            `${quest.currentGate.objective}`,
-        'These quest facts and objectives are mechanically established. ' +
-            'Do not reveal hidden truth or replace the objective.'
+        `Concern: ${quest.pitch || quest.title}`,
+        ...publicQuestFactLines(quest),
+        `First objective: ${quest.currentGate.objective}`,
+        'Portray the concern in-world. NPCs do not know about System ' +
+            'XP, silver, reputation, or salvage and do not dispense them.',
+        'The extension has already saved the offer and handles its ' +
+            'contract notification, acceptance, and rewards.'
     ].join('\n');
 }
+
 
 function inventoryActionNarrationPacket(result, action) {
     if (action === 'equip') {

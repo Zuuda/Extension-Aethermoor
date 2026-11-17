@@ -26696,7 +26696,19 @@ function settlementWorkContextPacket(state, settlement) {
         `Saved offer reference: ${pending.id}.`,
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest),
+        `System offer: ${quest.title} (Rank ${quest.rank}).`,
         `First objective: ${quest.currentGate.objective}`,
+        `System rewards on completion: ${quest.payout.xp} XP, ` +
+            `${quest.payout.silver} silver, ` +
+            `${quest.payout.repSteps} reputation step(s), and ` +
+            `${quest.salvage.name} (${quest.salvage.rarity}).`,
+        'When this concern is conveyed to the crew, describe a quest ' +
+            'window appearing for Q’tik and Tansy. They can see its ' +
+            'locked objective and rewards; ordinary NPCs cannot. ' +
+            'The window offers the quest—it does not accept it. ' +
+            'Write a concise <template> record of these quest details ' +
+            'for later fictional continuity. Do not invent additional ' +
+            'objectives or rewards.',
         'Reveal this saved concern through a plausible local event: ' +
             'an NPC they are talking with might reveal/remember something, '+
             'or an NPC may approach, or the crew may overhear a conversation, ' +

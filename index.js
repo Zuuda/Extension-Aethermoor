@@ -26708,7 +26708,7 @@ function settlementWorkContextPacket(state, settlement) {
             'The window offers the quest—it does not accept it. ' +
             'Write a concise <template> record of these quest details ' +
             'for later fictional continuity. Do not invent additional ' +
-            'objectives or rewards.',
+            'objectives or rewards or promise an NPC will pay for the quest since it is The System that handles rewards.',
         'Reveal this saved concern through a plausible local event: ' +
             'an NPC they are talking with might reveal/remember something, '+
             'or an NPC may approach, or the crew may overhear a conversation, ' +

@@ -26681,13 +26681,12 @@ function settlementWorkContextPacket(state, settlement) {
         return [
             `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
             ...agreementRules,
-
-            'No System-authorized local quest is available for this reply.',
-            'NPCs may discuss ordinary concerns, but do not turn one ' +
-                'into a quest or promise a quest reward. Do not emit ' +
-                'ASK_WORK or REVEAL_WORK.'
-        ].join('\n');
+            'No local work offer is saved for this reply. If asked for ' +
+                'jobs, NPCs have no specific paid opening to offer or ' +
+                'recommend right now nor do they know of anyone who might have something to offer.'
+            ].join('\n');
     }
+
 
     const quest = pending.pendingQuest;
 
@@ -26699,7 +26698,8 @@ function settlementWorkContextPacket(state, settlement) {
         ...publicQuestFactLines(quest),
         `First objective: ${quest.currentGate.objective}`,
         'Reveal this saved concern through a plausible local event: ' +
-            'an NPC may approach, the crew may overhear a conversation, ' +
+            'an NPC they are talking with might reveal/remember something, '+
+            'or an NPC may approach, or the crew may overhear a conversation, ' +
             'or they may notice a notice, flyer, or physical clue. ' +
             'No NPC conversation is required. Do not invent a different ' +
             'objective or imply that an NPC pays the System reward.',
@@ -26709,10 +26709,10 @@ function settlementWorkContextPacket(state, settlement) {
         'That opens the saved offer in the Quests UI for the players to ' +
             'accept or decline. Do not have the NPC award XP, silver, ' +
             'gear, or a mechanically separate quest.',
-        'Do not emit ASK_WORK. This saved opportunity belongs to the ' +
-            'settlement, not to a required NPC or conversation. ' +
-            'A physical clue may introduce it without inventing loot, ' +
-            'an encounter, or another mechanically distinct quest.'
+        'This saved opportunity belongs to the settlement, not to a ' +
+            'required NPC or conversation. A physical clue may introduce ' +
+            'it without inventing loot, an encounter, or another ' +
+            'mechanically distinct quest.'
     ].join('\n');
 }
 

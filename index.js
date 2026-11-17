@@ -11875,26 +11875,6 @@ function resolveVendorSelection(test) {
     );
 
     const state = clone(test.state);
-
-    if (test.action === 'commit') {
-        assert(
-            typeof test.socialId === 'string' &&
-            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-            'Herbalist agreement requires an engine-issued message reference'
-        );
-
-        const previous = state.herbalistReceipts?.[test.socialId];
-        if (previous) {
-            return {
-                ok: true,
-                created: false,
-                action: 'commit',
-                receipt: clone(previous),
-                state
-            };
-        }
-    }
-
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
@@ -13054,27 +13034,9 @@ function resolveInnAction(test) {
     );
 
     const state = clone(test.state);
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Inn services require presence at a free settlement'
-    );
-
     state.innReceipts ||= {};
 
-    /*
-     * Check receipts before inspecting the current menu. Replayed
-     * assistant notifications must not charge again, even after the
-     * crew leaves the settlement.
-     */
+    // A replay returns its saved receipt even after the crew has left.
     if (test.action === 'commit') {
         assert(
             typeof test.socialId === 'string' &&
@@ -13094,6 +13056,20 @@ function resolveInnAction(test) {
             };
         }
     }
+
+    const settlement = Object.values(
+        state.world?.settlements || {}
+    ).find(entry =>
+        entry.locationId === state.currentLocationId &&
+        entry.zone === state.zone
+    );
+
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Inn services require presence at a free settlement'
+    );
 
     if (test.action === 'open') {
         assert(
@@ -16362,7 +16338,14 @@ function resolveBatch(args) {
                     break;
                 }
 
-            case 'quest':
+                case 'quest':
+                    result = test.action
+                        ? resolveQuestAction(test)
+                        : resolveQuestSeed(test);
+                    break;
+                default:
+                    throw new Error(`Unknown mechanics kind: ${test.kind}`);
+            }
 
             if (test.expectError) {
                 results.push({
@@ -16384,10 +16367,9 @@ function resolveBatch(args) {
                 checks.some(check => check.path === 'ok');
 
             const resultStatusOk =
-                !result ||
-                typeof result !== 'object' ||
-                result.ok !== false ||
-                explicitlyChecksStatus;
+                result !== undefined &&
+                result !== null &&
+                (result.ok !== false || explicitlyChecksStatus);
 
             const checksOk =
                 checks.every(check => check.ok);
@@ -21653,23 +21635,8 @@ async function openAethermoorShopWindow() {
                 staged?.results?.[0]?.error || 'Could not stage trade'
             );
 
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'ui_commit_vendor_trade',
-                    kind: 'vendor',
-                    action: 'commit',
-                    socialId: `work-0-${Date.now().toString(36)}`
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not complete trade'
-            );
-
-            const receipt = committed.results[0].result.receipt;
-            toastr.success(
-                `Trade recorded. Purse: ${receipt.purseAfter}s`,
+            toastr.info(
+                'Trade quote staged. No items or silver exchanged yet.',
                 'Aethermoor'
             );
             windowElement.remove();
@@ -21966,23 +21933,8 @@ async function openAethermoorHerbalistWindow() {
                 staged?.results?.[0]?.error || 'Could not stage selection'
             );
 
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'ui_commit_herbalist_trade',
-                    kind: 'herbalist',
-                    action: 'commit',
-                    socialId: `work-0-${Date.now().toString(36)}`
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not complete trade'
-            );
-
-            const receipt = committed.results[0].result.receipt;
-            toastr.success(
-                `Herbalist trade recorded. Purse: ${receipt.purseAfter}s`,
+            toastr.info(
+                'Herbalist quote staged. No potions or silver exchanged yet.',
                 'Aethermoor'
             );
             panel.remove();
@@ -22261,24 +22213,8 @@ async function openAethermoorInnWindow() {
                 staged?.ok === true && staged.results?.[0]?.ok !== false,
                 staged?.results?.[0]?.error || 'Could not stage inn selection'
             );
-
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'ui_commit_inn_services',
-                    kind: 'inn',
-                    action: 'commit',
-                    socialId: `work-0-${Date.now().toString(36)}`
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not record payment'
-            );
-
-            const receipt = committed.results[0].result.receipt;
-            toastr.success(
-                `Inn expense recorded (−${receipt.cost}s). Purse: ${receipt.purseAfter}s`,
+            toastr.info(
+                'Inn quote staged. No silver paid yet.',
                 'Aethermoor'
             );
             panel.remove();
@@ -26714,6 +26650,20 @@ function settlementShopBriefingPacket(state, settlement) {
 }
 
 function settlementWorkContextPacket(state, settlement) {
+    const agreementRules = [
+        ['vendorMenu', 'TRADE_AGREED', 'gear trade'],
+        ['herbalistMenu', 'HERBALIST_AGREED', 'herbalist exchange'],
+        ['innMenu', 'INN_AGREED', 'inn services']
+    ].filter(([menu]) =>
+        state[menu]?.settlementId === settlement.id &&
+        state[menu]?.pendingBasket
+    ).map(([, tag, description]) =>
+        `A ${description} quote is staged. Only after the crew actually ` +
+        `agrees to this exchange in the fiction, emit ` +
+        `<AETHERMOOR:${tag}> inside <plan>. Staging alone does not pay. ` +
+        `Do not report the same agreement again in a later reply.`
+    );
+
     const pending = Object.values(
         state.socialOpportunities?.contacts || {}
     ).find(contact =>
@@ -26725,6 +26675,8 @@ function settlementWorkContextPacket(state, settlement) {
     if (!pending) {
         return [
             `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
+            ...agreementRules,
+
             'No System-authorized local quest is available for this reply.',
             'NPCs may discuss ordinary concerns, but do not turn one ' +
                 'into a quest or promise a quest reward. Do not emit ' +
@@ -26736,6 +26688,7 @@ function settlementWorkContextPacket(state, settlement) {
 
     return [
         `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
+        ...agreementRules,
         `Saved offer reference: ${pending.id}.`,
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest),

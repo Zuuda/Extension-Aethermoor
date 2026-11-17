@@ -17727,8 +17727,17 @@ function appendAethermoorHandoff(queue, entry, revision) {
 
 const aethermoorContractNotifications = [];
 let aethermoorContractNotificationBusy = false;
+let aethermoorContractNotificationEpoch = 0;
+
+function clearAethermoorContractNotifications() {
+    aethermoorContractNotificationEpoch++;
+    aethermoorContractNotifications.length = 0;
+    aethermoorContractNotificationBusy = false;
+    document.getElementById('aethermoor_contract_popup')?.remove();
+}
 
 function scheduleAethermoorContractNotifications(before, after, metadata) {
+
     const oldJournal = ensureQuestJournal(clone(before));
     const newJournal = ensureQuestJournal(clone(after));
 
@@ -17779,10 +17788,22 @@ function scheduleAethermoorContractNotifications(before, after, metadata) {
 
     if (!notices.length) return;
 
-    // Run after the save operation has returned from the mechanics queue.
+    const epoch = aethermoorContractNotificationEpoch;
+    const scheduledNotices = notices.map(notice => ({
+        ...notice,
+        metadata
+    }));
+
+    // Ignore callbacks scheduled by a campaign that has since been reset.
     setTimeout(() => {
-        if (getContext().chatMetadata !== metadata) return;
-        aethermoorContractNotifications.push(...notices);
+        if (
+            epoch !== aethermoorContractNotificationEpoch ||
+            getContext().chatMetadata !== metadata
+        ) {
+            return;
+        }
+
+        aethermoorContractNotifications.push(...scheduledNotices);
         void showNextAethermoorContractNotification();
     }, 0);
 }
@@ -17797,14 +17818,30 @@ async function showNextAethermoorContractNotification() {
 
     aethermoorContractNotificationBusy = true;
     const notice = aethermoorContractNotifications.shift();
+    const epoch = aethermoorContractNotificationEpoch;
+
+    if (getContext().chatMetadata !== notice.metadata) {
+        aethermoorContractNotificationBusy = false;
+        void showNextAethermoorContractNotification();
+        return;
+    }
 
     try {
         if (notice.type === 'offered') {
-            await showAethermoorContractOffer(notice.questId);
-        } else {
+            await showAethermoorContractOffer(
+                notice.questId,
+                notice.metadata,
+                epoch
+            );
+        } else if (
+            epoch === aethermoorContractNotificationEpoch &&
+            getContext().chatMetadata === notice.metadata
+        ) {
             showAethermoorContractProgress(notice);
         }
     } catch (error) {
+        if (epoch !== aethermoorContractNotificationEpoch) return;
+
         aethermoorContractNotificationBusy = false;
         reportAethermoorError(
             error,
@@ -20545,11 +20582,34 @@ function showAethermoorContractProgress(notice) {
  * it does not accept or decline anything. All text is added as text nodes,
  * so quest names and cosmetic item names cannot inject HTML.
  */
-async function showAethermoorContractOffer(questId) {
-    const metadata = getContext().chatMetadata;
+async function showAethermoorContractOffer(
+    questId,
+    expectedMetadata = getContext().chatMetadata,
+    expectedEpoch = aethermoorContractNotificationEpoch
+) {
+    if (
+        getContext().chatMetadata !== expectedMetadata ||
+        expectedEpoch !== aethermoorContractNotificationEpoch
+    ) {
+        if (expectedEpoch === aethermoorContractNotificationEpoch) {
+            aethermoorContractNotificationBusy = false;
+            void showNextAethermoorContractNotification();
+        }
+        return;
+    }
+
     const snapshot = await readStoredCombatState();
 
-    if (getContext().chatMetadata !== metadata) return;
+    if (
+        getContext().chatMetadata !== expectedMetadata ||
+        expectedEpoch !== aethermoorContractNotificationEpoch
+    ) {
+        if (expectedEpoch === aethermoorContractNotificationEpoch) {
+            aethermoorContractNotificationBusy = false;
+            void showNextAethermoorContractNotification();
+        }
+        return;
+    }
 
     const quest = ensureQuestJournal(snapshot.state).offered.find(
         entry => entry.id === questId && entry.status === 'offered'
@@ -25672,6 +25732,8 @@ function openNarrationDebug() {
 
             try {
                 await resetAethermoorCampaign();
+
+                clearAethermoorContractNotifications();
 
                 for (const id of [
                     'aethermoor_shop_window',

@@ -6268,10 +6268,8 @@ function questsForArrival(state, locationId) {
 
         const returningWithObjective =
             Boolean(quest.objectiveResolution) &&
-            (
-                quest.structureV2?.family === 'rescue_person' ||
-                quest.archetype?.id === 'herb_foraging'
-            );
+            ['rescue_person', 'retrieve_item']
+                .includes(quest.structureV2?.family);
 
         const arrivalLocationId = returningWithObjective
             ? quest.turnIn?.locationId
@@ -6330,10 +6328,8 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
 
     const returningWithObjective =
         Boolean(quest.objectiveResolution) &&
-        (
-            quest.structureV2?.family === 'rescue_person' ||
-            quest.archetype?.id === 'herb_foraging'
-        );
+        ['rescue_person', 'retrieve_item']
+            .includes(quest.structureV2?.family);
 
     assert(
         nextState.currentLocationId ===
@@ -6344,23 +6340,24 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
     );
 
     if (
-        quest.archetype?.id === 'herb_foraging' &&
+        quest.structureV2?.family === 'retrieve_item' &&
         quest.objectiveResolution
     ) {
-        const herb = quest.discoveries?.find(
+        const cargo = quest.discoveries?.find(
             item => item.id === quest.turnIn?.discoveryId
         );
 
         assert(
-            herb?.state === 'acquired',
-            'The required herb harvest is not in quest cargo'
+            cargo?.kind === 'quest_item' &&
+            cargo.state === 'acquired',
+            'The required item is not secured as quest cargo'
         );
 
         quest.deliveryReady = true;
         outcome.deliveryReadyList.push({
             questId: quest.id,
             recipient: quest.turnIn.recipient,
-            cargo: herb.name
+            cargo: cargo.name
         });
         saveQuestToJournal(nextState, quest);
         return nextState;
@@ -6647,20 +6644,16 @@ function resolveTravelStep(test) {
     }
 
     /*
-     * Missing Person needs safe arrival; Herb Foraging needs an actual
-     * handover after returning. An explicit destination or existing
-     * journey takes precedence. Multiple eligible returns still require
-     * the player to choose one in the Quests tab.
+     * Missing Person needs safe arrival; retrieval quests need cargo
+     * handover after arrival. Explicit travel takes precedence.
      */
     if (!state.currentJourney && !test.destinationId) {
         const returnCandidates = ensureQuestJournal(state)
             .accepted.filter(quest =>
                 quest.status === 'in_progress' &&
                 Boolean(quest.objectiveResolution) &&
-                (
-                    quest.structureV2?.family === 'rescue_person' ||
-                    quest.archetype?.id === 'herb_foraging'
-                ) &&
+                ['rescue_person', 'retrieve_item']
+                    .includes(quest.structureV2?.family) &&
                 Boolean(quest.turnIn?.locationId) &&
                 state.currentLocationId !== quest.turnIn.locationId
             );
@@ -6675,7 +6668,7 @@ function resolveTravelStep(test) {
 
             assert(
                 safetySettlement,
-                'Missing person origin settlement is unavailable'
+                'Quest return settlement is unavailable'
             );
 
             const route = shortestRoute(state, safetyId);
@@ -7085,7 +7078,7 @@ function resolveTravelStep(test) {
     }
     if (outcome.arrived) {
         const arrivalQuests =
-            questsForArrival(state, outcome.destinationId);
+            questsForArrival(state, journey.destinationId);
 
         for (const arrivalQuest of arrivalQuests) {
             state = completeQuestArrivalGate(
@@ -10984,39 +10977,53 @@ function resolveQuestAction(test) {
         result.objectiveResolution = quest.objectiveResolution;
 
         /*
-         * Herb Foraging has physical cargo. Harvesting secures the field
-         * objective; payment waits for a narrated handover at the locked
-         * turn-in location. Missing Person retains its separate safe-arrival
-         * rule. Already-completed quests are never reopened by this change.
+         * Both current retrieve_item archetypes carry physical cargo.
+         * Securing it does not deliver it. Missing Person instead finishes
+         * on safe arrival. Completed historical quests are not reopened.
          */
+        const cargoDelivery =
+            quest.structureV2?.family === 'retrieve_item';
+
         if (
-            quest.archetype?.id === 'herb_foraging' ||
+            cargoDelivery ||
             quest.structureV2?.family === 'rescue_person'
         ) {
             state.leads ||= {};
             const returnLeadId = `quest-return-${quest.id}`;
-            const herbDelivery =
-                quest.archetype?.id === 'herb_foraging';
+            const cargoName = cargoDelivery
+                ? quest.discoveries?.find(
+                    item => item.id === quest.turnIn?.discoveryId
+                  )?.name
+                : null;
+
+            if (cargoDelivery) {
+                assert(
+                    cargoName,
+                    'Retrieval quest has no locked turn-in cargo'
+                );
+            }
 
             state.leads[returnLeadId] ||= {
                 id: returnLeadId,
                 kind: 'quest_return',
-                label: herbDelivery
-                    ? `Deliver ${quest.facts.herb}`
+                label: cargoDelivery
+                    ? `Deliver ${cargoName}`
                     : `Bring ${quest.facts.person} to safety`,
-                claim: herbDelivery
-                    ? `Bring ${quest.facts.herb} to ${quest.turnIn.recipient}.`
+                claim: cargoDelivery
+                    ? `Bring ${cargoName} to ${quest.turnIn.recipient}.`
                     : `${quest.facts.person} must reach the origin settlement safely.`,
                 targetType: 'place',
                 targetId: quest.turnIn.locationId,
                 status: 'known'
             };
 
-            quest.deliveryReady = false;
+            if (cargoDelivery) {
+                quest.deliveryReady = false;
+            }
+
             saveQuestToJournal(state, quest);
             return result;
         }
-
 
         const completion = resolveQuestAction({
             state,
@@ -11064,12 +11071,12 @@ function resolveQuestAction(test) {
         'Quest cannot complete before its final gate'
     );
 
-    if (quest.archetype?.id === 'herb_foraging') {
+    if (quest.structureV2?.family === 'retrieve_item') {
         assert(
             quest.deliveryReady === true &&
             state.currentLocationId === quest.turnIn?.locationId &&
             !state.currentJourney,
-            'Return to the herb recipient with the harvested plants before completion'
+            'Return to the locked recipient with the quest cargo before completion'
         );
     }
 
@@ -16371,13 +16378,12 @@ function resolveBatch(args) {
                     const quest = findQuestById(state, questId);
 
                     /*
-                     * MESSAGE_RECEIVED and CHARACTER_MESSAGE_RENDERED may
-                     * both report one handover. Once this herb quest is
-                     * complete, replay is a no-op rather than a second payout.
+                     * A duplicate notification for an already-completed
+                     * retrieval quest must never pay a second time.
                      */
                     if (
                         quest?.status === 'complete' &&
-                        quest.archetype?.id === 'herb_foraging'
+                        quest.structureV2?.family === 'retrieve_item'
                     ) {
                         result = {
                             ok: true,
@@ -16391,32 +16397,35 @@ function resolveBatch(args) {
 
                     assert(
                         quest?.status === 'in_progress' &&
-                        quest.archetype?.id === 'herb_foraging',
-                        `No in-progress Herb Foraging quest awaits ${questId}`
+                        quest.structureV2?.family === 'retrieve_item',
+                        `No in-progress retrieval quest awaits ${questId}`
                     );
 
                     assert(
                         quest.deliveryReady === true &&
                         Boolean(quest.objectiveResolution),
-                        'Herb harvest has not returned ready for delivery'
+                        'Quest cargo has not returned ready for delivery'
                     );
 
                     assert(
                         state.currentLocationId ===
-                            quest.turnIn?.locationId,
-                        'The crew is not at this quest turn-in location'
+                            quest.turnIn?.locationId &&
+                        !state.currentJourney,
+                        'The crew is not free at this quest turn-in location'
                     );
 
-                              /*
-                     * Delivery is bound to quest.id. Preparation and
-                     * completion must not change the UI compatibility
-                     * selection or make another accepted quest active.
-                     */
-                    if (quest.archetype?.id === 'recover_cargo') {
-                        prepareRecoverCargoDiscovery(quest);
-                    }
+                    const cargo = quest.discoveries?.find(
+                        item => item.id === quest.turnIn?.discoveryId
+                    );
+
+                    assert(
+                        cargo?.kind === 'quest_item' &&
+                        cargo.state === 'acquired',
+                        'The locked quest cargo has not been recovered'
+                    );
 
                     result = resolveQuestAction({
+
                         state,
                         questId: quest.id,
                         action: 'complete',
@@ -17034,16 +17043,16 @@ function travelNarrationPacket(result) {
             'This gate clearance alone granted no quest payout.'
         );
     }
-
-     for (const ready of result.deliveryReadyList || []) {
+    for (const ready of result.deliveryReadyList || []) {
         lines.push(
             `${ready.cargo} has returned to ${ready.recipient}'s settlement.`,
-            `Herb delivery is ready for quest ${ready.questId}.`,
-            'Arrival did not hand over the plants or pay quest rewards. ' +
+            `Cargo handover is ready for quest ${ready.questId}.`,
+            'Arrival did not hand over the cargo or pay quest rewards. ' +
                 'Leave the actual handover to the player.'
         );
     }
 
+    for (const completion of result.questCompletions || []) {
         lines.push(
             `The missing person reached safety; the System completed ` +
                 `${completion.title}.`,
@@ -17293,8 +17302,9 @@ function questDiscoveryContextPacket(quest, state) {
           'player stated a desired outcome. Judge what their actions ' +
           'actually accomplish.',
         ...(quest.currentGate?.decisive === true &&
-            quest.structureV2?.family !== 'rescue_person' &&
-            quest.archetype?.id !== 'herb_foraging'
+            !['rescue_person', 'retrieve_item']
+                .includes(quest.structureV2?.family)
+
             ? [
                 '* **QUEST DONE — only if THIS final objective is actually ' +
                     'completed in this reply:** First portray the recovery. ' +
@@ -17315,19 +17325,21 @@ function questDiscoveryContextPacket(quest, state) {
                     'remains separate and is not completed by this recovery.'
             ]
             : []),
-        ...(isHerbHarvest && quest.currentGate?.decisive === true
+        ...(quest.structureV2?.family === 'retrieve_item' &&
+            quest.currentGate?.decisive === true
             ? [
-                '* **HARVEST IS NOT DELIVERY:** Once the plants are gathered, ' +
-                    'portray them as secured quest cargo. Do NOT show a ' +
-                    'quest-completion window, award rewards, or claim the ' +
-                    'supplier has received them.',
-                `* **Return:** Bring the harvest to ${
+                '* **RECOVERY IS NOT DELIVERY:** Once the required object ' +
+                    'is recovered, portray it as secured quest cargo. ' +
+                    'Do NOT show a completion window, award rewards, ' +
+                    'or claim the recipient has received it.',
+                `* **Return:** Bring this quest’s locked cargo to ${
                     quest.turnIn.recipient
-                } at the issuing settlement. The System pays only after ` +
-                    'the actual handover is reported. Other accepted ' +
-                    'harvest quests remain separate.'
+                } at the issuing settlement. The System pays only ` +
+                    'after the actual handover is reported. Other ' +
+                    'accepted retrieval quests remain separate.'
             ]
             : [])
+
     ];
 
     if (discovery.contents) {
@@ -17412,8 +17424,8 @@ function questDiscoveryNarrationPacket(result, quest) {
                   'quest’s final objective and applied its rewards. The ' +
                   'completion window belongs to the recovery scene already ' +
                   'narrated; do not show it again or repeat the reward beat.'
-                : quest?.archetype?.id === 'herb_foraging'
-                    ? 'The herb harvest is secured as quest cargo. Return ' +
+                : quest?.structureV2?.family === 'retrieve_item'
+                    ? 'The required item is secured as quest cargo. Return ' +
                       'to the locked recipient; no quest rewards have ' +
                       'been paid and no completion window appeared.'
                     : 'The missing person has been found or freed; bring them ' +
@@ -17484,8 +17496,8 @@ function questDeliveryNarrationPacket(result, quest) {
         ),
         'In the next reply, continue from the already-described handover and report these exact rewards naturally.',
         'Do not calculate, alter, repeat, or grant any additional rewards.',
-        'This Herb Foraging quest has a locked turnIn.discoveryId: ' +
-            'the plants were handed over in the previous reply.',
+        'This retrieval quest has locked turn-in cargo: it was handed ' +
+            'over in the previous reply.',
         'The System, not the recipient, supplied the rewards after ' +
             'that handover. Do not stage a second delivery.',
         'Do not mention software, extensions, protocol tags, or reward administration in story prose.'
@@ -18105,8 +18117,10 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
+                oneCase.kind === 'quest_delivery' ||
                 (
                     oneCase.kind === 'social' &&
+
                     [
                         'check_work',
                         'reveal_work',
@@ -21103,9 +21117,15 @@ async function renderQuestTab(host) {
             Boolean(quest.objectiveResolution) &&
             quest.structureV2?.family === 'rescue_person';
 
-        const returningWithHerbs =
+        const returningWithCargo =
             Boolean(quest.objectiveResolution) &&
-            quest.archetype?.id === 'herb_foraging';
+            quest.structureV2?.family === 'retrieve_item';
+
+        const cargoName = returningWithCargo
+            ? quest.discoveries?.find(
+                item => item.id === quest.turnIn?.discoveryId
+              )?.name || 'the quest cargo'
+            : null;
 
         if (bringingPersonToSafety) {
             section.appendChild(
@@ -21119,18 +21139,18 @@ async function renderQuestTab(host) {
             );
         }
 
-        if (returningWithHerbs) {
+        if (returningWithCargo) {
             section.appendChild(
                 makeAethermoorSection(
                     quest.deliveryReady
-                        ? 'HERBS READY TO DELIVER'
-                        : 'RETURN WITH THE HARVEST',
+                        ? 'CARGO READY TO DELIVER'
+                        : 'RETURN WITH THE CARGO',
                     quest.deliveryReady
-                        ? `Give ${quest.facts.herb} to ` +
+                        ? `Give ${cargoName} to ` +
                             `${quest.turnIn.recipient}. The System pays ` +
                             'after the handover is reported.'
-                        : `Bring ${quest.facts.herb} back to ` +
-                            `${quest.turnIn.recipient}. Harvesting alone ` +
+                        : `Bring ${cargoName} back to ` +
+                            `${quest.turnIn.recipient}. Recovery alone ` +
                             'does not complete the quest.',
                     'quest'
                 )
@@ -21138,9 +21158,10 @@ async function renderQuestTab(host) {
         }
 
         const destinationId =
-            bringingPersonToSafety || returningWithHerbs
+            bringingPersonToSafety || returningWithCargo
                 ? quest.turnIn.locationId
                 : quest.destinationId;
+
 
         if (
             destinationId &&
@@ -21170,9 +21191,10 @@ async function renderQuestTab(host) {
                         ? 'Continue to quest destination'
                         : bringingPersonToSafety
                             ? 'Bring person to safety'
-                            : returningWithHerbs
-                                ? 'Return with herb harvest'
+                            : returningWithCargo
+                                ? 'Return with quest cargo'
                                 : 'Travel to quest objective',
+
 
                 'quest',
                 () => copyAethermoorCommand(
@@ -27390,26 +27412,33 @@ globalThis.aethermoorMechanicsInterceptor =
                 }
 
                 if (
-                    quest.archetype?.id === 'herb_foraging' &&
+                    quest.structureV2?.family === 'retrieve_item' &&
                     quest.objectiveResolution &&
                     quest.deliveryReady === true &&
                     contextState.currentLocationId ===
                         quest.turnIn?.locationId
                 ) {
+                    const cargo = quest.discoveries?.find(
+                        item => item.id === quest.turnIn?.discoveryId
+                    );
+
+                    if (!cargo || cargo.state !== 'acquired') continue;
+
                     entries.push({
-                        id: `herb-delivery-${quest.id}`,
+                        id: `cargo-delivery-${quest.id}`,
                         type: 'quest_delivery_context',
                         packet: [
-                            'PRIVATE HERB HANDOVER — do not recite.',
+                            'PRIVATE QUEST-CARGO HANDOVER — do not recite.',
                             `Quest: ${quest.title} (${quest.id}).`,
                             `Recipient: ${quest.turnIn.recipient}.`,
-                            `Cargo: ${quest.facts.herb}.`,
+                            `Cargo: ${cargo.name}.`,
+                            'The cargo is secured and delivery is ready.',
                             'The harvest is secured and delivery is ready.',
                             'Arrival and conversation alone do not complete ' +
                                 'the quest. Give the player an opportunity ' +
-                                'to hand over the plants.',
+                                'to hand over this cargo.',
                             'ONLY if the crew actually gives this quest’s ' +
-                                'plants to the recipient in this reply, ' +
+                                'cargo to the recipient in this reply, ' +
                                 'portray that handover and report:',
                             `<plan><AETHERMOOR:DELIVERED quest_id=${
                                 quest.id
@@ -27418,7 +27447,7 @@ globalThis.aethermoorMechanicsInterceptor =
                                 'rewards have been paid yet. The extension ' +
                                 'validates and pays after this reply; its ' +
                                 'saved completion result informs the next one.',
-                            'A different accepted herb quest has its own ' +
+                            'Another accepted retrieval quest has its own ' +
                                 'cargo, quest ID, and delivery.'
                         ].join('\n')
                     });

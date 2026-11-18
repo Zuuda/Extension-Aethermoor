@@ -18426,16 +18426,6 @@ async function runStoredMechanic(args) {
             );
         }
 
-        if (narrationPacket) {
-            appendAethermoorHandoff(
-                handoffQueue,
-                {
-                    type: 'combat',
-                    packet: narrationPacket
-                },
-                revision
-            );
-        }
         const rumorPackets = [
             ...(caseResult.rumorArrivalPackets || []),
             ...arrivedRumors.packets
@@ -27217,7 +27207,7 @@ globalThis.aethermoorMechanicsInterceptor =
 
         if (localMovement) {
             try {
-                await runStoredMechanic({
+                const output = await runStoredMechanic({
                     cases: [{
                         name: 'resolve_instance_command',
                         kind: 'instance',
@@ -27229,6 +27219,12 @@ globalThis.aethermoorMechanicsInterceptor =
                             : {})
                     }]
                 });
+
+                assert(
+                    output?.ok === true,
+                    output?.results?.[0]?.error ||
+                        'Instance movement was rejected'
+                );
             } catch (error) {
                 reportAethermoorError(
                     error,
@@ -27242,7 +27238,7 @@ globalThis.aethermoorMechanicsInterceptor =
 
             if (movement) {
                 try {
-                    await runStoredMechanic({
+                    const output = await runStoredMechanic({
                         cases: [{
                             name: 'resolve_movement_command',
                             kind: 'travel',
@@ -27251,6 +27247,12 @@ globalThis.aethermoorMechanicsInterceptor =
                                 movement.destinationId || undefined
                         }]
                     });
+
+                    assert(
+                        output?.ok === true,
+                        output?.results?.[0]?.error ||
+                            'Travel was rejected'
+                    );
                 } catch (error) {
                     reportAethermoorError(
                         error,

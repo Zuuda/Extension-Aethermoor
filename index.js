@@ -25637,7 +25637,6 @@ function makeAethermoorHandoffMessage(entries) {
         name: 'Aethermoor Mechanics',
         send_date: Date.now(),
         mes:
-        mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
             '* **PRIVATE ROLEPLAY CONTEXT:** You are the Narrator: portray NPCs, ' +
             'dialogue, and the physical scene. A SillyTavern Aethermoor extension ' +

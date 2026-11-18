@@ -25335,8 +25335,16 @@ async function openCombatPanel(inlineHost) {
                 result?.error || 'Combat turn failed'
             );
 
-            aethermoorLastCombatLog =
-                formatCombatTurnResult(result);
+            aethermoorLastCombatLog = JSON.stringify({
+                turn: result.turn,
+                actions: actionsInput,
+                exchanges: result.exchanges,
+                turnEffects: result.turnEffects,
+                kills: result.kills,
+                rewards: result.rewards,
+                death: result.death,
+                afterTurn: result.summary
+            }, null, 2);
 
             aethermoorLastCombatLogKey =
                 `${result.summary.encounter.id}:${result.turn}`;

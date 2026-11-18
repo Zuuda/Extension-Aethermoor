@@ -25335,16 +25335,55 @@ async function openCombatPanel(inlineHost) {
                 result?.error || 'Combat turn failed'
             );
 
-            aethermoorLastCombatLog = JSON.stringify({
-                turn: result.turn,
-                actions: actionsInput,
-                exchanges: result.exchanges,
-                turnEffects: result.turnEffects,
-                kills: result.kills,
-                rewards: result.rewards,
-                death: result.death,
-                afterTurn: result.summary
-            }, null, 2);
+            const foeLabel = id => {
+                const index = result.summary?.encounter?.foes
+                    ?.findIndex(foe => foe.id === id) ?? -1;
+                return index >= 0 ? `Opponent ${index + 1}` : id;
+            };
+
+            aethermoorLastCombatLog = [
+                `Turn ${result.turn} · ${actionsInput.qtik} / ${actionsInput.tansy}`,
+                ...(result.exchanges || []).map(exchange => {
+                    const hits = (exchange.hits || [])
+                        .filter(hit => hit.damage > 0)
+                        .map(hit =>
+                            `${foeLabel(hit.id)} −${hit.damage} HP ` +
+                            `(${hit.hp} left)`
+                        );
+
+                    return [
+                        `Exchange ${exchange.exchange}: ` +
+                            (hits.join('; ') || 'No damage dealt'),
+                        ...(exchange.frontlineDamage > 0
+                            ? [`  Q'tik took ${exchange.frontlineDamage} damage.`]
+                            : []),
+                        ...(exchange.backlineDamage > 0
+                            ? [`  Tansy took ${exchange.backlineDamage} damage.`]
+                            : []),
+                        ...(exchange.enemyMiss
+                            ? ['  Enemy attack missed.']
+                            : []),
+                        ...(exchange.effects || []).map(effect =>
+                            `  ${effect}`
+                        )
+                    ].join('\n');
+                }),
+                ...(result.turnEffects || []),
+                '',
+                `Remaining: ${
+                    (result.summary?.encounter?.foes || [])
+                        .filter(foe => foe.hp > 0)
+                        .map(foe =>
+                            `${foeLabel(foe.id)} ${foe.hp}/${foe.maxHp} HP`
+                        ).join('; ') || 'none'
+                }`,
+                `Q'tik: ${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP`,
+                `Tansy: ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP`,
+                result.rewards?.applied
+                    ? `Rewards: +${result.rewards.xp} XP, ` +
+                      `+${result.rewards.silver} silver`
+                    : 'No victory rewards yet.'
+            ].join('\n');
 
             aethermoorLastCombatLogKey =
                 `${result.summary.encounter.id}:${result.turn}`;

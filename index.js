@@ -1556,8 +1556,36 @@ function applyXp(crew, xp) {
             after
         });
     }
-
     return changes;
+}
+
+/*
+ * XP rewards produce crew-visible System feedback. This formatter only
+ * describes the post-award state; it does not grant XP or prescribe a
+ * character's reaction.
+ */
+function xpProgressNarrationLines(crew, levelUps = []) {
+    if (!crew) return [];
+
+    const threshold = nextXp(crew.level);
+
+    return [
+        'At this XP award, a System progression readout appears ' +
+            'to both Q’tik and Tansy (not ordinary NPCs).',
+        ...(levelUps.length
+            ? [
+                'A level-up chime sounds for the crew. The readout ' +
+                    `shows each level reached: ${
+                        levelUps.map(change => change.level).join(', then ')
+                    }. Mention the chime in this reward scene.`
+            ]
+            : []),
+        `The readout shows their shared crew progression: ` +
+            `Level ${crew.level} · ${crew.xp}/${threshold} XP · ` +
+            `${threshold - crew.xp} XP until Level ${crew.level + 1}.`,
+        'These are visible System facts, not instructions for either ' +
+            'character to comment on them or feel a particular way.'
+    ];
 }
 
 function checkTape(state) {
@@ -4305,6 +4333,10 @@ if (frontliners.length > 0) {
                 ? clone(encounterRewards.packDrop)
                 : null,
             levelUps: clone(levelUps),
+            xpProgress: {
+                level: c.level,
+                xp: c.xp
+            },
             death: victoryDeath ? clone(victoryDeath) : null,
             narrativeTurns: clone(encounter.narrativeTurns || [])
         };
@@ -17066,6 +17098,10 @@ function travelNarrationPacket(result) {
                 `${completion.rewards.repSteps} reputation steps.`,
             ...completion.rewards.loot.map(item =>
                 `System salvage received: ${item.name}.`
+            ),
+            ...xpProgressNarrationLines(
+                result.state?.crew,
+                completion.levelUps || []
             )
         );
     }
@@ -17081,6 +17117,10 @@ function travelNarrationPacket(result) {
                 `${rewards.repSteps} reputation steps.`,
             ...rewards.loot.map(item =>
                 `System salvage received: ${item.name}.`
+            ),
+            ...xpProgressNarrationLines(
+                result.state?.crew,
+                secured.questCompletion.levelUps || []
             )
         );
     }
@@ -17499,6 +17539,10 @@ function questDeliveryNarrationPacket(result, quest) {
             `Salvage granted: ${item.name} (${item.rarity}), ` +
             `Stat ${item.rawStat}.`
         ),
+        ...xpProgressNarrationLines(
+            result.state?.crew,
+            result.levelUps || []
+        ),
         'In the next reply, continue from the already-described handover and report these exact rewards naturally.',
         'Do not calculate, alter, repeat, or grant any additional rewards.',
         'This retrieval quest has locked turn-in cargo: it was handed ' +
@@ -17566,6 +17610,10 @@ function questActionNarrationPacket(result, questAction) {
                 `${rewards.repSteps} reputation steps.`,
             ...rewards.loot.map(item =>
                 `System salvage received: ${item.name} (${item.rarity}).`
+            ),
+            ...xpProgressNarrationLines(
+                result.state?.crew,
+                result.levelUps || []
             ),
             'NPC reactions may be narrated separately. No NPC handover ' +
                 'or additional reward is required.'
@@ -17713,10 +17761,17 @@ function combatNarrationPacket(result, actions) {
                     'that choice to the protagonists.'
             );
         }
+        lines.push(
+            ...xpProgressNarrationLines(
+                result.state?.crew,
+                result.levelUps || []
+            )
+        );
     } else if (result.packCleared) {
         lines.push(
             'The encounter was cleared; no rewards were applied.'
         );
+
     } else if (!result.death) {
         lines.push(
             living.length
@@ -23114,8 +23169,18 @@ function combatRecapPrompt(receipt) {
         lines.push('A quest breadcrumb was found.');
     }
 
-    for (const levelUp of receipt.levelUps || []) {
-        lines.push(`The crew reached level ${levelUp.level}.`);
+    if (receipt.xpProgress) {
+        lines.push(
+            ...xpProgressNarrationLines(
+                receipt.xpProgress,
+                receipt.levelUps || []
+            )
+        );
+    } else {
+        // Receipts saved before this change retain their old level-up text.
+        for (const levelUp of receipt.levelUps || []) {
+            lines.push(`The crew reached level ${levelUp.level}.`);
+        }
     }
 
     return lines.join('\n');

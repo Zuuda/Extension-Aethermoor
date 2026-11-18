@@ -17202,8 +17202,6 @@ function questDiscoveryContextPacket(quest, state) {
             : [])
     ];
 
-    ];
-
     if (discovery.contents) {
         lines.push(
             '* **Contents:** Reveal these only if the object is opened ' +

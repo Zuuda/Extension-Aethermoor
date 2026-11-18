@@ -19618,6 +19618,43 @@ function addAethermoorPanelStyles() {
             white-space: nowrap;
         }
 
+        .aethermoor-status-strip [data-stat="level"] {
+            color: #c084fc;
+        }
+
+        .aethermoor-status-strip [data-stat="xp"] {
+            color: #4ade80;
+        }
+
+        .aethermoor-status-strip [data-stat="qtik"] {
+            color: #38bdf8;
+        }
+
+        .aethermoor-status-strip [data-stat="tansy"] {
+            color: #f9a8d4;
+        }
+
+        .aethermoor-status-strip [data-stat="silver"] {
+            color: #ffd166;
+        }
+
+        .aethermoor-status-copy {
+            margin-left: auto;
+            padding: 1px 7px;
+            color: #9caab8;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            border-radius: 2px;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        .aethermoor-status-copy:hover,
+        .aethermoor-status-copy:focus-visible {
+            color: #ffffff;
+            border-color: #4da6ff;
+        }
+
         .aethermoor-panel-close {
 
             min-width: 28px;
@@ -24142,6 +24179,60 @@ function combatLogKey(state) {
  * from narration, change campaign state, or trigger a save. Reuse the
  * existing tab refreshes rather than adding another polling operation.
  */
+function aethermoorStatusReadouts(state) {
+    const crew = state.crew;
+    const stats = derived(crew);
+
+    return [
+        { key: 'level', text: `Level: ${crew.level}` },
+        { key: 'xp', text: `XP: ${crew.xp}/${nextXp(crew.level)}` },
+        {
+            key: 'qtik',
+            text: `Q'tik HP: ${crew.qtik.hp}/${stats.qtikMaxHp}`
+        },
+        {
+            key: 'tansy',
+            text: `Tansy HP: ${crew.tansy.hp}/${stats.tansyMaxHp}`
+        },
+        { key: 'silver', text: `Silver: ${crew.purse}s` }
+    ];
+}
+
+async function copyAethermoorStatus() {
+    // Read at click time: the displayed tab may not have refreshed yet.
+    const state = getContext().chatMetadata?.[
+        AETHERMOOR_METADATA_KEY
+    ]?.state;
+
+    assert(state?.crew, 'No saved crew status to copy');
+
+    const text = aethermoorStatusReadouts(state)
+        .map(readout => readout.text)
+        .join('\n');
+
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_error) {
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+
+        assert(copied, 'Could not copy crew status');
+    }
+
+    toastr.info('Crew status copied.', 'Aethermoor');
+}
+
+/*
+ * Display only saved mechanics. Rendering and copying do not change
+ * campaign state, consume RNG, or ask the narrator to calculate values.
+ */
 function updateAethermoorStatusStrip(state) {
     const strip = aethermoorPanelElement?.querySelector(
         '.aethermoor-status-strip'
@@ -24155,24 +24246,30 @@ function updateAethermoorStatusStrip(state) {
         return;
     }
 
-    const stats = derived(state.crew);
-    const crew = state.crew;
-    const values = [
-        `Lv ${crew.level}`,
-        `XP ${crew.xp}/${nextXp(crew.level)}`,
-        `Q'tik ${crew.qtik.hp}/${stats.qtikMaxHp} HP`,
-        `Tansy ${crew.tansy.hp}/${stats.tansyMaxHp} HP`,
-        `${crew.purse}s`
-    ];
+    const readouts = aethermoorStatusReadouts(state);
 
-    strip.replaceChildren(
-        ...values.map(value => {
-            const item = document.createElement('span');
-            item.textContent = value;
-            return item;
-        })
-    );
+    const items = readouts.map(readout => {
+        const item = document.createElement('span');
+        item.dataset.stat = readout.key;
+        item.textContent = readout.text;
+        return item;
+    });
 
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'aethermoor-status-copy';
+    copy.textContent = 'Copy';
+    copy.title = 'Copy level, XP, HP, and silver';
+    copy.addEventListener('click', () => {
+        void copyAethermoorStatus().catch(error => {
+            toastr.error(
+                error instanceof Error ? error.message : String(error),
+                'Aethermoor'
+            );
+        });
+    });
+
+    strip.replaceChildren(...items, copy);
     strip.hidden = false;
 }
 

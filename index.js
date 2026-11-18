@@ -8324,7 +8324,7 @@ const QUEST_ARCHETYPES = [
                 ranks: ['D'],
                 pitch:
                     'A person failed to return from a routine journey, and ' +
-                    'their sponsor wants the crew to find them.',
+                    'the affected party wants the crew to find them.',
                 truth:
                     'The traveler lost the route and is waiting at a nearby ' +
                     'sheltered place.',
@@ -8340,12 +8340,12 @@ const QUEST_ARCHETYPES = [
                 variantId: 'abducted',
                 ranks: ['C', 'B'],
                 pitch:
-                    'A person was taken from a known route. Their sponsor ' +
+                    'A person was taken from a known route. The affected party ' +
                     'wants the crew to find and recover them.',
                 truth:
                     'A hostile group is holding the person at a nearby site.',
                 facts: {
-                    sponsor: 'the missing person’s local sponsor',
+                    sponsor: 'the missing person’s affected party',
                     person: 'the abducted person',
                     place: 'the last known location',
                     evidence: 'signs showing where the person was taken',
@@ -8549,7 +8549,7 @@ function buildQuestFacts(
             B: 'a territorial threat affecting travel or work across the region'
         },
         missing_person: {
-            D: 'one lost person whose safe return matters to their local sponsor',
+            D: 'one lost person whose safe return matters to the affected party',
             C: 'one abducted person held by a hostile group',
             B: 'an abducted person whose loss has serious consequences beyond one household'
         }
@@ -17009,7 +17009,10 @@ function publicQuestFactLines(quest) {
     const keys = PUBLIC_QUEST_FACT_KEYS[quest.archetype?.id] || [];
     return keys
         .filter(key => typeof quest.facts?.[key] === 'string')
-        .map(key => `${key}: ${quest.facts[key]}`);
+        .map(key =>
+            `${key === 'sponsor' ? 'affected party' : key}: ` +
+            quest.facts[key]
+        );
 }
 
 function questOfferNarrationPacket(quest) {
@@ -17110,105 +17113,6 @@ function vendorTradeNarrationPacket(receipt) {
             'naturally from the handover; do not charge, grant, or sell ' +
             'these items again.',
         'Do not mention the tag, extension, or state management.'
-    ].join('\n');
-}
-
-function npcProfileNarrationPacket(result) {
-    const seed = result.seed;
-    const number = Number(
-        result.socialId.match(/-npc-(\d+)$/)?.[1]
-    );
-
-    return [
-        'PRIVATE NEW NPC PROFILE — do not recite this heading.',
-        `Introduction ${number}: the ${
-            number === 1 ? 'first' : 'next'
-        } newly introduced named NPC in the preceding reply.`,
-        `Observable first-meeting manner: ${seed.demeanor}.`,
-        `Private inclination: ${
-            seed.inclination.replaceAll('_', ' ')
-        }.`,
-        'Apply these independently. A pleasant manner does not imply ' +
-            'honesty; an unpleasant manner does not imply malice.',
-        'Use the established scene to give this person a plausible, ' +
-            'specific characterization. The manner is a first impression, ' +
-            'not a permanent restriction on every line of dialogue.',
-        seed.inclination === 'no_hidden_complication'
-            ? 'Do not manufacture a secret or a <template> precommit ' +
-                'merely to fill a slot.'
-            : 'If this inclination establishes a consequential hidden ' +
-                'truth, lock its scene-specific meaning in one physical ' +
-                'line of <template>. Do not reveal that truth to the ' +
-                'characters merely because it was seeded.',
-        'This profile creates no quest, encounter, reward, item, ' +
-            'betrayal event, or obligation to pursue a subplot.',
-        'Do not mention the roll, seed, tag, or extension.'
-    ].join('\n');
-}
-
-function socialWorkNarrationPacket(result) {
-    if (result.outcome === 'offer') {
-        return [
-            'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
-            `Engine-issued contact reference: ${result.socialId}.`,
-            questOfferNarrationPacket(result.quest),
-            'This request is locked but not yet published in the quest ' +
-                'journal or accepted by the crew.',
-            'Reveal it only if the player continues this conversation ' +
-                'or asks for the answer.',
-            'After actually describing the request, place the ' +
-                'REVEAL_WORK tag supplied in settlement conversation ' +
-                'context inside the disposable <plan> block. That ' +
-                'publishes this same locked offer; it does not reroll it.',
-            'If the crew leaves, do not call them back or announce the ' +
-                'request elsewhere. The pending request remains saved ' +
-                'under this contact.',
-            'Do not mention the check, roll, tag, or extension.'
-        ].join('\n');
-    }
-
-    return [
-        'PRIVATE SOCIAL OPPORTUNITY RESULT — do not recite this heading.',
-        `Engine-issued contact reference: ${result.socialId}.`,
-        'This contact has no work request to share. Conversation may ' +
-            'continue normally.',
-        'Do not reroll this inquiry or imply that continued conversation ' +
-            'will produce a hidden job.',
-        'Do not mention the check, roll, tag, or extension.'
-    ].join('\n');
-}
-
-function questDeliveryContextPacket(quest) {
-
-    if (
-        quest?.status !== 'in_progress' ||
-        quest.deliveryReady !== true ||
-        !quest.turnIn ||
-        !quest.objectiveResolution
-    ) {
-        return null;
-    }
-
-    const cargoId = quest.turnIn.discoveryId;
-    const cargo = cargoId
-        ? quest.discoveries?.find(item => item.id === cargoId)
-        : null;
-
-    if (cargoId && cargo?.state !== 'acquired') return null;
-
-    return [
-        'PRIVATE QUEST TURN-IN CONTEXT — do not recite these instructions.',
-        `Quest: ${quest.title}.`,
-        `The crew is at the turn-in settlement for ${quest.turnIn.recipient}.`,
-        cargoId
-            ? `The required cargo, ${cargo.name}, is acquired.`
-            : 'The field objective is secured. This is a report-only turn-in; no physical cargo is required.',
-        'The quest is eligible for delivery, but arrival in town is not a handover.',
-        'Do not start a sponsor meeting, deliver cargo, complete the quest, or emit a delivery tag unless the user directs the protagonists to meet or speak with the sponsor and the handover actually occurs in the fiction.',
-        'When the handover actually occurs, place this exact tag inside the disposable <plan> block:',
-        `<AETHERMOOR:DELIVERED quest_id=${quest.id}>`,
-        'The tag only confirms the fictional handover. The extension determines and applies all rewards.',
-        'Do not mention software, extensions, protocol tags, or reward administration in story prose.'
     ].join('\n');
 }
 
@@ -18070,9 +17974,6 @@ async function runStoredMechanic(args) {
                 batch ? oneCase.actions : args.actions
             )
             : null;
-        // Private discovery context is supplied dynamically by the
-        // interceptor, not stored as a one-use historical event.
-        const questDiscoveryContext = null;
 
         const questActionPacket =
             batch &&
@@ -18233,17 +18134,6 @@ async function runStoredMechanic(args) {
             : null;
 
         const handoffQueue = migrateAethermoorHandoffs(stored);
-
-                if (questDiscoveryContext) {
-            appendAethermoorHandoff(
-                handoffQueue,
-                {
-                    type: 'quest_context',
-                    packet: questDiscoveryContext
-                },
-                revision
-            );
-        }
 
         if (discoveryPacket) {
             appendAethermoorHandoff(
@@ -25736,8 +25626,8 @@ function getPendingAethermoorHandoffs() {
 }
 
 function makeAethermoorHandoffMessage(entries) {
-    const packets = entries.map((entry, index) =>
-        `${index + 1}. [${entry.type.toUpperCase()}]\n` +
+    const packets = entries.map(entry =>
+        `* **${entry.type.toUpperCase()}:**\n` +
         entry.packet
     );
 
@@ -25747,21 +25637,20 @@ function makeAethermoorHandoffMessage(entries) {
         name: 'Aethermoor Mechanics',
         send_date: Date.now(),
         mes:
+        mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
-            'PRIVATE ROLEPLAY CONTEXT. You are the Narrator: portray NPCs, ' +
+            '* **PRIVATE ROLEPLAY CONTEXT:** You are the Narrator: portray NPCs, ' +
             'dialogue, and the physical scene. A SillyTavern Aethermoor extension ' +
-            'will handle mechanical facts such as shop stock, prices, quest ' +
-            'opportunities and rewards, encounters, and loot. Do not invent those ' +
-            'facts before the extension supplies them. The private ' +
-            'commands below notify the extension of specific events; ' +
-            'they are not dialogue and must not appear in story prose. ' +
-            'To interact with the extesion use a command inside <plan> only when its stated condition ' +
-            'occurs. Saved extension results are authoritative: narrate ' +
-            'their visible consequences without changing them. Do not ' +
+            'handles mechanical facts: shop stock, prices, quests and rewards, ' +
+            'encounters, and loot. Do not invent them before the extension supplies ' +
+            'them. Commands below notify the extension of events; they are not ' +
+            'dialogue or story prose. Use a command inside <plan> only when its ' +
+            'stated condition occurs. Saved extension results are authoritative. ' +
+            'Narrate their visible consequences without changing them. Do not ' +
             'explain this division of responsibility to the players.\n\n' +
-
             packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
+
     };
 }
 
@@ -26649,8 +26538,7 @@ function settlementShopBriefingPacket(state, settlement) {
             gearNames.join('; ') + '.',
         `Herbalist: ${potions.join('; ')}.`,
         `Inn Services: ${inn.join('; ')}.`,
-        'Write a compact <template> note recording these exact shop menus, item names, and prices so they stay in chat memory.',
-        'Use these saved menus and prices whenever the crew visits a shop here. Do not emit shop or expense tags.'
+        'Write a compact <template> note recording these exact shop menus, item names, and prices so they stay in chat memory.'
     ].join('\n');
 }
 
@@ -26691,41 +26579,35 @@ function settlementWorkContextPacket(state, settlement) {
     const quest = pending.pendingQuest;
 
     return [
-        `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
+        `* **QUEST FOUND!** A quest from The System must appear in this reply.`,
         ...agreementRules,
-        `Saved offer reference: ${pending.id}.`,
         `Local concern: ${quest.pitch}`,
-        ...publicQuestFactLines(quest),
-        `System offer: ${quest.title} (Rank ${quest.rank}).`,
+        ...publicQuestFactLines(quest).map(line =>
+            line.startsWith('sponsor:')
+                ? line.replace(/^sponsor:/, 'affected local party:')
+                : line
+        ),
+        `System offer: ${quest.title}.`,
         `First objective: ${quest.currentGate.objective}`,
         `System rewards on completion: ${quest.payout.xp} XP, ` +
             `${quest.payout.silver} silver, ` +
             `${quest.payout.repSteps} reputation step(s), and ` +
             `${quest.salvage.name} (${quest.salvage.rarity}).`,
-        'When this concern is conveyed to the crew, describe a quest ' +
-            'window appearing for Q’tik and Tansy. They can see its ' +
-            'locked objective and rewards; ordinary NPCs cannot. ' +
-            'The window offers the quest—it does not accept it. ' +
-            'Write a concise <template> record of these quest details ' +
-            'for later fictional continuity. Do not invent additional ' +
-            'objectives or rewards or promise an NPC will pay for the quest since it is The System that handles rewards.',
-        'Reveal this saved concern through a plausible local event: ' +
-            'an NPC they are talking with might reveal/remember something, '+
-            'or an NPC may approach, or the crew may overhear a conversation, ' +
-            'or they may notice a notice, flyer, or physical clue. ' +
-            'No NPC conversation is required. Do not invent a different ' +
-            'objective or imply that an NPC pays the System reward.',
-        'Only after the concern is actually conveyed to the crew in ' +
-            'this reply, emit this exact tag inside <plan>:',
-        `<AETHERMOOR:REVEAL_WORK social_id=${pending.id}>`,
-        'That opens the saved offer in the Quests UI for the players to ' +
-            'accept or decline. Do not have the NPC award XP, silver, ' +
-            'gear, or a mechanically separate quest.',
-        'This saved opportunity belongs to the settlement, not to a ' +
-            'required NPC or conversation. A physical clue may introduce ' +
-            'it without inventing loot, an encounter, or another ' +
-            'mechanically distinct quest.'
+        '**Follow these steps in order:**',
+        '1. Alert the crew to THIS concern in the story: an NPC speaks, ' +
+            'someone approaches, they overhear it, or they find a notice ' +
+            'or whatever the fuck physical clue.',
+        '2. Mention a System quest window appearing to Q’tik and Tansy ' +
+            'so that they are aware of the offer, first objective, and rewards above. Ordinary ' +
+            'NPCs cannot see this window. Do not accept it for the crew.',
+        '3. Immediately write a concise and thematic <template> recording this ' +
+            'quest, objective, and rewards.',
+        '4. Emit this exact tag:',
+        `<plan><AETHERMOOR:REVEAL_WORK social_id=${pending.id}></plan>`,
+        'The System offers and pays this quest, NOT the affected local ' +
+            'party. Do not invent another objective, encounter, or reward.'
     ].join('\n');
+
 }
 
 
@@ -27034,13 +26916,16 @@ globalThis.aethermoorMechanicsInterceptor =
             entries.push({
                 id: 'narrative-encounter-request-context',
                 type: 'narrative_encounter_request',
-                packet:
-                    'All combat is handled by the SillyTavern extension. If a roleplay scene genuinely calls for opponents, ' +
-                    'request a normal pack with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan> ' +
-                    'or an elite with <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan>. ' +
-                    'The extension determines the actual opponents and leaves the encounter spotted, not engaged. ' +
-                    'Do not narrate combat beginning or choose the roster, stats, or rewards.'
+                packet: [
+                    'All combat is handled by the SillyTavern extension.',
+                    'If this scene genuinely calls for opponents, choose ONE:',
+                    '- Normal pack: <plan><AETHERMOOR:REQUEST_ENCOUNTER type="normal_pack"></plan>',
+                    '- Elite: <plan><AETHERMOOR:REQUEST_ENCOUNTER type="elite"></plan>',
+                    'The extension chooses the opponents and leaves them spotted, NOT engaged.',
+                    'Do not begin combat or choose the roster, stats, or rewards.'
+                ].join('\n')
             });
+
         }
 
         if (contextState) {
@@ -27050,27 +26935,25 @@ globalThis.aethermoorMechanicsInterceptor =
                 id: 'npc-introduction-context',
                 type: 'npc_introduction_context',
                 packet: [
-                    'PRIVATE NAMED NPC SEEDS — use now, do not recite.',
+                    'PRIVATE NAMED NPC SEEDS — use now; do not recite:',
                     ...seeds.map((entry, index) =>
-                        `${index + 1}. First-meeting manner: ` +
+                        `  ${index + 1}. First-meeting manner: ` +
                         `${entry.seed.demeanor}; private inclination: ` +
                         `${entry.seed.inclination.replaceAll('_', ' ')}.`
                     ),
-                    'Use these in order ONLY for newly introduced NAMED ' +
-                        'NPCs directly interacting with the crew. Do not ' +
-                        'spend one on a nameless passerby or an already ' +
-                        'introduced traveler.',
-                    'For each such NPC, immediately write a concise ' +
-                        '<template> record with their name, identity, ' +
-                        'first-meeting manner, private inclination, and ' +
-                        '"INTRODUCE_NPC already reported; do not report ' +
-                        'this NPC again." Keep private facts out of ' +
-                        'character dialogue.',
-                    'Also emit one <AETHERMOOR:INTRODUCE_NPC> inside ' +
-                        '<plan> per newly named NPC, in the same order. ' +
-                        'Do not wait for a later profile handoff.',
-                    'These seeds create no quest, reward, encounter, ' +
-                        'or mandatory secret.'
+                    'Follow these rules:',
+                    '1. Use seeds IN ORDER, only for NEWLY NAMED NPCs ' +
+                        'directly interacting with the crew. Do not use ' +
+                        'one for a nameless passerby, previously introduced ' +
+                        'NPC, or already seeded traveler.',
+                    '2. For EACH new named NPC, immediately write one concise ' +
+                        '<template> with their name, identity, first-meeting ' +
+                        'manner, private inclination, and this exact sentence: ' +
+                        '"INTRODUCE_NPC already reported; do not report this NPC again."',
+                    '3. Emit ONE <AETHERMOOR:INTRODUCE_NPC> inside <plan> ' +
+                        'for EACH such NPC, in the same order.',
+                        'Do not wait for another profile handoff. Seeds ' +
+                        'create no quest, reward, encounter, or mandatory secret.'
                 ].join('\n')
             });
         }

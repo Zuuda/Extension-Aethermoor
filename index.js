@@ -17130,43 +17130,71 @@ function questDiscoveryContextPacket(quest) {
 
     if (!discovery || discovery.state === 'acquired') return null;
 
+    const isHerbHarvest =
+        quest.archetype?.id === 'herb_foraging' &&
+        discovery.requiredAction === 'gather_herb';
+
     const lines = [
-        'PRIVATE SCENE CONTEXT — do not recite these instructions.',
-        `Quest objective: ${quest.currentGate.objective}`,
-        `Authored object: ${discovery.name}.`,
-        `Object state: ${discovery.state}.`,
-        `Location: ${discovery.hidingPlace}.`,
-        `Required action: ${discovery.requiredAction || 'expose the object'}.`,
-        `Meaning when discovered: ${discovery.significance}.`,
-        'A player declaration of success alone does not establish discovery.',
-        'Judge whether the described actions actually expose or recover this object.',
-        'Keep the story entirely in-world. Do not mention extensions, parsers, flags, or reward administration.'
+        '* **QUEST OBJECTIVE HERE — portray this in the current scene.**',
+        `* **Objective:** ${quest.currentGate.objective}`,
+        `* **Established subject:** ${discovery.name}.`,
+        `* **Where:** ${discovery.hidingPlace}.`,
+        `* **Saved state:** ${discovery.state}.`,
+        isHerbHarvest
+            ? '* **Do now:** Describe the gathering area and give the crew ' +
+              'a clear, in-world opportunity to identify and pick the ' +
+              'requested plants. The plants are available here; do not ' +
+              'hide this routine harvest behind another lead.'
+            : '* **Do now:** Describe the current site and give the crew ' +
+              'a clear, in-world opportunity to interact with the ' +
+              'established subject at its authored location.',
+        '* **Stop before success:** Arrival alone does not perform the ' +
+          'required action, acquire the object, complete the gate, or ' +
+          'award rewards. Leave the next action to the player.',
+        `* **Required action:** ${
+            discovery.requiredAction || 'expose the object'
+        }.`,
+        `* **Significance once found:** ${discovery.significance}`,
+        '* **Report only what happens in the scene:** Do not emit a ' +
+          'discovery tag merely because this context appeared or the ' +
+          'player stated a desired outcome. Judge what their actions ' +
+          'actually accomplish.'
     ];
 
     if (discovery.contents) {
         lines.push(
-            'Authored contents; reveal only when the object is opened or inspected:',
-            ...discovery.contents.map(item => `- ${item}`),
-            'These contents are quest cargo, not personal loot. Do not add them to the crew purse.'
+            '* **Contents:** Reveal these only if the object is opened ' +
+              'or inspected:',
+            ...discovery.contents.map(item => `  - ${item}`),
+            '  These are quest cargo, not personal loot.'
         );
     }
 
-    if (discovery.requiredAction) {
+    if (discovery.requiredAction && discovery.state === 'hidden') {
         lines.push(
-            'When the required action occurs, place this exact tag inside <plan>:',
-            `<AETHERMOOR:SEARCHED quest_item=${discovery.id}>`
+            '* **If the required action actually occurs, report:**',
+            `  <plan><AETHERMOOR:SEARCHED quest_item=${
+                discovery.id
+            }></plan>`
         );
     }
 
     lines.push(
-        'When the object is actually recovered/exposed, place this exact tag inside <plan>:',
-        `<AETHERMOOR:FOUND quest_item=${discovery.id}>`,
-        'SEARCHED and FOUND may occur in the same reply, in that order, if the scene supports both.',
-        'Do not emit tags merely because you received these instructions.'
+        '* **If the object is actually recovered or exposed, report:**',
+        `  <plan><AETHERMOOR:FOUND quest_item=${
+            discovery.id
+        }></plan>`,
+        discovery.requiredAction && discovery.state === 'hidden'
+            ? '  If both events happen in one reply, report SEARCHED ' +
+              'before FOUND.'
+            : '  Do not repeat an earlier SEARCHED event.',
+        '* Keep the story in-world. Do not recite these instructions, ' +
+          'tags, or extension mechanics to the players.'
     );
 
     return lines.join('\n');
 }
+
 function questTerminalNarrationPacket(encounter, quest) {
     return [
         `The linked threat for ${quest.title} has been spotted.`,
@@ -26592,15 +26620,26 @@ function settlementWorkContextPacket(state, settlement) {
             `${quest.payout.silver} silver, ` +
             `${quest.payout.repSteps} reputation step(s), and ` +
             `${quest.salvage.name} (${quest.salvage.rarity}).`,
-        '**Follow these steps in order:**',
-        '1. Alert the crew to THIS concern in the story: an NPC speaks, ' +
-            'someone approaches, they overhear it, or they find a notice ' +
-            'or whatever the fuck physical clue.',
-        '2. Mention a System quest window appearing to Q’tik and Tansy ' +
-            'so that they are aware of the offer, first objective, and rewards above. Ordinary ' +
-            'NPCs cannot see this window. Do not accept it for the crew.',
-        '3. Immediately write a concise and thematic <template> recording this ' +
-            'quest, objective, and rewards.',
+        '**Follow these steps in order — do not skip the story beat:**',
+        '1. FIRST, establish why THIS quest appears NOW. Show a ' +
+            'specific in-world request, remark, need, notice, or clue ' +
+            'that makes the quest above apparent to Q’tik and Tansy. ' +
+            'Do this on the page before mentioning its System window.',
+        '   If another quest in the current scene sounds similar, ' +
+            'explicitly make this offer legible as additional work. ' +
+            'The same NPC, conversation, or clue may reveal both quests; but they ' +
+            'may not share a destination or be gathered on the same trip. ' +
+            'Do not silently treat a second System window as the first ' +
+            'quest repeating, or skip its in-world reason.',
+        '   Fit the reason to the established scene and the saved ' +
+            'concern. Do not invent a new mandatory meeting, ' +
+            'different objective, extra quantity, or separate journey.',
+        '2. THEN describe THIS quest’s System window appearing to ' +
+            'Q’tik and Tansy, with the saved first objective and rewards ' +
+            'above. Ordinary NPCs cannot see it. Do not accept it for ' +
+            'the crew.',
+        '3. Immediately write a concise and thematic <template> ' +
+            'recording this quest, objective, and rewards.',
         '4. Emit this exact tag:',
         `<plan><AETHERMOOR:REVEAL_WORK social_id=${pending.id}></plan>`,
         'The System offers and pays this quest, NOT the affected local ' +

@@ -17116,7 +17116,7 @@ function vendorTradeNarrationPacket(receipt) {
     ].join('\n');
 }
 
-function questDiscoveryContextPacket(quest) {
+function questDiscoveryContextPacket(quest, state) {
     if (
         quest?.status !== 'in_progress' ||
         quest.objectiveResolution
@@ -17130,16 +17130,35 @@ function questDiscoveryContextPacket(quest) {
 
     if (!discovery || discovery.state === 'acquired') return null;
 
+    const similarQuestsElsewhere = (state.quests?.accepted || [])
+        .filter(other =>
+            other.id !== quest.id &&
+            other.status === 'in_progress' &&
+            other.archetype?.id === quest.archetype?.id &&
+            other.destinationId !== quest.destinationId
+        );
+
     const isHerbHarvest =
         quest.archetype?.id === 'herb_foraging' &&
         discovery.requiredAction === 'gather_herb';
 
     const lines = [
         '* **QUEST OBJECTIVE HERE — portray this in the current scene.**',
+        `* **This site belongs to quest:** ${quest.id}.`,
         `* **Objective:** ${quest.currentGate.objective}`,
         `* **Established subject:** ${discovery.name}.`,
         `* **Where:** ${discovery.hidingPlace}.`,
         `* **Saved state:** ${discovery.state}.`,
+        ...(similarQuestsElsewhere.length
+            ? [
+                '* **Separate accepted work:** Other quests of this type ' +
+                    'have their own saved destination and discovery. Even if ' +
+                    'its objectives sound identical only one quest is completed. ' +
+                    'Do not narrate both as finished or report the other ' +
+                    'quest’s discovery ID here.'
+            ]
+            : []),
+
         isHerbHarvest
             ? '* **Do now:** Describe the gathering area and give the crew ' +
               'a clear, in-world opportunity to identify and pick the ' +
@@ -17158,7 +17177,31 @@ function questDiscoveryContextPacket(quest) {
         '* **Report only what happens in the scene:** Do not emit a ' +
           'discovery tag merely because this context appeared or the ' +
           'player stated a desired outcome. Judge what their actions ' +
-          'actually accomplish.'
+          'actually accomplish.',
+        ...(quest.currentGate?.decisive === true &&
+            quest.structureV2?.family !== 'rescue_person'
+            ? [
+                '* **QUEST DONE — only if THIS final objective is actually ' +
+                    'completed in this reply:** First portray the recovery. ' +
+                    'Then, in the SAME reply, say that the quest is completed and mention a System quest-completion window appearing ' +
+                    'visible to Q’tik and Tansy (not ordinary NPCs).',
+                `* **Window identifies this quest:** ${quest.title} ` +
+                    `(${quest.id}).`,
+                `* **Locked completion rewards:** ${quest.payout.xp} XP, ` +
+                    `${quest.payout.silver} silver, ` +
+                    `${quest.payout.repSteps} reputation step(s), and ` +
+                    `${quest.salvage.name} (${quest.salvage.rarity}).`,
+                '* The System pays these rewards, not an NPC. The ' +
+                    'extension will validate the reported discovery and ' +
+                    'apply the locked payout; do not grant anything ' +
+                    'separately or require an NPC handover.',
+                '* If the object is NOT recovered in this reply, show ' +
+                    'NO completion window. A similar accepted quest ' +
+                    'remains separate and is not completed by this recovery.'
+            ]
+            : [])
+    ];
+
     ];
 
     if (discovery.contents) {
@@ -17239,18 +17282,25 @@ function questDiscoveryNarrationPacket(result, quest) {
 
         lines.push(
             completion
-                ? 'The System completed the quest and applied its saved rewards.'
-                : 'The missing person has been found or freed; bring them safely to the origin settlement before the System completes the quest.'
+                ? 'QUEST COMPLETION CONFIRMED: The System validated this ' +
+                  'quest’s final objective and applied its rewards. The ' +
+                  'completion window belongs to the recovery scene already ' +
+                  'narrated; do not show it again or repeat the reward beat.'
+                : 'The missing person has been found or freed; bring them ' +
+                  'safely to the origin settlement before the System ' +
+                  'completes the quest.'
         );
 
         if (completion) {
             lines.push(
-                `${completion.rewards.xp} XP, ` +
+                `Confirmed rewards: ${completion.rewards.xp} XP, ` +
                 `${completion.rewards.silver} silver, and ` +
-                `${completion.rewards.repSteps} reputation steps awarded.`,
+                `${completion.rewards.repSteps} reputation steps.`,
                 ...completion.rewards.loot.map(item =>
-                    `System salvage: ${item.name}.`
-                )
+                    `Confirmed System salvage: ${item.name}.`
+                ),
+                'These are confirmation of rewards already applied, ' +
+                    'not a new payout or an NPC handover.'
             );
         }
 
@@ -26845,7 +26895,10 @@ globalThis.aethermoorMechanicsInterceptor =
                 if (
                     contextState.currentLocationId === quest.destinationId
                 ) {
-                    const packet = questDiscoveryContextPacket(quest);
+                    const packet = questDiscoveryContextPacket(
+                        quest,
+                        contextState
+                    );
 
                     if (packet) {
                         entries.push({

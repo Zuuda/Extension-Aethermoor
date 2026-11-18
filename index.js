@@ -774,11 +774,39 @@ function reportAethermoorError(error, context, eventKey = null) {
 
         const key = eventKey ||
             `${context}:${metadata.aethermoorV2?.revision ?? 'none'}:${message}`;
+
         if (reported.has(key)) return;
         reported.add(key);
+
         if (reported.size > 100) {
             reported.delete(reported.values().next().value);
         }
+
+        // Errors are retained independently of the optional narration
+        // recorder. Saving uses the same queue as mechanics, so an error
+        // record cannot overwrite an in-flight campaign save.
+        const entry = {
+            time: new Date().toISOString(),
+            context,
+            message,
+            revision: metadata.aethermoorV2?.revision ?? null,
+            key
+        };
+
+        void saveNarrationDebugChange(metadata, debug => {
+            debug.errors ||= [];
+
+            if (!debug.errors.some(saved => saved.key === key)) {
+                debug.errors.push(entry);
+            }
+        }).catch(saveError => {
+            // Do not call reportAethermoorError here: that would retry
+            // the failed diagnostic save indefinitely.
+            console.error(
+                '[Aethermoor] Could not save error record',
+                saveError
+            );
+        });
     }
 
     globalThis.toastr?.error(
@@ -25571,7 +25599,10 @@ function saveNarrationDebugChange(metadata, change) {
             : { enabled: false, entries: [] };
 
         change(next);
-        next.entries = next.entries.slice(-AETHERMOOR_DEBUG_LIMIT);
+        next.entries = (next.entries || [])
+            .slice(-AETHERMOOR_DEBUG_LIMIT);
+        next.errors = (next.errors || [])
+            .slice(-AETHERMOOR_DEBUG_LIMIT);
         metadata[AETHERMOOR_DEBUG_KEY] = next;
 
         try {
@@ -25726,24 +25757,60 @@ function openNarrationDebug() {
     function refresh() {
         const debug = metadata[AETHERMOOR_DEBUG_KEY];
         const entries = debug?.entries || [];
+        const errors = debug?.errors || [];
 
         status.textContent =
             `Recording: ${debug?.enabled ? 'ON' : 'OFF'} · ` +
-            `${entries.length}/${AETHERMOOR_DEBUG_LIMIT} events\n` +
-            'Private engine context may contain hidden quest information.\n' +
-            'Each event has its own clipboard action.';
+            `${entries.length}/${AETHERMOOR_DEBUG_LIMIT} events · ` +
+            `${errors.length}/${AETHERMOOR_DEBUG_LIMIT} errors\n` +
+            'Errors are saved even when narration recording is OFF.\n' +
+            'Private diagnostic context may contain hidden quest information.';
         toggle.textContent = debug?.enabled
             ? 'Disable recording'
             : 'Enable recording';
 
         output.replaceChildren();
 
+        const errorHeading = document.createElement('div');
+        errorHeading.className = 'aethermoor-ui-heading';
+        errorHeading.textContent = `SAVED ERRORS · ${errors.length}`;
+        output.appendChild(errorHeading);
+
+        for (const entry of [...errors].reverse()) {
+            const record = document.createElement('section');
+            record.className = 'aethermoor-debug-record';
+
+            const text = document.createElement('div');
+            text.className = 'aethermoor-ui-text';
+            text.textContent =
+                `${entry.time} · Revision ${entry.revision ?? 'none'}\n` +
+                `${entry.context}\n${entry.message}`;
+
+            const copyButton = makeAethermoorAction(
+                'Copy error',
+                'world',
+                () => {
+                    void copyDebugText(
+                        JSON.stringify(entry, null, 2),
+                        'Error record'
+                    );
+                }
+            );
+
+            record.append(text, copyButton);
+            output.appendChild(record);
+        }
+
+        const eventHeading = document.createElement('div');
+        eventHeading.className = 'aethermoor-ui-heading';
+        eventHeading.textContent = `NARRATION EVENTS · ${entries.length}`;
+        output.appendChild(eventHeading);
+
         if (entries.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'aethermoor-ui-text';
-            empty.textContent = 'No diagnostic records.';
+            empty.textContent = 'No narration records.';
             output.appendChild(empty);
-            return;
         }
 
         entries.forEach((entry, index) => {
@@ -25820,6 +25887,7 @@ function openNarrationDebug() {
     const clear = makeAethermoorAction('Clear records', 'world', () => {
         void changeDebug(debug => {
             debug.entries = [];
+            debug.errors = [];
         });
     });
 
@@ -26686,6 +26754,14 @@ async function processAethermoorAssistantEvents(data) {
                     }]
                 });
             }
+
+            assert(
+                result?.ok === true &&
+                result.results?.[0]?.ok !== false,
+                result?.results?.[0]?.error ||
+                    result?.error ||
+                    `Assistant event ${event.event} was rejected`
+            );
 
             console.log(
                 '[Aethermoor] Accepted assistant quest event',

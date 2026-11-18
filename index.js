@@ -17653,7 +17653,10 @@ function appendAethermoorHandoff(queue, entry, revision) {
     queue.push({
         id: `${revision}-${queue.length + 1}`,
         type: entry.type,
-        packet: entry.packet
+        packet: entry.packet,
+        ...(entry.encounterId
+            ? { encounterId: entry.encounterId }
+            : {})
     });
 }
 
@@ -18041,15 +18044,37 @@ async function runStoredMechanic(args) {
             ? oneCase?.kind === 'turn'
             : Boolean(args.actions);
 
-        const narrationPacket = isCombatTurn
-            ? combatNarrationPacket(
-                {
-                    ...caseResult,
-                    summary: stateSummary(nextState, revision)
-                },
-                batch ? oneCase.actions : args.actions
-            )
-            : null;
+        /*
+         * A player may resolve the whole fight in the UI before sending
+         * their next fictional reply. At victory, use the saved receipt
+         * for the entire fight, not just the final turn's result.
+         * Unfinished fights retain their ordinary current-turn handoff.
+         */
+        const completedFightReceipt =
+            isCombatTurn &&
+            nextState.encounter?.status === 'cleared' &&
+            nextState.encounter.victoryReceipt?.encounterId ===
+                nextState.encounter.id
+                ? nextState.encounter.victoryReceipt
+                : null;
+
+        const narrationPacket = completedFightReceipt
+            ? [
+                'PRIVATE COMPLETED FIGHT — narrate in this reply; do not recite this heading.',
+                'Continue directly from the player’s fictional decision to engage.',
+                'The UI has already resolved the entire encounter. Do not ask',
+                'whether to fight, restart combat, or resolve another turn.',
+                combatRecapPrompt(completedFightReceipt)
+            ].join('\n')
+            : isCombatTurn
+                ? combatNarrationPacket(
+                    {
+                        ...caseResult,
+                        summary: stateSummary(nextState, revision)
+                    },
+                    batch ? oneCase.actions : args.actions
+                )
+                : null;
 
         const questActionPacket =
             batch &&
@@ -18211,12 +18236,42 @@ async function runStoredMechanic(args) {
 
         const handoffQueue = migrateAethermoorHandoffs(stored);
 
+        /*
+         * Only the latest report for this encounter should reach the
+         * next GM reply. On victory, that report contains the saved
+         * full-fight recap. Do not discard handoffs for other encounters
+         * or unrelated quest, travel, and discovery results.
+         */
+        if (narrationPacket && nextState.encounter?.id) {
+            for (let index = handoffQueue.length - 1; index >= 0; index--) {
+                if (
+                    handoffQueue[index].type === 'combat' &&
+                    handoffQueue[index].encounterId ===
+                        nextState.encounter.id
+                ) {
+                    handoffQueue.splice(index, 1);
+                }
+            }
+        }
+
         if (discoveryPacket) {
             appendAethermoorHandoff(
                 handoffQueue,
                 {
                     type: 'discovery',
                     packet: discoveryPacket
+                },
+                revision
+            );
+        }
+
+        if (narrationPacket) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'combat',
+                    encounterId: nextState.encounter?.id,
+                    packet: narrationPacket
                 },
                 revision
             );

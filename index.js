@@ -19599,7 +19599,27 @@ function addAethermoorPanelStyles() {
             letter-spacing: 1px;
         }
 
+        .aethermoor-status-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+            padding: 7px 12px;
+            color: #d0d7de;
+            background: #101419;
+            border-bottom: 1px solid #1f2730;
+            font: 11px/1.4 Consolas, monospace;
+        }
+
+        .aethermoor-status-strip[hidden] {
+            display: none;
+        }
+
+        .aethermoor-status-strip span {
+            white-space: nowrap;
+        }
+
         .aethermoor-panel-close {
+
             min-width: 28px;
             padding: 3px 8px;
             color: #9caab8;
@@ -23954,7 +23974,15 @@ function openAethermoorPanel() {
         debug.title = 'Open Aethermoor diagnostics and campaign reset';
         debug.addEventListener('click', openNarrationDebug);
 
-        header.append(title, debug, close);
+        const headerActions = document.createElement('div');
+        headerActions.className = 'aethermoor-shop-header-actions';
+        headerActions.append(debug, close);
+        header.append(title, headerActions);
+
+        const statusStrip = document.createElement('div');
+        statusStrip.className = 'aethermoor-status-strip';
+        statusStrip.setAttribute('aria-label', 'Crew status');
+        statusStrip.hidden = true;
 
         const tabs = document.createElement('nav');
         tabs.className = 'aethermoor-tabs';
@@ -23981,7 +24009,7 @@ function openAethermoorPanel() {
 
         const content = document.createElement('main');
         content.className = 'aethermoor-panel-content';
-        panel.append(header, tabs, content);
+        panel.append(header, statusStrip, tabs, content);
         document.body.appendChild(panel);
 
         restoreAethermoorPanelGeometry(panel);
@@ -24109,11 +24137,51 @@ function combatLogKey(state) {
     return `${state.encounter?.id || 'none'}:${state.encounter?.turn || 0}`;
 }
 
+/*
+ * The status strip reads saved mechanics only. It does not infer values
+ * from narration, change campaign state, or trigger a save. Reuse the
+ * existing tab refreshes rather than adding another polling operation.
+ */
+function updateAethermoorStatusStrip(state) {
+    const strip = aethermoorPanelElement?.querySelector(
+        '.aethermoor-status-strip'
+    );
+
+    if (!strip) return;
+
+    if (!state?.crew) {
+        strip.hidden = true;
+        strip.replaceChildren();
+        return;
+    }
+
+    const stats = derived(state.crew);
+    const crew = state.crew;
+    const values = [
+        `Lv ${crew.level}`,
+        `XP ${crew.xp}/${nextXp(crew.level)}`,
+        `Q'tik ${crew.qtik.hp}/${stats.qtikMaxHp} HP`,
+        `Tansy ${crew.tansy.hp}/${stats.tansyMaxHp} HP`,
+        `${crew.purse}s`
+    ];
+
+    strip.replaceChildren(
+        ...values.map(value => {
+            const item = document.createElement('span');
+            item.textContent = value;
+            return item;
+        })
+    );
+
+    strip.hidden = false;
+}
+
 function markCombatViewRendered(snapshot) {
     aethermoorCombatViewKey = {
         metadata: getContext().chatMetadata,
         revision: snapshot.revision
     };
+    updateAethermoorStatusStrip(snapshot.state);
 }
 
 function markCampaignViewRendered(snapshot) {
@@ -24121,6 +24189,7 @@ function markCampaignViewRendered(snapshot) {
         metadata: getContext().chatMetadata,
         revision: snapshot.revision
     };
+    updateAethermoorStatusStrip(snapshot.state);
 }
 
 function normalizeEncounterPotionUses(encounter) {

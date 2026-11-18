@@ -11101,9 +11101,9 @@ function resolveQuestAction(test) {
     );
 
     /*
-     * NPCs are sources or beneficiaries, not reward dispensers. Cargo
-     * must actually have been recovered, but it need not be handed to
-     * an NPC for the System to recognize the completed objective.
+     * The System supplies rewards, but retrieval cargo must be handed
+     * over first. Record that transfer on the locked quest discovery
+     * during the same completion operation as the payout.
      */
     if (quest.structureV2?.family === 'retrieve_item') {
         const cargo = quest.discoveries?.find(
@@ -11111,9 +11111,13 @@ function resolveQuestAction(test) {
         );
 
         assert(
-            cargo?.state === 'acquired',
-            'The required quest item has not been recovered'
+            cargo?.kind === 'quest_item' &&
+            cargo.state === 'acquired',
+            'The required quest cargo has not been recovered'
         );
+
+        cargo.state = 'delivered';
+        quest.deliveryReady = false;
     }
 
     if (quest.structureV2?.family === 'rescue_person') {
@@ -11125,6 +11129,7 @@ function resolveQuestAction(test) {
     }
 
     quest.status = 'complete';
+
     quest.completionEvidence = test.completionEvidence.trim();
 
     saveQuestToJournal(state, quest);

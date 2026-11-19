@@ -12377,68 +12377,6 @@ function resolveTradeAction(test) {
 }
 
 /*
- * The GM reports that the crew asked to see wares. The engine identifies
- * that report by its saved assistant message and opens a read-only catalog
- * for the settlement the crew actually occupies. Repeated notifications
- * for the same message do not create another mechanics revision.
- *
- * Opening stock is not a purchase, item grant, or equipment change.
- */
-function resolveVendorMenuOpen(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Showing wares requires saved state'
-    );
-
-    const state = clone(test.state);
-
-    assert(
-        typeof test.socialId === 'string' &&
-        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-        'Showing wares requires an engine-issued message reference'
-    );
-
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'The crew must be free to speak at a saved settlement'
-    );
-
-    if (state.vendorMenu?.settlementId === settlement.id) {
-        // Another request to view this shop must not erase a staged quote.
-        return {
-            ok: true,
-            created: false,
-            action: 'open',
-            settlementId: settlement.id,
-            state
-        };
-    }
-
-    state.vendorMenu = {
-        settlementId: settlement.id,
-        inquiryId: test.socialId,
-        pendingBasket: null
-    };
-
-    return {
-        ok: true,
-        created: true,
-        action: 'open',
-        settlementId: settlement.id,
-        state
-    };
-}
-
-/*
  * A staged trade is a quote, not a transaction. Preserve exactly which
  * stock options and owned items were selected, along with a snapshot of
  * the owned items. A later commit must revalidate everything against
@@ -14194,65 +14132,6 @@ function resolveFoodAction(test) {
     };
 }
 
-/*
- * Account for an incidental payment already made in the fiction.
- * The assistant-message reference identifies one payment report; replaying
- * that reply returns its receipt without deducting silver again.
- *
- * Shop purchases use their own menus. This operation neither grants an
- * item nor decides whether the characters chose to make the payment.
- */
-function resolveExpenseAction(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Expense payment requires saved state'
-    );
-
-    const state = clone(test.state);
-    state.expenseReceipts ||= {};
-
-    assert(
-        test.action === 'paid',
-        `Unsupported expense action: ${test.action}`
-    );
-
-    assert(
-        typeof test.socialId === 'string' &&
-        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-        'Expense payment requires an engine-issued message reference'
-    );
-
-    int(test.amount, 'expense amount', 1);
-    assert(
-        test.amount <= 1000000,
-        'Expense exceeds the supported limit'
-    );
-    assert(
-        typeof test.reason === 'string' &&
-        test.reason.trim().length > 0 &&
-        test.reason.trim().length <= 160,
-        'Expense requires a brief reason'
-    );
-
-    const reason = test.reason.trim();
-    const previous = state.expenseReceipts[test.socialId];
-
-    if (previous) {
-        assert(
-            previous.amount === test.amount &&
-            previous.reason === reason,
-            'Payment report ID was reused for another expense'
-        );
-
-        return {
-            ok: true,
-            created: false,
-            action: 'paid',
-            receipt: clone(previous),
-            state
-        };
-    }
-
     const purseBefore = int(state.crew?.purse, 'crew purse');
 
     assert(
@@ -15814,9 +15693,7 @@ function resolveBatch(args) {
                     result = resolveXpAction(test);
                     break;
                 case 'currency':
-                    result = test.action === 'paid'
-                        ? resolveExpenseAction(test)
-                        : resolveCurrencyAction(test);
+                    result = resolveCurrencyAction(test);
                     break;
                 case 'consumable':
                     result = resolveConsumableAction(test);
@@ -15843,13 +15720,9 @@ function resolveBatch(args) {
                     break;
 
                 case 'vendor':
-                    result = test.action === 'open'
-                        ? resolveVendorMenuOpen(test)
-                        : test.action === 'commit'
-                            ? resolveVendorTradeCommit(test)
-                            : ['stage', 'discard'].includes(test.action)
-                                ? resolveVendorSelection(test)
-                                : resolveVendorAction(test);
+                    result = test.action === 'commit'
+                        ? resolveVendorTradeCommit(test)
+                        : resolveVendorAction(test);
                     break;
                     
                 case 'shadows':
@@ -18553,7 +18426,6 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'quest_delivery' ||
                 (
                     oneCase.kind === 'social' &&
-
                     [
                         'check_work',
                         'reveal_work',
@@ -18561,15 +18433,6 @@ async function runStoredMechanic(args) {
                         'prepare_npc_seeds',
                         'claim_npc_seed'
                     ].includes(oneCase.action)
-                ) ||
-                (
-                    ['vendor', 'herbalist', 'inn']
-                        .includes(oneCase.kind) &&
-                    ['open', 'commit'].includes(oneCase.action)
-                ) ||
-                (
-                    oneCase.kind === 'currency' &&
-                    oneCase.action === 'paid'
                 )
             )
         ) {
@@ -20086,54 +19949,6 @@ function openAethermoorTab(tab) {
     }
 }
 
-function createQuestController() {
-    if (document.getElementById('aethermoor_quest_button')) return;
-
-    const composer = document.querySelector('#send_form');
-
-    if (!composer) {
-        console.warn(
-            'Aethermoor: chat composer not found; Quest button not added'
-        );
-        return;
-    }
-
-    const button = document.createElement('button');
-    button.id = 'aethermoor_quest_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Quests';
-    button.title = 'View the Aethermoor quest journal';
-    button.addEventListener('click', () => {
-        openAethermoorTab('quests');
-    });
-
-    composer.insertBefore(button, composer.firstChild);
-}
-
-function createWorldController() {
-    if (document.getElementById('aethermoor_world_button')) return;
-
-    const composer = document.querySelector('#send_form');
-    if (!composer) {
-        console.warn(
-            'Aethermoor: chat composer not found; World button not added'
-        );
-        return;
-    }
-
-    const button = document.createElement('button');
-    button.id = 'aethermoor_world_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'World';
-    button.title = 'View the Aethermoor World tab';
-    button.addEventListener('click', () => {
-        openAethermoorTab('world');
-    });
-
-    composer.insertBefore(button, composer.firstChild);
-}
 
 /*
  * AETHERMOOR UI DESIGN TEMPLATE
@@ -20928,85 +20743,7 @@ function addAethermoorPanelStyles() {
         }
     `;
 
-     style.textContent += `
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-group {
-            width: 100%;
-            max-width: 100%;
-            min-width: 0 !important;
-            box-sizing: border-box;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices {
-            display: grid !important;
-            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-            align-items: stretch;
-            gap: 6px;
-            width: 100%;
-            max-width: 100%;
-            min-width: 0;
-            box-sizing: border-box;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices > button.aethermoor-combat-choice {
-            display: flex !important;
-            width: 100% !important;
-            min-width: 0 !important;
-            max-width: 100% !important;
-            box-sizing: border-box;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            white-space: normal;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices > button.aethermoor-combat-choice {
-            display: inline-flex !important;
-            visibility: visible !important;
-            flex: 0 0 auto !important;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: auto !important;
-            min-width: 82px;
-            max-width: 100%;
-            height: auto !important;
-            min-height: 42px;
-            padding: 7px 10px;
-            opacity: 1;
-            white-space: normal;
-            text-align: center;
-            line-height: 1.25;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-title,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-detail,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-telegraph {
-            display: block;
-            width: 100%;
-            text-align: center;
-            white-space: normal;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice[aria-pressed="true"] {
-            outline: 2px solid #4ade80;
-            outline-offset: 1px;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:disabled {
-            opacity: 0.35 !important;
-            cursor: not-allowed;
-        }
+    style.textContent += `
         .aethermoor-debug-records {
             display: grid;
             gap: 8px;
@@ -21020,33 +20757,9 @@ function addAethermoorPanelStyles() {
             border: 1px solid #2b3542;
             border-left: 3px solid #c084fc;
         }
-
     `;
 
     document.head.appendChild(style);
-}
-
-function makeAethermoorTabCard(accent, title, text, actionLabel, action) {
-    const card = document.createElement('section');
-    card.className = 'aethermoor-panel-card';
-    card.dataset.accent = accent;
-
-    const heading = document.createElement('div');
-    heading.className = 'aethermoor-panel-card-title';
-    heading.textContent = title;
-
-    const description = document.createElement('div');
-    description.className = 'aethermoor-panel-card-text';
-    description.textContent = text;
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'aethermoor-panel-action';
-    button.textContent = actionLabel;
-    button.addEventListener('click', action);
-
-    card.append(heading, description, button);
-    return card;
 }
 
 let aethermoorTabViews = null;
@@ -22037,7 +21750,7 @@ async function openAethermoorShopWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Zone ${state.zone} · Purse: ${state.crew.purse}s\n` +
-        'Select items to buy or sell, then click Confirm & Complete Trade.';
+        'Select items to buy or sell, then click Confirm.';
     windowElement.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -22440,7 +22153,7 @@ async function openAethermoorHerbalistWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Purse: ${state.crew.purse}s\n` +
-        'Choose quantities, then click Confirm & Complete Trade.';
+        'Choose quantities, then click Confirm.';
     panel.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -22564,12 +22277,18 @@ async function openAethermoorHerbalistWindow() {
 
     for (const owned of state.inventory.consumables || []) {
         if (owned.quantity > 0) {
+            const definition = consumableDefinition(owned.id);
             addRow(
                 crew,
                 'sell',
                 {
                     id: owned.id,
-                    ...consumableDefinition(owned.id)
+                    ...definition,
+                    name: owned.name || cosmeticStockName(
+                        state,
+                        potionCosmeticStockKey(owned.id),
+                        definition.name
+                    )
                 },
                 owned.quantity
             );
@@ -22732,7 +22451,7 @@ async function openAethermoorInnWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Purse: ${state.crew.purse}s\n` +
-        'Meals and lodging are expenses only. Choose services, then click Confirm & Pay.';
+        'Meals and lodging are expenses only. Choose services, then click Confirm.';
     panel.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -23079,25 +22798,30 @@ async function renderInventoryTab(host) {
                 use.addEventListener('click', async () => {
                     use.disabled = true;
 
-                    await runAethermoorPanelCase(
-                        host,
-                        'inventory',
-                        {
-                            name:
-                                `use_${item.id}_${recipient}`,
-                            kind: 'consumable',
-                            action: 'use',
-                            item: item.id,
-                            quantity: 1,
-                            recipient
-                        },
-                        `${definition.name} used on ${
-                            recipient === 'qtik'
-                                ? "Q'tik"
-                                : 'Tansy'
-                        }.`
-                    );
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'inventory',
+                            {
+                                name:
+                                    `use_${item.id}_${recipient}`,
+                                kind: 'consumable',
+                                action: 'use',
+                                item: item.id,
+                                quantity: 1,
+                                recipient
+                            },
+                            `${consumableDisplayName(item)} used on ${
+                                recipient === 'qtik'
+                                    ? "Q'tik"
+                                    : 'Tansy'
+                            }.`
+                        );
+                    } finally {
+                        use.disabled = false;
+                    }
                 });
+
 
                 actions.appendChild(use);
             }
@@ -23153,17 +22877,22 @@ async function renderInventoryTab(host) {
             sell.textContent = `Sell (+${curio.value}s)`;
             sell.addEventListener('click', async () => {
                 sell.disabled = true;
-                await runAethermoorPanelCase(
-                    host,
-                    'inventory',
-                    {
-                        name: `sell_curio_${curio.id}`,
-                        kind: 'curio',
-                        action: 'sell',
-                        curioId: curio.id
-                    },
-                    `Sold ${curio.name} for +${curio.value}s.`
-                );
+
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'inventory',
+                        {
+                            name: `sell_curio_${curio.id}`,
+                            kind: 'curio',
+                            action: 'sell',
+                            curioId: curio.id
+                        },
+                        `Sold ${curio.name} for +${curio.value}s.`
+                    );
+                } finally {
+                    sell.disabled = false;
+                }
             });
 
             const remove = document.createElement('button');
@@ -23171,17 +22900,22 @@ async function renderInventoryTab(host) {
             remove.textContent = 'Remove';
             remove.addEventListener('click', async () => {
                 remove.disabled = true;
-                await runAethermoorPanelCase(
-                    host,
-                    'inventory',
-                    {
-                        name: `remove_curio_${curio.id}`,
-                        kind: 'curio',
-                        action: 'remove',
-                        curioId: curio.id
-                    },
-                    `Removed ${curio.name}.`
-                );
+
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'inventory',
+                        {
+                            name: `remove_curio_${curio.id}`,
+                            kind: 'curio',
+                            action: 'remove',
+                            curioId: curio.id
+                        },
+                        `Removed ${curio.name}.`
+                    );
+                } finally {
+                    remove.disabled = false;
+                }
             });
 
             actions.append(sell, remove);
@@ -23326,17 +23060,21 @@ async function renderInventoryTab(host) {
             equip.addEventListener('click', async () => {
                 equip.disabled = true;
 
-                await runAethermoorPanelCase(
-                    host,
-                    'inventory',
-                    {
-                        name: `equip_inventory_item_${index}`,
-                        kind: 'gear',
-                        action: 'equip',
-                        itemIndex: index
-                    },
-                    'Gear equipped.'
-                );
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'inventory',
+                        {
+                            name: `equip_inventory_item_${index}`,
+                            kind: 'gear',
+                            action: 'equip',
+                            itemIndex: index
+                        },
+                        'Gear equipped.'
+                    );
+                } finally {
+                    equip.disabled = false;
+                }
             });
 
             actions.appendChild(equip);
@@ -24700,6 +24438,7 @@ function openAethermoorPanel() {
         });
 
         const debug = document.createElement('button');
+        debug.id = 'aethermoor_debug_button';
         debug.type = 'button';
         debug.className = 'aethermoor-panel-close';
         debug.textContent = 'Debug';
@@ -24709,6 +24448,7 @@ function openAethermoorPanel() {
         const headerActions = document.createElement('div');
         headerActions.className = 'aethermoor-shop-header-actions';
         headerActions.append(debug, close);
+
         header.append(title, headerActions);
 
         const statusStrip = document.createElement('div');
@@ -24755,9 +24495,9 @@ function openAethermoorPanel() {
         });
 
         aethermoorPanelElement = panel;
-
     }
 
+    updateAethermoorDebugButton();
     aethermoorPanelElement.hidden = false;
     aethermoorPanelOpen = true;
     renderAethermoorTab(aethermoorActiveTab);
@@ -24781,26 +24521,6 @@ function createAethermoorController() {
     button.title = 'Open Aethermoor controls';
     button.addEventListener('click', openAethermoorPanel);
     composer.insertBefore(button, composer.firstChild);
-}
-
-   function createCombatController() {
-    const button = document.createElement('button');
-    button.id = 'aethermoor_combat_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Combat';
-    button.title = 'View or resolve the saved Aethermoor encounter';
-    button.addEventListener('click', openCombatPanel);
-
-    const composer = document.querySelector('#send_form');
-
-    if (composer) {
-        composer.insertBefore(button, composer.firstChild);
-    } else {
-        console.warn(
-            'Aethermoor: chat composer not found; Combat button not added'
-        );
-    }
 }
 
 async function readStoredCombatState() {
@@ -25987,7 +25707,10 @@ async function openCombatPanel(inlineHost) {
     const resultBox = document.createElement('pre');
     resultBox.className = 'aethermoor-combat-result';
 
-    if (aethermoorLastCombatLog) {
+    if (
+        aethermoorLastCombatLog &&
+        aethermoorLastCombatLogKey === combatLogKey(state)
+    ) {
         resultBox.textContent = aethermoorLastCombatLog;
     } else {
         resultBox.hidden = true;
@@ -26091,13 +25814,17 @@ async function openCombatPanel(inlineHost) {
                 );
             if (finished) {
                 const destination =
-                    state.activeInstanceId ? 'instances' : 'world';
+                    state.activeInstanceId &&
+                    !result.death?.totalDefeat
+                        ? 'instances'
+                        : 'world';
 
                 aethermoorActiveTab = destination;
                 renderAethermoorTab(destination);
             } else {
                 renderAethermoorTab('combat');
             }
+
         } catch (error) {
             resultBox.hidden = false;
             resultBox.textContent =
@@ -26281,8 +26008,9 @@ function openNarrationDebug() {
         '',
         'world',
         () => {
-            aethermoorRoleplayHandoffsPaused =
-                !aethermoorRoleplayHandoffsPaused;
+            setAethermoorHandoffsPaused(
+                !aethermoorRoleplayHandoffsPaused
+            );
             updateRoleplayHandoffButton();
         }
     );
@@ -26611,13 +26339,59 @@ function openNarrationDebug() {
 const AETHERMOOR_HANDOFF_MARKER =
     '<aethermoor-mechanics-handoff>';
 
+const AETHERMOOR_HANDOFFS_PAUSED_KEY =
+    'aethermoorRoleplayHandoffsPaused';
+
+function readAethermoorHandoffsPaused() {
+    try {
+        return localStorage.getItem(
+            AETHERMOOR_HANDOFFS_PAUSED_KEY
+        ) === 'true';
+    } catch (_error) {
+        return false;
+    }
+}
+
+function setAethermoorHandoffsPaused(paused) {
+    aethermoorRoleplayHandoffsPaused = Boolean(paused);
+
+    try {
+        localStorage.setItem(
+            AETHERMOOR_HANDOFFS_PAUSED_KEY,
+            String(aethermoorRoleplayHandoffsPaused)
+        );
+    } catch (error) {
+        console.warn(
+            '[Aethermoor] Could not save handoff pause setting',
+            error
+        );
+    }
+
+    updateAethermoorDebugButton();
+}
+
+function updateAethermoorDebugButton() {
+    const button = document.getElementById('aethermoor_debug_button');
+    if (!button) return;
+
+    button.textContent = aethermoorRoleplayHandoffsPaused
+        ? 'Debug (PAUSED)'
+        : 'Debug';
+    button.style.color = aethermoorRoleplayHandoffsPaused
+        ? '#ffd166'
+        : '';
+    button.style.borderColor = aethermoorRoleplayHandoffsPaused
+        ? '#ffd166'
+        : '';
+}
+
 /*
  * Prompt context is for roleplay, not extension development.
  * The manual switch handles technical conversations that cannot be
  * reliably classified from prose. CODE COPY pastes are an additional
  * narrow automatic safeguard. Neither path consumes queued results.
  */
-let aethermoorRoleplayHandoffsPaused = false;
+let aethermoorRoleplayHandoffsPaused = readAethermoorHandoffsPaused();
 let aethermoorInjectedHandoff = null;
 let aethermoorGenerationReceived = false;
 
@@ -26877,19 +26651,6 @@ function extractAethermoorQuestEvents(text) {
             }
         }
 
-        /*
-         * ASK_WORK reports the interaction only. The GM does not assign
-         * contact identity. REVEAL_WORK below uses an ID previously
-         * issued by the engine.
-         */
-        const pattern = /<AETHERMOOR:ASK_WORK\s*>/g;
-
-        for (const _match of plan[1].matchAll(pattern)) {
-            events.push({
-                event: 'ask_work'
-            });
-        }
-
         const encounterRequestPattern =
             /<AETHERMOOR:REQUEST_ENCOUNTER\s+type="(normal_pack|elite)"\s*>/g;
 
@@ -26899,17 +26660,6 @@ function extractAethermoorQuestEvents(text) {
             events.push({
                 event: 'request_encounter',
                 encounterType: match[1]
-            });
-        }
-
-        const expensePaidPattern =
-            /<AETHERMOOR:EXPENSE_PAID\s+amount=([1-9]\d*)\s+reason="([^"]{1,160})"\s*>/g;
-
-        for (const match of plan[1].matchAll(expensePaidPattern)) {
-            events.push({
-                event: 'expense_paid',
-                amount: Number(match[1]),
-                reason: match[2]
             });
         }
 
@@ -27162,29 +26912,6 @@ async function processAethermoorAssistantEvents(data) {
                         breadcrumbId: event.breadcrumbId
                     }]
                 });
-            } else if (event.event === 'expense_paid') {
-                const socialId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(
-                    socialId,
-                    'Expense payment awaits a saved assistant message'
-                );
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_expense_paid',
-                        kind: 'currency',
-                        action: 'paid',
-                        socialId,
-                        amount: event.amount,
-                        reason: event.reason
-                    }]
-                });
-            } else if (event.event === 'ask_work') {
-                // Retired reporting tag. Opportunity checks now happen
-                // before narration, once per saved user reply.
-                continue;
             } else if (event.event === 'reveal_work') {
                 result = await runStoredMechanic({
                     cases: [{
@@ -27729,7 +27456,6 @@ globalThis.aethermoorMechanicsInterceptor =
                             `Recipient: ${quest.turnIn.recipient}.`,
                             `Cargo: ${cargo.name}.`,
                             'The cargo is secured and delivery is ready.',
-                            'The harvest is secured and delivery is ready.',
                             'Arrival and conversation alone do not complete ' +
                                 'the quest. Give the player an opportunity ' +
                                 'to hand over this cargo.',

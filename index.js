@@ -666,6 +666,155 @@ function ensureKnownInstance(state) {
     return changed;
 }
 
+/*
+ * Rare one-time hidden instances discovered on travel rolls 98–100.
+ * Shorter and punchier than the zone's Known Site (3–5 rooms), splitting
+ * 50/50 between an Elite Lair and a Chest Vault (no Elite).
+ */
+function createHiddenInstance(state, zone, stepId) {
+    state.instances ||= {};
+    state.places ||= {};
+    state.routeEdges ||= [];
+
+    const id = `instance-z${zone}-hidden-${stepId}`;
+    const entranceId = `${id}-entrance`;
+    const anchor = savedPrimarySettlement(state, zone);
+    const label = `Hidden site, Zone ${zone}`;
+
+    if (state.instances[id]) {
+        return state.instances[id];
+    }
+
+    const roomCount = roll(state, 3) + 2; // 3–5 rooms
+    const ending = roll(state, 2) === 1 ? 'elite' : 'chest';
+    const packCount = roomCount - 2; // 1–3 guarded chambers
+    const finalRoomId = ending === 'elite' ? 'inner_chamber' : 'vault_chamber';
+    const sequence = ['entrance'];
+
+    for (let number = 1; number <= packCount; number++) {
+        sequence.push(`chamber_${number}`);
+    }
+    sequence.push(finalRoomId);
+
+    const chestObstacles = [
+        'a corroded lock or jammed mechanism',
+        'a flooded alcove or treacherous footing',
+        'a crumbling ledge or unstable stonework',
+        'tangled roots, heavy debris, or a wedged beam'
+    ];
+
+    const rooms = {};
+
+    for (const [index, roomId] of sequence.entries()) {
+        const previousId = sequence[index - 1] || null;
+        const nextId = sequence[index + 1] || null;
+        const isPack = roomId.startsWith('chamber_');
+        const isElite = roomId === 'inner_chamber';
+        const isVault = roomId === 'vault_chamber';
+        const guarded = isPack || isElite;
+
+        const composition = isPack
+            ? instancePackComposition(state, zone, `${id}:${roomId}`)
+            : null;
+
+        const tactic = isPack
+            ? chooseInstancePackTactic(
+                state,
+                zone,
+                composition,
+                `${id}:${roomId}`
+            )
+            : null;
+
+        const obstacle = isVault && roll(state, 2) === 1
+            ? chestObstacles[roll(state, chestObstacles.length) - 1]
+            : null;
+
+        rooms[roomId] = {
+            id: roomId,
+            label:
+                roomId === 'entrance'
+                    ? 'Entrance'
+                    : isElite
+                        ? 'Inner Chamber'
+                        : isVault
+                            ? 'Vault Chamber'
+                            : `Chamber ${roomId.split('_')[1]}`,
+            exits: [previousId, nextId].filter(Boolean),
+            requiresCleared: previousId &&
+                (
+                    previousId.startsWith('chamber_') ||
+                    previousId === 'inner_chamber'
+                )
+                ? [previousId]
+                : [],
+            visited: false,
+            ...(guarded
+                ? {
+                    threat: isElite
+                        ? { type: 'elite' }
+                        : {
+                            type: 'normal_pack',
+                            bracket: 'mid',
+                            composition,
+                            tactic
+                        },
+                    threatStatus: 'unresolved',
+                    encounterId: null,
+                    encounterBlueprint: null
+                }
+                : { threatStatus: 'none' }),
+            ...(isVault
+                ? {
+                    chest: {
+                        id: `${id}-chest`,
+                        opened: false,
+                        obstacle,
+                        loot: null
+                    }
+                }
+                : {})
+        };
+    }
+
+    const instance = {
+        id,
+        zone,
+        kind: 'hidden',
+        ending,
+        label,
+        entranceId,
+        size: 'small',
+        roomCount,
+        status: 'open',
+        currentRoomId: null,
+        discoveredAtStep: stepId,
+        rooms
+    };
+
+    state.instances[id] = instance;
+
+    state.places[entranceId] = {
+        id: entranceId,
+        label,
+        zone,
+        kind: 'instance_entrance',
+        instanceId: id,
+        visited: false
+    };
+
+    state.routeEdges.push({
+        fromId: anchor.locationId,
+        toId: entranceId,
+        length: 2,
+        kind: 'hidden_instance_access',
+        fromZone: zone,
+        toZone: zone
+    });
+
+    return instance;
+}
+
 function savedZoneRecord(state, zone = state.zone) {
     const record = state.world?.zones?.[zone];
     assert(record, `Zone ${zone} has no saved world record`);
@@ -5825,14 +5974,16 @@ function resolveInstanceTheme(test) {
         state
     };
 }
-
 function refreshInstanceStatus(instance) {
-    const requiredRooms = Object.values(instance.rooms)
-        .filter(room => room.threat);
+    const rooms = Object.values(instance.rooms || {});
+    const threatsCleared = rooms
+        .filter(room => room.threat)
+        .every(room => room.threatStatus === 'cleared');
+    const chestsOpened = rooms
+        .filter(room => room.chest)
+        .every(room => room.chest.opened === true);
 
-    instance.status = requiredRooms.every(room =>
-        room.threatStatus === 'cleared'
-    )
+    instance.status = threatsCleared && chestsOpened
         ? 'exhausted'
         : 'open';
 
@@ -6063,6 +6214,13 @@ function resolveInstanceAction(test) {
         firstVisit,
         status: instance.status,
         roomThreatStatus: room?.threatStatus || 'none',
+        chest: room?.chest
+            ? {
+                id: room.chest.id,
+                opened: Boolean(room.chest.opened),
+                obstacle: room.chest.obstacle || null
+            }
+            : null,
         encounter: encounter
             ? {
                 id: encounter.id,
@@ -6090,6 +6248,79 @@ function resolveInstanceAction(test) {
         ok: true,
         created: true,
         ...outcome,
+        state
+    };
+}
+
+/*
+ * Manual UI action for opening a saved instance chest once the player
+ * is ready in the fiction. Commits loot once via rollChestLoot() and
+ * queues a one-way GM handoff.
+ */
+function resolveInstanceChestOpen(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Opening a chest requires saved state'
+    );
+
+    const state = clone(test.state);
+    const instance = state.instances?.[test.instanceId];
+
+    assert(instance, 'Unknown saved instance');
+    assert(
+        state.activeInstanceId === instance.id &&
+        instance.currentRoomId,
+        'Enter this instance before opening its chest'
+    );
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the encounter before opening the chest'
+    );
+
+    const room = instance.rooms?.[instance.currentRoomId];
+
+    assert(
+        room?.chest && typeof room.chest === 'object',
+        'There is no chest in the current room'
+    );
+    assert(
+        room.threatStatus !== 'unresolved',
+        'Clear this room’s threat before opening the chest'
+    );
+
+    if (room.chest.opened === true) {
+        return {
+            ok: true,
+            created: false,
+            action: 'open_chest',
+            instanceId: instance.id,
+            instanceLabel: instance.label,
+            roomId: room.id,
+            roomLabel: room.label,
+            status: instance.status,
+            chest: clone(room.chest),
+            loot: clone(room.chest.loot),
+            state
+        };
+    }
+
+    const loot = rollChestLoot(state, instance.zone, room.chest.id);
+
+    room.chest.opened = true;
+    room.chest.loot = clone(loot);
+    refreshInstanceStatus(instance);
+
+    return {
+        ok: true,
+        created: true,
+        action: 'open_chest',
+        instanceId: instance.id,
+        instanceLabel: instance.label,
+        roomId: room.id,
+        roomLabel: room.label,
+        status: instance.status,
+        chest: clone(room.chest),
+        loot,
         state
     };
 }
@@ -7047,8 +7278,7 @@ function resolveTravelStep(test) {
     } else if (travelRoll <= 97) {
         event = 'social_opportunity';
     } else {
-        // Rolls 98–100 are reserved for future rare hidden-instance finds.
-        event = 'quiet_travel';
+        event = 'hidden_instance';
     }
 
     const outcome = {
@@ -7066,6 +7296,7 @@ function resolveTravelStep(test) {
         encounter: null,
         environmentalSign: null,
         cache: null,
+        hiddenInstance: null,
         site: null,
         social: null,
         rumor: null
@@ -7077,6 +7308,28 @@ function resolveTravelStep(test) {
             state.zone,
             test.stepId
         );
+    }
+
+    if (event === 'hidden_instance') {
+        const created = createHiddenInstance(
+            state,
+            state.zone,
+            test.stepId
+        );
+        const atEntrance = !state.currentJourney;
+
+        if (atEntrance) {
+            state.currentLocationId = created.entranceId;
+            state.currentPosition = { nodeId: created.entranceId };
+            state.places[created.entranceId].visited = true;
+        }
+
+        outcome.hiddenInstance = {
+            id: created.id,
+            entranceId: created.entranceId,
+            label: created.label,
+            atEntrance
+        };
     }
 
     if (event === 'environmental_sign') {
@@ -13035,6 +13288,21 @@ function herbalistStock(zone) {
     }));
 }
 
+function consumableDisplayName(entry) {
+    const definition = consumableDefinition(entry.id);
+    const base = entry.name || definition?.name || entry.id;
+
+    if (
+        definition?.type === 'potion' &&
+        definition.heal > 0 &&
+        !/\(\d+\s*HP\)/i.test(base)
+    ) {
+        return `${base} (${definition.heal} HP)`;
+    }
+
+    return base;
+}
+
 function normalizeConsumableInventory(inventory) {
     inventory.consumables ||= [];
 
@@ -15622,7 +15890,9 @@ function resolveBatch(args) {
                 case 'instance':
                     result = test.action === 'theme'
                         ? resolveInstanceTheme(test)
-                        : resolveInstanceAction(test);
+                        : test.action === 'open_chest'
+                            ? resolveInstanceChestOpen(test)
+                            : resolveInstanceAction(test);
                     break;
 
                 case 'cleanup_test_data': {
@@ -16923,6 +17193,74 @@ function stateSummary(state, revision) {
     };
 }
 
+function chestLootNarrationLines(cache) {
+    if (cache.kind === 'curio' || cache.kind === 'rare_curio') {
+        const curio = cache.curio;
+        const interestGuidance = {
+            uninterested:
+                'LOCAL BUYER INTEREST (PRIVATE): Uninterested. Ordinary ' +
+                'shopkeepers treat it as common junk or clutter and will ' +
+                'NOT fawn over it; it is only worth modest pawn value ' +
+                'unless the crew specifically hunts down a niche buyer.',
+            practical:
+                'LOCAL BUYER INTEREST (PRIVATE): Practical. A relevant ' +
+                'tradesman or pawnbroker recognizes modest workmanship ' +
+                'and will buy it without making a fuss.',
+            collector:
+                'LOCAL BUYER INTEREST (PRIVATE): Collector interest. A ' +
+                'local scholar, jeweler, or antiquarian will genuinely ' +
+                'care about its origin and gladly buy it.'
+        }[curio.buyerInterest];
+
+        return [
+            `Found (${curio.rarity} Curio): ${curio.name} — ` +
+                `locked resale value ${curio.value} silver.`,
+            interestGuidance,
+            'Write a concise <template> note recording this curio’s name, ' +
+                'physical appearance, locked value, and private buyer-interest ' +
+                'attitude so future NPCs react consistently.'
+        ];
+    }
+
+    if (cache.kind === 'consumable') {
+        return [
+            `Found (Consumable): 1× ${cache.item.name}` +
+                (cache.item.heal
+                    ? ` (heals ${cache.item.heal} HP).`
+                    : ' (cleansing tonic).')
+        ];
+    }
+
+    if (cache.kind === 'silver') {
+        return [
+            `Found (Coin Stash): ${cache.silver} silver added to the crew’s purse.`
+        ];
+    }
+
+    if (cache.kind === 'gear') {
+        return [
+            `Found (Gear): ${cache.item.name} (${cache.item.rarity}, ` +
+                `Stat ${cache.item.rawStat}) — placed in Bag Reserves, NOT equipped.`
+        ];
+    }
+
+    return [];
+}
+
+function instanceChestNarrationPacket(result) {
+    return [
+        '* **INSTANCE CHEST OPENED!**',
+        `Location: ${result.instanceLabel} — ${result.roomLabel}.`,
+        'Portray the crew opening the chest and discovering the exact ' +
+            'contents below. The contents are ALREADY added to saved state. ' +
+            'Do not add extra coin, gear, traps, or combat.',
+        ...chestLootNarrationLines(result.loot),
+        ...(result.status === 'exhausted'
+            ? ['All threats and chests in this instance are cleared. The instance is now exhausted.']
+            : [])
+    ].join('\n');
+}
+
 function instanceNarrationPacket(result) {
     if (result.action === 'exit') {
         return [
@@ -16964,6 +17302,27 @@ function instanceNarrationPacket(result) {
         );
     }
 
+    if (result.chest) {
+        if (!result.chest.opened) {
+            lines.push(
+                '* **UNOPENED CHEST SPOTTED!** This chamber holds a sealed ' +
+                    'or hidden chest/container.',
+                ...(result.chest.obstacle
+                    ? [
+                        `Environmental obstacle around the chest: ${result.chest.obstacle}. ` +
+                            'Stage this as a brief fictional complication for the crew to deal with.'
+                    ]
+                    : []),
+                'Do NOT open the chest or invent its contents yet. Wait for ' +
+                    'the player to open it in the fiction.'
+            );
+        } else {
+            lines.push(
+                'The chest in this chamber has already been opened and emptied.'
+            );
+        }
+    }
+
     lines.push(
         `Visible exits: ${
             result.knownExits.map(exit =>
@@ -16973,11 +17332,11 @@ function instanceNarrationPacket(result) {
             ).join(', ') || 'none'
         }.`,
         result.status === 'exhausted'
-            ? 'All required instance threats have been cleared. The ' +
+            ? 'All required instance content has been cleared. The ' +
                 'instance is exhausted.'
             : 'Other instance content may remain unresolved.',
         'Describe only architecture, atmosphere, and the engine-established ' +
-            'threat. Do not add loot, puzzles, quests, bosses, or rewards.'
+            'threat or chest. Do not add extra loot, quests, bosses, or rewards.'
     );
 
     return lines.join('\n');
@@ -16993,60 +17352,31 @@ function travelNarrationPacket(result) {
             'Nothing notable was discovered on this stretch.'
         );
     } else if (result.event === 'hidden_cache' && result.cache) {
-        const cache = result.cache;
-
         lines.push(
             '* **HIDDEN CACHE FOUND!** Tansy’s shadow-weasels sniffed out ' +
                 'a hidden stash, buried box, or tucked-away cache along the route.',
             'Portray the weasels alerting Tansy and the crew recovering ' +
                 'the cache. Dress the hiding spot to fit the saved geography.',
             'The contents below are ALREADY added to saved state. Do not ' +
-                'add extra coin, gear, traps, or combat.'
+                'add extra coin, gear, traps, or combat.',
+            ...chestLootNarrationLines(result.cache)
         );
-
-        if (cache.kind === 'curio' || cache.kind === 'rare_curio') {
-            const curio = cache.curio;
-            const interestGuidance = {
-                uninterested:
-                    'LOCAL BUYER INTEREST (PRIVATE): Uninterested. Ordinary ' +
-                    'shopkeepers treat it as common junk or clutter and will ' +
-                    'NOT fawn over it; it is only worth modest pawn value ' +
-                    'unless the crew specifically hunts down a niche buyer.',
-                practical:
-                    'LOCAL BUYER INTEREST (PRIVATE): Practical. A relevant ' +
-                    'tradesman or pawnbroker recognizes modest workmanship ' +
-                    'and will buy it without making a fuss.',
-                collector:
-                    'LOCAL BUYER INTEREST (PRIVATE): Collector interest. A ' +
-                    'local scholar, jeweler, or antiquarian will genuinely ' +
-                    'care about its origin and gladly buy it.'
-            }[curio.buyerInterest];
-
-            lines.push(
-                `Found (${curio.rarity} Curio): ${curio.name} — ` +
-                    `locked resale value ${curio.value} silver.`,
-                interestGuidance,
-                'Write a concise <template> note recording this curio’s name, ' +
-                    'physical appearance, locked value, and private buyer-interest ' +
-                    'attitude so future NPCs react consistently.'
-            );
-        } else if (cache.kind === 'consumable') {
-            lines.push(
-                `Found (Consumable): 1× ${cache.item.name}` +
-                    (cache.item.heal
-                        ? ` (heals ${cache.item.heal} HP).`
-                        : ' (cleansing tonic).')
-            );
-        } else if (cache.kind === 'silver') {
-            lines.push(
-                `Found (Coin Stash): ${cache.silver} silver added to the crew’s purse.`
-            );
-        } else if (cache.kind === 'gear') {
-            lines.push(
-                `Found (Gear): ${cache.item.name} (${cache.item.rarity}, ` +
-                    `Stat ${cache.item.rawStat}) — placed in Bag Reserves, NOT equipped.`
-            );
-        }
+    } else if (result.event === 'hidden_instance' && result.hiddenInstance) {
+        const site = result.hiddenInstance;
+        lines.push(
+            '* **RARE HIDDEN INSTANCE DISCOVERED!**',
+            site.atEntrance
+                ? 'Tansy’s shadow-weasels or the crew uncovered the concealed ' +
+                    'entrance to a rare, one-time hidden site right here ' +
+                    '(e.g., a collapsed smuggling tunnel, sealed Pre-Calamity ' +
+                    'cellar, forgotten vault, or hidden shrine). They are ' +
+                    'standing at its entrance and may enter or leave it for later.'
+                : 'Along the route, the crew spotted the concealed entrance to ' +
+                    'a rare, one-time hidden site tucked off the path. Its ' +
+                    'location is now recorded for a future visit while their ' +
+                    'current journey continues.',
+            'Do NOT enter the site, start combat, or grant loot automatically.'
+        );
     } else if (result.event === 'environmental_sign') {
         lines.push(
             `Environmental sign: ${result.environmentalSign}.`,
@@ -18372,6 +18702,12 @@ async function runStoredMechanic(args) {
 
             : batch &&
               oneCase?.kind === 'instance' &&
+              oneCase.action === 'open_chest' &&
+              caseResult.created
+                ? instanceChestNarrationPacket(caseResult)
+
+            : batch &&
+              oneCase?.kind === 'instance' &&
               ['enter', 'move', 'exit'].includes(oneCase.action) &&
               caseResult.created
                 ? [
@@ -19317,6 +19653,7 @@ function registerTools() {
                                     'move',
                                     'exit',
                                     'theme',
+                                    'open_chest',
                                     'stage',
                                     'discard',
                                     'commit',
@@ -22715,7 +23052,8 @@ async function renderInventoryTab(host) {
         name.className =
             `aethermoor-vendor-name ${rarityClass(item)}`;
         name.textContent =
-            `${item.name || definition?.name || item.id} ×${item.quantity}`;
+            `${consumableDisplayName(item)} ×${item.quantity}`;
+
 
         main.appendChild(name);
 
@@ -23411,25 +23749,23 @@ async function renderInstanceTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    const instance = state.activeInstanceId
-        ? state.instances?.[state.activeInstanceId]
-        : state.instances?.[`instance-z${state.zone}-known`];
-
-    if (!instance) {
-        host.appendChild(
-            makeAethermoorSection(
-                'INSTANCE',
-                'No known instance in the current zone.',
-                'world'
-            )
-        );
-        return;
-    }
-
     const blocked = ['active', 'spotted']
         .includes(state.encounter?.status);
 
     if (state.activeInstanceId) {
+        const instance = state.instances?.[state.activeInstanceId];
+
+        if (!instance) {
+            host.appendChild(
+                makeAethermoorSection(
+                    'INSTANCE',
+                    'Saved active instance is unavailable.',
+                    'world'
+                )
+            );
+            return;
+        }
+
         if (state.encounter?.instanceId === instance.id) {
             appendEncounterCard(host, state, 'instances');
         }
@@ -23465,12 +23801,17 @@ async function renderInstanceTab(host) {
                             threat.tactic
                         ).label}`
                         : '';
+                const chestTag = entry.chest
+                    ? entry.chest.opened
+                        ? ' · Chest opened'
+                        : ' · Unopened chest'
+                    : '';
 
                 return (
                     `${entry.id === room.id ? '● ' : '○ '}` +
                     `${entry.label} · ` +
                     `${entry.visited ? 'Visited' : 'Known exit'}` +
-                    `${tactic}`
+                    `${tactic}${chestTag}`
                 );
             }).join('\n');
 
@@ -23483,6 +23824,52 @@ async function renderInstanceTab(host) {
                     : ''),
             'world'
         );
+
+        if (room.chest && !room.chest.opened) {
+            const openChest = makeAethermoorAction(
+                'Open Chest',
+                'quest',
+                async () => {
+                    openChest.disabled = true;
+
+                    try {
+                        const output = await runStoredMechanic({
+                            cases: [{
+                                name: 'open_instance_chest',
+                                kind: 'instance',
+                                action: 'open_chest',
+                                instanceId: instance.id
+                            }]
+                        });
+
+                        assert(
+                            output?.ok === true &&
+                            output.results?.[0]?.ok !== false,
+                            output?.results?.[0]?.error ||
+                                'Could not open chest'
+                        );
+
+                        toastr.success(
+                            'Chest opened! Contents saved and queued for the GM.',
+                            'Aethermoor'
+                        );
+                        await renderInstanceTab(host);
+                    } catch (error) {
+                        openChest.disabled = false;
+                        toastr.error(
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                            'Aethermoor'
+                        );
+                    }
+                }
+            );
+
+            openChest.disabled =
+                blocked || room.threatStatus === 'unresolved';
+            section.appendChild(openChest);
+        }
 
         for (const exitId of room.exits) {
             const destination = instance.rooms[exitId];
@@ -23529,49 +23916,74 @@ async function renderInstanceTab(host) {
         return;
     }
 
-    const atEntrance =
-        state.currentLocationId === instance.entranceId &&
-        !state.currentJourney;
+    const zoneInstances = Object.values(state.instances || {})
+        .filter(site => site && site.zone === state.zone)
+        .sort((a, b) => {
+            const aKnown = a.id === `instance-z${state.zone}-known` ? 0 : 1;
+            const bKnown = b.id === `instance-z${state.zone}-known` ? 0 : 1;
+            return aKnown - bKnown;
+        });
 
-    const journey =
-        state.currentJourney?.destinationId === instance.entranceId
-            ? state.currentJourney
-            : null;
+    if (zoneInstances.length === 0) {
+        host.appendChild(
+            makeAethermoorSection(
+                'INSTANCE',
+                'No known instance in the current zone.',
+                'world'
+            )
+        );
+        return;
+    }
 
-    const section = makeAethermoorSection(
-        'KNOWN INSTANCE',
-        `${instance.label}\nStatus: ${instance.status}\n` +
-            (atEntrance
-                ? 'The crew is at its entrance.'
-                : journey
-                    ? `Journey: ${journey.completedSegments}/` +
-                        `${journey.totalSegments} segments` +
-                        (journey.status === 'paused'
-                            ? ' · interrupted'
-                            : '')
-                    : 'The entrance is a known destination.'),
-        'world'
-    );
+    for (const instance of zoneInstances) {
+        const atEntrance =
+            state.currentLocationId === instance.entranceId &&
+            !state.currentJourney;
 
-    const command = atEntrance
-        ? instanceCommand(instance.id, 'enter')
-        : destinationCommand(instance.entranceId);
+        const journey =
+            state.currentJourney?.destinationId === instance.entranceId
+                ? state.currentJourney
+                : null;
 
-    const button = makeAethermoorAction(
-        atEntrance
-            ? 'Enter instance'
-            : journey?.completedSegments === journey?.totalSegments
-                ? 'Finish journey to instance entrance'
-                : journey
-                    ? 'Continue to instance entrance'
-                    : 'Travel to instance entrance',
-        'world',
-        () => copyAethermoorCommand(command)
-    );
+        const heading = instance.kind === 'hidden'
+            ? 'HIDDEN INSTANCE (ONE-TIME)'
+            : 'KNOWN INSTANCE';
 
-    button.disabled = blocked;
-    section.appendChild(button);
-    host.appendChild(section);
+        const section = makeAethermoorSection(
+            heading,
+            `${instance.label}\nStatus: ${instance.status}\n` +
+                (atEntrance
+                    ? 'The crew is at its entrance.'
+                    : journey
+                        ? `Journey: ${journey.completedSegments}/` +
+                            `${journey.totalSegments} segments` +
+                            (journey.status === 'paused'
+                                ? ' · interrupted'
+                                : '')
+                        : 'The entrance is a known destination.'),
+            'world'
+        );
+
+        const command = atEntrance
+            ? instanceCommand(instance.id, 'enter')
+            : destinationCommand(instance.entranceId);
+
+        const button = makeAethermoorAction(
+            atEntrance
+                ? 'Enter instance'
+                : journey?.completedSegments === journey?.totalSegments
+                    ? 'Finish journey to instance entrance'
+                    : journey
+                        ? 'Continue to instance entrance'
+                        : 'Travel to instance entrance',
+            'world',
+            () => copyAethermoorCommand(command)
+        );
+
+        button.disabled = blocked;
+        section.appendChild(button);
+        host.appendChild(section);
+    }
 }
 
 async function renderWorldTab(host) {
@@ -24620,9 +25032,7 @@ function potionOptionsFor(state) {
         )
         .map(entry => ({
             value: entry.id,
-            label:
-                entry.name ||
-                consumableDefinition(entry.id).name,
+            label: consumableDisplayName(entry),
             detail: `${entry.quantity} in stock`
         }));
 }
@@ -27396,9 +27806,16 @@ globalThis.aethermoorMechanicsInterceptor =
                             'PRIVATE INSTANCE IDENTITY REQUEST.',
                             `Engine-issued instance ID: ${instance.id}.`,
                             `Saved geography: ${geography}.`,
-                            'This is a finite fixed site. Choose a short ' +
-                                'locally fitting name, a kind of place, ' +
-                                'and one sentence of atmosphere.',
+                            instance.kind === 'hidden'
+                                ? 'This is a rare, forgotten one-time hidden site ' +
+                                    '(such as a sealed Pre-Calamity cellar, collapsed ' +
+                                    'smuggling tunnel, hidden shrine, or forgotten vault). ' +
+                                    'Choose a short locally fitting name, kind of place, ' +
+                                    'and one sentence of atmosphere, optionally weaving ' +
+                                    'in a brief narrative scrap of local or Pre-Calamity lore.'
+                                : 'This is a finite fixed site. Choose a short ' +
+                                    'locally fitting name, a kind of place, ' +
+                                    'and one sentence of atmosphere.',
                             'The kind may be a ruin, camp, catacomb, ' +
                                 'worksite, cave complex, or another form ' +
                                 'that makes sense here. Do not assume ' +

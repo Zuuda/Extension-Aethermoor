@@ -7418,9 +7418,10 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   dramatization; copying does not rerun combat or grant rewards.
  *
  * - IMPLEMENTED — BETA PENDING: World and Instance show spotted-encounter
- *   decisions in context. Engage opens the one Combat UI; a finished turn
- *   returns to the originating tab, where victory shows that saved receipt.
- *   No second combat resolver or reward claim path was added.
+ *   decisions in context. Engage opens the one Combat UI; cleared-fight
+ *   receipts and recap controls appear only in Combat. A finished turn
+ *   may return to its originating tab. No second combat resolver or
+ *   reward claim path was added.
  *
  * - IMPLEMENTED — BETA PENDING: healing potions have fixed purchase-zone
  *   grades. Basic heals 50 × zone HP for 10 × zone silver; Mid-Tier heals
@@ -7830,8 +7831,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *
  * PLANNED — Local site exploration sessions
  * - IMPLEMENTED — BETA PENDING: travel establishes a directly noticed,
- *   scenic-only POI with a stable place ID and saved route; World offers
- *   Travel to it.
+ *   scenic-only POI with a stable place ID and saved route. World does
+ *   not foreground scenic POIs as actionable destinations.
  * - Confirmed arrival records one source-linked visit observation and
  *   authorizes description of visible features. Ordinary POIs have no
  *   hidden curiosity roll, loot, hazard, lore, encounter, or quest result.
@@ -7864,8 +7865,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Enter, move, and exit require submitted instance commands. The Instance
  *   tab shows visited rooms, known exits, threats, and the entrance command.
  * - Quest destination commands live on their Quests cards; World retains
- *   rumors, POIs, settlements, onward travel, exploration, and a compact
- *   pointer to available quest and instance destinations.
+ *   rumors, settlements, exploration, and onward travel at the bottom.
+ *   Known-instance navigation and status live in the Instance tab;
+ *   scenic POIs have no World travel controls.
  * - Every movement button remains clipboard-only. Submitted commands use
  *   the existing saved overland or instance resolver, never a tab-specific
  *   movement mechanic.
@@ -23334,16 +23336,7 @@ function appendEncounterCard(host, state, originTab) {
         }
 
         host.appendChild(section);
-        return;
     }
-
-    const receipt = encounter?.status === 'cleared'
-        ? encounter.victoryReceipt
-        : null;
-
-    if (!receipt || receipt.encounterId !== encounter.id) return;
-
-    appendVictoryReceipt(host, receipt);
 }
 
 /*
@@ -23711,22 +23704,7 @@ async function renderWorldTab(host) {
         host.appendChild(returnSection);
     }
 
-    const knownInstance =
-        state.instances?.[`instance-z${state.zone}-known`];
-
-    if (knownInstance) {
-        host.appendChild(
-            makeAethermoorSection(
-                'KNOWN INSTANCE',
-                `${knownInstance.label} · ${knownInstance.status}\n` +
-                    'Its entrance and room controls are in the Instance tab.',
-                'world'
-            )
-        );
-    }
-
     const journey = state.currentJourney;
-
     if (journey) {
 
         /*
@@ -23880,39 +23858,6 @@ async function renderWorldTab(host) {
         host.appendChild(history);
     }
 
-    const pointsOfInterest = Object.values(state.places || {})
-        .filter(place =>
-            place?.kind === 'point_of_interest' &&
-            Number(place.zone) === state.zone &&
-            place.testOnly !== true
-        );
-
-    const poiSection = makeAethermoorSection(
-        'POINTS OF INTEREST · CURRENT ZONE',
-        pointsOfInterest.length
-            ? 'Places noticed during travel. Visiting is not searching.'
-            : 'No points of interest noticed in this zone.',
-        'world'
-    );
-
-    for (const place of pointsOfInterest) {
-        if (place.id === currentLocationId) {
-            const atSite = document.createElement('div');
-            atSite.className = 'aethermoor-ui-text';
-            atSite.textContent =
-                `${place.label}\nThe crew is here. ` +
-                'What they do next is up to the player.';
-            poiSection.appendChild(atSite);
-        } else {
-            addTravelAction(
-                poiSection,
-                `Travel to ${place.label}`,
-                place.id
-            );
-        }
-    }
-    host.appendChild(poiSection);
-
     /*
      * The saved world connects neighboring primary settlements, but the
      * next settlement need not already be a character-known place or lead.
@@ -23924,23 +23869,6 @@ async function renderWorldTab(host) {
     const nextSettlement = nextZone
         ? world.settlements?.[nextZone.primarySettlementId]
         : null;
-
-    if (nextSettlement?.locationId) {
-        const onward = makeAethermoorSection(
-            'ONWARD',
-            `Route toward Zone ${nextZone.number}: ${nextZone.name}\n` +
-                `Terrain ahead: ${nextZone.geography?.description || 'unknown'}.`,
-            'world'
-        );
-
-        addTravelAction(
-            onward,
-            `Travel onward to Zone ${nextZone.number}`,
-            nextSettlement.locationId
-        );
-
-        host.appendChild(onward);
-    }
 
     // Test fixtures are created from Narration Debug, not ordinary World.
     const settlements = Object.values(world.settlements || {})
@@ -24023,6 +23951,23 @@ async function renderWorldTab(host) {
         exploreButton.disabled = movementBlocked;
         exploreSection.appendChild(exploreButton);
         host.appendChild(exploreSection);
+    }
+
+    if (nextSettlement?.locationId) {
+        const onward = makeAethermoorSection(
+            'ONWARD',
+            `Route toward Zone ${nextZone.number}: ${nextZone.name}\n` +
+                `Terrain ahead: ${nextZone.geography?.description || 'unknown'}.`,
+            'world'
+        );
+
+        addTravelAction(
+            onward,
+            `Travel onward to Zone ${nextZone.number}`,
+            nextSettlement.locationId
+        );
+
+        host.appendChild(onward);
     }
 }
 

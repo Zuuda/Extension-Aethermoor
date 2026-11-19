@@ -8074,12 +8074,27 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Chat metadata could retain concise, source-linked facts established in
  *   play: recurring NPC details, settlement events, relationships, and
  *   relevant clues. Do not save every NPC or every line of dialogue.
+ * - A possible narrative-only lore thread could let the GM introduce a brief,
+ *   inconsequential world detail when play presents a fitting opportunity,
+ *   then build on or connect that detail when later opportunities arise.
+ *   The GM would create the lore; the extension would only help keep
+ *   established ideas available so they are less likely to be abandoned for
+ *   unrelated lore. Do not preauthor a lore catalog or make these details
+ *   mechanical clues, rewards, or prerequisites.
+ * - An instance-theme handoff could optionally include relevant established
+ *   world lore and invite the GM to make the instance thematically consistent
+ *   with it. This is presentation guidance only: each campaign replay may
+ *   establish different lore, and the handoff must not add rooms, threats,
+ *   rewards, or lore that is required for progression.
+ * - Treat both ideas as experiments in narrative continuity, not committed
+ *   mechanics. First observe whether the GM naturally carries lore forward
+ *   and whether relevant context improves the story. Only then consider
+ *   saving concise, source-linked lore and retrieving relevant details.
  * - Keep GM-reported fictional continuity separate from engine-authoritative
  *   mechanics and from unverified NPC claims.
- * - Supply a compact settlement recap on a relevant return, or a specific
- *   old clue when a new opportunity explicitly references it. Do not inject
- *   the entire history into every prompt or depend solely on name matching.
- * - Establish stable NPC identity, fact-update rules, source links, and
+ * - Supply compact, relevant context rather than injecting the entire
+ *   history into every prompt or relying solely on name matching.
+ * - Establish stable identities, fact-update rules, source links, and
  *   retrieval limits before accepting GM-written continuity records.
  * - This is not part of the current social-work ID repair or beta-start
  *   requirement.

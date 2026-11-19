@@ -6586,6 +6586,168 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
     return nextState;
 }
 
+/*
+ * Shared cache/chest loot generator used by overland hidden caches and
+ * future instance chests. Applies the rolled reward immediately to saved
+ * state so no GM-to-extension tag is required.
+ */
+function rollChestLoot(state, zone, sourceId) {
+    assert(ZONES[zone], `Unknown chest loot zone: ${zone}`);
+
+    state.inventory ||= {};
+    state.inventory.consumables ||= [];
+    state.inventory.bagReserves ||= [];
+    state.inventory.curios ||= [];
+
+    const lootRoll = roll(state, 10);
+
+    if (lootRoll <= 6) {
+        const rare = lootRoll >= 5;
+        const slotCount = rare ? 3 : 4;
+        const nameSlot = roll(state, slotCount);
+        const stockKey = `curio:${rare ? 'rare' : 'common'}:${nameSlot}`;
+        const fallback = rare
+            ? `Zone ${zone} Rare Curio`
+            : `Zone ${zone} Curio`;
+        const name = cosmeticStockName(state, stockKey, fallback);
+        const value = rare
+            ? (roll(state, 6) + 9) * zone
+            : (roll(state, 5) + 3) * zone;
+
+        const interestRoll = roll(state, 6);
+        const buyerInterest =
+            interestRoll <= 3
+                ? 'uninterested'
+                : interestRoll <= 5
+                    ? 'practical'
+                    : 'collector';
+
+        const curio = {
+            id: `curio-${sourceId}`,
+            name,
+            rarity: rare ? 'Rare' : 'Common',
+            zone,
+            value,
+            buyerInterest,
+            sourceId
+        };
+
+        state.inventory.curios.push(curio);
+
+        return {
+            roll: lootRoll,
+            kind: rare ? 'rare_curio' : 'curio',
+            curio
+        };
+    }
+
+    if (lootRoll <= 8) {
+        const stock = herbalistStock(zone);
+        const picked = stock[roll(state, stock.length) - 1];
+        const displayName = cosmeticStockName(
+            state,
+            potionCosmeticStockKey(picked.id),
+            picked.name
+        );
+
+        let entry = state.inventory.consumables.find(
+            item => item.id === picked.id
+        );
+
+        if (!entry) {
+            entry = {
+                id: picked.id,
+                name: displayName,
+                type: picked.type,
+                quantity: 0,
+                recipient: null
+            };
+            state.inventory.consumables.push(entry);
+        }
+
+        entry.quantity += 1;
+
+        return {
+            roll: lootRoll,
+            kind: 'consumable',
+            item: {
+                id: picked.id,
+                name: entry.name || displayName,
+                type: picked.type,
+                heal: picked.heal || 0
+            }
+        };
+    }
+
+    if (lootRoll === 9) {
+        const silver = (roll(state, 4) + 2) * zone;
+        state.crew.purse = int(state.crew.purse, 'crew purse') + silver;
+
+        return {
+            roll: lootRoll,
+            kind: 'silver',
+            silver
+        };
+    }
+
+    const generated = rollLootFromState(state, 'wild', zone);
+    const item = {
+        ...generated.item,
+        acquiredFrom: 'hidden_cache',
+        acquiredAtStep: sourceId,
+        bound: false
+    };
+
+    state.inventory.bagReserves.push(item);
+
+    return {
+        roll: lootRoll,
+        kind: 'gear',
+        item
+    };
+}
+
+function resolveCurioAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Curio action requires saved state'
+    );
+    assert(
+        ['sell', 'remove'].includes(test.action),
+        `Unsupported curio action: ${test.action}`
+    );
+    assert(
+        typeof test.curioId === 'string' && test.curioId.length > 0,
+        'Curio action requires curioId'
+    );
+
+    const state = clone(test.state);
+    state.inventory ||= {};
+    state.inventory.curios ||= [];
+
+    const index = state.inventory.curios.findIndex(
+        entry => entry?.id === test.curioId
+    );
+
+    assert(index >= 0, `Curio not found: ${test.curioId}`);
+
+    const [curio] = state.inventory.curios.splice(index, 1);
+    let silverGained = 0;
+
+    if (test.action === 'sell') {
+        silverGained = int(curio.value, 'curio.value', 1);
+        state.crew.purse = int(state.crew.purse, 'crew purse') + silverGained;
+    }
+
+    return {
+        ok: true,
+        action: test.action,
+        curio,
+        silverGained,
+        state
+    };
+}
+
 function resolveTravelStep(test) {
     assert(
         test.state && typeof test.state === 'object',
@@ -6872,8 +7034,10 @@ function resolveTravelStep(test) {
 
     let event;
 
-    if (travelRoll <= 65) {
+    if (travelRoll <= 57) {
         event = 'quiet_travel';
+    } else if (travelRoll <= 65) {
+        event = 'hidden_cache';
     } else if (travelRoll <= 75) {
         event = 'environmental_sign';
     } else if (travelRoll <= 85) {
@@ -6883,8 +7047,7 @@ function resolveTravelStep(test) {
     } else if (travelRoll <= 97) {
         event = 'social_opportunity';
     } else {
-        // Rolls 98–100 have no authored event contract yet.
-        // Treat them as quiet travel rather than invite an invented result.
+        // Rolls 98–100 are reserved for future rare hidden-instance finds.
         event = 'quiet_travel';
     }
 
@@ -6902,10 +7065,19 @@ function resolveTravelStep(test) {
         encounterId: null,
         encounter: null,
         environmentalSign: null,
+        cache: null,
         site: null,
         social: null,
         rumor: null
     };
+
+    if (event === 'hidden_cache') {
+        outcome.cache = rollChestLoot(
+            state,
+            state.zone,
+            test.stepId
+        );
+    }
 
     if (event === 'environmental_sign') {
         const signs = [
@@ -13252,7 +13424,17 @@ function stockNamingEntries(state) {
         description: service.label
     }));
 
-    return [...gear, ...potions, ...innServices];
+    const curios = [
+        { key: 'curio:common:1', description: 'ordinary local curio or trinket' },
+        { key: 'curio:common:2', description: 'ordinary local curio or craft oddity' },
+        { key: 'curio:common:3', description: 'ordinary local curio or old keepsake' },
+        { key: 'curio:common:4', description: 'ordinary local curio or minor relic' },
+        { key: 'curio:rare:1', description: 'rare local curio or Pre-Calamity relic' },
+        { key: 'curio:rare:2', description: 'rare local curio or collector piece' },
+        { key: 'curio:rare:3', description: 'rare local curio or fine antique' }
+    ];
+
+    return [...gear, ...potions, ...innServices, ...curios];
 }
 
 function resolveStockNames(test) {
@@ -13317,7 +13499,7 @@ function resolveStockNames(test) {
             value.trim().length >= 3 &&
             value.trim().length <= 60 &&
             !/[<>\r\n]/.test(value) &&
-            !/\b(?:hp|stat|silver|gold|tier)\b/i.test(value) &&
+            !/\b(?:hp|stat|tier|coin|price|copper)\b/i.test(value) &&
             !/\d/.test(value),
             `Invalid cosmetic stock name for ${key}`
         );
@@ -15371,6 +15553,9 @@ function resolveBatch(args) {
                 case 'consumable':
                     result = resolveConsumableAction(test);
                     break;
+                case 'curio':
+                    result = resolveCurioAction(test);
+                    break;
                 case 'herbalist':
                     result = resolveHerbalistAction(test);
                     break;
@@ -16580,7 +16765,8 @@ function createInitialCampaignState() {
         inventory: {
             consumables: [],
             bagReserves: [],
-            activeTradeListings: []
+            activeTradeListings: [],
+            curios: []
         },
         encounter: null,
         activeQuest: null,
@@ -16806,6 +16992,61 @@ function travelNarrationPacket(result) {
         lines.push(
             'Nothing notable was discovered on this stretch.'
         );
+    } else if (result.event === 'hidden_cache' && result.cache) {
+        const cache = result.cache;
+
+        lines.push(
+            '* **HIDDEN CACHE FOUND!** Tansy’s shadow-weasels sniffed out ' +
+                'a hidden stash, buried box, or tucked-away cache along the route.',
+            'Portray the weasels alerting Tansy and the crew recovering ' +
+                'the cache. Dress the hiding spot to fit the saved geography.',
+            'The contents below are ALREADY added to saved state. Do not ' +
+                'add extra coin, gear, traps, or combat.'
+        );
+
+        if (cache.kind === 'curio' || cache.kind === 'rare_curio') {
+            const curio = cache.curio;
+            const interestGuidance = {
+                uninterested:
+                    'LOCAL BUYER INTEREST (PRIVATE): Uninterested. Ordinary ' +
+                    'shopkeepers treat it as common junk or clutter and will ' +
+                    'NOT fawn over it; it is only worth modest pawn value ' +
+                    'unless the crew specifically hunts down a niche buyer.',
+                practical:
+                    'LOCAL BUYER INTEREST (PRIVATE): Practical. A relevant ' +
+                    'tradesman or pawnbroker recognizes modest workmanship ' +
+                    'and will buy it without making a fuss.',
+                collector:
+                    'LOCAL BUYER INTEREST (PRIVATE): Collector interest. A ' +
+                    'local scholar, jeweler, or antiquarian will genuinely ' +
+                    'care about its origin and gladly buy it.'
+            }[curio.buyerInterest];
+
+            lines.push(
+                `Found (${curio.rarity} Curio): ${curio.name} — ` +
+                    `locked resale value ${curio.value} silver.`,
+                interestGuidance,
+                'Write a concise <template> note recording this curio’s name, ' +
+                    'physical appearance, locked value, and private buyer-interest ' +
+                    'attitude so future NPCs react consistently.'
+            );
+        } else if (cache.kind === 'consumable') {
+            lines.push(
+                `Found (Consumable): 1× ${cache.item.name}` +
+                    (cache.item.heal
+                        ? ` (heals ${cache.item.heal} HP).`
+                        : ' (cleansing tonic).')
+            );
+        } else if (cache.kind === 'silver') {
+            lines.push(
+                `Found (Coin Stash): ${cache.silver} silver added to the crew’s purse.`
+            );
+        } else if (cache.kind === 'gear') {
+            lines.push(
+                `Found (Gear): ${cache.item.name} (${cache.item.rarity}, ` +
+                    `Stat ${cache.item.rawStat}) — placed in Bag Reserves, NOT equipped.`
+            );
+        }
     } else if (result.event === 'environmental_sign') {
         lines.push(
             `Environmental sign: ${result.environmentalSign}.`,
@@ -18838,6 +19079,7 @@ function registerTools() {
                                     'vendor',
                                     'currency',
                                     'consumable',
+                                    'curio',
                                     'herbalist',
                                     'inn',
                                     'stock_names',
@@ -19094,7 +19336,6 @@ function registerTools() {
                                     'remove',
                                     'activate',
                                     'deactivate'
-
                                 ]
                             },
 
@@ -19107,6 +19348,12 @@ function registerTools() {
                                 type: 'string',
                                 description:
                                     'Saved consumable ID; healing grades include their purchase zone'
+                            },
+
+                            curioId: {
+                                type: 'string',
+                                description:
+                                    'Stable ID of a saved curio in inventory.curios'
                             },
 
                             quantity: {
@@ -22377,15 +22624,6 @@ async function renderInventoryTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    host.appendChild(
-        makeAethermoorSection(
-            'CREW INVENTORY',
-            `Purse: ${state.crew.purse}s\n` +
-                'Items below are from saved state, not narrated estimates.',
-            'world'
-        )
-    );
-
     const purseSection = makeAethermoorSection(
         'PURSE',
         'Add or deduct silver from fictional sales, meals, tips, or sundries.',
@@ -22537,6 +22775,84 @@ async function renderInventoryTab(host) {
     }
 
     host.appendChild(potionSection);
+
+    const curios = inventory.curios || [];
+
+    if (curios.length > 0) {
+        const curioSection = makeAethermoorSection(
+            `VALUABLES & CURIOS · ${curios.length}`,
+            'Sell for locked value or remove after gifting/custom trades.',
+            'world'
+        );
+
+        for (const curio of curios) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const name = document.createElement('div');
+            name.className =
+                `aethermoor-vendor-name aethermoor-rarity-${
+                    String(curio.rarity || 'common').toLowerCase()
+                }`;
+            name.textContent = curio.name || 'Unnamed curio';
+
+            const detail = document.createElement('div');
+            detail.className = 'aethermoor-vendor-detail';
+            detail.textContent =
+                `Zone ${curio.zone} ${curio.rarity || 'Common'} · ` +
+                `Value ${curio.value}s`;
+
+            main.append(name, detail);
+
+            const actions = document.createElement('div');
+            actions.className = 'aethermoor-inventory-item-actions';
+
+            const sell = document.createElement('button');
+            sell.type = 'button';
+            sell.textContent = `Sell (+${curio.value}s)`;
+            sell.addEventListener('click', async () => {
+                sell.disabled = true;
+                await runAethermoorPanelCase(
+                    host,
+                    'inventory',
+                    {
+                        name: `sell_curio_${curio.id}`,
+                        kind: 'curio',
+                        action: 'sell',
+                        curioId: curio.id
+                    },
+                    `Sold ${curio.name} for +${curio.value}s.`
+                );
+            });
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = 'Remove';
+            remove.addEventListener('click', async () => {
+                remove.disabled = true;
+                await runAethermoorPanelCase(
+                    host,
+                    'inventory',
+                    {
+                        name: `remove_curio_${curio.id}`,
+                        kind: 'curio',
+                        action: 'remove',
+                        curioId: curio.id
+                    },
+                    `Removed ${curio.name}.`
+                );
+            });
+
+            actions.append(sell, remove);
+            row.append(main, actions);
+            curioSection.appendChild(row);
+        }
+
+        host.appendChild(curioSection);
+    }
 
     const bag = inventory.bagReserves || [];
 

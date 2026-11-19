@@ -14132,36 +14132,6 @@ function resolveFoodAction(test) {
     };
 }
 
-    const purseBefore = int(state.crew?.purse, 'crew purse');
-
-    assert(
-        purseBefore >= test.amount,
-        `Cannot record ${test.amount}s spent: saved purse has ` +
-            `${purseBefore}s`
-    );
-
-    state.crew.purse = purseBefore - test.amount;
-
-    const receipt = {
-        id: test.socialId,
-        amount: test.amount,
-        reason,
-        locationId: state.currentLocationId || null,
-        purseBefore,
-        purseAfter: state.crew.purse
-    };
-
-    state.expenseReceipts[test.socialId] = clone(receipt);
-
-    return {
-        ok: true,
-        created: true,
-        action: 'paid',
-        receipt,
-        state
-    };
-}
-
 function resolveBossGearCheck(test) {
     assert(
         test.state &&

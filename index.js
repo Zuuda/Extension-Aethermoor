@@ -21704,7 +21704,6 @@ async function openAethermoorShopWindow() {
         confirm.disabled = true;
 
         try {
-        try {
             const committed = await runStoredMechanic({
                 cases: [{
                     name: 'commit_vendor_trade',
@@ -21733,6 +21732,7 @@ async function openAethermoorShopWindow() {
 
             toastr.success('Trade completed.', 'Aethermoor');
             windowElement.remove();
+
             if (aethermoorPanelOpen) {
                 renderAethermoorTab(aethermoorActiveTab);
             }

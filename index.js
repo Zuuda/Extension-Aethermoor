@@ -12171,8 +12171,12 @@ function resolveVendorSelection(test) {
         );
     }
 
+    state.vendorMenu ||= {
+        settlementId: settlement.id,
+        pendingBasket: null
+    };
+
     state.vendorMenu.pendingBasket = {
-        id: `${state.vendorMenu.inquiryId}-trade`,
         settlementId: settlement.id,
         zone: state.zone,
         buy,
@@ -12192,84 +12196,49 @@ function resolveVendorSelection(test) {
 }
 
 /*
- * A trade is committed only after the fictional agreement is reported.
- * Re-stage the saved choices against CURRENT state: the staged quote is
- * never authority for prices, possession, equipment, or available silver.
- * All changes happen on one clone and are saved as one operation.
- *
- * The assistant-message ID identifies the agreement event. Repeated
- * received/rendered notifications return its saved receipt without
- * transferring items or silver twice.
+ * Direct-confirm vendor trade. Validates the submitted basket against
+ * current state and applies all sales, purchases, and silver changes
+ * atomically on one clone.
  */
 function resolveVendorTradeCommit(test) {
     assert(
         test.state && typeof test.state === 'object',
-        'Trade agreement requires saved state'
+        'Trade commit requires saved state'
     );
 
     const state = clone(test.state);
-
-    assert(
-        typeof test.socialId === 'string' &&
-        /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-        'Trade agreement requires an engine-issued message reference'
-    );
-
-    state.vendorTradeReceipts ||= {};
-
-    const previousReceipt =
-        state.vendorTradeReceipts[test.socialId];
-
-    if (previousReceipt) {
-        return {
-            ok: true,
-            created: false,
-            action: 'commit',
-            receipt: clone(previousReceipt),
-            state
-        };
-    }
-
-    const pending = state.vendorMenu?.pendingBasket;
-
-    assert(
-        pending &&
-        Array.isArray(pending.buy) &&
-        Array.isArray(pending.sell),
-        'No staged trade awaits agreement'
-    );
-
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
-        entry.id === pending.settlementId &&
-        entry.id === state.vendorMenu.settlementId &&
         entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone &&
-        pending.zone === state.zone
+        entry.zone === state.zone
     );
 
     assert(
         settlement &&
         !state.currentJourney &&
         !['active', 'spotted'].includes(state.encounter?.status),
-        'The crew must still be at the shop to complete this trade'
+        'The crew must be free at a saved settlement to trade'
     );
 
-    /*
-     * Use the existing staging validator to re-price and re-identify
-     * the basket. Compare its complete quote, including item snapshots,
-     * before changing any possession or silver.
-     */
+    const requested = test.basket || state.vendorMenu?.pendingBasket;
+
+    assert(
+        requested &&
+        Array.isArray(requested.buy) &&
+        Array.isArray(requested.sell),
+        'Select at least one item to trade'
+    );
+
     const checked = resolveVendorSelection({
         state,
         action: 'stage',
         basket: {
-            buy: pending.buy.map(item => ({
+            buy: requested.buy.map(item => ({
                 number: item.number,
                 variant: item.variant
             })),
-            sell: pending.sell.map(item =>
+            sell: requested.sell.map(item =>
                 item.location === 'worn'
                     ? {
                         location: 'worn',
@@ -12284,11 +12253,7 @@ function resolveVendorTradeCommit(test) {
         }
     });
 
-    assert(
-        JSON.stringify(checked.basket) === JSON.stringify(pending),
-        'Trade selection changed; reopen the shop and stage it again'
-    );
-
+    const pending = checked.basket;
     let working = checked.state;
     const beforeStats = derived(working.crew);
     const purseBefore = working.crew.purse;
@@ -12371,7 +12336,6 @@ function resolveVendorTradeCommit(test) {
     working.crew.tansy.maxHp = afterStats.tansyMaxHp;
 
     const receipt = {
-        id: test.socialId,
         settlementId: settlement.id,
         bought,
         sold,
@@ -12383,8 +12347,9 @@ function resolveVendorTradeCommit(test) {
         derivedAfter: afterStats
     };
 
-    working.vendorMenu.pendingBasket = null;
-    working.vendorTradeReceipts[test.socialId] = clone(receipt);
+    if (working.vendorMenu) {
+        working.vendorMenu.pendingBasket = null;
+    }
 
     return {
         ok: true,
@@ -12949,50 +12914,16 @@ function resolveHerbalistAction(test) {
         'Herbalist trade requires presence at a free settlement'
     );
 
-    state.herbalistMenu ||= null;
-    state.herbalistReceipts ||= {};
-
-    if (test.action === 'open') {
-        assert(
-            typeof test.socialId === 'string' &&
-            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-            'Herbalist opening requires an engine-issued message reference'
-        );
-
-        if (state.herbalistMenu?.settlementId === settlement.id) {
-            return {
-                ok: true, created: false, action: 'open', state
-            };
-        }
-
-        state.herbalistMenu = {
-            settlementId: settlement.id,
-            inquiryId: test.socialId,
-            pendingBasket: null
-        };
-
-        return { ok: true, created: true, action: 'open', state };
-    }
-
     assert(
-        state.herbalistMenu?.settlementId === settlement.id,
-        'No herbalist window is open at this settlement'
+        test.action === 'commit',
+        `Unsupported herbalist action: ${test.action}`
     );
 
-    if (test.action === 'discard') {
-        state.herbalistMenu.pendingBasket = null;
-        return { ok: true, action: 'discard', state };
-    }
-
-    const pending = state.herbalistMenu.pendingBasket;
-    const selection = test.action === 'commit'
-        ? pending?.choices
-        : test.basket?.choices;
+    const selection = test.basket?.choices;
 
     assert(
-        ['stage', 'commit'].includes(test.action) &&
-        Array.isArray(selection),
-        'Herbalist trade requires a selection'
+        Array.isArray(selection) && selection.length > 0,
+        'Select at least one potion'
     );
 
     normalizeConsumableInventory(state.inventory);
@@ -13085,25 +13016,11 @@ function resolveHerbalistAction(test) {
         purseAfter
     };
 
-    if (test.action === 'stage') {
-        state.herbalistMenu.pendingBasket = quote;
-        return {
-            ok: true,
-            action: 'stage',
-            basket: clone(quote),
-            state
-        };
-    }
-
-    assert(
-        JSON.stringify(pending) === JSON.stringify(quote),
-        'Herbalist selection changed; reopen and stage it again'
-    );
-
     /*
      * This is one cloned state. If any check fails, runStoredMechanic()
      * saves none of the sales, purchases, or silver changes.
      */
+
     for (const choice of choices.filter(item =>
         item.side === 'sell'
     )) {
@@ -13145,19 +13062,15 @@ function resolveHerbalistAction(test) {
 
     state.crew.purse = purseAfter;
 
-    const receipt = {
-        id: test.socialId,
-        ...quote
-    };
-
-    state.herbalistMenu.pendingBasket = null;
-    state.herbalistReceipts[test.socialId] = clone(receipt);
+    if (state.herbalistMenu) {
+        state.herbalistMenu.pendingBasket = null;
+    }
 
     return {
         ok: true,
         created: true,
         action: 'commit',
-        receipt,
+        receipt: quote,
         state
     };
 }
@@ -13185,29 +13098,6 @@ function resolveInnAction(test) {
     );
 
     const state = clone(test.state);
-    state.innReceipts ||= {};
-
-    // A replay returns its saved receipt even after the crew has left.
-    if (test.action === 'commit') {
-        assert(
-            typeof test.socialId === 'string' &&
-            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-            'Inn agreement requires an engine-issued message reference'
-        );
-
-        const previous = state.innReceipts[test.socialId];
-
-        if (previous) {
-            return {
-                ok: true,
-                created: false,
-                action: 'commit',
-                receipt: clone(previous),
-                state
-            };
-        }
-    }
-
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
@@ -13222,45 +13112,12 @@ function resolveInnAction(test) {
         'Inn services require presence at a free settlement'
     );
 
-    if (test.action === 'open') {
-        assert(
-            typeof test.socialId === 'string' &&
-            /^work-[0-9]+-[a-z0-9]+$/.test(test.socialId),
-            'Inn opening requires an engine-issued message reference'
-        );
-
-        if (state.innMenu?.settlementId === settlement.id) {
-            return { ok: true, created: false, action: 'open', state };
-        }
-
-        state.innMenu = {
-            settlementId: settlement.id,
-            inquiryId: test.socialId,
-            pendingBasket: null
-        };
-
-        return { ok: true, created: true, action: 'open', state };
-    }
-
     assert(
-        state.innMenu?.settlementId === settlement.id,
-        'No inn menu is open at this settlement'
-    );
-
-    if (test.action === 'discard') {
-        state.innMenu.pendingBasket = null;
-        return { ok: true, action: 'discard', state };
-    }
-
-    assert(
-        ['stage', 'commit'].includes(test.action),
+        test.action === 'commit',
         `Unsupported inn action: ${test.action}`
     );
 
-    const pending = state.innMenu.pendingBasket;
-    const requested = test.action === 'commit'
-        ? pending?.choices
-        : test.basket?.choices;
+    const requested = test.basket?.choices;
 
     assert(
         Array.isArray(requested) && requested.length > 0,
@@ -13343,36 +13200,17 @@ function resolveInnAction(test) {
         purseAfter
     };
 
-    if (test.action === 'stage') {
-        state.innMenu.pendingBasket = quote;
-        return {
-            ok: true,
-            action: 'stage',
-            basket: clone(quote),
-            state
-        };
-    }
-
-    assert(
-        JSON.stringify(pending) === JSON.stringify(quote),
-        'Inn quote changed; reopen and stage it again'
-    );
-
     state.crew.purse = purseAfter;
-    state.innMenu.pendingBasket = null;
 
-    const receipt = {
-        id: test.socialId,
-        ...quote
-    };
-
-    state.innReceipts[test.socialId] = clone(receipt);
+    if (state.innMenu) {
+        state.innMenu.pendingBasket = null;
+    }
 
     return {
         ok: true,
         created: true,
         action: 'commit',
-        receipt,
+        receipt: quote,
         state
     };
 }
@@ -17245,59 +17083,6 @@ function inventoryActionNarrationPacket(result, action) {
         `Bottles remaining: ${result.stockAfter}.`,
         'The bottle and healing have already been applied. ' +
             'Describe the use naturally; do not consume or heal again.'
-    ].join('\n');
-}
-
-function innServiceNarrationPacket(receipt) {
-    return [
-        'PRIVATE INN SERVICE RECEIPT — do not recite this heading.',
-        `Paid ${receipt.cost}s at ${receipt.settlementId}.`,
-        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
-        ...receipt.choices.map(choice =>
-            `${choice.label} ×${choice.quantity}.`
-        ),
-        'Payment was applied once. Continue naturally from the ' +
-            'agreement; do not charge again.',
-        'No healing, buffs, inventory items, or time passage were applied.'
-    ].join('\n');
-}
-
-function herbalistTradeNarrationPacket(receipt) {
-    return [
-        'PRIVATE HERBALIST TRADE RESULT — do not recite this heading.',
-        `Silver spent: ${receipt.cost}s; received: ` +
-            `${receipt.proceeds}s.`,
-        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
-        ...receipt.choices.map(choice =>
-            `${choice.side === 'buy' ? 'Bought' : 'Sold'}: ` +
-                `${choice.name} ×${choice.quantity} ` +
-                `(${choice.unitPrice}s each).`
-        ),
-        'The exchange has already been saved. Narrate the handover ' +
-            'naturally; do not charge or transfer these potions again.',
-        'No potion was used or equipped by this trade.'
-    ].join('\n');
-}
-
-function vendorTradeNarrationPacket(receipt) {
-    return [
-        'PRIVATE COMPLETED TRADE RESULT — do not recite this heading.',
-        `Settlement: ${receipt.settlementId}.`,
-        `Silver received for sales: ${receipt.proceeds}s.`,
-        `Silver paid for purchases: ${receipt.cost}s.`,
-        `Purse: ${receipt.purseBefore}s → ${receipt.purseAfter}s.`,
-        ...receipt.sold.map(item =>
-            `Sold: ${item.name} for ${item.proceeds}s` +
-                (item.location === 'worn' ? ' (removed from worn gear).' : '.')
-        ),
-        ...receipt.bought.map(item =>
-            `Purchased: ${item.name} (${item.rarity}, Stat ` +
-                `${item.rawStat}) — placed in Bag Reserves, NOT equipped.`
-        ),
-        'The agreed exchange has already been applied once. Continue ' +
-            'naturally from the handover; do not charge, grant, or sell ' +
-            'these items again.',
-        'Do not mention the tag, extension, or state management.'
     ].join('\n');
 }
 
@@ -21610,14 +21395,16 @@ async function openAethermoorShopWindow() {
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
-        entry.id === state.vendorMenu?.settlementId &&
         entry.locationId === state.currentLocationId &&
         entry.zone === state.zone
     );
 
     assert(
-        settlement,
-        'There is no open shop at the crew’s current settlement'
+        settlement &&
+        !state.currentJourney &&
+        !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Reach a free settlement before opening the shop'
     );
 
     const stock = resolveVendorAction({
@@ -21628,31 +21415,7 @@ async function openAethermoorShopWindow() {
 
     const selectedBuys = new Map();
     const selectedSales = new Map();
-    const saved = state.vendorMenu.pendingBasket;
-
-    if (saved?.settlementId === settlement.id) {
-        for (const item of saved.buy || []) {
-            selectedBuys.set(
-                `${item.owner}:${item.slot}`,
-                {
-                    number: item.number,
-                    variant: item.variant
-                }
-            );
-        }
-
-        for (const item of saved.sell || []) {
-            selectedSales.set(
-                item.location === 'worn'
-                    ? `worn:${item.owner}:${item.slot}`
-                    : `bag:${item.index}`,
-                item
-            );
-        }
-    }
-
     document.getElementById('aethermoor_shop_window')?.remove();
-
     const windowElement = document.createElement('section');
     windowElement.id = 'aethermoor_shop_window';
     windowElement.className = 'aethermoor-shop';
@@ -21745,7 +21508,7 @@ async function openAethermoorShopWindow() {
         ledger.textContent =
             `Crew offers +${proceeds}s · Merchant offers −${cost}s\n` +
             `Projected purse: ${remaining}s · ` +
-            'No transaction has occurred.';
+            'Click Confirm to complete trade.';
 
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
@@ -21941,11 +21704,12 @@ async function openAethermoorShopWindow() {
         confirm.disabled = true;
 
         try {
-            const staged = await runStoredMechanic({
+        try {
+            const committed = await runStoredMechanic({
                 cases: [{
-                    name: 'stage_vendor_selection',
+                    name: 'commit_vendor_trade',
                     kind: 'vendor',
-                    action: 'stage',
+                    action: 'commit',
                     basket: {
                         buy: [...selectedBuys.values()].map(
                             ({ number, variant }) => ({ number, variant })
@@ -21963,16 +21727,12 @@ async function openAethermoorShopWindow() {
             });
 
             assert(
-                staged?.ok === true && staged.results?.[0]?.ok !== false,
-                staged?.results?.[0]?.error || 'Could not stage trade'
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not complete trade'
             );
 
-            toastr.info(
-                'Trade quote staged. No items or silver exchanged yet.',
-                'Aethermoor'
-            );
+            toastr.success('Trade completed.', 'Aethermoor');
             windowElement.remove();
-
             if (aethermoorPanelOpen) {
                 renderAethermoorTab(aethermoorActiveTab);
             }
@@ -22039,12 +21799,17 @@ async function openAethermoorHerbalistWindow() {
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
-        entry.id === state.herbalistMenu?.settlementId &&
         entry.locationId === state.currentLocationId &&
         entry.zone === state.zone
     );
 
-    assert(settlement, 'No herbalist is open at this settlement');
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Reach a free settlement before opening the herbalist'
+    );
 
     const stock = herbalistStock(state.zone).map(item => ({
         ...item,
@@ -22055,17 +21820,7 @@ async function openAethermoorHerbalistWindow() {
         )
     }));
     const quantities = new Map();
-
-    for (const choice of
-        state.herbalistMenu.pendingBasket?.choices || []) {
-        quantities.set(
-            `${choice.side}:${choice.id}`,
-            choice.quantity
-        );
-    }
-
     document.getElementById('aethermoor_herbalist_window')?.remove();
-
     const panel = document.createElement('section');
     panel.id = 'aethermoor_herbalist_window';
     panel.className = 'aethermoor-shop aethermoor-herbalist-window';
@@ -22151,7 +21906,7 @@ async function openAethermoorHerbalistWindow() {
 
         ledger.textContent =
             `Sales +${proceeds}s · Purchases −${cost}s\n` +
-            `Projected purse: ${remaining}s · Nothing exchanged yet.`;
+            `Projected purse: ${remaining}s · Click Confirm to complete trade.`;
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
@@ -22251,24 +22006,21 @@ async function openAethermoorHerbalistWindow() {
         confirm.disabled = true;
 
         try {
-            const staged = await runStoredMechanic({
+            const committed = await runStoredMechanic({
                 cases: [{
-                    name: 'stage_herbalist_basket',
+                    name: 'commit_herbalist_trade',
                     kind: 'herbalist',
-                    action: 'stage',
+                    action: 'commit',
                     basket: { choices }
                 }]
             });
 
             assert(
-                staged?.ok === true && staged.results?.[0]?.ok !== false,
-                staged?.results?.[0]?.error || 'Could not stage selection'
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not complete exchange'
             );
 
-            toastr.info(
-                'Herbalist quote staged. No potions or silver exchanged yet.',
-                'Aethermoor'
-            );
+            toastr.success('Herbalist trade completed.', 'Aethermoor');
             panel.remove();
 
             if (aethermoorPanelOpen) {
@@ -22343,18 +22095,19 @@ async function openAethermoorInnWindow() {
     const settlement = Object.values(
         state.world?.settlements || {}
     ).find(entry =>
-        entry.id === state.innMenu?.settlementId &&
         entry.locationId === state.currentLocationId &&
         entry.zone === state.zone
     );
 
-    assert(settlement, 'No inn menu is open here');
-
-    const quantities = new Map(
-        (state.innMenu.pendingBasket?.choices || [])
-            .map(choice => [choice.id, choice.quantity])
+    assert(
+        settlement &&
+        !state.currentJourney &&
+        !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Reach a free settlement before opening inn services'
     );
 
+    const quantities = new Map();
     const serviceById = id =>
         displayServices.find(service => service.id === id);
 
@@ -22420,7 +22173,7 @@ async function openAethermoorInnWindow() {
 
         ledger.textContent =
             `Services −${cost}s · Projected purse: ${remaining}s\n` +
-            'No payment has occurred.';
+            'Click Confirm to pay.';
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
@@ -22532,25 +22285,21 @@ async function openAethermoorInnWindow() {
         confirm.disabled = true;
 
         try {
-            const staged = await runStoredMechanic({
+            const committed = await runStoredMechanic({
                 cases: [{
-                    name: 'stage_inn_selection',
+                    name: 'commit_inn_services',
                     kind: 'inn',
-                    action: 'stage',
+                    action: 'commit',
                     basket: { choices }
                 }]
             });
 
             assert(
-                staged?.ok === true && staged.results?.[0]?.ok !== false,
-                staged?.results?.[0]?.error || 'Could not stage inn selection'
+                committed?.ok === true && committed.results?.[0]?.ok !== false,
+                committed?.results?.[0]?.error || 'Could not complete payment'
             );
-            toastr.info(
-                'Inn quote staged. No silver paid yet.',
-                'Aethermoor'
-            );
+            toastr.success('Inn services paid.', 'Aethermoor');
             panel.remove();
-
             if (aethermoorPanelOpen) {
                 renderAethermoorTab(aethermoorActiveTab);
             }
@@ -22637,55 +22386,68 @@ async function renderInventoryTab(host) {
         )
     );
 
-    const expenseSection = makeAethermoorSection(
-        'INCIDENTAL EXPENSE',
-        'Deduct silver spent in fiction (ferries, bribes, tolls, sundries).',
+    const purseSection = makeAethermoorSection(
+        'PURSE',
+        'Add or deduct silver from fictional sales, meals, tips, or sundries.',
         'world'
     );
 
-    const expenseAmount = document.createElement('input');
-    expenseAmount.type = 'number';
-    expenseAmount.min = '1';
-    expenseAmount.placeholder = 'Silver amount';
-    expenseAmount.className = 'text_pole';
+    const purseAmount = document.createElement('input');
+    purseAmount.type = 'number';
+    purseAmount.min = '1';
+    purseAmount.placeholder = 'Silver amount';
+    purseAmount.className = 'text_pole';
 
-    const expenseReason = document.createElement('input');
-    expenseReason.type = 'text';
-    expenseReason.maxLength = 160;
-    expenseReason.placeholder = 'Reason (optional, e.g. ferry fare)';
-    expenseReason.className = 'text_pole';
+    const purseButtons = document.createElement('div');
+    purseButtons.style.display = 'grid';
+    purseButtons.style.gridTemplateColumns = '1fr 1fr';
+    purseButtons.style.gap = '6px';
 
-    const spendButton = makeAethermoorAction(
-        'Deduct Silver',
-        'world',
-        async () => {
-            const amount = Number(expenseAmount.value);
-            if (!Number.isInteger(amount) || amount < 1) {
-                toastr.warning('Enter a whole silver amount of at least 1.', 'Aethermoor');
-                return;
-            }
+    async function adjustPurse(action, button) {
+        const amount = Number(purseAmount.value);
+        if (!Number.isInteger(amount) || amount < 1) {
+            toastr.warning('Enter a whole silver amount of at least 1.', 'Aethermoor');
+            return;
+        }
 
-            spendButton.disabled = true;
+        button.disabled = true;
 
+        try {
             await runAethermoorPanelCase(
                 host,
                 'inventory',
                 {
-                    name: 'manual_incidental_expense',
+                    name: `manual_purse_${action}`,
                     kind: 'currency',
-                    action: 'spend',
-                    amount,
-                    reason: expenseReason.value.trim() || 'Incidental expense'
+                    action,
+                    amount
                 },
-                `Deducted ${amount}s.`
+                action === 'spend'
+                    ? `Deducted ${amount}s.`
+                    : `Added ${amount}s.`
             );
+        } finally {
+            button.disabled = false;
         }
+    }
+
+    const spendButton = makeAethermoorAction(
+        '− Spend',
+        'world',
+        () => adjustPurse('spend', spendButton)
     );
+    spendButton.style.textAlign = 'center';
 
-    expenseSection.append(expenseAmount, expenseReason, spendButton);
-    host.appendChild(expenseSection);
+    const earnButton = makeAethermoorAction(
+        '+ Earn',
+        'world',
+        () => adjustPurse('earn', earnButton)
+    );
+    earnButton.style.textAlign = 'center';
 
-
+    purseButtons.append(spendButton, earnButton);
+    purseSection.append(purseAmount, purseButtons);
+    host.appendChild(purseSection);
     const potionSection = makeAethermoorSection(
         'POTIONS & TONICS',
         'Saved consumables available outside combat.',
@@ -23054,8 +22816,7 @@ async function renderShopsTab(host) {
         makeAethermoorSection(
             `SHOPS · ${settlement.label}`,
             `Purse: ${state.crew.purse}s\n` +
-                'Opening a shop does not buy, sell, or pay for anything. ' +
-                'Selections are staged in its window.',
+                'Opening a shop is read-only. Clicking Confirm completes the exchange immediately.',
             'world'
         )
     );
@@ -23063,17 +22824,14 @@ async function renderShopsTab(host) {
     for (const shop of [
         {
             label: 'Blacksmith & Gear',
-            kind: 'vendor',
             open: openAethermoorShopWindow
         },
         {
             label: 'Herbalist',
-            kind: 'herbalist',
             open: openAethermoorHerbalistWindow
         },
         {
             label: 'Inn Services',
-            kind: 'inn',
             open: openAethermoorInnWindow
         }
     ]) {
@@ -23081,57 +22839,9 @@ async function renderShopsTab(host) {
             `Open ${shop.label}`,
             'world',
             async () => {
-                button.disabled = true;
-
                 try {
-                    const metadata = getContext().chatMetadata;
-                    const current = metadata?.[AETHERMOOR_METADATA_KEY]?.state;
-                    const stillHere = Object.values(
-                        current?.world?.settlements || {}
-                    ).some(entry =>
-                        entry.id === settlement.id &&
-                        entry.locationId === current.currentLocationId &&
-                        entry.zone === current.zone
-                    );
-
-                    assert(
-                        stillHere &&
-                        !current.currentJourney &&
-                        !current.activeInstanceId &&
-                        !['active', 'spotted'].includes(
-                            current.encounter?.status
-                        ),
-                        'The crew is no longer free to shop here'
-                    );
-
-                    const result = await runStoredMechanic({
-                        cases: [{
-                            name: `ui_open_${shop.kind}`,
-                            kind: shop.kind,
-                            action: 'open',
-                            socialId:
-                                `work-0-${worldHash(
-                                    `${settlement.id}:${shop.kind}`
-                                ).toString(36)}`
-                        }]
-                    });
-
-                    assert(
-                        result?.ok === true &&
-                        result.results?.[0]?.ok !== false,
-                        result?.results?.[0]?.error ||
-                            'Could not open this shop'
-                    );
-
-                    assert(
-                        getContext().chatMetadata === metadata,
-                        'Chat changed before the shop window opened'
-                    );
-
                     await shop.open();
-                    await renderShopsTab(host);
                 } catch (error) {
-                    button.disabled = false;
                     toastr.error(
                         error instanceof Error
                             ? error.message
@@ -26454,12 +26164,6 @@ function extractAethermoorQuestEvents(text) {
             });
         }
 
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:ASK_WARES\s*>/g
-        )) {
-            events.push({ event: 'ask_wares' });
-        }
-
         const encounterRequestPattern =
             /<AETHERMOOR:REQUEST_ENCOUNTER\s+type="(normal_pack|elite)"\s*>/g;
 
@@ -26472,24 +26176,6 @@ function extractAethermoorQuestEvents(text) {
             });
         }
 
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:ASK_HERBALIST\s*>/g
-        )) {
-
-            events.push({ event: 'ask_herbalist' });
-        }
-
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:ASK_INN\s*>/g
-        )) {
-            events.push({ event: 'ask_inn' });
-        }
-
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:INN_AGREED\s*>/g
-        )) {
-            events.push({ event: 'inn_agreed' });
-        }
         const expensePaidPattern =
             /<AETHERMOOR:EXPENSE_PAID\s+amount=([1-9]\d*)\s+reason="([^"]{1,160})"\s*>/g;
 
@@ -26498,21 +26184,6 @@ function extractAethermoorQuestEvents(text) {
                 event: 'expense_paid',
                 amount: Number(match[1]),
                 reason: match[2]
-            });
-        }
-
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:HERBALIST_AGREED\s*>/g
-        )) {
-
-            events.push({ event: 'herbalist_agreed' });
-        }
-
-        for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:TRADE_AGREED\s*>/g
-        )) {
-            events.push({
-                event: 'trade_agreed'
             });
         }
 
@@ -26798,122 +26469,6 @@ async function processAethermoorAssistantEvents(data) {
                     }]
                 });
 
-            } else if (event.event === 'ask_wares') {
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(
-                    messageId,
-                    'Wares inquiry awaits a saved assistant message'
-                );
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_vendor_menu_open',
-                        kind: 'vendor',
-                        action: 'open',
-                        socialId: messageId
-                    }]
-                });
-
-                assert(
-                    result?.ok === true &&
-                    result.results?.[0]?.result?.action === 'open',
-                    'Vendor menu did not open'
-                );
-
-                await openAethermoorShopWindow();
-            } else if (event.event === 'ask_herbalist') {
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(messageId, 'Herbalist inquiry awaits a saved reply');
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_herbalist_open',
-                        kind: 'herbalist',
-                        action: 'open',
-                        socialId: messageId
-                    }]
-                });
-
-                assert(
-                    result?.ok === true &&
-                    result.results?.[0]?.result?.action === 'open',
-                    'Herbalist menu did not open'
-                );
-
-                await openAethermoorHerbalistWindow();
-            } else if (event.event === 'ask_inn') {
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(messageId, 'Inn inquiry awaits a saved reply');
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_inn_open',
-                        kind: 'inn',
-                        action: 'open',
-                        socialId: messageId
-                    }]
-                });
-
-                assert(
-                    result?.ok === true &&
-                    result.results?.[0]?.result?.action === 'open',
-                    'Inn menu did not open'
-                );
-
-                await openAethermoorInnWindow();
-            } else if (event.event === 'inn_agreed') {
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(messageId, 'Inn agreement awaits a saved reply');
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_inn_commit',
-                        kind: 'inn',
-                        action: 'commit',
-                        socialId: messageId
-                    }]
-                });
-            } else if (event.event === 'herbalist_agreed') {
-
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(messageId, 'Herbalist agreement awaits a saved reply');
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_herbalist_commit',
-                        kind: 'herbalist',
-                        action: 'commit',
-                        socialId: messageId
-                    }]
-                });
-            } else if (event.event === 'trade_agreed') {
-
-                const messageId =
-                    socialWorkIdForAssistantMessage(message);
-
-                assert(
-                    messageId,
-                    'Trade agreement awaits a saved assistant message'
-                );
-
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_vendor_trade_agreement',
-                        kind: 'vendor',
-                        action: 'commit',
-                        socialId: messageId
-                    }]
-                });
             } else if (event.event === 'delivered') {
                 result = await runStoredMechanic({
                     cases: [{
@@ -27140,20 +26695,6 @@ function settlementShopBriefingPacket(state, settlement) {
 }
 
 function settlementWorkContextPacket(state, settlement) {
-    const agreementRules = [
-        ['vendorMenu', 'TRADE_AGREED', 'gear trade'],
-        ['herbalistMenu', 'HERBALIST_AGREED', 'herbalist exchange'],
-        ['innMenu', 'INN_AGREED', 'inn services']
-    ].filter(([menu]) =>
-        state[menu]?.settlementId === settlement.id &&
-        state[menu]?.pendingBasket
-    ).map(([, tag, description]) =>
-        `A ${description} quote is staged. Only after the crew actually ` +
-        `agrees to this exchange in the fiction, emit ` +
-        `<AETHERMOOR:${tag}> inside <plan>. Staging alone does not pay. ` +
-        `Do not report the same agreement again in a later reply.`
-    );
-
     const pending = Object.values(
         state.socialOpportunities?.contacts || {}
     ).find(contact =>
@@ -27165,19 +26706,16 @@ function settlementWorkContextPacket(state, settlement) {
     if (!pending) {
         return [
             `PRIVATE LOCAL OPPORTUNITY — ${settlement.label}.`,
-            ...agreementRules,
             'No local work offer is saved for this reply. If asked for ' +
                 'jobs, NPCs have no specific paid opening to offer or ' +
                 'recommend right now nor do they know of anyone who might have something to offer.'
-            ].join('\n');
+        ].join('\n');
     }
-
 
     const quest = pending.pendingQuest;
 
     return [
         `* **QUEST FOUND!** A quest from The System must appear in this reply.`,
-        ...agreementRules,
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest).map(line =>
             line.startsWith('sponsor:')

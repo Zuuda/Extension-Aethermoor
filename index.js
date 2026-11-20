@@ -10890,7 +10890,7 @@ function resolveSelectedQuestEvent(test) {
     );
 
     assert(
-        ['searched', 'found'].includes(test.event),
+        test.event === 'found',
         `Unsupported quest discovery event: ${test.event}`
     );
 
@@ -10916,10 +10916,7 @@ function resolveSelectedQuestEvent(test) {
     );
 
     // Repeated message/render events must not acquire or advance twice.
-    if (
-        discovery.state === 'acquired' ||
-        (test.event === 'searched' && discovery.state === 'searched')
-    ) {
+    if (discovery.state === 'acquired') {
         return {
             ok: true,
             created: false,
@@ -10942,27 +10939,6 @@ function resolveSelectedQuestEvent(test) {
         allowedIds.includes(discovery.id),
         'Discovery is not authorized for the current gate'
     );
-    if (test.event === 'searched') {
-        assert(discovery.requiredAction, 'No search prerequisite exists');
-        assert(
-            discovery.state === 'hidden',
-            `Cannot search from state ${discovery.state}`
-        );
-
-        discovery.state = 'searched';
-
-        return {
-            ok: true,
-            created: true,
-            action: 'quest_event',
-            event: 'searched',
-            questId: quest.id,
-            questItemId: discovery.id,
-            quest: clone(quest),
-            discovery: clone(discovery),
-            state
-        };
-    }
 
     assert(
         ['hidden', 'searched', 'found'].includes(discovery.state),
@@ -13276,6 +13252,8 @@ function resolveHerbalistAction(test) {
         const definition = consumableDefinition(choice.id);
         assert(definition, `Unknown consumable: ${choice.id}`);
 
+        let owned = null;
+
         if (choice.side === 'buy') {
             assert(
                 herbalistStock(state.zone).some(item =>
@@ -13284,7 +13262,7 @@ function resolveHerbalistAction(test) {
                 `The herbalist does not sell ${choice.id} here`
             );
         } else {
-            const owned = state.inventory.consumables.find(item =>
+            owned = state.inventory.consumables.find(item =>
                 item.id === choice.id
             );
 
@@ -13294,11 +13272,13 @@ function resolveHerbalistAction(test) {
             );
         }
 
-        const displayName = cosmeticStockName(
-            state,
-            potionCosmeticStockKey(choice.id),
-            definition.name
-        );
+        const displayName =
+            (choice.side === 'sell' && owned?.name) ||
+            cosmeticStockName(
+                state,
+                potionCosmeticStockKey(choice.id),
+                definition.name
+            );
 
         return {
             side: choice.side,
@@ -17415,15 +17395,6 @@ function questTerminalNarrationPacket(encounter, quest) {
 
 function questDiscoveryNarrationPacket(result, quest) {
     const discovery = result.discovery;
-
-    if (result.event === 'searched') {
-        return [
-            `The required action concerning ${discovery.name} was recorded.`,
-            'The object has not yet been mechanically acquired.',
-            'Continue naturally; do not repeat the search or announce a discovery unless it occurs.'
-        ].join('\n');
-    }
-
     const lines = [
         `Discovery validated: ${discovery.name}.`,
         `State: ${discovery.state}.`
@@ -18341,9 +18312,16 @@ async function runStoredMechanic(args) {
                             )
                         ]
                         : []),
-                    ...(caseResult.journey
-                        ? [travelNarrationPacket(caseResult)]
-                        : [])
+                    ...(
+                        caseResult.journey ||
+                        (
+                            batch &&
+                            oneCase?.kind === 'travel' &&
+                            caseResult.created
+                        )
+                            ? [travelNarrationPacket(caseResult)]
+                            : []
+                    )
                 ].join('\n\n')
 
             : batch &&
@@ -19136,10 +19114,8 @@ function registerTools() {
                             },
                             event: {
                                 type: 'string',
-                                enum: ['searched', 'found']
-
+                                enum: ['found']
                             },
-
 
                             mob: {
                                 type: 'object'
@@ -19200,6 +19176,10 @@ function registerTools() {
                                 enum: [
                                     'initialize',
                                     'import',
+                                    'start',
+                                    'request',
+                                    'prepare_npc_seeds',
+                                    'claim_npc_seed',
                                     'check_work',
                                     'reveal_work',
                                     'status',
@@ -23014,29 +22994,6 @@ function combatRecapPrompt(receipt) {
 }
 
 
-async function copyCombatRecapPrompt(receipt) {
-    const text = combatRecapPrompt(receipt);
-
-    try {
-        await navigator.clipboard.writeText(text);
-    } catch (_error) {
-        const input = document.createElement('textarea');
-        input.value = text;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        document.execCommand('copy');
-        input.remove();
-    }
-
-    toastr.info(
-        'Combat recap copied. Paste and send it to invite the GM to narrate the fight.',
-        'Aethermoor'
-    );
-}
-
 function appendVictoryReceipt(host, receipt) {
     const lines = [
         `+${receipt.xp} XP · +${receipt.silver}s`,
@@ -23067,30 +23024,15 @@ function appendVictoryReceipt(host, receipt) {
         lines.push('No additional item dropped.');
     }
 
-    const section = makeAethermoorSection(
-        'VICTORY · REWARDS RECEIVED',
-        lines.join('\n'),
-        'combat'
-    );
+    lines.push('', 'Fight recap is queued for your next GM reply.');
 
-    section.appendChild(
-        makeAethermoorAction(
-            'Copy fight recap prompt',
-            'combat',
-            () => {
-                void copyCombatRecapPrompt(receipt).catch(error =>
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor'
-                    )
-                );
-            }
+    host.appendChild(
+        makeAethermoorSection(
+            'VICTORY · REWARDS RECEIVED',
+            lines.join('\n'),
+            'combat'
         )
     );
-
-    host.appendChild(section);
 }
 
 /*
@@ -25541,11 +25483,9 @@ async function openCombatPanel(inlineHost) {
                 aethermoorLastCombatLog;
             resultBox.scrollTop = 0;
 
-            const finished =
-                ['cleared', 'fled', 'dead'].includes(
-                    result.summary?.encounter?.status
-                );
-            if (finished) {
+            const statusAfter = result.summary?.encounter?.status;
+
+            if (statusAfter === 'fled' || statusAfter === 'dead') {
                 const destination =
                     state.activeInstanceId &&
                     !result.death?.totalDefeat
@@ -26776,11 +26716,7 @@ function settlementWorkContextPacket(state, settlement) {
     return [
         `* **QUEST FOUND!** A quest from The System must appear in this reply.`,
         `Local concern: ${quest.pitch}`,
-        ...publicQuestFactLines(quest).map(line =>
-            line.startsWith('sponsor:')
-                ? line.replace(/^sponsor:/, 'affected local party:')
-                : line
-        ),
+        ...publicQuestFactLines(quest),
         `System offer: ${quest.title}.`,
         `First objective: ${quest.currentGate.objective}`,
         `System rewards on completion: ${quest.payout.xp} XP, ` +
@@ -26826,10 +26762,12 @@ globalThis.aethermoorMechanicsInterceptor =
             return;
         }
 
+        let movedThisTurn = false;
         const localMovement =
             findLatestUserInstanceMovement(chat);
 
         if (localMovement) {
+            movedThisTurn = true;
             try {
                 const output = await runStoredMechanic({
                     cases: [{
@@ -26861,6 +26799,7 @@ globalThis.aethermoorMechanicsInterceptor =
             const movement = findLatestUserMovement(chat);
 
             if (movement) {
+                movedThisTurn = true;
                 try {
                     const output = await runStoredMechanic({
                         cases: [{
@@ -26930,6 +26869,7 @@ globalThis.aethermoorMechanicsInterceptor =
             );
 
         if (
+            !movedThisTurn &&
             currentSettlement &&
             !currentState.currentJourney &&
             !currentState.activeInstanceId &&
@@ -26937,6 +26877,7 @@ globalThis.aethermoorMechanicsInterceptor =
                 currentState.encounter?.status
             )
         ) {
+
             const userIndex = findLastUserMessage(chat);
             const userText = chat[userIndex]?.mes;
             const pendingContact = Object.values(

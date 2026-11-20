@@ -1816,16 +1816,25 @@ function xpProgressCardHtml(crew, levelUps = []) {
             ? ` | Regen ${before.regen} → <b style="color:#4ade80;">${after.regen}</b>`
             : '';
 
+        const beforeSlots = 3 + Math.floor(oldLevel / 2);
+        const afterSlots = 3 + Math.floor(crew.level / 2);
+        const gainedSlots = afterSlots - beforeSlots;
+        const summonsLine = gainedSlots > 0
+            ? `<div>• <b>Summons:</b> Shadow-Weasels ${beforeSlots} → <b style="color:#4ade80;">${afterSlots}</b> (+${gainedSlots} ${gainedSlots === 1 ? 'slot' : 'slots'})</div>`
+            : '';
+
         return systemLogCardHtml({
             accent: '#4ade80',
             heading: 'System Log // Level-Up',
             rightHtml: `<b style="color:#ffffff;">Lv ${oldLevel} → Lv ${crew.level} (${crew.xp}/${threshold} XP)</b>`,
             bodyHtml:
                 `<div>• <b>Vitality:</b> Q'tik ${before.qtikMaxHp} → <b style="color:#4ade80;">${after.qtikMaxHp} HP</b> | Tansy ${before.tansyMaxHp} → <b style="color:#4ade80;">${after.tansyMaxHp} HP</b>${regenPart}</div>` +
-                `<div>• <b>Parameters:</b> ATK ${before.atk} → <b style="color:#4ade80;">${after.atk}</b> | DEF ${before.def} → <b style="color:#4ade80;">${after.def}</b> | LUK ${before.luk} → <b style="color:#4ade80;">${after.luk}</b></div>`,
+                `<div>• <b>Parameters:</b> ATK ${before.atk} → <b style="color:#4ade80;">${after.atk}</b> | DEF ${before.def} → <b style="color:#4ade80;">${after.def}</b> | LUK ${before.luk} → <b style="color:#4ade80;">${after.luk}</b></div>` +
+                summonsLine,
             buttons: ['close']
         });
     }
+
 
     return systemLogCardHtml({
         accent: '#4ade80',

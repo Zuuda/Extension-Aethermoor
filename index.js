@@ -18455,7 +18455,42 @@ function addAethermoorPanelStyles() {
             border-color: #4da6ff;
         }
 
+        .aethermoor-queued-move {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 12px;
+            color: #ffd166;
+            background: #181d23;
+            border-bottom: 1px solid #2b3542;
+            border-left: 3px solid #ffd166;
+            font: 11px/1.4 Consolas, monospace;
+        }
+
+        .aethermoor-queued-move[hidden] {
+            display: none;
+        }
+
+        .aethermoor-queued-move-cancel {
+            padding: 2px 7px;
+            color: #f87171;
+            background: #12161c;
+            border: 1px solid #f87171;
+            border-radius: 2px;
+            cursor: pointer;
+            font: inherit;
+            flex-shrink: 0;
+        }
+
+        .aethermoor-queued-move-cancel:hover,
+        .aethermoor-queued-move-cancel:focus-visible {
+            color: #ffffff;
+            background: #2b181c;
+        }
+
         .aethermoor-panel-close {
+
 
             min-width: 28px;
             padding: 3px 8px;
@@ -19836,32 +19871,133 @@ async function renderQuestTab(host) {
         )
     );
 }
+/*
+ * Queued movement is stored in memory and scoped to the current chat's
+ * metadata object. Sending the next roleplay reply consumes and clears it
+ * automatically without pasting tags into the chat transcript.
+ */
+let aethermoorQueuedMove = null;
 
-async function copyAethermoorCommand(command) {
-    assert(
-        typeof command === 'string' && command.length > 0,
-        'Clipboard command is empty'
-    );
+function parseQueuedMoveCommand(command, state) {
+    const instanceMatch = command.match(AETHERMOOR_INSTANCE_COMMAND);
+    if (instanceMatch) {
+        const instanceId = instanceMatch[1];
+        const action = instanceMatch[2].toLowerCase();
+        const roomId = instanceMatch[3] || null;
+        const instance = state?.instances?.[instanceId];
+        const siteLabel = instance?.label || instanceId;
+        const roomLabel = roomId
+            ? instance?.rooms?.[roomId]?.label || roomId
+            : null;
 
-    try {
-        await navigator.clipboard.writeText(command);
-    } catch (_error) {
-        const input = document.createElement('textarea');
-        input.value = command;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        document.execCommand('copy');
-        input.remove();
+        const label = action === 'enter'
+            ? `Enter ${siteLabel}`
+            : action === 'exit'
+                ? `Leave ${siteLabel}`
+                : `Move to ${roomLabel}`;
+
+        return {
+            kind: 'instance',
+            instanceId,
+            action,
+            roomId,
+            label
+        };
     }
 
+    const moveMatch = command.match(AETHERMOOR_MOVE_COMMAND);
+    if (moveMatch) {
+        const destinationId = moveMatch[1];
+        const place = state?.places?.[destinationId];
+        const settlement = Object.values(
+            state?.world?.settlements || {}
+        ).find(entry => entry.locationId === destinationId);
+        const label = place?.label || settlement?.label || destinationId;
+
+        return {
+            kind: 'travel',
+            destinationId,
+            label: `Travel to ${label}`
+        };
+    }
+
+    if (AETHERMOOR_EXPLORE_COMMAND.test(command)) {
+        return {
+            kind: 'travel',
+            destinationId: null,
+            label: 'Explore the surrounding region'
+        };
+    }
+
+    return null;
+}
+
+function clearAethermoorQueuedMove() {
+    aethermoorQueuedMove = null;
+    updateAethermoorQueuedMoveBar();
+}
+
+function updateAethermoorQueuedMoveBar() {
+    const bar = aethermoorPanelElement?.querySelector(
+        '.aethermoor-queued-move'
+    );
+    if (!bar) return;
+
+    const currentMetadata = getContext().chatMetadata;
+    const active =
+        aethermoorQueuedMove &&
+        aethermoorQueuedMove.metadata === currentMetadata
+            ? aethermoorQueuedMove
+            : null;
+
+    if (!active) {
+        bar.hidden = true;
+        bar.replaceChildren();
+        return;
+    }
+
+    const text = document.createElement('span');
+    text.textContent = `Queued: ${active.label}`;
+
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'aethermoor-queued-move-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => {
+        clearAethermoorQueuedMove();
+        toastr.info('Queued movement cancelled.', 'Aethermoor');
+    });
+
+    bar.replaceChildren(text, cancel);
+    bar.hidden = false;
+}
+
+function copyAethermoorCommand(command) {
+    assert(
+        typeof command === 'string' && command.length > 0,
+        'Movement command is empty'
+    );
+
+    const metadata = getContext().chatMetadata;
+    const state = metadata?.[AETHERMOOR_METADATA_KEY]?.state || null;
+    const parsed = parseQueuedMoveCommand(command, state);
+
+    assert(parsed, 'Unsupported movement command');
+
+    aethermoorQueuedMove = {
+        metadata,
+        command,
+        label: parsed.label,
+        parsed
+    };
+
+    updateAethermoorQueuedMoveBar();
     toastr.info(
-        'Movement command copied. Add your fiction, paste the command, and send the message.',
+        `Queued: ${parsed.label}. Send your next message to move.`,
         'Aethermoor'
     );
 }
+
 function renderCrewKnowledge(state) {
     /*
      * Display only acquired crew knowledge. Never read quest coreTruth,
@@ -22859,6 +22995,11 @@ function openAethermoorPanel() {
         statusStrip.setAttribute('aria-label', 'Crew status');
         statusStrip.hidden = true;
 
+        const queuedMoveBar = document.createElement('div');
+        queuedMoveBar.className = 'aethermoor-queued-move';
+        queuedMoveBar.setAttribute('aria-label', 'Queued movement');
+        queuedMoveBar.hidden = true;
+
         const tabs = document.createElement('nav');
         tabs.className = 'aethermoor-tabs';
 
@@ -22884,7 +23025,7 @@ function openAethermoorPanel() {
 
         const content = document.createElement('main');
         content.className = 'aethermoor-panel-content';
-        panel.append(header, statusStrip, tabs, content);
+        panel.append(header, statusStrip, queuedMoveBar, tabs, content);
         document.body.appendChild(panel);
 
         restoreAethermoorPanelGeometry(panel);
@@ -22901,6 +23042,7 @@ function openAethermoorPanel() {
     }
 
     updateAethermoorDebugButton();
+    updateAethermoorQueuedMoveBar();
     aethermoorPanelElement.hidden = false;
     aethermoorPanelOpen = true;
     renderAethermoorTab(aethermoorActiveTab);
@@ -23049,6 +23191,8 @@ async function copyAethermoorStatus() {
  * campaign state, consume RNG, or ask the narrator to calculate values.
  */
 function updateAethermoorStatusStrip(state) {
+    updateAethermoorQueuedMoveBar();
+
     const strip = aethermoorPanelElement?.querySelector(
         '.aethermoor-status-strip'
     );
@@ -24680,6 +24824,7 @@ function openNarrationDebug() {
                     document.getElementById(id)?.remove();
                 }
 
+                clearAethermoorQueuedMove();
                 aethermoorLastCombatLog = '';
                 aethermoorLastCombatLogKey = null;
                 combatSelections.target = null;
@@ -25475,9 +25620,48 @@ globalThis.aethermoorMechanicsInterceptor =
             return;
         }
 
-        let movedThisTurn = false;
+         let movedThisTurn = false;
+        const activeChatMetadata = getContext().chatMetadata;
+        const queuedMove =
+            aethermoorQueuedMove &&
+            aethermoorQueuedMove.metadata === activeChatMetadata
+                ? aethermoorQueuedMove
+                : null;
+
+        if (queuedMove) {
+            clearAethermoorQueuedMove();
+        }
+
+        const lastUserIndex = findLastUserMessage(chat);
+        const lastUserText =
+            typeof chat[lastUserIndex]?.mes === 'string'
+                ? chat[lastUserIndex].mes
+                : '';
+
         const localMovement =
-            findLatestUserInstanceMovement(chat);
+            queuedMove?.parsed.kind === 'instance'
+                ? {
+                    index: lastUserIndex,
+                    text: `${lastUserText}\n${queuedMove.command}`,
+                    instanceId: queuedMove.parsed.instanceId,
+                    action: queuedMove.parsed.action,
+                    roomId: queuedMove.parsed.roomId
+                }
+                : queuedMove
+                    ? null
+                    : findLatestUserInstanceMovement(chat);
+
+        const movement =
+            localMovement
+                ? null
+                : queuedMove?.parsed.kind === 'travel'
+                    ? {
+                        index: lastUserIndex,
+                        text: `${lastUserText}\n${queuedMove.command}`,
+                        destinationId: queuedMove.parsed.destinationId,
+                        explicit: true
+                    }
+                    : findLatestUserMovement(chat);
 
         if (localMovement) {
             movedThisTurn = true;
@@ -25508,35 +25692,31 @@ globalThis.aethermoorMechanicsInterceptor =
                         `${error instanceof Error ? error.message : String(error)}`
                 );
             }
-        } else {
-            const movement = findLatestUserMovement(chat);
+        } else if (movement) {
+            movedThisTurn = true;
+            try {
+                const output = await runStoredMechanic({
+                    cases: [{
+                        name: 'resolve_movement_command',
+                        kind: 'travel',
+                        stepId: travelStepId(movement),
+                        destinationId:
+                            movement.destinationId || undefined
+                    }]
+                });
 
-            if (movement) {
-                movedThisTurn = true;
-                try {
-                    const output = await runStoredMechanic({
-                        cases: [{
-                            name: 'resolve_movement_command',
-                            kind: 'travel',
-                            stepId: travelStepId(movement),
-                            destinationId:
-                                movement.destinationId || undefined
-                        }]
-                    });
-
-                    assert(
-                        output?.ok === true,
-                        output?.results?.[0]?.error ||
-                            'Travel was rejected'
-                    );
-                } catch (error) {
-                    reportAethermoorError(
-                        error,
-                        'Travel failed',
-                        `travel:${travelStepId(movement)}:` +
-                            `${error instanceof Error ? error.message : String(error)}`
-                    );
-                }
+                assert(
+                    output?.ok === true,
+                    output?.results?.[0]?.error ||
+                        'Travel was rejected'
+                );
+            } catch (error) {
+                reportAethermoorError(
+                    error,
+                    'Travel failed',
+                    `travel:${travelStepId(movement)}:` +
+                        `${error instanceof Error ? error.message : String(error)}`
+                );
             }
         }
 

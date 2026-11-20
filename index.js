@@ -1708,6 +1708,186 @@ function applyXp(crew, xp) {
     return changes;
 }
 
+function escapeSystemLogHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&')
+        .replace(/</g, '<')
+        .replace(/>/g, '>')
+        .replace(/"/g, '"');
+}
+
+function systemLogButtonHtml(label, color = '#9caab8', border = '#2b3542') {
+    return `<span style="display:inline-block; padding:2px 8px; border:1px solid ${border}; background:#181d23; color:${color}; border-radius:2px; font-weight:700;">${escapeSystemLogHtml(label)}</span>`;
+}
+
+function systemLogCardHtml({ accent, heading, rightHtml = '', bodyHtml, buttons = ['close'] }) {
+    const buttonHtml = buttons.map(kind => {
+        if (kind === 'accept') return systemLogButtonHtml('Accept', '#4ade80', '#4ade80');
+        if (kind === 'decline') return systemLogButtonHtml('Decline', '#f87171', '#f87171');
+        return systemLogButtonHtml('Close');
+    }).join(' ');
+
+    return `<div style="background:#12161c; border:1px solid #2b3542; border-left:3px solid ${accent}; border-radius:2px; padding:8px 10px; font-family:'Segoe UI', Tahoma, sans-serif; font-size:11px; color:#d0d7de; line-height:1.45; max-width:440px;">` +
+        `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; border-bottom:1px solid #1f2730; padding-bottom:4px; margin-bottom:6px;">` +
+            `<b style="color:${accent}; text-transform:uppercase; letter-spacing:0.6px;">${escapeSystemLogHtml(heading)}</b>` +
+            (rightHtml ? `<span style="white-space:nowrap;">${rightHtml}</span>` : '') +
+        `</div>` +
+        bodyHtml +
+        `<div style="display:flex; justify-content:flex-end; gap:6px; margin-top:7px; padding-top:5px; border-top:1px solid #1f2730;">${buttonHtml}</div>` +
+    `</div>`;
+}
+
+function contractOfferedCardHtml(quest) {
+    const salvage = quest.salvage || {};
+    const salvageColor = salvage.rarityColor || '#ffffff';
+    const gateLabel = `${quest.gates} ${quest.gates === 1 ? 'Gate' : 'Gates'}`;
+
+    return systemLogCardHtml({
+        accent: '#d99b26',
+        heading: 'System Log // Contract Offered',
+        rightHtml: `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`,
+        bodyHtml:
+            `<div><b style="color:#ffffff;">${escapeSystemLogHtml(quest.title)}</b> — ${escapeSystemLogHtml(quest.currentGate?.objective || '')}</div>` +
+            `<div style="margin-top:4px;"><b>Payout:</b> <b style="color:#4ade80;">${quest.payout.xp} XP</b> | <b style="color:#ffd166;">${quest.payout.silver}s</b> | <b style="color:#38bdf8;">+${quest.payout.repSteps} Rep</b></div>` +
+            `<div><b>Salvage:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(salvage.name || 'Salvage')}</b> <span style="color:#9caab8;">(${escapeSystemLogHtml(salvage.rarity || 'Common')})</span></div>`,
+        buttons: ['accept', 'decline', 'close']
+    });
+}
+
+function contractCompleteCardHtml({ title, rank = null, rewards }) {
+    const salvage = (rewards?.loot || [])[0] || null;
+    const salvageColor = salvage?.rarityColor || '#ffffff';
+    const salvageHtml = salvage
+        ? `<div style="margin-top:4px;"><b style="color:#e5a93c;">Salvage Awarded:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(salvage.name)}</b> <span style="color:#9caab8;">(${escapeSystemLogHtml(salvage.rarity || 'Common')}${Number.isInteger(salvage.sellValue) ? ` • Pawn: ${salvage.sellValue}s` : ''})</span></div>`
+        : '';
+
+    return systemLogCardHtml({
+        accent: '#d99b26',
+        heading: 'System Log // Contract Complete',
+        rightHtml: rank ? `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(rank)}</b>` : '',
+        bodyHtml:
+            `<div><b style="color:#ffffff;">${escapeSystemLogHtml(title)}</b> — <b style="color:#4ade80;">+${rewards.xp} XP</b> | <b style="color:#ffd166;">+${rewards.silver}s</b> | <b style="color:#38bdf8;">+${rewards.repSteps} Rep</b></div>` +
+            salvageHtml,
+        buttons: ['close']
+    });
+}
+
+function xpProgressCardHtml(crew, levelUps = []) {
+    const threshold = nextXp(crew.level);
+    const first = levelUps[0];
+    const last = levelUps.at(-1);
+
+    if (levelUps.length > 0 && first?.before && last?.after) {
+        const before = first.before;
+        const after = last.after;
+        const oldLevel = first.level - 1;
+        const regenPart = after.regen !== before.regen
+            ? ` | Regen ${before.regen} → <b style="color:#4ade80;">${after.regen}</b>`
+            : '';
+
+        return systemLogCardHtml({
+            accent: '#4ade80',
+            heading: 'System Log // Level-Up',
+            rightHtml: `<b style="color:#ffffff;">Lv ${oldLevel} → Lv ${crew.level} (${crew.xp}/${threshold} XP)</b>`,
+            bodyHtml:
+                `<div>• <b>Vitality:</b> Q'tik ${before.qtikMaxHp} → <b style="color:#4ade80;">${after.qtikMaxHp} HP</b> | Tansy ${before.tansyMaxHp} → <b style="color:#4ade80;">${after.tansyMaxHp} HP</b>${regenPart}</div>` +
+                `<div>• <b>Parameters:</b> ATK ${before.atk} → <b style="color:#4ade80;">${after.atk}</b> | DEF ${before.def} → <b style="color:#4ade80;">${after.def}</b> | LUK ${before.luk} → <b style="color:#4ade80;">${after.luk}</b></div>`,
+            buttons: ['close']
+        });
+    }
+
+    return systemLogCardHtml({
+        accent: '#4ade80',
+        heading: 'System Log // Crew Progression',
+        rightHtml: `<b style="color:#ffffff;">Level ${crew.level}</b>`,
+        bodyHtml:
+            `<div><b>XP:</b> <b style="color:#4ade80;">${crew.xp} / ${threshold}</b> <span style="color:#9caab8;">(${threshold - crew.xp} XP to Level ${crew.level + 1})</span></div>`,
+        buttons: ['close']
+    });
+}
+
+function formatAcquiredBonusHtml(item) {
+    if (item.classRestricted) {
+        return `<b style="color:#f87171;">✕ Class Restricted (Trade/Pawn Fodder)</b>`;
+    }
+
+    const labels = {
+        crewAtk: 'Crew ATK',
+        tansyMaxHp: 'Tansy MaxHP',
+        qtikMaxHp: "Q'tik MaxHP",
+        frontlineDef: 'Frontline DEF',
+        crewLuk: 'Crew LUK'
+    };
+
+    const parts = Object.entries(item.bonus || {})
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => `+${value} ${labels[key] || key}`);
+
+    return parts.length
+        ? `<b style="color:#4ade80;">${escapeSystemLogHtml(parts.join(', '))}</b>`
+        : `<span style="color:#9caab8;">Stat ${item.rawStat ?? item.stat ?? 0}</span>`;
+}
+
+function acquiredItemsCardHtml(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return '';
+
+    const rows = entries.map((entry, index) => {
+        const divider = index > 0
+            ? 'border-top:1px solid #1f2730; margin-top:6px; padding-top:6px;'
+            : '';
+
+        if (entry.kind === 'curio') {
+            const curio = entry.curio;
+            const color = curio.rarity === 'Rare' ? '#38bdf8' : '#ffffff';
+            return `<div style="${divider}">` +
+                `<div style="display:flex; justify-content:space-between; gap:8px;">` +
+                    `<b style="color:${color};">${escapeSystemLogHtml(curio.name)}</b>` +
+                    `<span style="color:#6e7f91; white-space:nowrap;">Curio — ${escapeSystemLogHtml(curio.rarity)}</span>` +
+                `</div>` +
+                `<div>Zone ${curio.zone} Curio • <span style="color:#ffd166;">Value: ${curio.value}s</span></div>` +
+            `</div>`;
+        }
+
+        if (entry.kind === 'consumable') {
+            const item = entry.item;
+            const effect = item.heal
+                ? `Restores ${item.heal} HP`
+                : 'Clears eligible debuff stacks';
+            return `<div style="${divider}">` +
+                `<div style="display:flex; justify-content:space-between; gap:8px;">` +
+                    `<b style="color:#4ade80;">${escapeSystemLogHtml(item.name)} ×1</b>` +
+                    `<span style="color:#6e7f91; white-space:nowrap;">Consumable</span>` +
+                `</div>` +
+                `<div>${escapeSystemLogHtml(effect)}</div>` +
+            `</div>`;
+        }
+
+        const item = entry.item || entry;
+        const color = item.rarityColor || '#ffffff';
+        const slot = item.slot
+            ? `${item.slot[0].toUpperCase()}${item.slot.slice(1)}`
+            : 'Gear';
+        const pawn = Number.isInteger(item.sellValue)
+            ? ` • <span style="color:#ffd166;">Pawn: ${item.sellValue}s</span>`
+            : '';
+
+        return `<div style="${divider}">` +
+            `<div style="display:flex; justify-content:space-between; gap:8px;">` +
+                `<b style="color:${color};">${escapeSystemLogHtml(item.name)}</b>` +
+                `<span style="color:#6e7f91; white-space:nowrap;">${escapeSystemLogHtml(slot)} — ${escapeSystemLogHtml(item.rarity || 'Common')}</span>` +
+            `</div>` +
+            `<div>${formatAcquiredBonusHtml(item)}${pawn}</div>` +
+        `</div>`;
+    }).join('');
+
+    return systemLogCardHtml({
+        accent: '#4da6ff',
+        heading: 'System Log // Acquired Items',
+        bodyHtml: rows,
+        buttons: ['close']
+    });
+}
+
 /*
  * XP rewards produce crew-visible System feedback. This formatter only
  * describes the post-award state; it does not grant XP or prescribe a
@@ -1716,24 +1896,16 @@ function applyXp(crew, xp) {
 function xpProgressNarrationLines(crew, levelUps = []) {
     if (!crew) return [];
 
-    const threshold = nextXp(crew.level);
-
     return [
-        'At this XP award, a System progression readout appears ' +
-            'to both Q’tik and Tansy (not ordinary NPCs).',
+        'At this XP award, display this exact System progression HTML card ' +
+            'verbatim (visible to Q’tik and Tansy, not ordinary NPCs):',
+        xpProgressCardHtml(crew, levelUps),
         ...(levelUps.length
             ? [
-                'A level-up chime sounds for the crew. The readout ' +
-                    `shows each level reached: ${
-                        levelUps.map(change => change.level).join(', then ')
-                    }. Mention the chime in this reward scene.`
+                'A level-up chime sounds for the crew. Mention the chime in this reward scene.'
             ]
             : []),
-        `The readout shows their shared crew progression: ` +
-            `Level ${crew.level} · ${crew.xp}/${threshold} XP · ` +
-            `${threshold - crew.xp} XP until Level ${crew.level + 1}.`,
-        'These are visible System facts, not instructions for either ' +
-            'character to comment on them or feel a particular way.'
+        'These are visible System facts.'
     ];
 }
 
@@ -7468,19 +7640,6 @@ function resolveTravelStep(test) {
 
         if (event === 'wild_encounter') {
             journey.status = 'paused';
-        } else if (journey.completedSegments === journey.totalSegments) {
-            state.places[journey.destinationId].visited = true;
-            state.currentLocationId = journey.destinationId;
-            state.currentPosition = { nodeId: journey.destinationId };
-            outcome.arrived = true;
-            state.currentJourney = null;
-            journey.status = 'arrived';
-
-            state = applyArrivalLocation(
-                state,
-                journey.destinationId,
-                outcome
-            );
         }
 
         outcome.movement = {
@@ -7488,27 +7647,12 @@ function resolveTravelStep(test) {
             journeySegmentConsumed: true,
             arrivalOnly: false,
             interrupted: event === 'wild_encounter',
-            arrivalDeferred:
-                event === 'wild_encounter' &&
-                journey.completedSegments === journey.totalSegments,
             completedSegments: journey.completedSegments,
             totalSegments: journey.totalSegments,
             journeyStatus: journey.status
         };
 
         outcome.journey = clone(journey);
-    }
-    if (outcome.arrived) {
-        const arrivalQuests =
-            questsForArrival(state, journey.destinationId);
-
-        for (const arrivalQuest of arrivalQuests) {
-            state = completeQuestArrivalGate(
-                state,
-                outcome,
-                arrivalQuest.id
-            );
-        }
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
@@ -16680,6 +16824,8 @@ function chestLootNarrationLines(cache) {
             `Found (${curio.rarity} Curio): ${curio.name} — ` +
                 `locked resale value ${curio.value} silver.`,
             interestGuidance,
+            'Display this exact System HTML card verbatim (visible to Q’tik and Tansy):',
+            acquiredItemsCardHtml([{ kind: 'curio', curio }]),
             'Write a concise <template> note recording this curio’s name, ' +
                 'physical appearance, locked value, and private buyer-interest ' +
                 'attitude so future NPCs react consistently.'
@@ -16691,7 +16837,9 @@ function chestLootNarrationLines(cache) {
             `Found (Consumable): 1× ${cache.item.name}` +
                 (cache.item.heal
                     ? ` (heals ${cache.item.heal} HP).`
-                    : ' (cleansing tonic).')
+                    : ' (cleansing tonic).'),
+            'Display this exact System HTML card verbatim (visible to Q’tik and Tansy):',
+            acquiredItemsCardHtml([{ kind: 'consumable', item: cache.item }])
         ];
     }
 
@@ -16704,7 +16852,9 @@ function chestLootNarrationLines(cache) {
     if (cache.kind === 'gear') {
         return [
             `Found (Gear): ${cache.item.name} (${cache.item.rarity}, ` +
-                `Stat ${cache.item.rawStat}) — placed in Bag Reserves, NOT equipped.`
+                `Stat ${cache.item.rawStat}) — placed in Bag Reserves, NOT equipped.`,
+            'Display this exact System HTML card verbatim (visible to Q’tik and Tansy):',
+            acquiredItemsCardHtml([{ kind: 'gear', item: cache.item }])
         ];
     }
 
@@ -16936,12 +17086,6 @@ function travelNarrationPacket(result) {
         }
     }
 
-    if (result.arrived || result.event === 'journey_arrival') {
-        lines.push(
-            'Arrival does not establish whether any rumor about this place is true.'
-        );
-    }
-
     if (result.poiArrival) {
         lines.push(
             `Confirmed arrival at ${result.poiArrival.label}.`,
@@ -16980,18 +17124,42 @@ function travelNarrationPacket(result) {
     }
 
     for (const completion of result.questCompletions || []) {
+        const completedQuest = result.state
+            ? findQuestById(result.state, completion.questId)
+            : null;
         lines.push(
-            `The missing person reached safety; the System completed ` +
-                `${completion.title}.`,
-            `Quest rewards applied: ${completion.rewards.xp} XP, ` +
-                `${completion.rewards.silver} silver, ` +
-                `${completion.rewards.repSteps} reputation steps.`,
-            ...completion.rewards.loot.map(item =>
-                `System salvage received: ${item.name}.`
-            ),
+            `The missing person reached safety; the System completed ${completion.title}.`,
+            'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy):',
+            contractCompleteCardHtml({
+                title: completion.title,
+                rank: completedQuest?.rank || null,
+                rewards: completion.rewards
+            }),
             ...xpProgressNarrationLines(
                 result.state?.crew,
                 completion.levelUps || []
+            )
+        );
+    }
+
+    for (const secured of result.questObjectiveSecuredList || []) {
+        if (!secured.questCompletion) continue;
+        const rewards = secured.questCompletion.rewards;
+        const completedQuest = result.state
+            ? findQuestById(result.state, secured.questId)
+            : null;
+
+        lines.push(
+            'The System completed the quest at its final objective.',
+            'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy):',
+            contractCompleteCardHtml({
+                title: completedQuest?.title || 'Contract',
+                rank: completedQuest?.rank || null,
+                rewards
+            }),
+            ...xpProgressNarrationLines(
+                result.state?.crew,
+                secured.questCompletion.levelUps || []
             )
         );
     }
@@ -17077,23 +17245,24 @@ function questOfferNarrationPacket(quest) {
     const sourceText = {
         rumor: 'Following the rumor revealed a local concern.',
         pack_drop: 'Following the pack breadcrumb revealed a local concern.',
-        social: 'A local concern was mentioned in conversation.',
+        social: 'A local concern was discovered.',
         debug_test: 'A test trigger created this offer.'
     }[quest.seed?.source] ||
         'A local concern has been established.';
 
     return [
-        'PRIVATE QUEST OFFER — use for the scene, do not recite.',
+        '* **QUEST OFFERED!**',
         sourceText,
         `Concern: ${quest.pitch || quest.title}`,
         ...publicQuestFactLines(quest),
         `First objective: ${quest.currentGate.objective}`,
-        'Portray the concern in-world. NPCs do not know about System ' +
-            'XP, silver, reputation, or salvage and do not dispense them.',
-        'The extension has already saved the offer and handles its ' +
-            'contract notification, acceptance, and rewards.'
+        'First portray the concern in-world (NPCs do not know about System ' +
+            'rewards). Then display this exact System offer HTML card verbatim ' +
+            '(visible only to Q’tik and Tansy; do not accept it for them):',
+        contractOfferedCardHtml(quest)
     ].join('\n');
 }
+
 
 
 function inventoryActionNarrationPacket(result, action) {
@@ -17190,14 +17359,18 @@ function questDiscoveryContextPacket(quest, state) {
             ? [
                 '* **QUEST DONE — only if THIS final objective is actually ' +
                     'completed in this reply:** First portray the recovery. ' +
-                    'Then, in the SAME reply, say that the quest is completed and mention a System quest-completion window appearing ' +
-                    'visible to Q’tik and Tansy (not ordinary NPCs).',
-                `* **Window identifies this quest:** ${quest.title} ` +
-                    `(${quest.id}).`,
-                `* **Locked completion rewards:** ${quest.payout.xp} XP, ` +
-                    `${quest.payout.silver} silver, ` +
-                    `${quest.payout.repSteps} reputation step(s), and ` +
-                    `${quest.salvage.name} (${quest.salvage.rarity}).`,
+                    'Then, in the SAME reply, display this exact System completion ' +
+                    'HTML card verbatim (visible to Q’tik and Tansy, not ordinary NPCs):',
+                contractCompleteCardHtml({
+                    title: quest.title,
+                    rank: quest.rank,
+                    rewards: {
+                        xp: quest.payout.xp,
+                        silver: quest.payout.silver,
+                        repSteps: quest.payout.repSteps,
+                        loot: [quest.salvage]
+                    }
+                }),
                 '* The System pays these rewards, not an NPC. The ' +
                     'extension will validate the reported discovery and ' +
                     'apply the locked payout; do not grant anything ' +
@@ -17341,12 +17514,12 @@ function questDeliveryNarrationPacket(result, quest) {
         'AUTHORITATIVE QUEST COMPLETION CONTRACT — use these values exactly.',
         `Quest completed: ${quest.title}.`,
         `Handover recipient: ${quest.turnIn?.recipient || quest.facts?.sponsor || quest.town}.`,
-        `Rewards applied by the extension: ${rewards.xp} XP, ` +
-            `${rewards.silver} silver, ${rewards.repSteps} reputation step(s).`,
-        ...(rewards.loot || []).map(item =>
-            `Salvage granted: ${item.name} (${item.rarity}), ` +
-            `Stat ${item.rawStat}.`
-        ),
+        'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy):',
+        contractCompleteCardHtml({
+            title: quest.title,
+            rank: quest.rank,
+            rewards
+        }),
         ...xpProgressNarrationLines(
             result.state?.crew,
             result.levelUps || []
@@ -17404,7 +17577,6 @@ function questActionNarrationPacket(result, questAction) {
             'The quest was not completed and remains recorded in the quest history.'
         ].join('\n');
     }
-
     if (questAction === 'complete') {
         const rewards = result.rewards;
 
@@ -17413,12 +17585,12 @@ function questActionNarrationPacket(result, questAction) {
             quest.structureV2?.family === 'rescue_person'
                 ? `${quest.facts.person} reached the origin settlement safely.`
                 : 'The final field objective was validated.',
-            `Rewards already applied: ${rewards.xp} XP, ` +
-                `${rewards.silver} silver, ` +
-                `${rewards.repSteps} reputation steps.`,
-            ...rewards.loot.map(item =>
-                `System salvage received: ${item.name} (${item.rarity}).`
-            ),
+            'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not ordinary NPCs):',
+            contractCompleteCardHtml({
+                title: quest.title,
+                rank: quest.rank,
+                rewards
+            }),
             ...xpProgressNarrationLines(
                 result.state?.crew,
                 result.levelUps || []
@@ -17546,10 +17718,10 @@ function combatNarrationPacket(result, actions) {
             `The encounter was cleared. Rewards applied: ` +
             `${result.rewards.xp} XP and ${result.rewards.silver} silver.`
         );
-
-        for (const item of result.rewards.loot || []) {
+        if ((result.rewards.loot || []).length > 0) {
             lines.push(
-                `Loot received: ${item.name} (${item.rarity}).`
+                'Display this exact System loot HTML card verbatim (visible to Q’tik and Tansy but nordinary NPCs):',
+                acquiredItemsCardHtml(result.rewards.loot)
             );
         }
 
@@ -17616,15 +17788,19 @@ function combatNarrationPacket(result, actions) {
 
         if (questGate.questCompletion) {
             const rewards = questGate.questCompletion.rewards;
+            const completedQuest = result.state && questGate.questId
+                ? findQuestById(result.state, questGate.questId)
+                : null;
             lines.push(
-                `Quest rewards applied: ${rewards.xp} XP, ` +
-                `${rewards.silver} silver, ` +
-                `${rewards.repSteps} reputation steps.`,
-                ...rewards.loot.map(item =>
-                    `System salvage received: ${item.name}.`
-                )
+                'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not ordinary NPCs):',
+                contractCompleteCardHtml({
+                    title: completedQuest?.title || 'Contract',
+                    rank: completedQuest?.rank || null,
+                    rewards
+                })
             );
         }
+
     }
 
     lines.push(
@@ -22813,9 +22989,13 @@ function combatRecapPrompt(receipt) {
         `Result: victory. ${receipt.xp} XP and ${receipt.silver} silver were received.`
     );
 
-    for (const item of receipt.loot || []) {
-        lines.push(`Loot received: ${item.name || 'Unnamed item'}.`);
+    if ((receipt.loot || []).length > 0) {
+        lines.push(
+            'Display this exact System loot HTML card verbatim (visible to Q’tik and Tansy but not ordinary NPCs):',
+            acquiredItemsCardHtml(receipt.loot)
+        );
     }
+
 
     if (
         receipt.packDrop?.result ===
@@ -22888,12 +23068,11 @@ function combatRecapPrompt(receipt) {
         if (questGate.questCompletion) {
             const rewards = questGate.questCompletion.rewards;
             lines.push(
-                `Quest rewards applied: ${rewards.xp} XP, ` +
-                    `${rewards.silver} silver, ` +
-                    `${rewards.repSteps} reputation steps.`,
-                ...rewards.loot.map(item =>
-                    `System salvage received: ${item.name}.`
-                )
+                'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not ordinary NPCs):',
+                contractCompleteCardHtml({
+                    title: 'Contract',
+                    rewards
+                })
             );
         }
     }
@@ -26706,10 +26885,9 @@ function settlementWorkContextPacket(state, settlement) {
         '   Fit the reason to the established scene and the saved ' +
             'concern. Do not invent a new mandatory meeting, ' +
             'different objective, extra quantity, or separate journey.',
-        '2. THEN describe THIS quest’s System window appearing to ' +
-            'Q’tik and Tansy, with the saved first objective and rewards ' +
-            'above. Ordinary NPCs cannot see it. Do not accept it for ' +
-            'the crew.',
+        '2. THEN display this exact System offer HTML card verbatim to ' +
+            'Q’tik and Tansy (ordinary NPCs cannot see it; do not accept it for the crew):',
+        contractOfferedCardHtml(quest),
         '3. Immediately write a concise and thematic <template> ' +
             'recording this quest, objective, and rewards.',
         '4. Emit this exact tag:',
@@ -27321,7 +27499,9 @@ async function consumeAethermoorHandoff(injected) {
         return;
     }
 
-    injected.consumePromise = (async () => {
+    injected.consumePromise = queueAethermoor(async () => {
+        if (injected.consumed) return;
+
         const stored =
             injected.metadata?.[AETHERMOOR_METADATA_KEY];
 
@@ -27374,7 +27554,7 @@ async function consumeAethermoorHandoff(injected) {
         ) {
             aethermoorInjectedHandoff = null;
         }
-    })();
+    });
 
     try {
         await injected.consumePromise;

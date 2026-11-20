@@ -7917,772 +7917,109 @@ function rollQuestTerminalThreat(state, rank, zone) {
 /*
  * AETHERMOOR IMPLEMENTATION ROADMAP
  *
- * This is the working feature list for the current beta architecture.
- * Update the status here when a feature is completed, deliberately changed,
- * or superseded. Keep this list near the quest architecture notes so future
- * maintenance does not depend on reconstructing priorities from chat history,
- * scattered comments, or saved-state incidents.
+ * Working priority list for the current beta architecture.
+ * Update statuses in the same edit as the implementation so this roadmap
+ * and the live code stay synchronized.
  *
  * Status meanings:
- * - DONE: implemented and exercised in the current campaign flow.
- * - IMPLEMENTED — BETA PENDING: code path is connected; campaign-flow
- *   verification is deliberately deferred to beta, not unfinished coding.
- * - PARTIAL: important implementation paths or integrations remain.
- * - NEXT: the next focused implementation target.
- * - PLANNED: agreed work that has not started.
- * - DEFERRED: useful work intentionally postponed while another dependency is settled.
- *
- * COMPLETED FOUNDATIONS
- *
- * DONE — Persistent per-chat state
- * - Save the complete machine state in chat metadata.
- * - Serialize concurrent operations through the Aethermoor queue.
- * - Preserve revisions, RNG state, locked results, and ordered narrator handoffs.
- *
- * DONE — Saved world foundation
- * - Persist the world seed, zones, geography profiles, settlements, reputation,
- *   primary route edges, current location, and current position.
- * - Generate missing world records deterministically without advancing combat RNG.
- * - Preserve stable IDs for places, settlements, routes, quests, and factions.
- *
- * DONE — Core campaign loop
- * - Travel one segment per [moved] event.
- * - Support journeys, arrival, interruption, encounter discovery, engage/avoid,
- *   points of interest, rumors, social opportunities, and quest return travel.
- *
- * DONE — Combat systems
- * - Resolve normal packs, declared rosters, elites, bosses, telegraphs,
- *
- *   reinforcements, fleeing, death, XP, silver, loot, potions, and shadows.
- * - IMPLEMENTED — BETA PENDING: ordinary normal packs retain the original
- *   six three-foe compositions and gain six four-foe compositions. Four-foe
- *   odds rise from 1-in-6 (Zones 1–2), to 1-in-3 (Zones 3–5), to 1-in-2
- *   (Zone 6 onward). New instance rooms save a zone-weighted composition;
- *   existing rooms and encounters are not regenerated.
- * - XP and silver use the actual slain roster. Quest XP keeps its separate
- *   three-foe reference. Test four-foe incoming pressure, specialist
- *   stacking, and Frost Stomp before changing combat formulas.
- *
- * - IMPLEMENTED — BETA PENDING: resolveTurn() requires
- *   encounter.status === 'active'. Spotted encounters must be engaged
- *   first, and cleared/fled/dead encounters cannot receive another turn.
- *   The UI remains a convenience layer; the mechanics assertion is the
- *   authoritative boundary.
- *
- * - IMPLEMENTED — BETA PENDING: a cleared encounter retains a read-only
- *   victory receipt and a concise, number-free log of established combat
- *   beats. The receipt displays applied XP, silver, loot, breadcrumbs,
- *   and level-ups. Players may copy a recap prompt for optional GM
- *   dramatization; copying does not rerun combat or grant rewards.
- *
- * - IMPLEMENTED — BETA PENDING: World and Instance show spotted-encounter
- *   decisions in context. Engage opens the one Combat UI; cleared-fight
- *   receipts and recap controls appear only in Combat. A finished turn
- *   may return to its originating tab. No second combat resolver or
- *   reward claim path was added.
- *
- * - IMPLEMENTED — BETA PENDING: healing potions have fixed purchase-zone
- *   grades. Basic heals 50 × zone HP for 10 × zone silver; Mid-Tier heals
- *   120 × zone HP for 20 × zone silver. An old bottle never scales up.
- *   Cleansing Tonic retains its fixed effect. Verify use in combat and
- *   outside combat before expanding the catalog.
- *
- * DONE — Quest delivery foundation
- * - Lock the quest issuer and return location.
- * - Separate field-objective completion from delivery and payment.
- * - Support report-only delivery for defeat objectives.
- * - Support cargo delivery for retrieval objectives.
- * - Apply quest rewards exactly once after validated delivery.
- *
- * IMPLEMENTED — BETA PENDING: V2 linked-threat quest path
- * - Use complete V2 structures for supported linked-threat gate counts.
- * - Longer structures use authored local discoveries for tracking, reaching
- *   the lair, and locating the target; they do not require repeat arrival.
- * - Complete the arrival gate, reveal the linked threat, resolve the linked
- *   combat gate, return to the issuer, and complete report-only delivery.
- * - Verify the longer discovery paths during beta.
- * - Keep the linked threat and the current encounter identity separate.
- * - Retain a narrowly scoped reconciliation operation for beta test saves.
- *
- * DONE — Current mechanical UI foundation
- * - Provide Combat, Quests, and World tabs.
- * - Keep UI refresh read-only.
- * - Persist panel position and size.
- * - Expose encounter, journey, quest, destination, and delivery actions.
- *
- * NEXT FOCUSED WORK
- *
- * IMPLEMENTED — BETA PENDING: Fresh-campaign initialization
- * - A reset chat can create its level-1 crew and Zone 1 saved world from
- *   the World tab without a manual state import.
- * - Initialization creates no quest, rumor, NPC, encounter, or handoff.
- * - It cannot overwrite an existing campaign. Verify from a fresh chat
- *   during beta.
- *
- * PARTIAL — Travel interruption behavior
- * - Destination journeys roll random travel events only before the final
- *   segment. An event consumes one segment, including wild encounters.
- * - The final segment consumes distance and confirms arrival without a
- *   random travel-event roll. One-segment journeys arrive directly.
- * - Quest and rumor arrival mechanics still run and may reveal their own
- *   opportunities or spotted threats, without automatically engaging combat.
- * - Regional exploration without a destination retains normal event rolls.
- * - Movement while an encounter is spotted or active does not advance travel.
- * - Older final-segment interruptions remain supported: after resolution or
- *   avoidance, finalize arrival without another segment or travel-event roll.
- * - Narration and Combat UI report saved journey progress at interruptions.
- * - Final-segment policy implemented; fresh one-segment and multi-segment
- *   arrival verification pending. Earlier test arrivals still rolled events.
- *
- * NEXT — Travel interruption regression pass
- * - Test encounters on the first, middle, and final journey segments.
- * - Verify that [moved] during a spotted or active encounter does not advance.
- * - Verify that resolving the encounter resumes at the saved progress.
- * - Verify final-segment interruptions finalize arrival without an extra roll.
- * - World must retain a clipboard-only Continue/Finish journey entry after
- *   an interruption, including when shortestRoute() reports zero distance.
- * - Watchtower regression: clearing a final-segment encounter left arrival
- *   pending but hid its movement entry. Explicit journey control added;
- *   verify after reload before marking this case complete.
-
- * - Test quiet travel, environmental signs, points of interest, and social events.
- * - Travel-step replay now checks its stable message ID before changing or
- *   starting a journey. Verify duplicate commands after arrival and after
- *   interrupted travel do not move the crew or save another revision.
- * - Traveler events return cloned state: refresh the journey reference before
- *   advancing progress so saved progress matches the narrated outcome.
- * - Verify a traveler on segment 1 saves 1/N, then a subsequent move saves 2/N.
- * - Regression incident: the Watchtower journey reported 1/5 after a traveler
- *   but lost that first segment in saved state. Fix added; retest pending.
- *
- * DONE — Out-of-combat Q'tik recovery
- * - When a previously active encounter ends, restore Q'tik to derived maximum
- *   HP if no active or spotted encounter remains in the resulting state.
- * - Do not tie recovery to travel steps, elapsed time, or UI refreshes.
- * - A successor encounter revealed by the same operation suppresses recovery.
- * - Death already restores the crew and is not an additional recovery event.
- *
- * PLANNED — Tansy out-of-combat recovery
- * - Do not heal Tansy between fights yet.
- * - Revisit after she reaches level 20 and completes the authored Mender quest.
- * - At that point decide whether established Mender care warrants full
- *   between-fight recovery; do not track time or invent a cast-rate formula.
- *
- * NEXT — V2 quest completion regression pass
- * - Test a fresh defeat-elite quest from offer through delivery without debug
- *   reconciliation.
- * - Verify that the linked encounter alone advances the quest objective.
- * - Verify that an unrelated cleared Elite cannot advance the quest.
- * - Verify duplicate combat completion, duplicate delivery, and repeated tags.
- *
- * NEXT — Quest delivery handshake regression pass
- * - Arrival at the issuer settlement only sets deliveryReady; it never starts
- *   the sponsor meeting or completes the quest.
- * - Verify the narrator waits for player direction before staging the handover.
- * - Verify report-only and cargo handovers emit the exact quest delivery tag
- *   only after the fictional handover occurs.
- * - Verify the extension applies the locked payout once and queues the
- *   authoritative reward contract for the following LLM reply.
- * - Verify duplicate tags, wrong quest IDs, wrong locations, incomplete cargo,
- *   and delivery after completion cannot grant rewards again.
- * - Cancelling or abandoning a quest stops its field-destination journey
- *   while preserving route position. Shared destinations and independent
- *   settlement return travel are preserved. Live verification pending.
- *
- * PARTIAL SYSTEMS
- *
- * PARTIAL — V2 retrieve-item quests
- * - IMPLEMENTED — BETA PENDING: new Recover Cargo offers use the
- *   Abandoned Transport, Diverted Shipment, and Stolen Shipment variants.
- * - Their authored discoveries cover supported retrieval gate counts and
- *   require the final recovered cargo to match the locked turn-in item.
- * - New cargo eligibility and discovery preparation do not depend on biome.
- *   Saved world geography remains narration context.
- * - Retired Missing Cargo and Sunken Salvage fixed-site catalogs, gate
- *   templates, and discovery helpers have been removed for the beta reset.
- * - Full gameplay verification is deferred to beta.
- *
- * IMPLEMENTED — BETA PENDING: Authored quest discoveries
- * - Every current V2 discovery-triggered gate receives a stable,
- *   engine-authored discovery with a locked location and acquisition state.
- * - Acceptance validates its discovery ID, location, acquisition policy,
- *   hiding place, and significance before saving the accepted quest.
- * - FOUND events validate the current gate and record acquired discoveries
- *   as source-linked Crew Knowledge; hidden preparations are not knowledge.
- * - Verify each quest family from acceptance through discovery during beta.
- *
- * PARTIAL — Quest family migration
- * - Recover Cargo, Ruin Clearance, and Territorial Beast use V2 foundations.
- *
- * - IMPLEMENTED — BETA PENDING: Herb Foraging uses rank-appropriate,
- *   geography-agnostic requests and V2 authored discoveries for every
- *   supported gate count; the harvest remains locked turn-in cargo.
- * - Saved zone geography informs presentation, not Herb Foraging eligibility.
- *
- * - IMPLEMENTED — BETA PENDING: Missing Person Search uses geography-neutral
- *   Lost-at-D and Abducted-at-C/B variants. Lost ends when the person is
- *   found; Abducted ends when the linked threat is defeated. Returning the
- *   person is diegetic; turn-in is report-only.
- * - Four- and five-gate Missing Person offers use Abducted, because the
- *   current Lost scenario supports only two or three field gates.
- *
- * - IMPLEMENTED — BETA PENDING: Ruin Clearance and Territorial Beast Hunt
- *   use setting-neutral premises and saved V2 linked-threat structures.
- * - New-offer scenario eligibility no longer reads geography profiles.
- *   Saved world geography still guides narration and zone transitions.
- * - Full gameplay verification remains for beta.
- *
- * PARTIAL — Quest ranks and settlement reputation
- * - Rank reflects stakes, trust, and consequences, not gate count alone.
- * - F: routine, low-stakes, menial help. A common-plant errand is now
- *   authored for any saved geography; other F objectives remain future work.
- * - Offer generation rolls only among reputation-permitted ranks with
- *   an eligible authored scenario. Geography does not filter new offers.
- * - E: useful work needing judgment or travel, with limited consequences.
- * - D: consequential local problems entrusted to a capable crew.
- * - C: serious threats to a community, essential service, or trade route.
- * - B: major local or regional problems entrusted to proven crews.
- * - A/S: reserved for specially authored quests and distinctive rewards.
- * - Archetypes may appear at different ranks only when their authored
- *   scenario and stakes fit; more gates alone do not raise a quest’s rank.
- * - Reputation and rank offers are settlement-specific. Offers should move
- *   upward with trust; reaching a higher band should not erase the option to
- *   undertake lower-ranked work.
- * - Reputation should encourage regional momentum, not require clearing a
- *   fixed number of quests before the crew can move on.
- * - New offer bands: Unknown F/E; Slightly Known F/E/D; Known E/D/C;
- *   Well Respected D/C/B; Renowned C/B.
- * - Three reputation steps per tier. F/E grant one; D/C/B grant two.
- *   Keep earned tiers and banked steps. Tune pacing during beta.
- * - Missing Person: Lost at D; Abducted at C/B.
- * - Herb Foraging has explicit F, E/D, and C/B stakes; Missing Person has
- *   Lost at D and Abducted at C/B; F nuisance variants are explicitly authored
- *   for Ruin Clearance and Territorial Beast Hunt.
- *
- * - IMPLEMENTED — BETA PENDING: every current quest scenario has explicit
- *   rank eligibility; offers roll only from scenarios authored for the
- *   selected rank. Verify rank pools and stakes during beta.
- * - Keep A/S offer generation disabled until their special objectives and
- *   rewards are authored.
- *
- * - IMPLEMENTED — BETA PENDING: linked-threat type follows rank: F/E normal
- *   pack, D/C pack-or-Elite roll, B Elite.
- * - Gate count means quest length, not difficulty. Mechanical challenge for
- *   non-combat objectives remains unresolved; do not imply otherwise.
- *
- * PARTIAL — World integration
- * - World records and route edges are saved.
- * - IMPLEMENTED — BETA PENDING: newly generated zones beyond the named
- *   campaign start and unnamed primary settlements receive deterministic,
- *   geography-compatible placeholder names. Saved records are not renamed;
- *   IDs and reputation keys remain independent of presentation.
- * - IMPLEMENTED — BETA PENDING: World exposes the saved route to the next
- *   zone's primary settlement even before a local lead names it. This
- *   enables forward progression without revealing NPCs or quest content.
- *
- * - IMPLEMENTED — BETA PENDING: traveler rumors use setting-neutral
- *   templates. Each new rumor owns a stable, zone-local destination;
- *   rolling the same template again does not reuse another rumor's site.
- * - The new site's route is saved with its lead, without advancing combat RNG.
- * - Missing current-place records use the saved settlement identity rather
- *   than labelling every zone's outpost Peat-Cairn Outpost.
- * - Existing saved places keep their established names and IDs.
- *
- * - IMPLEMENTED — BETA PENDING: route search uses saved world edges only;
- *   retired Stone Ford, Old Mill, and Watchtower edges are not synthesized
- *   in every zone. Generated settlements and authored destinations save
- *   their own stable route edges.
- * - Beta starts from reset state; path-only legacy journeys without saved
- *   route legs are not reconstructed.
- *
- * PARTIAL — Shared cosmetic stock naming
- *
- * - IMPLEMENTED — BETA PENDING: at a saved settlement, the extension
- *   requests one geography-aware naming batch for the current zone and
- *   validates engine-issued gear-variant and potion-grade keys.
- * - The batch is saved once per zone and can be extended only for newly
- *   added stock keys; existing names cannot be silently renamed.
- *   Missing or malformed replies leave generic names and never block play.
- *
- * - IMPLEMENTED — BETA PENDING: saved labels now flow through gear and
- *   herbalist shop windows, purchase receipts, Bag Reserves, Inventory,
- *   and combat potion choices.
- *
- * - Generic labels remain fallbacks when a naming batch is absent.
- * - On confirmed arrival in a new zone, the extension supplies the GM
- *   with saved geography and engine-issued keys for the zone's gear and
- *   herbalist stock. The GM returns cosmetic names inside <plan>.
- * - The extension validates and saves one naming batch per zone. All
- *   settlements in that zone reuse it, including stackable potion grades.
- * - Names change presentation only: never item IDs, slots, variants,
- *   healing, stats, prices, ownership, or rewards.
- * - Shops, purchase receipts, Inventory, and Combat should display the
- *   same saved name. Missing or invalid names retain generic labels and
- *   never block arrival or trade.
- * - The extension initiates the request in the arrival handoff; it must
- *   not rely on the GM remembering a standing instruction. SillyTavern's
- *   configured regex handles hiding <plan> from the player.
- * - Implement this as one shared naming path after inn services, not
- *   separate GM-naming handshakes for each shop.
- *
- * DONE — Direct-confirm settlement shops (Blacksmith, Herbalist, Inn)
- * - Opening a shop from the Shops tab is read-only; clicking Confirm
- *   validates and commits the exchange immediately without GM tags or
- *   staged quotes. Shop transactions stay silent while the fiction handles
- *   the scene.
- * - Blacksmith commits sales and purchases atomically; purchased gear
- *   enters Bag Reserves unbound, and selling worn gear updates stats/HP.
- * - Herbalist trades zone-grade healing potions and Cleansing Tonics;
- *   owned bottles retain their purchase-zone healing grade.
- * - Inn Services tracks flat-price meals (1/3/5s), rooms (1/2/5s), and
- *   hot water (2s) as expenses only; buff food remains future work.
- *
- * DONE — Inventory, Purse & Curios
- * - Inventory provides direct Purse controls (− Spend / + Earn) for
- *   fictional meals, tips, sundries, and custom trades.
- * - Displays saved potions (with HP values), Valuables & Curios (with
- *   Sell / Remove), Bag Reserves (Equip), and worn gear.
- * - Equip and outside-combat healing queue the saved result for the next
- *   GM reply; UI actions do not require an assistant protocol tag.
- *
- * PLANNED — Currency presentation
- * - Centralize silver formatting before introducing denominations such as
- *   100 silver = 1 gold. Keep saved currency in integer silver internally.
- * - Decide the next denomination and conversion display before adding it to
- *   vendor, herbalist, quest, and expense packets.
- *
- * DEFERRED — Aether-Trade window
- * - Reuse the independent window pattern for Trade-Stream listings:
- *   pending sales, sold/unsold receipts, returned items, proceeds, and
- *   eventually purchases.
- * - Keep listing settlement and NPC/vendor purchases as separate saved
- *   mechanics until their handshake contracts are authored.
- *
- * PARTIAL — Migration and validation
- * - Existing saves receive world, journey, potion, and quest migrations.
- * - Formalize schema migrations for old journey shapes, old quest structures,
- *   old encounter records, settlement names, and legacy potion counters.
- * - Add validation for every migrated shape before it can be saved again.
- *
- * PLANNED WORK
- *
- * PLANNED — Test-data cleanup
- * - Mark all historical debug places, leads, quests, encounters, and routes
- *   with a consistent test-only identity.
- * - Extend cleanup so obsolete test records cannot appear as normal destinations.
- * - Preserve campaign records that were actually used for legitimate rewards.
- * - Debug rumor fixtures connect to a stable settlement anchor and backfill
- *   existing test sites, preventing repeated fixtures from forming long
- *   accidental route chains. Existing interrupted journeys retain their
- *   saved route until cancelled and restarted.
- * 
- * PLANNED — UI cleanup and consistency
- * - IMPLEMENTED — BETA PENDING: test-rumor creation lives in Narration Debug,
- *   not the ordinary World view; cancelled quests appear in history.
- *
- * - IMPLEMENTED — BETA PENDING: the Quests and World buttons open their
- *   saved-state tabs. Clicking either button while the panel is open
- *   switches tabs instead of closing it.
- *
- * - IMPLEMENTED — BETA PENDING: removed the unused legacy quest and World
- *   popups. Ordinary UI uses the saved-state tabs; the old popup's direct
- *   quest-payout path is no longer present.
- *
- * - Deduplicate destinations and leads by stable identity.
- * - Show exact journey progress, interruption state, current gate, and delivery
- *   eligibility from saved state.
- * - Legacy World movement now copies the same explicit movement command as
- *   the main World tab; mechanics resolve only after the player submits it.
- * - Ordinary legacy settlement choices and leads exclude earlier zones;
- *   earlier destinations remain available only when tied to an accepted quest.
- * - Prevent action-button numbering collisions in legacy popup panels.
- *
- * PARTIAL — Narration authority
- * - Engine handoffs explicitly separate private instructions from output.
- * - Detect recognizable engine-instruction headings outside Markdown code.
- * - A match is diagnostic evidence, not proof that hidden facts were exposed.
- * - Ignore fenced and inline code examples in both instruction detection
- *   and protocol-event extraction so beta explanations cannot submit tags.
- * - Warn without modifying story text, consuming RNG, or saving a revision.
- * - Reject assistant discovery/delivery events from replies matching the
- *   instruction detector outside code. Technical prose can still match;
- *   inspect the observed reply before diagnosing a narration failure.
- * - Code-example exclusion implemented; live verification pending.
- * - Do not automatically regenerate replies or undo resolved mechanics.
- * - Leak detection is narrow: it does not validate arbitrary narrative claims.
- * - Optional per-chat narration recorder retains the last 30 diagnostic events
- *   outside machine state and gameplay revisions; recording starts disabled.
- * - Capture engine handoffs, assistant notification text, leakage rejection,
- *   generation end, and handoff consumption. Viewer uses plain text only.
- * - Diagnostics may contain hidden quest context. Disabling preserves records;
- *   clearing removes them. Recording consumes no RNG and uses the save queue.
- * - Recorder regression pending: enable, capture a normal generation, reload,
- *   inspect retained records, disable, and verify further replies add none.
- * - Regression pending: ordinary reply, leaked packet containing an example
- *   tag, and duplicate received/rendered notifications.
- *
- * - IMPLEMENTED — BETA PENDING: the narrator may introduce fictional
- *   complications and request one engine-resolved normal pack or Elite
- *   through a narrow plan tag.
- * - The request is bound to the saved assistant reply, valid only during a
- *   free non-travel, non-instance scene, and cannot supply stats, roster,
- *   levels, rewards, loot, or quest facts.
- * - The resulting encounter uses the existing spotted -> engage/avoid ->
- *   combat flow. It creates no quest or fictional reward by itself.
- * - Verify duplicate notifications, insufficiently free scenes, normal-pack
- *   requests, Elite requests, and narration after the combat receipt.
- * 
- * - Travel rolls 58–65 resolve as Hidden Caches (weasel finds) with immediate
- *   loot commit and a one-way GM handoff. Rolls 98–100 discover rare one-time
- *   Hidden Instances (3–5 rooms, 50/50 Elite Lair or Chest Vault).
- * - Include encounter ID, journey progress, quest gate, objective resolution,
- *   delivery readiness, and reward status where relevant.
- * - Prevent prose from implying combat, discovery, arrival, or reward events
- *   that are absent from the saved result.
- *
- * PLANNED — Regression suite
- * - Maintain assertion-based cases for the complete campaign loop.
- * - Cover quest offer, acceptance, travel, interruption, arrival, discovery,
- *   linked combat, return travel, report delivery, cargo delivery, duplicate
- *   events, flee, death, and migration.
- * - Run the relevant regression group after every quest, travel, or persistence
- *   change instead of relying only on the live campaign state.
- *
- * IMPLEMENTED — BETA PENDING: Explicit movement commands and World destinations
- * - World entries copy stable-ID movement commands; movement resolves only
- *   when the player submits the command with their fiction.
- * - Supports known destinations and regional exploration.
- * - Explicit destination commands can change direction mid-journey.
- * - Legacy [moved] parsing remains supported.
- * - Beta verification remains part of the travel interruption regression pass.
- *
- * PLANNED — Local site exploration sessions
- * - IMPLEMENTED — BETA PENDING: travel establishes a directly noticed,
- *   scenic-only POI with a stable place ID and saved route. World does
- *   not foreground scenic POIs as actionable destinations.
- * - Confirmed arrival records one source-linked visit observation and
- *   authorizes description of visible features. Ordinary POIs have no
- *   hidden curiosity roll, loot, hazard, lore, encounter, or quest result.
- * - A POI is not a rumor and need not contain a reward. Do not add an
- *   Inspect button.
- * - Add consequential site content only through a separately authored,
- *   saved player-interaction contract.
- *
- * - IMPLEMENTED — BETA PENDING: each entered zone has one known instance
- *   with a saved entrance route and finite local room graph. Older
- *   three-room instances retain their saved topology.
- *
- * - IMPLEMENTED — BETA PENDING: newly created small instances have 5–7
- *   rooms: three or four guarded normal-pack chambers, optionally one
- *   quiet chamber, and a final Elite chamber. The layout is saved once;
- *   room rosters are locked on first entry and reused on revisits.
- * - IMPLEMENTED — BETA PENDING: on reaching the entrance, the extension
- *   requests a locally fitting cosmetic instance name, kind, and atmosphere.
- *   It saves a valid identity once, shows the name in the Instance tab,
- *   and resends the identity while exploring. Missing names never block
- *   entry. The GM cannot change rooms, encounters, or rewards through it.
- * - Forward passages past guarded chambers require actual clearance.
- *   Backtracking remains possible; visiting alone never clears a threat.
- * - Entering a threat room spots its saved encounter without engaging it.
- *   Avoiding, fleeing, or dying leaves the room unresolved; returning
- *   restores the same encounter rather than rolling another.
- * - The Inner Chamber exit is blocked until the Work Chamber threat is
- *   actually cleared. Room clearance is owned by the room, not by the
- *   replaceable global encounter record.
- * - Enter, move, and exit require submitted instance commands. The Instance
- *   tab shows visited rooms, known exits, threats, and the entrance command.
- * - Quest destination commands live on their Quests cards; World retains
- *   rumors, settlements, exploration, and onward travel at the bottom.
- *   Known-instance navigation and status live in the Instance tab;
- *   scenic POIs have no World travel controls.
- * - Every movement button remains clipboard-only. Submitted commands use
- *   the existing saved overland or instance resolver, never a tab-specific
- *   movement mechanic.
- * - Revisits retain room state and cannot reroll content. The instance is
- *   exhausted only after all required room threats are cleared.
- * - This first combat slice contains no chest, puzzle, or boss. The Inner
- *   Chamber Elite is the initial deeper-room payoff; later instance modules
- *   may add bosses, loot, puzzles, alternate routes, and larger layouts.
- *
- * - Permit newly discovered areas, such as secret cellars or upper levels,
- *   to be added when established by authored mechanics.
- * - Distinguish local exploration from campaign-route travel.
- *
- * DEFERRED — Narrator-created local map expansion
- * - The narrator must not create new mechanically rewarding nodes merely to
- *   obtain additional encounter or loot rolls.
- * - Define the validation boundary for newly revealed local exits before
- *   allowing prose to expand a saved site map.
- *
- * PARTIAL — Persistent discoveries and crew knowledge foundation
- * - A saved discoveries registry now records rumor-arrival outcomes as
- *   source-linked observations with stable IDs and explicit certainty.
- * - Reprocessing an arrival preserves the original record.
- * - Original rumor claims remain testimony; resolution does not make the
- *   claim itself true.
- * - Traveler rumors record unverified testimony when their claims are heard.
- * - Validated FOUND quest events also record source-linked observations.
- *   Hidden preparations and SEARCHED prerequisites are not crew knowledge.
- * - Stable discovery IDs prevent repeated notifications from duplicating
- *   those observations; existing acquired discoveries are not backfilled.
- * - Verified with a debug fixture: testimony exists before travel; arrival
- *   adds a separate observation without overwriting the original claim.
- * - World displays saved knowledge, sources, certainty, and learning locations.
- * - Live verification of quest-discovery knowledge remains for beta.
- * - Knowledge display is read-only and labels identifiable test records.
- * - Crew Knowledge starts collapsed, with expandable Unverified and
- *   Established groups showing record counts.
- * - Natural traveler testimony integration still awaits live verification.
- * - Authored lore content and quest prerequisite checks remain unimplemented.
- * - Let future quests explicitly recognize relevant prior knowledge.
- * - Keep discovery records separate from inventory and rewards.
- * - Do not migrate incidental historical chat prose into authoritative data.
- *
- * PARTIAL — Rumor arrival and closure contracts
- * - Automatic confirmed-arrival resolution implemented for the existing
- *   benign, already-cleared, and genuine-hook outcomes; regression pending.
- * - Preserve locked inquiries and defer offers while the quest slot is busy.
- * - IMPLEMENTED — BETA PENDING: rumor resolution is arrival-driven; the
- *   obsolete manual investigate_lead operation and narration path are removed.
- * - Elite, contact, settlement-discovery, and explorable-site outcomes remain
- *   unimplemented. Define their saved records and arrival contracts before
- *   adding them to the outcome table.
- *
- * * PARTIAL — Quest journal and multiple simultaneous opportunities
- * - Current state stores one activeQuest, which causes later genuine rumor
- *   hooks to defer or discard their offer while another quest occupies the slot.
- * - Preserve every engine-created quest offer with a stable quest ID.
- * - Support multiple offered quests without rerolling or replacing them.
- * - Separate quest selection from quest existence; an offered quest can remain
- *   available while another quest is accepted or in progress.
- * - Migrate legacy activeQuest data without duplicating or losing a quest.
- * - Update acceptance, progression, delivery, UI, narration, and duplicate
- *   protection to address an explicit quest ID.
- * - Multiple offers are stored and survive reload.
- * - Multiple quests may be accepted; accepting another offer preserves an
- *   already in-progress activeQuest selection. Journal records remain
- *   authoritative and new mechanics use stable quest IDs.
- * - Quest actions and FOUND discovery progression address stable quest IDs;
- *   discovery events do not temporarily change the activeQuest selection.
- *   Beta verification remains pending.
- * - Cancelled quests remain in history and receive no rewards.
- * - Arrival selects quest identity from the destination and progresses it
- *   by stable quest ID without changing the activeQuest selection.
- * - Arrival result arrays preserve independently affected quests.
- * - Cleared linked combat selects its quest by the encounter's locked quest
- *   and target IDs, then restores the previous compatibility selection.
- * - Automatic return travel uses a unique eligible journal quest; multiple
- *   possible returns require an explicit destination choice.
- * - Scene context includes every relevant accepted quest at the location.
- * - Quest-site inspection and discovery reconciliation now address explicit
- *   quest IDs instead of advancing the compatibility-selected quest.
- * - Reconciliation and site-inspection narration resolve their quest by the
- *   result's stable quest ID. Remaining activeQuest-dependent narration still
- *   needs migration.
- * - Arrival integration implemented; live verification pending.
- * - The next integration pass must select quest identity from destination,
- *   authored discovery, encounter linkage, or delivery quest ID.
- * - Offer preparation targets the newly generated quest directly; retrieval
- *   and V2 discovery preparation helpers take explicit quest arguments.
- * - Quests tab renders all journal offers with ID-bound acceptance/decline.
- * - Rumor arrivals create journal offers immediately, preserving selection.
- * - The journal is authoritative after JSON loading. Reconnect activeQuest
- *   to its journal record; never overwrite journal progress with a stale
- *   compatibility selection. Import genuinely journal-less legacy quests once.
- * - Linked-combat completion progresses the encounter's locked quest ID
- *   without temporarily changing the selected quest.
- * - Journal delivery uses the fictional handover handshake, not a payout button.
- * - Verified in live testing: two offers survived reload; declining the
- *   Rank D test offer preserved the original Rank B offer after reload.
- * - Pending: isolated tests for unknown quest IDs, repeated decline,
- *   preserving an in-progress quest when another offer is created, and
- *   accepting one offer while another remains available.
- * - Concurrent accepted-quest progression remains unsupported.
- * - Do not implement quest abandonment or completion by relying only on a
- *   global activeQuest pointer.
- *
- * - Resolve a known rumor once on confirmed arrival, including arrival after
- *   a final-segment encounter; do not require a generic Investigate button.
- * - Separate the locked outcome from what is observable on arrival.
- * - Arrival may reveal a landmark, contact, entrance, clue, or spotted threat;
- *   it must not automatically engage combat, accept quests, or acquire items.
- * - Make remaining authored opportunities legible through established clues.
- * - Give concluded rumors clear closure so players need not search endlessly
- *   to distinguish an exhausted lead from an undiscovered hidden objective.
- * - Revisiting a resolved rumor does not reroll its outcome or rewards.
- * - Do not enable spawn-rich explorable-site outcomes until persistent local
- *   exploration can prevent repeated visits from generating unlimited rolls.
- *
- * IMPLEMENTED — BETA PENDING: Cleared-pack quest breadcrumbs
- * - A qualifying pack's existing breadcrumb roll creates a durable,
- *   engine-ID'd clue at the saved fight position, independent of the
- *   replaceable current encounter.
- * - The player may pursue it there through ordinary fiction; the GM
- *   reports the engine-issued ID, and the extension generates one offer.
- * - Finding, pursuing, offering, and accepting remain separate events.
- *   No Inspect button or extra journey is required.
- * - Lore, hazards, and chests are separate outcomes to design later;
- *   this breadcrumb currently means a possible quest offer only.
- *
- * TENTATIVE — Diegetic opportunities and conditional connections
- * - Aspirational vision: quests are relatively rare discoveries, not a
- *   settlement quest board or an exclamation mark over every NPC. Wandering,
- *   combat breadcrumbs, rumors, local discoveries, conversation, and prior
- *   help can each reveal opportunities. Several small chances may combine
- *   into a lively world without making every conversation yield a quest.
- * - The crew's actions can change what a local person is willing to share:
- *   helping a worker might reveal a friend's concern; discovering a ruin
- *   might make a local scholar interested in speaking. Carry such facts as
- *   saved knowledge or stable events, not as assumed LLM memory.
- * - Do not require players to exhaust endless NPC dialogue or guess an exact
- *   keyword. Meaningful engagement may reveal an eligible opening; an NPC
- *   without one can still be worth talking to.
- * - The engine decides whether an opportunity exists, its prerequisites,
- *   objective, rank, rewards, and one-time identity. The narrator handles
- * conversation and local presentation, not quest generation.
- *
- * - IMPLEMENTED — BETA PENDING: while at a settlement, the narrator
- *   receives the private ASK_WORK reporting rule even without a queued
- *   event. Previously checked contacts and their saved results are
- *   supplied again for relevant resumed conversations.
- * - Beta-sized first step: implement one or two authored local connections
- *   with explicit saved prerequisites and one-time reveal. Do not build a
- *   settlement-wide relationship simulation or weighted variable web.
- * - Keep routine F work discoverable by asking around if play needs a
- *   fallback, without making a quest board mandatory. A multi-step social
- *   unlock should not automatically spend its payoff on a random F errand.
- *
- * - IMPLEMENTED — BETA PENDING: successful ASK_WORK checks lock a quest
- *   under the contact without exposing it in the journal. The GM receives
- *   that saved result on a relevant later reply; after describing the
- *   request, REVEAL_WORK publishes the same offer without another roll.
- * - Publishing an offer is not accepting a quest, completing an objective,
- *   or paying a reward. Repeated reports do not reroll or republish it.
- *
- * - IMPLEMENTED — BETA PENDING: ASK_WORK reports an interaction without
- *   a GM-chosen ID. The extension derives the inquiry ID from the saved
- *   assistant message and scopes its result to the current settlement.
- * - Inquiry identity excludes temporary system handoffs from the saved
- *   assistant-message position, so received/rendered notifications cannot
- *   change its ID merely because the handoff was removed. Verify both
- *   notification orders during beta.
- * - Message identity does not identify a fictional NPC across different
- *   conversations. Reusing an engine-issued contact ID for a recurring
- *   person remains a GM reporting obligation until NPC continuity has
- *   its own identity contract.
- * - No predetermined roster, interaction button, or guaranteed quest.
- * - Delayed handshake: player acts; the GM narrates only what is already
- *   known and privately reports an eligible interaction; the extension
- *   resolves and saves it after that reply; the NEXT relevant GM reply
- *   receives the result. Never promise an unrolled job in the first reply.
- * - This timing boundary also applies to future vendor stock, consequential
- *   site interactions, and other results the engine cannot supply midway
- *   through a reply. Saved state, not a <template> note or one-use packet,
- *   remains authoritative if the conversation resumes later.
- * - Social job inquiries have a 1-in-2 chance until two offers have been
- *   locked at that settlement; subsequent inquiries have a 1-in-20 chance.
- *   Failed conversations do not consume the introductory offer allowance.
- *   A successful first check weights F work three times as strongly as E
- *   for an Unknown crew; it guarantees neither.
- * - Social offer packets identify a contact as a possible referral to the
- *   locked sponsor, not necessarily the quest giver. Tune scarcity and
- *   introductory rank weighting during beta.
- * - Do not transmit or score every line of NPC dialogue yet. Add narrowly
- *   defined interaction events only when a concrete mechanic needs them.
- * - Tune opportunity frequency and the need for an F fallback during beta;
- *   quest scarcity is intentional, but an empty-feeling world is not.
- *
- * - Do not transmit or score every line of NPC dialogue yet. Add narrowly
- *   defined interaction events only when a concrete mechanic needs them.
- * - Tune opportunity frequency and the need for an F fallback during beta;
- *   quest scarcity is intentional, but an empty-feeling world is not.
- *
- * DEFERRED — Fictional continuity and relevant-context retrieval
- * - Chat metadata could retain concise, source-linked facts established in
- *   play: recurring NPC details, settlement events, relationships, and
- *   relevant clues. Do not save every NPC or every line of dialogue.
- * - A possible narrative-only lore thread could let the GM introduce a brief,
- *   inconsequential world detail when play presents a fitting opportunity,
- *   then build on or connect that detail when later opportunities arise.
- *   The GM would create the lore; the extension would only help keep
- *   established ideas available so they are less likely to be abandoned for
- *   unrelated lore. Do not preauthor a lore catalog or make these details
- *   mechanical clues, rewards, or prerequisites.
- * - An instance-theme handoff could optionally include relevant established
- *   world lore and invite the GM to make the instance thematically consistent
- *   with it. This is presentation guidance only: each campaign replay may
- *   establish different lore, and the handoff must not add rooms, threats,
- *   rewards, or lore that is required for progression.
- * - Treat both ideas as experiments in narrative continuity, not committed
- *   mechanics. First observe whether the GM naturally carries lore forward
- *   and whether relevant context improves the story. Only then consider
- *   saving concise, source-linked lore and retrieving relevant details.
- * - Keep GM-reported fictional continuity separate from engine-authoritative
- *   mechanics and from unverified NPC claims.
- * - Supply compact, relevant context rather than injecting the entire
- *   history into every prompt or relying solely on name matching.
- * - Establish stable identities, fact-update rules, source links, and
- *   retrieval limits before accepting GM-written continuity records.
- * - This is not part of the current social-work ID repair or beta-start
- *   requirement.
- *
- * DEFERRED — Larger rumor threads and regional mysteries
- * - Potentially connect distinct clues to an authored conclusion, such as a
- *   historical answer, newly accessible location, or boss destination.
- * - Author the conclusion and prerequisites before treating clues as pieces
- *   of a mechanically supported larger thread.
- * - Do not assume the crew will remain in one region or finish every thread.
- * - Preserve unfinished threads without blocking progression or imposing a
- *   return journey; cross-region continuations require authored connections.
- * - Avoid endless referrals from one rumor to another without a satisfying
- *   scene, discovery, or clear conclusion along the way.
- * - Defer implementation until ordinary rumor arrival, persistent knowledge,
- *   and local exploration are exercised and stable.
- *
- * DEFERRED — Forward-moving zones and portable discoveries
- * - Each zone is its own level-band ecosystem: Zone 1 covers levels 1–5,
- *   Zone 2 covers 6–10, and so on. Local quests, rumors, NPCs, and dungeon
- *   entrances stay in the zone where they were established.
- * - The intended pace is a few quests, levels, and selected rumors before
- *   moving forward—not exhausting every opportunity in a zone.
- * - Leaving an opportunity behind does not move it to the next zone,
- *   scale up its old encounters, or impose a return trip.
- * - World foregrounds open rumors in the current zone and shows older-zone
- *   rumors in collapsed, read-only history. This is a display rule only:
- *   departure does not cancel quests or delete unresolved records.
- * - Earlier-zone rumors remain read-only history, and earlier settlements
- *   are not ordinary World travel targets. Accepted quests may still expose
- *   their own earlier-zone destination or issuer return; the player chooses
- *   whether to pursue or cancel that quest.
- * - A later-zone continuation should create a new local opportunity informed
- *   by portable Crew Knowledge, not require travel back to old content.
- * - Portable Crew Knowledge can give later, locally playable opportunities
- *   continuity. Carry forward what the crew learned, not an unfinished
- *   destination or a requirement to remember its NPCs.
- * - A later-zone continuation needs its own local site, appropriate
- *   difficulty, and satisfying objective. Earlier clues may enrich it
- *   but must not be required homework for players who missed them.
- * - Travel rolls 98–100 discover rare one-time Hidden Instances in the
- *   current zone without a per-zone cap.
- *
- * DEFERRED UNTIL CORE FLOWS ARE STABLE
- *
- * DEFERRED — Additional quest families and biome-specific presentation.
- * DEFERRED — Expanded food and settlement simulation.
- * DEFERRED — Rich NPC schedules, faction systems, and detailed local roads.
- * DEFERRED — A unified HUD that replaces the current tab and popup surfaces.
- *
+ * - DONE: implemented and exercised in play.
+ * - BETA PENDING: code path is wired; live verification continues in beta.
+ * - NEXT (TIER 1): highest-priority upcoming work for Zones 1–2.
+ * - MID-CAMPAIGN (TIER 2): build when combat difficulty or wealth spikes.
+ * - DEFERRED (TIER 3): later-game, polish, or low-priority work.
+ *
+ * =========================================================================
+ * COMPLETED FOUNDATIONS (DONE / BETA PENDING)
+ * =========================================================================
+ * - Persistent per-chat state in chat metadata with serialized queue,
+ *   revisions, RNG state, locked results, and ordered GM handoffs.
+ * - Deterministic saved world (seed, geography profiles, settlements,
+ *   reputation, route edges, forward zone progression, fresh-chat init).
+ * - Combat engine: 3- and 4-foe packs, declared rosters, Elites, Bosses,
+ *   telegraphs, reinforcements, flee, death/respawn, out-of-combat Q'tik
+ *   recovery, zone-graded potions with HP labels, and full-fight recaps.
+ * - Quest Journal (V2): multiple offers and accepted quests addressed by
+ *   stable questId; Recover Cargo, Herb Foraging, Ruin Clearance,
+ *   Territorial Beast, and Missing Person; pack breadcrumbs; settlement
+ *   work checks; and manual UI fallback buttons (Mark Found / Confirm
+ *   Cargo Handover) alongside GM protocol tags.
+ * - Direct-confirm settlement shops (Blacksmith, Herbalist, Inn Services)
+ *   with silent UI commits and per-zone cosmetic stock naming (gear,
+ *   potions, inn services, and curios).
+ * - Inventory, Purse (− Spend / + Earn), Valuables & Curios (with hidden
+ *   buyer-interest rolls), Bag Reserves, and Worn Gear.
+ * - Overland travel & exploration: journeys, interruptions, arrival-driven
+ *   rumors, Crew Knowledge, scenic POIs, Hidden Caches (rolls 58–65, 8%,
+ *   weasel finds), and Rare Hidden One-Time Instances (rolls 98–100, 3%,
+ *   3–5 rooms, 50/50 Elite Lair or Chest Vault with manual Open Chest UI).
+ * - Known Local Instances (5–7 rooms, cosmetic theming, multi-instance UI).
+ * - Narration Debug recorder, saved error log, handoff pause toggle, and
+ *   per-chat campaign reset.
+ *
+ * =========================================================================
+ * TIER 1 — NEXT UP (ZONES 1–2 PRIORITY)
+ * =========================================================================
+ * 1. NEXT — Gear rarity scaling
+ *    - Replace flat +1 / +3 / +5 rarity bonuses in lootStatFromRarity()
+ *      with percentage-based scaling (e.g., ~20–25% Uncommon, ~45–50%
+ *      Rare, ~70% Epic) with minimum floors so Zone 1 stays intact and
+ *      Uncommon/Rare drops remain meaningful past Zone 3.
+ *    - Keep QUEST_REWARD_TABLES, spawnEncounter(), and validate() synced.
+ *
+ * 2. NEXT — Aether-Net (Trade-Stream) UI
+ *    - Wire the existing resolveTradeAction() backend (list / settle,
+ *      3-listing cap, 6 buyer archetypes, Skill Tome tradeStat=10) into
+ *      an Inventory drawer so duplicate and off-class drops feed the
+ *      zone-to-zone silver-sink loop.
+ *    - Optional one-way GM handoff on settle for Twitch-like buyer banter.
+ *    - Diegetic utility purchases (Stealth Tent, Canteen, etc.) stay in
+ *      fiction + manual Purse (− Spend) + <template>.
+ *
+ * 3. NEXT — Passing Immortals in road encounters
+ *    - Add a sub-roll on travel social_opportunity (Local vs. Passing
+ *      Immortal) so wilderness travel preserves the "living NPCs + MMO
+ *      tourists" feel outside taverns.
+ *
+ * 4. NEXT — Small UX polish pass
+ *    - Keep the killing-turn combat log visible under Victory in Combat.
+ *    - Suppress settlement check_work during active cargo handovers so
+ *      QUEST FOUND! cannot photobomb a delivery scene.
+ *    - Align Combat's uninitialized-chat message with the other tabs.
+ *
+ * =========================================================================
+ * TIER 2 — MID-CAMPAIGN (WHEN DIFFICULTY OR WEALTH SPIKES)
+ * =========================================================================
+ * - Boss encounters & deeper instances: wire Boss rooms/destinations as a
+ *   live source of Epic gear once normal/hidden instances are beta-tested.
+ * - Food buffs (Elemental Titan passive): populate FOOD_BUFF_RECIPES when
+ *   combat starts forcing potion use; implement Q'tik's 3 distinct food
+ *   buffs and triple duration.
+ * - Currency denominations: centralize silver formatting (100s = 1g) for
+ *   display while keeping integer silver internally.
+ * - Fate / Complication Die: lightweight UI button rolling Clean Success /
+ *   Success with a Cost / Complication with a one-way GM handoff for
+ *   non-combat checks (locks, chest obstacles, haggling).
+ *
+ * =========================================================================
+ * TIER 3 — LATER / DEFERRED
+ * =========================================================================
+ * - Shadow Deck UI (fuse/unfuse toggles) & Tansy out-of-combat Mender
+ *   recovery (revisit around Level 15–20).
+ * - Code elegance cleanup (single-file): retire state.activeQuest pointer,
+ *   centralize item display formatting, add a small DOM helper, and prune
+ *   dead claimLockedLoot() / legacy one-off debug cases.
+ * - Test-data cleanup & automated regression suite.
+ * - Narrative lore continuity, larger rumor threads, and portable Crew
+ *   Knowledge continuations across zones.
+ *
+ * =========================================================================
  * MAINTENANCE RULES
- *
+ * =========================================================================
  * - New mechanics must identify their saved state, stable IDs, RNG behavior,
  *   narrator handoff, migration needs, and duplicate-event behavior.
- * - A bug discovered during live testing belongs in this roadmap until it is
- *   fixed and exercised. Do not let the next incident silently replace it.
- * - When a feature changes status, update this comment in the same edit as the
- *   implementation so the roadmap and code remain synchronized.
- */
-
-/*
+ * - Log live-testing bugs here until fixed and verified.
+ * - Update this roadmap in the same edit as any status change.
+ *
  * QUEST ARCHITECTURE — AGREED DIRECTION
  *
  * The extension exists because narrator LLMs have invented mechanics,
@@ -20976,7 +20313,7 @@ async function renderQuestTab(host) {
             !state.activeInstanceId &&
             !['active', 'spotted'].includes(state.encounter?.status);
 
-        if (canRevealTerminal) {
+         if (canRevealTerminal) {
             section.appendChild(
                 makeAethermoorAction(
                     'Reveal Quest Threat',
@@ -20995,6 +20332,50 @@ async function renderQuestTab(host) {
             );
         }
 
+        const pendingDiscovery =
+            !quest.objectiveResolution &&
+            !state.currentJourney &&
+            !state.activeInstanceId &&
+            !['active', 'spotted'].includes(state.encounter?.status) &&
+            quest.currentGate?.requiredDiscoveryId
+                ? quest.discoveries?.find(item =>
+                    item.id === quest.currentGate.requiredDiscoveryId &&
+                    item.locationId === state.currentLocationId &&
+                    item.state !== 'acquired'
+                )
+                : null;
+
+        if (pendingDiscovery) {
+            const markFound = makeAethermoorAction(
+                `Mark Found · ${pendingDiscovery.name}`,
+                'quest',
+                async () => {
+                    markFound.disabled = true;
+
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'quests',
+                            {
+                                name: 'manual_quest_found',
+                                kind: 'quest_event',
+                                event: 'found',
+                                questId: quest.id,
+                                questItemId: pendingDiscovery.id
+                            },
+                            `Marked found: ${pendingDiscovery.name}.`
+                        );
+                    } finally {
+                        markFound.disabled = false;
+                    }
+                }
+            );
+
+            markFound.title =
+                'Manual fallback if the GM misses the <AETHERMOOR:FOUND> tag.';
+            section.appendChild(markFound);
+        }
+
         const bringingPersonToSafety =
             Boolean(quest.objectiveResolution) &&
             quest.structureV2?.family === 'rescue_person';
@@ -21003,11 +20384,13 @@ async function renderQuestTab(host) {
             Boolean(quest.objectiveResolution) &&
             quest.structureV2?.family === 'retrieve_item';
 
-        const cargoName = returningWithCargo
+        const cargoDiscovery = returningWithCargo
             ? quest.discoveries?.find(
                 item => item.id === quest.turnIn?.discoveryId
-              )?.name || 'the quest cargo'
+              ) || null
             : null;
+
+        const cargoName = cargoDiscovery?.name || 'the quest cargo';
 
         if (bringingPersonToSafety) {
             section.appendChild(
@@ -21037,6 +20420,44 @@ async function renderQuestTab(host) {
                     'quest'
                 )
             );
+
+            const canConfirmHandover =
+                quest.deliveryReady === true &&
+                state.currentLocationId === quest.turnIn?.locationId &&
+                !state.currentJourney &&
+                !state.activeInstanceId &&
+                !['active', 'spotted'].includes(state.encounter?.status) &&
+                cargoDiscovery?.kind === 'quest_item' &&
+                cargoDiscovery.state === 'acquired';
+
+            if (canConfirmHandover) {
+                const confirmHandover = makeAethermoorAction(
+                    'Confirm Cargo Handover',
+                    'quest',
+                    async () => {
+                        confirmHandover.disabled = true;
+
+                        try {
+                            await runAethermoorPanelCase(
+                                host,
+                                'quests',
+                                {
+                                    name: 'manual_quest_delivery',
+                                    kind: 'quest_delivery',
+                                    questId: quest.id
+                                },
+                                'Cargo handover confirmed. Rewards applied.'
+                            );
+                        } finally {
+                            confirmHandover.disabled = false;
+                        }
+                    }
+                );
+
+                confirmHandover.title =
+                    'Manual fallback if the GM misses the <AETHERMOOR:DELIVERED> tag.';
+                section.appendChild(confirmHandover);
+            }
         }
 
         const destinationId =

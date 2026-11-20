@@ -1675,6 +1675,13 @@ function applyXp(crew, xp) {
         crew.xp -= xpCost;
         crew.level += 1;
 
+        if (crew.weasels) {
+            const beforeMax = 3 + Math.floor((crew.level - 1) / 2);
+            const afterMax = 3 + Math.floor(crew.level / 2);
+            crew.weasels.max = afterMax;
+            crew.weasels.active += Math.max(0, afterMax - beforeMax);
+        }
+
         const after = derived(crew);
 
         // Preserve the existing level-up HP increase: maximum HP gained
@@ -9946,11 +9953,7 @@ function resolveQuestSeed(test) {
      * Existing in-progress state remains the compatibility-selected quest
      * for progression. New offers are stored in the journal and do not
      * silently replace it.
-     */
-    const existing =
-        state.activeQuest;
-
-    /*
+     *
      * The current encounter's trigger can produce only one offer.
      * A later encounter may provide a fresh trigger after this
      * quest is declined or completed.
@@ -13956,9 +13959,14 @@ function resolveConsumableAction(test) {
         if (!entry) {
             entry = {
                 id: test.item,
-                name: definition.name,
+                name: cosmeticStockName(
+                    state,
+                    potionCosmeticStockKey(test.item),
+                    definition.name
+                ),
                 type: definition.type,
-                quantity: 0
+                quantity: 0,
+                recipient: null
             };
             state.inventory.consumables.push(entry);
         }
@@ -18145,8 +18153,10 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'follow_breadcrumb' ||
+                oneCase.kind === 'quest_event' ||
                 oneCase.kind === 'quest_delivery' ||
                 (
+
                     oneCase.kind === 'social' &&
                     [
                         'check_work',

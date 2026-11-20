@@ -532,40 +532,84 @@ function ensureKnownInstance(state) {
     let changed = false;
 
     if (!state.instances[id]) {
-        const roomCount = 5 + (
+        const packCount = 3 + (
             worldHash(
                 `${state.world.seed}:known-instance-size:${zone}`
-            ) % 3
+            ) % 2
         );
-
-        const packCount = roomCount >= 6 ? 4 : 3;
-        const quietCount = roomCount - packCount - 2;
-        const sequence = ['entrance'];
+        const spine = ['entrance'];
 
         for (let number = 1; number <= packCount; number++) {
-            sequence.push(`chamber_${number}`);
+            spine.push(`chamber_${number}`);
+        }
+        spine.push('inner_chamber');
 
-            // The seven-room version gets one place to pause between
-            // guarded chambers. It has no reward or search roll.
-            if (number === 2 && quietCount > 0) {
-                sequence.push('quiet_chamber');
-            }
+        const coords = {};
+        const exitsMap = {};
+        const requiresMap = {};
+        const featureMap = {};
+
+        for (const [index, roomId] of spine.entries()) {
+            const previousId = spine[index - 1] || null;
+            const nextId = spine[index + 1] || null;
+
+            coords[roomId] = { x: 0, y: index };
+            exitsMap[roomId] = [previousId, nextId].filter(Boolean);
+            requiresMap[roomId] =
+                previousId &&
+                (
+                    previousId.startsWith('chamber_') ||
+                    previousId === 'inner_chamber'
+                )
+                    ? [previousId]
+                    : [];
         }
 
-        sequence.push('inner_chamber');
-
-        assert(
-            sequence.length === roomCount,
-            'Generated instance room count does not match its plan'
+        // Sprout 1–2 scenic/lore dead-end branches off spine chambers
+        // without changing pack count or advancing combat RNG.
+        const sideCount = 1 + (
+            worldHash(
+                `${state.world.seed}:known-instance-sides:${zone}`
+            ) % 2
         );
+        const branchParents = spine.filter(
+            roomId => roomId.startsWith('chamber_')
+        );
+        const usedSlots = new Set();
+
+        for (let number = 1; number <= sideCount; number++) {
+            const parentId = branchParents[
+                worldHash(
+                    `${state.world.seed}:known-side-parent:${zone}:${number}`
+                ) % branchParents.length
+            ];
+            let dir = worldHash(
+                `${state.world.seed}:known-side-dir:${zone}:${number}`
+            ) % 2 === 0 ? -1 : 1;
+
+            if (usedSlots.has(`${parentId}:${dir}`)) dir = -dir;
+            if (usedSlots.has(`${parentId}:${dir}`)) continue;
+            usedSlots.add(`${parentId}:${dir}`);
+
+            const sideId = `side_${number}`;
+            coords[sideId] = {
+                x: coords[parentId].x + dir,
+                y: coords[parentId].y
+            };
+            exitsMap[parentId].push(sideId);
+            exitsMap[sideId] = [parentId];
+            requiresMap[sideId] = [parentId];
+            featureMap[sideId] = worldHash(
+                `${state.world.seed}:known-side-feature:${zone}:${number}`
+            ) % 2 === 0 ? 'scenic' : 'lore';
+        }
 
         const rooms = {};
 
-        for (const [index, roomId] of sequence.entries()) {
-            const previousId = sequence[index - 1] || null;
-            const nextId = sequence[index + 1] || null;
+        for (const roomId of Object.keys(coords)) {
             const isPack = roomId.startsWith('chamber_');
             const isElite = roomId === 'inner_chamber';
+            const isSide = roomId.startsWith('side_');
             const guarded = isPack || isElite;
 
             const composition = isPack
@@ -586,19 +630,18 @@ function ensureKnownInstance(state) {
                 label:
                     roomId === 'entrance'
                         ? 'Entrance'
-                        : roomId === 'quiet_chamber'
-                            ? 'Quiet Chamber'
-                            : isElite
-                                ? 'Inner Chamber'
+                        : isElite
+                            ? 'Inner Chamber'
+                            : isSide
+                                ? (featureMap[roomId] === 'lore'
+                                    ? 'Side Chamber'
+                                    : 'Side Alcove')
                                 : `Chamber ${roomId.split('_')[1]}`,
-                exits: [previousId, nextId].filter(Boolean),
-                requiresCleared: previousId &&
-                    (
-                        previousId.startsWith('chamber_') ||
-                        previousId === 'inner_chamber'
-                    )
-                    ? [previousId]
-                    : [],
+                x: coords[roomId].x,
+                y: coords[roomId].y,
+                ...(isSide ? { feature: featureMap[roomId] } : {}),
+                exits: exitsMap[roomId],
+                requiresCleared: requiresMap[roomId],
                 visited: false,
                 ...(guarded
                     ? {
@@ -624,7 +667,7 @@ function ensureKnownInstance(state) {
             label,
             entranceId,
             size: 'small',
-            roomCount,
+            roomCount: Object.keys(rooms).length,
             status: 'open',
             currentRoomId: null,
             rooms
@@ -701,14 +744,53 @@ function createHiddenInstance(state, zone, stepId) {
         'tangled roots, heavy debris, or a wedged beam'
     ];
 
-    const rooms = {};
+    const coords = {};
+    const exitsMap = {};
+    const requiresMap = {};
+    const featureMap = {};
 
     for (const [index, roomId] of sequence.entries()) {
         const previousId = sequence[index - 1] || null;
         const nextId = sequence[index + 1] || null;
+
+        coords[roomId] = { x: 0, y: index };
+        exitsMap[roomId] = [previousId, nextId].filter(Boolean);
+        requiresMap[roomId] =
+            previousId &&
+            (
+                previousId.startsWith('chamber_') ||
+                previousId === 'inner_chamber'
+            )
+                ? [previousId]
+                : [];
+    }
+
+    // 50% chance to add one scenic/lore dead-end alcove off a spine chamber.
+    if (roll(state, 2) === 1) {
+        const branchParents = sequence.filter(
+            roomId => roomId.startsWith('chamber_')
+        );
+        const parentId = branchParents[roll(state, branchParents.length) - 1];
+        const dir = roll(state, 2) === 1 ? -1 : 1;
+        const sideId = 'side_1';
+
+        coords[sideId] = {
+            x: coords[parentId].x + dir,
+            y: coords[parentId].y
+        };
+        exitsMap[parentId].push(sideId);
+        exitsMap[sideId] = [parentId];
+        requiresMap[sideId] = [parentId];
+        featureMap[sideId] = roll(state, 2) === 1 ? 'lore' : 'scenic';
+    }
+
+    const rooms = {};
+
+    for (const roomId of Object.keys(coords)) {
         const isPack = roomId.startsWith('chamber_');
         const isElite = roomId === 'inner_chamber';
         const isVault = roomId === 'vault_chamber';
+        const isSide = roomId.startsWith('side_');
         const guarded = isPack || isElite;
 
         const composition = isPack
@@ -737,15 +819,16 @@ function createHiddenInstance(state, zone, stepId) {
                         ? 'Inner Chamber'
                         : isVault
                             ? 'Vault Chamber'
-                            : `Chamber ${roomId.split('_')[1]}`,
-            exits: [previousId, nextId].filter(Boolean),
-            requiresCleared: previousId &&
-                (
-                    previousId.startsWith('chamber_') ||
-                    previousId === 'inner_chamber'
-                )
-                ? [previousId]
-                : [],
+                            : isSide
+                                ? (featureMap[roomId] === 'lore'
+                                    ? 'Side Chamber'
+                                    : 'Side Alcove')
+                                : `Chamber ${roomId.split('_')[1]}`,
+            x: coords[roomId].x,
+            y: coords[roomId].y,
+            ...(isSide ? { feature: featureMap[roomId] } : {}),
+            exits: exitsMap[roomId],
+            requiresCleared: requiresMap[roomId],
             visited: false,
             ...(guarded
                 ? {
@@ -783,7 +866,7 @@ function createHiddenInstance(state, zone, stepId) {
         label,
         entranceId,
         size: 'small',
-        roomCount,
+        roomCount: Object.keys(rooms).length,
         status: 'open',
         currentRoomId: null,
         discoveredAtStep: stepId,
@@ -6073,13 +6156,14 @@ function resolveInstanceTheme(test) {
     }
 
     const names = test.names;
+    const allowedKeys = new Set(['name', 'kind', 'atmosphere', 'rooms']);
 
     assert(
         names && typeof names === 'object' &&
         !Array.isArray(names) &&
-        Object.keys(names).sort().join(',') ===
-            'atmosphere,kind,name',
-        'Instance theme requires exactly name, kind, and atmosphere'
+        ['name', 'kind', 'atmosphere'].every(key => key in names) &&
+        Object.keys(names).every(key => allowedKeys.has(key)),
+        'Instance theme requires name, kind, atmosphere, and optional rooms'
     );
 
     const themeLimits = {
@@ -6096,6 +6180,25 @@ function resolveInstanceTheme(test) {
             !/[<>\r\n]/.test(names[key]),
             `Invalid instance ${key}`
         );
+    }
+
+    if (
+        names.rooms &&
+        typeof names.rooms === 'object' &&
+        !Array.isArray(names.rooms)
+    ) {
+        for (const [roomId, roomName] of Object.entries(names.rooms)) {
+            const room = instance.rooms?.[roomId];
+            if (!room) continue;
+            if (
+                typeof roomName === 'string' &&
+                roomName.trim().length >= 2 &&
+                roomName.trim().length <= 60 &&
+                !/[<>\r\n]/.test(roomName)
+            ) {
+                room.label = roomName.trim();
+            }
+        }
     }
 
     instance.presentation = {
@@ -6361,6 +6464,7 @@ function resolveInstanceAction(test) {
         requestedRoomId: test.roomId || null,
         roomId: room?.id || null,
         roomLabel: room?.label || null,
+        roomFeature: room?.feature || null,
         firstVisit,
         status: instance.status,
         roomThreatStatus: room?.threatStatus || 'none',
@@ -16270,6 +16374,21 @@ function instanceNarrationPacket(result) {
             'This room’s saved threat has already been cleared.',
             'Do not create another encounter or reward here.'
         );
+    } else if (result.roomFeature === 'lore' && result.firstVisit) {
+        lines.push(
+            'This dead-end side room has no combat threat. It holds a quiet ' +
+                'narrative scrap of local or Pre-Calamity lore (e.g., an ' +
+                'inscription, weathered mural, forgotten ledger, or architectural ' +
+                'clue). Purely narrative world-building—no mechanical loot, XP, ' +
+                'or quest.'
+        );
+    } else if (result.roomFeature === 'scenic' && result.firstVisit) {
+        lines.push(
+            'This dead-end side room has no combat threat. Portray it as a ' +
+                'memorable scenic or liminal pocket (ecological reclamation, ' +
+                'still water, striking ruins, or quiet atmosphere). No mechanical ' +
+                'loot, XP, or quest.'
+        );
     } else {
         lines.push(
             'This room has no combat threat in the current instance plan.'
@@ -22088,39 +22207,192 @@ async function renderInstanceTab(host) {
             for (const exitId of visited.exits) known.add(exitId);
         }
 
-        const map = Object.values(instance.rooms)
-            .filter(entry => known.has(entry.id))
-            .map(entry => {
-                const threat = entry.threat;
-                const tactic =
-                    threat?.tactic && threat.tactic !== 'none'
-                        ? ` · ${packTacticDefinition(
-                            threat.tactic
-                        ).label}`
-                        : '';
-                const chestTag = entry.chest
-                    ? entry.chest.opened
-                        ? ' · Chest opened'
-                        : ' · Unopened chest'
-                    : '';
+        const allRooms = Object.values(instance.rooms);
+        const pos = {};
+        allRooms.forEach((entry, index) => {
+            pos[entry.id] = {
+                x: Number.isFinite(entry.x) ? entry.x : 0,
+                y: Number.isFinite(entry.y) ? entry.y : index
+            };
+        });
 
-                return (
-                    `${entry.id === room.id ? '● ' : '○ '}` +
-                    `${entry.label} · ` +
-                    `${entry.visited ? 'Visited' : 'Known exit'}` +
-                    `${tactic}${chestTag}`
+        const knownRooms = allRooms.filter(entry => known.has(entry.id));
+        const xs = knownRooms.map(entry => pos[entry.id].x);
+        const ys = knownRooms.map(entry => pos[entry.id].y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+
+        const step = 42;
+        const pad = 24;
+        const svgWidth = Math.max(120, (maxX - minX) * step + pad * 2);
+        const svgHeight = Math.max(72, (maxY - minY) * step + pad * 2);
+        const svgNS = 'http://www.w3.org/2000/svg';
+
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+        svg.setAttribute('width', String(svgWidth));
+        svg.setAttribute('height', String(svgHeight));
+        svg.style.display = 'block';
+        svg.style.maxWidth = '100%';
+        svg.style.height = 'auto';
+        svg.style.margin = '4px auto 2px';
+
+        const toPx = id => ({
+            cx: pad + (pos[id].x - minX) * step +
+                (svgWidth - ((maxX - minX) * step + pad * 2)) / 2,
+            cy: pad + (pos[id].y - minY) * step +
+                (svgHeight - ((maxY - minY) * step + pad * 2)) / 2
+        });
+
+        const drawnEdges = new Set();
+        for (const entry of knownRooms) {
+            for (const exitId of entry.exits || []) {
+                if (!known.has(exitId)) continue;
+                const edgeKey = [entry.id, exitId].sort().join('--');
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
+
+                const p1 = toPx(entry.id);
+                const p2 = toPx(exitId);
+                const target = instance.rooms[exitId];
+                const isBlocked = (target?.requiresCleared || []).some(
+                    reqId => instance.rooms[reqId]?.threatStatus !== 'cleared'
                 );
-            }).join('\n');
+
+                const line = document.createElementNS(svgNS, 'line');
+                line.setAttribute('x1', String(p1.cx));
+                line.setAttribute('y1', String(p1.cy));
+                line.setAttribute('x2', String(p2.cx));
+                line.setAttribute('y2', String(p2.cy));
+                line.setAttribute('stroke', isBlocked ? '#6e7f91' : '#3b4a5e');
+                line.setAttribute('stroke-width', '2');
+                if (isBlocked) line.setAttribute('stroke-dasharray', '3 3');
+                svg.appendChild(line);
+            }
+        }
+
+        for (const entry of knownRooms) {
+            const { cx, cy } = toPx(entry.id);
+            const isCurrent = entry.id === room.id;
+            const unvisited = !entry.visited;
+            const hasThreat = entry.threatStatus === 'unresolved';
+            const hasChest = Boolean(entry.chest && !entry.chest.opened);
+            const isSide = Boolean(entry.feature);
+            const cleared = entry.threatStatus === 'cleared';
+
+            const group = document.createElementNS(svgNS, 'g');
+
+            const fill = isCurrent
+                ? '#2d1b4e'
+                : unvisited
+                    ? '#12161c'
+                    : hasThreat
+                        ? '#2b181c'
+                        : hasChest
+                            ? '#2a2312'
+                            : isSide
+                                ? '#132433'
+                                : '#181d23';
+
+            const stroke = isCurrent
+                ? '#c084fc'
+                : unvisited
+                    ? '#6e7f91'
+                    : hasThreat
+                        ? '#ef4444'
+                        : hasChest
+                            ? '#ffd166'
+                            : isSide
+                                ? '#38bdf8'
+                                : cleared
+                                    ? '#4ade80'
+                                    : '#4da6ff';
+
+            const circle = document.createElementNS(svgNS, 'circle');
+            circle.setAttribute('cx', String(cx));
+            circle.setAttribute('cy', String(cy));
+            circle.setAttribute('r', isCurrent ? '12' : '10');
+            circle.setAttribute('fill', fill);
+            circle.setAttribute('stroke', stroke);
+            circle.setAttribute('stroke-width', isCurrent ? '2.5' : '1.5');
+            if (unvisited) circle.setAttribute('stroke-dasharray', '3 2');
+            group.appendChild(circle);
+
+            const glyph = unvisited
+                ? '?'
+                : hasThreat
+                    ? '⚔'
+                    : hasChest
+                        ? '✦'
+                        : isSide
+                            ? '✧'
+                            : isCurrent
+                                ? '●'
+                                : cleared
+                                    ? '✓'
+                                    : '·';
+
+            const labelEl = document.createElementNS(svgNS, 'text');
+            labelEl.setAttribute('x', String(cx));
+            labelEl.setAttribute('y', String(cy + 3.5));
+            labelEl.setAttribute('text-anchor', 'middle');
+            labelEl.setAttribute('fill', stroke);
+            labelEl.setAttribute('font-size', '10');
+            labelEl.setAttribute('font-family', 'Consolas, monospace');
+            labelEl.textContent = glyph;
+            group.appendChild(labelEl);
+
+            const tactic =
+                entry.threat?.tactic && entry.threat.tactic !== 'none'
+                    ? ` · ${packTacticDefinition(entry.threat.tactic).label}`
+                    : '';
+            const statusText = unvisited
+                ? 'Unvisited exit'
+                : hasThreat
+                    ? `Threat unresolved${tactic}`
+                    : hasChest
+                        ? 'Unopened chest'
+                        : isSide
+                            ? `${entry.feature === 'lore' ? 'Lore' : 'Scenic'} alcove`
+                            : cleared
+                                ? 'Cleared'
+                                : 'Visited';
+
+            const titleEl = document.createElementNS(svgNS, 'title');
+            titleEl.textContent =
+                `${entry.label}${isCurrent ? ' (Here)' : ''}\n${statusText}`;
+            group.appendChild(titleEl);
+            svg.appendChild(group);
+        }
+
+        const mapWrap = document.createElement('div');
+        mapWrap.style.padding = '6px';
+        mapWrap.style.background = '#101419';
+        mapWrap.style.border = '1px solid #1f2730';
+        mapWrap.style.borderRadius = '2px';
+        mapWrap.appendChild(svg);
+
+        const legend = document.createElement('div');
+        legend.className = 'aethermoor-vendor-detail';
+        legend.style.fontSize = '10px';
+        legend.style.textAlign = 'center';
+        legend.style.marginTop = '4px';
+        legend.textContent =
+            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited (hover for names)';
+        mapWrap.appendChild(legend);
 
         const section = makeAethermoorSection(
             `INSTANCE · ${instance.label}`,
             `Current room: ${room.label}\n` +
-                `Status: ${instance.status}\n\n${map}` +
+                `Status: ${instance.status}` +
                 (blocked
                     ? '\n\nResolve or avoid the encounter before moving.'
                     : ''),
             'world'
         );
+        section.appendChild(mapWrap);
 
         if (room.chest && !room.chest.opened) {
             const openChest = makeAethermoorAction(
@@ -26006,11 +26278,32 @@ globalThis.aethermoorMechanicsInterceptor =
                                 'worksite, cave complex, or another form ' +
                                 'that makes sense here. Do not assume ' +
                                 'one particular culture or biome.',
+                            'Also provide short, diegetic room names (2–4 words, ' +
+                                'no numbers like "Chamber 1") for these room IDs:',
+                            ...Object.values(instance.rooms || {}).map(room => {
+                                const role =
+                                    room.id === 'entrance'
+                                        ? 'entry threshold'
+                                        : room.id === 'inner_chamber'
+                                            ? 'deepest boss chamber'
+                                            : room.id === 'vault_chamber'
+                                                ? 'sealed vault chamber'
+                                                : room.feature === 'lore'
+                                                    ? 'dead-end lore side room'
+                                                    : room.feature === 'scenic'
+                                                        ? 'dead-end scenic alcove'
+                                                        : 'guarded interior room';
+                                return `- ${room.id}: ${role}`;
+                            }),
                             'In this reply, place exactly this form ' +
                                 'inside <plan>, replacing the JSON values:',
                             `<AETHERMOOR:INSTANCE_THEME instance=${
                                 instance.id
-                            }>{"name":"Local site name","kind":"kind of place","atmosphere":"Short atmospheric description"}</AETHERMOOR:INSTANCE_THEME>`,
+                            }>{"name":"Local site name","kind":"kind of place","atmosphere":"Short atmospheric description","rooms":{${
+                                Object.keys(instance.rooms || {})
+                                    .map(id => `"${id}":"Room name"`)
+                                    .join(',')
+                            }}}</AETHERMOOR:INSTANCE_THEME>`,
                             'You are naming presentation only. Do not ' +
                                 'add rooms, exits, enemies, puzzles, ' +
                                 'loot, bosses, or rewards.',

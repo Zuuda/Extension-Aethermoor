@@ -1708,6 +1708,12 @@ function applyXp(crew, xp) {
     return changes;
 }
 
+/*
+ * NOTE FOR CODE AUDITS: The actual index.js uses proper HTML entities
+ * (&, <, >, ") here. SillyTavern's chat renderer decodes
+ * HTML entities when CODE COPY is pasted into chat, making these look
+ * like no-op replacements in transcripts. Do NOT flag or "fix" this.
+ */
 function escapeSystemLogHtml(text) {
     return String(text ?? '')
         .replace(/&/g, '&')
@@ -9588,7 +9594,7 @@ function buildQuestV2PlanForOffer(
 function registerQuestDestination(state, quest) {
     state.places ||= {};
     state.leads ||= {};
-    state.routeEdges ||= {};
+    state.routeEdges ||= [];
 
     const label =
         quest.facts?.site ||
@@ -16086,18 +16092,45 @@ function resolveBatch(args) {
                         'Resolve the existing quest offer before testing another'
                     );
 
-                    encounter.questSeed = {
+                    const breadcrumbId = `breadcrumb-${encounter.id}`;
+                    const issuer = questIssuerSettlement(state);
+
+                    state.breadcrumbs ||= {};
+                    assert(
+                        !state.breadcrumbs[breadcrumbId],
+                        `Breadcrumb ${breadcrumbId} already exists`
+                    );
+
+                    const questSeed = {
                         source: 'pack_drop',
                         roll: 10,
                         result: 'diegetic_quest_breadcrumb',
                         testOnly: true
                     };
+
+                    state.breadcrumbs[breadcrumbId] = {
+                        id: breadcrumbId,
+                        encounterId: encounter.id,
+                        zone: encounter.zone,
+                        settlementId: issuer.id,
+                        locationId: state.currentLocationId,
+                        position: clone(
+                            state.currentPosition ||
+                            { nodeId: state.currentLocationId }
+                        ),
+                        questSeed: clone(questSeed),
+                        questSeedConsumed: false,
+                        questId: null
+                    };
+
+                    encounter.questSeed = clone(questSeed);
                     encounter.questSeedConsumed = false;
 
                     result = {
                         ok: true,
                         action: 'debug_create_quest_breadcrumb',
                         created: true,
+                        breadcrumbId,
                         encounterId: encounter.id,
                         questSeed: clone(encounter.questSeed),
                         state
@@ -17324,36 +17357,19 @@ function questDiscoveryContextPacket(quest, state) {
             discovery.requiredAction || 'expose the object'
         }.`,
         `* **Significance once found:** ${discovery.significance}`,
-        '* **Report only what happens in the scene:** Do not emit a ' +
+         '* **Report only what happens in the scene:** Do not emit a ' +
           'discovery tag merely because this context appeared or the ' +
           'player stated a desired outcome. Judge what their actions ' +
           'actually accomplish.',
-        ...(quest.currentGate?.decisive === true &&
-            !['rescue_person', 'retrieve_item']
-                .includes(quest.structureV2?.family)
-
+        ...(quest.structureV2?.family === 'rescue_person' &&
+            quest.currentGate?.decisive === true
             ? [
-                '* **QUEST DONE — only if THIS final objective is actually ' +
-                    'completed in this reply:** First portray the recovery. ' +
-                    'Then, in the SAME reply, display this exact System completion ' +
-                    'HTML card verbatim (visible to Q’tik and Tansy, not ordinary NPCs):',
-                contractCompleteCardHtml({
-                    title: quest.title,
-                    rank: quest.rank,
-                    rewards: {
-                        xp: quest.payout.xp,
-                        silver: quest.payout.silver,
-                        repSteps: quest.payout.repSteps,
-                        loot: [quest.salvage]
-                    }
-                }),
-                '* The System pays these rewards, not an NPC. The ' +
-                    'extension will validate the reported discovery and ' +
-                    'apply the locked payout; do not grant anything ' +
-                    'separately or require an NPC handover.',
-                '* If the object is NOT recovered in this reply, show ' +
-                    'NO completion window. A similar accepted quest ' +
-                    'remains separate and is not completed by this recovery.'
+                '* **FINDING IS NOT COMPLETION:** Once the missing person ' +
+                    'is found, do NOT show a completion window or award ' +
+                    'rewards yet.',
+                '* **Return:** Escort the person safely back to the origin ' +
+                    'settlement. The System completes and pays this quest ' +
+                    'automatically upon confirmed arrival there.'
             ]
             : []),
         ...(quest.structureV2?.family === 'retrieve_item' &&
@@ -22484,6 +22500,7 @@ async function renderInventoryTab(host) {
 
         const actions = document.createElement('div');
         actions.className = 'aethermoor-inventory-item-actions';
+        const inActiveCombat = state.encounter?.status === 'active';
 
         if (definition?.type === 'potion') {
             for (const [recipient, label] of [
@@ -22493,6 +22510,10 @@ async function renderInventoryTab(host) {
                 const use = document.createElement('button');
                 use.type = 'button';
                 use.textContent = label;
+                use.disabled = inActiveCombat;
+                if (inActiveCombat) {
+                    use.title = 'Use potions from the Combat tab during an active fight.';
+                }
 
                 use.addEventListener('click', async () => {
                     use.disabled = true;

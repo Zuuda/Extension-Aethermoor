@@ -2310,6 +2310,8 @@ function applyConsumableItem(state, item, recipient) {
         `No ${item} remains in shared stock`
     );
 
+    const itemName = entry.name || definition.name;
+
     entry.quantity -= 1;
     if (entry.quantity === 0) {
         state.inventory.consumables =
@@ -2335,6 +2337,7 @@ function applyConsumableItem(state, item, recipient) {
 
         return {
             item,
+            itemName,
             recipient,
             effect: 'heal',
             requested: amount,
@@ -2344,6 +2347,44 @@ function applyConsumableItem(state, item, recipient) {
             potionsUsed: encounter.potionsUsed
         };
     }
+
+    /*
+     * Stacking debuffs currently affect shared Crew mechanics rather
+     * than separate character status lists. Either protagonist can
+     * cleanse them, spending their own potion allowance.
+     *
+     * Stamp immunity with the current encounter turn instead of a
+     * decrementing duration. This covers all three exchanges and expires
+     * automatically when resolveTurn increments encounter.turn again.
+     * Repeated UI reads cannot extend the protection.
+     */
+    let stacksRemoved = Object.values(encounter.hexStacks || {})
+        .reduce((total, stacks) => total + Number(stacks), 0);
+
+    encounter.hexStacks = {};
+
+    for (const foe of encounter.foes) {
+        if (!['elite', 'boss'].includes(foe.role)) continue;
+
+        stacksRemoved += Number(foe.passiveStacks || 0);
+        foe.passiveStacks = 0;
+    }
+
+    encounter.debuffImmunityTurn = encounter.turn;
+
+    return {
+        item,
+        itemName,
+        recipient,
+        effect: 'cleanse',
+        scope: 'crew',
+        stacksRemoved,
+        immunityTurn: encounter.turn,
+        note:
+            'All Hex and Elite/Boss passive stacks cleared; ' +
+            'new applications blocked for this turn.',
+        potionsUsed: encounter.potionsUsed
+    };
 
         /*
      * Stacking debuffs currently affect shared Crew mechanics rather
@@ -2805,7 +2846,13 @@ function completeLinkedCombatQuestGate(state) {
  * or roll values. The GM can dramatize these beats later, but cannot
  * change which actions landed or which foes were defeated.
  */
-function combatNarrativeTurn(encounter, actions, exchanges, kills) {
+function combatNarrativeTurn(
+    encounter,
+    actions,
+    exchanges,
+    kills,
+    itemUse = {}
+) {
     const labels = new Map(
         encounter.foes.map((foe, index) => [
             foe.id,
@@ -2828,15 +2875,25 @@ function combatNarrativeTurn(encounter, actions, exchanges, kills) {
         raise_shadow: 'Raise Shadow'
     };
 
+    const formatAction = (owner, action) => {
+        const label = actionLabels[action] || action;
+        if (action === 'drink' && itemUse?.[owner]?.itemName) {
+            return `${label} (${itemUse[owner].itemName})`;
+        }
+        return label;
+    };
+
     const slain = new Set(kills.map(kill => kill.id));
 
     return {
         turn: encounter.turn,
-        actions: {
-            qtik: actionLabels[actions.qtik] || actions.qtik,
-            tansy: actionLabels[actions.tansy] || actions.tansy,
-            target: labels.get(actions.target) || null
-        },
+        actions: actions.flee === true
+            ? { flee: true }
+            : {
+                qtik: formatAction('qtik', actions.qtik),
+                tansy: formatAction('tansy', actions.tansy),
+                target: labels.get(actions.target) || null
+            },
         exchanges: exchanges.map(exchange => {
             const events = [];
             const hitTargets = [
@@ -4448,13 +4505,14 @@ if (frontliners.length > 0) {
         }
     }
 
-        encounter.narrativeTurns ||= [];
+    encounter.narrativeTurns ||= [];
     encounter.narrativeTurns.push(
         combatNarrativeTurn(
             encounter,
             actions,
             logs,
-            kills
+            kills,
+            itemUse
         )
     );
 
@@ -13619,14 +13677,13 @@ function resolveStockNames(test) {
         Object.keys(names).every(key => expected.has(key)),
         'Naming reply must contain exactly the missing stock keys'
     );
-
     for (const [key, value] of Object.entries(names)) {
         assert(
             typeof value === 'string' &&
             value.trim().length >= 3 &&
             value.trim().length <= 60 &&
             !/[<>\r\n]/.test(value) &&
-            !/\b(?:hp|stat|tier|coin|price|copper)\b/i.test(value) &&
+            !/\b(?:hp|stat|tier|price)\b/i.test(value) &&
             !/\d/.test(value),
             `Invalid cosmetic stock name for ${key}`
         );
@@ -17617,16 +17674,26 @@ function combatNarrationPacket(result, actions) {
             narrativeFoeLabel(foe, index)
         ])
     );
-
     const foeName = id => foeNames.get(id) || id;
+    const qtikLabel =
+        (qtikActions[actions?.qtik] || actions?.qtik || 'an action') +
+        (actions?.qtik === 'drink' && result.itemUse?.qtik?.itemName
+            ? ` (${result.itemUse.qtik.itemName})`
+            : '');
+    const tansyLabel =
+        (tansyActions[actions?.tansy] || actions?.tansy || 'a command') +
+        (actions?.tansy === 'drink' && result.itemUse?.tansy?.itemName
+            ? ` (${result.itemUse.tansy.itemName})`
+            : '');
+
     const lines = [
         'COMBAT SCENE RESULT.',
-        `Q'tik used ${qtikActions[actions?.qtik] || actions?.qtik || 'an action'}.`,
-        `Tansy used ${tansyActions[actions?.tansy] || actions?.tansy || 'a command'}.`,
+        `Q'tik used ${qtikLabel}.`,
+        `Tansy used ${tansyLabel}.`,
         'Dramatize these established events as a coherent scene. ' +
-            'Add atmosphere, pacing, dialogue, and physical description, ' +
-            'but do not add attacks, injuries, decisions, enemy behavior, ' +
-            'or outcomes absent from this result.'
+        'Add atmosphere, pacing, dialogue, and physical description, ' +
+        'but do not add attacks, injuries, decisions, enemy behavior, ' +
+        'or outcomes absent from this result.'
     ];
 
     if (actions?.target) {
@@ -22884,11 +22951,13 @@ function combatRecapPrompt(receipt) {
 
     for (const turn of receipt.narrativeTurns || []) {
         lines.push(
-            `Turn ${turn.turn}: Q'tik chose ${turn.actions.qtik}; ` +
-                `Tansy chose ${turn.actions.tansy}.` +
-                (turn.actions.target
-                    ? ` Their selected target was ${turn.actions.target}.`
-                    : '')
+            turn.actions?.flee === true
+                ? `Turn ${turn.turn}: The crew attempted to flee, but failed.`
+                : `Turn ${turn.turn}: Q'tik chose ${turn.actions.qtik}; ` +
+                    `Tansy chose ${turn.actions.tansy}.` +
+                    (turn.actions.target
+                        ? ` Their selected target was ${turn.actions.target}.`
+                        : '')
         );
 
         for (const exchange of turn.exchanges || []) {

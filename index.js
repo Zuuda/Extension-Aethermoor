@@ -11481,13 +11481,14 @@ function resolveQuestAction(test) {
             objectiveCompleted: true,
             completionEvidence: quest.objectiveResolution.evidence
         });
-
         return {
             ...result,
             state: completion.state,
             quest: completion.quest,
             questCompletion: {
                 questId: quest.id,
+                title: completion.quest.title,
+                rank: completion.quest.rank,
                 rewards: completion.rewards,
                 levelUps: completion.levelUps || []
             }
@@ -17151,7 +17152,7 @@ function travelNarrationPacket(result) {
 
         lines.push(
             'The System completed the quest at its final objective.',
-            'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy):',
+            'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not to ordinary NPCs):',
             contractCompleteCardHtml({
                 title: completedQuest?.title || 'Contract',
                 rank: completedQuest?.rank || null,
@@ -17164,24 +17165,6 @@ function travelNarrationPacket(result) {
         );
     }
 
-    for (const secured of result.questObjectiveSecuredList || []) {
-        if (!secured.questCompletion) continue;
-        const rewards = secured.questCompletion.rewards;
-
-        lines.push(
-            'The System completed the quest at its final objective.',
-            `Quest rewards applied: ${rewards.xp} XP, ` +
-                `${rewards.silver} silver, ` +
-                `${rewards.repSteps} reputation steps.`,
-            ...rewards.loot.map(item =>
-                `System salvage received: ${item.name}.`
-            ),
-            ...xpProgressNarrationLines(
-                result.state?.crew,
-                secured.questCompletion.levelUps || []
-            )
-        );
-    }
 
         if (result.zoneTransition) {
         const transition = result.zoneTransition;
@@ -17720,7 +17703,7 @@ function combatNarrationPacket(result, actions) {
         );
         if ((result.rewards.loot || []).length > 0) {
             lines.push(
-                'Display this exact System loot HTML card verbatim (visible to Q’tik and Tansy but nordinary NPCs):',
+                'Display this exact System loot HTML card verbatim (visible to Q’tik and Tansy but not to ordinary NPCs):',
                 acquiredItemsCardHtml(result.rewards.loot)
             );
         }
@@ -23068,13 +23051,15 @@ function combatRecapPrompt(receipt) {
         if (questGate.questCompletion) {
             const rewards = questGate.questCompletion.rewards;
             lines.push(
-                'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not ordinary NPCs):',
+                'Display this exact System completion HTML card verbatim (visible to Q’tik and Tansy but not to ordinary NPCs):',
                 contractCompleteCardHtml({
-                    title: 'Contract',
+                    title: questGate.questCompletion.title || 'Contract',
+                    rank: questGate.questCompletion.rank || null,
                     rewards
                 })
             );
         }
+
     }
 
     return lines.join('\n');

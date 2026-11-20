@@ -2366,28 +2366,6 @@ function telegraphEffects(foe) {
     }[foe.nextTelegraph] || null;
 }
 
-function currentHexPenaltyForState(state) {
-    const encounter = state.encounter;
-
-    return Object.entries(
-        encounter.hexStacks || {}
-    ).reduce((total, [id, stacks]) => {
-        const hexer = live(state).find(
-            foe =>
-                foe.id === id &&
-                foe.role === 'hexer'
-        );
-
-        if (!hexer) {
-            return total;
-        }
-
-        return total +
-            2 *
-            enemyTier(hexer.level) *
-            Number(stacks);
-    }, 0);
-}
 function materializeBossReinforcements(state) {
     const encounter = state.encounter;
 
@@ -3278,8 +3256,8 @@ if (actions.tansy === 'surge') {
     const kills = [];
     const startingCount = live(s).length;
     let weaselsDestroyed = 0;
-    const fodderBlitz = null;
     function lowestHpFoe() {
+
         // Stable sorting preserves encounter order for ties.
         return [...live(s)].sort((a, b) => a.hp - b.hp)[0];
     }
@@ -4335,7 +4313,6 @@ if (frontliners.length > 0) {
             ],
             weaselsDestroyed,
             momentum,
-            fodderBlitz,
             kills,
             rewards: {
                 xp: 0,
@@ -4444,7 +4421,6 @@ if (frontliners.length > 0) {
         turnEffects,
         weaselsDestroyed,
         momentum,
-        fodderBlitz,
         kills,
         rewards: {
             xp: encounterRewards.xp,
@@ -9728,19 +9704,6 @@ function findQuestById(state, questId) {
     return null;
 }
 
-function setActiveQuest(state, quest) {
-    assert(
-        quest &&
-        typeof quest.id === 'string',
-        'Active quest requires a valid quest'
-    );
-
-    state.activeQuest = quest;
-    saveQuestToJournal(state, quest);
-
-    return quest;
-}
-
 function resolveQuestSeed(test) {
     assert(
         test.state &&
@@ -11219,6 +11182,15 @@ function resolveQuestAction(test) {
         quest.status = 'declined';
         saveQuestToJournal(state, quest);
 
+        for (const lead of Object.values(state.leads || {})) {
+            if (
+                lead.id === `quest-return-${quest.id}` ||
+                lead.id === `quest-lead-${quest.id}`
+            ) {
+                lead.status = 'resolved';
+            }
+        }
+
         if (state.activeQuest?.id === quest.id) {
             state.activeQuest = null;
         }
@@ -12520,12 +12492,7 @@ function resolveVendorSelection(test) {
         );
     }
 
-    state.vendorMenu ||= {
-        settlementId: settlement.id,
-        pendingBasket: null
-    };
-
-    state.vendorMenu.pendingBasket = {
+    const validatedBasket = {
         settlementId: settlement.id,
         zone: state.zone,
         buy,
@@ -12539,7 +12506,7 @@ function resolveVendorSelection(test) {
     return {
         ok: true,
         action: 'stage',
-        basket: clone(state.vendorMenu.pendingBasket),
+        basket: validatedBasket,
         state
     };
 }
@@ -12570,8 +12537,7 @@ function resolveVendorTradeCommit(test) {
         'The crew must be free at a saved settlement to trade'
     );
 
-    const requested = test.basket || state.vendorMenu?.pendingBasket;
-
+    const requested = test.basket;
     assert(
         requested &&
         Array.isArray(requested.buy) &&
@@ -12695,10 +12661,6 @@ function resolveVendorTradeCommit(test) {
         derivedBefore: beforeStats,
         derivedAfter: afterStats
     };
-
-    if (working.vendorMenu) {
-        working.vendorMenu.pendingBasket = null;
-    }
 
     return {
         ok: true,
@@ -13426,10 +13388,6 @@ function resolveHerbalistAction(test) {
 
     state.crew.purse = purseAfter;
 
-    if (state.herbalistMenu) {
-        state.herbalistMenu.pendingBasket = null;
-    }
-
     return {
         ok: true,
         created: true,
@@ -13565,10 +13523,6 @@ function resolveInnAction(test) {
     };
 
     state.crew.purse = purseAfter;
-
-    if (state.innMenu) {
-        state.innMenu.pendingBasket = null;
-    }
 
     return {
         ok: true,
@@ -13948,6 +13902,11 @@ function resolveConsumableAction(test) {
                     ? stats.qtikMaxHp
                     : stats.tansyMaxHp;
                 const beforeHp = state.crew[recipient].hp;
+
+                assert(
+                    beforeHp < maxHp,
+                    `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP`
+                );
 
                 state.crew[recipient].hp = Math.min(
                     maxHp,
@@ -19764,9 +19723,10 @@ function formatQuestStatus(quest) {
     if (quest.status === 'offered') {
         lines.push(
             'This quest has been offered but not accepted.',
-            'Accepting it does not invent its objective; the objective must be established later.'
+            `First objective: ${quest.currentGate?.objective || 'not established'}`
         );
-    } else if (quest.status === 'in_progress') {
+    }
+else if (quest.status === 'in_progress') {
         lines.push(
             `Current gate: ${quest.currentGate?.step || 1}/` +
             `${quest.currentGate?.total || quest.gates}`,
@@ -22912,9 +22872,8 @@ async function renderInventoryTab(host) {
         const detail = document.createElement('div');
         detail.className = 'aethermoor-vendor-detail';
         detail.textContent =
-            `Tier ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
+            `Stat ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
             `${item.bound ? 'Bound' : 'Unbound'}`;
-
         main.append(name, detail);
 
         const comparison = itemComparison(item);
@@ -23004,7 +22963,7 @@ async function renderInventoryTab(host) {
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
             detail.textContent =
-                `${slot} · Tier ${item.stat ?? item.rawStat}`;
+                `${slot} · Stat ${item.stat ?? item.rawStat}`;
 
             main.append(name, detail);
             row.appendChild(main);
@@ -23195,15 +23154,7 @@ function combatRecapPrompt(receipt) {
         }
     }
 
-    if (receipt.postFightHp) {
-        lines.push(
-            `After the fight: Q'tik ${receipt.postFightHp.qtik}/` +
-                `${receipt.postFightHp.qtikMax} HP; ` +
-                `Tansy ${receipt.postFightHp.tansy}/` +
-                `${receipt.postFightHp.tansyMax} HP.`
-        );
-    }
-
+if (receipt.postFightHp) {
     if (receipt.questGate) {
         const questGate = receipt.questGate;
         lines.push(
@@ -24493,9 +24444,6 @@ function combatStatusText(state) {
     return lines.join('   •   ');
 }
 
-let combatPanelElement = null;
-let combatPanelOpen = false;
-
 const combatSelections = {
     qtik: 'fire_melee',
     tansy: 'visor',
@@ -24617,6 +24565,27 @@ function updateAethermoorStatusStrip(state) {
 
     strip.replaceChildren(...items, copy);
     strip.hidden = false;
+
+    const shopsTab = aethermoorPanelElement?.querySelector(
+        '.aethermoor-tab[data-tab="shops"]'
+    );
+
+    if (shopsTab) {
+        const shopsAvailable = Boolean(
+            !state.currentJourney &&
+            !state.activeInstanceId &&
+            !['active', 'spotted'].includes(state.encounter?.status) &&
+            Object.values(state.world?.settlements || {}).some(entry =>
+                entry.locationId === state.currentLocationId &&
+                entry.zone === state.zone
+            )
+        );
+
+        shopsTab.disabled = !shopsAvailable;
+        shopsTab.title = shopsAvailable
+            ? 'Open settlement shops'
+            : 'Shops are available at a free settlement';
+    }
 }
 
 function markCombatViewRendered(snapshot) {
@@ -26324,8 +26293,6 @@ function updateAethermoorDebugButton() {
  */
 let aethermoorRoleplayHandoffsPaused = readAethermoorHandoffsPaused();
 let aethermoorInjectedHandoff = null;
-let aethermoorGenerationReceived = false;
-
 function aethermoorTechnicalMessage(chat) {
     const index = findLastUserMessage(chat);
     const text = chat[index]?.mes;
@@ -27705,15 +27672,12 @@ globalThis.aethermoorMechanicsInterceptor =
             message
         );
 
-        aethermoorGenerationReceived = false;
-
         aethermoorInjectedHandoff = {
             chat,
             message,
             metadata,
             ids: entries.map(entry => entry.id)
         };
-
 
         console.log(
             '[Aethermoor] Injected ordered mechanics handoff',
@@ -27855,7 +27819,6 @@ function registerAethermoorGenerationCleanup() {
             aethermoorInjectedHandoff === injected
         ) {
             aethermoorInjectedHandoff = null;
-            aethermoorGenerationReceived = false;
         }
     }
 
@@ -27883,9 +27846,7 @@ function registerAethermoorGenerationCleanup() {
                 return;
             }
 
-            aethermoorGenerationReceived = true;
             injected.replyReceived = true;
-
             console.log(
                 '[Aethermoor] Assistant reply event received',
                 {
@@ -27951,7 +27912,6 @@ function registerAethermoorGenerationCleanup() {
                     );
 
                     aethermoorInjectedHandoff = null;
-                    aethermoorGenerationReceived = false;
                 }
             }, 1000);
 

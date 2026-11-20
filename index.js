@@ -7168,12 +7168,6 @@ function resolveTravelStep(test) {
             );
         }
 
-        const rumorArrival = resolveArrivedRumors(state);
-        state = rumorArrival.state;
-
-        arrival.rumorArrivals = rumorArrival.resolutions;
-        arrival.rumorArrivalPackets = rumorArrival.packets;
-
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
 
@@ -7515,12 +7509,6 @@ function resolveTravelStep(test) {
                 arrivalQuest.id
             );
         }
-
-        const rumorArrival = resolveArrivedRumors(state);
-        state = rumorArrival.state;
-
-        outcome.rumorArrivals = rumorArrival.resolutions;
-        outcome.rumorArrivalPackets = rumorArrival.packets;
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
@@ -10681,92 +10669,6 @@ function advanceQuestFromDiscovery(state, discovery, questId) {
     };
 }
 
-function reconcileQuestDiscovery(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'Quest discovery reconciliation requires state'
-    );
-    const state = clone(test.state);
-    ensureQuestJournal(state);
-
-    assert(
-        typeof test.questId === 'string' &&
-        test.questId.length > 0,
-        'Quest discovery reconciliation requires a questId'
-    );
-
-    const quest = findQuestById(
-        state,
-        test.questId
-    );
-
-    assert(
-        quest?.status === 'in_progress',
-        `Quest ${test.questId} is not in progress`
-    );
-
-    const gate = quest.currentGate;
-    const requiredId = gate?.requiredDiscoveryId;
-
-    assert(
-        typeof requiredId === 'string' &&
-        requiredId.length > 0,
-        'Current quest gate has no required discovery'
-    );
-
-    const discovery = (quest.discoveries || []).find(
-        item => item.id === requiredId
-    );
-
-    assert(
-        discovery,
-        `Required quest discovery is missing: ${requiredId}`
-    );
-
-    assert(
-        discovery.state === 'acquired' ||
-        discovery.state === 'found',
-        `Required discovery is not acquired: ${discovery.state}`
-    );
-
-    assert(
-        state.currentLocationId === discovery.locationId,
-        'Crew is not at the discovery location'
-    );
-
-    assert(
-        state.encounter?.status !== 'active' &&
-        state.encounter?.status !== 'spotted',
-        'Resolve or avoid the current encounter first'
-    );
-
-    const progression = resolveQuestAction({
-        state,
-        questId: quest.id,
-        action: 'clear_gate',
-        objectiveCompleted: true,
-        completionEvidence:
-            `The crew had already secured ${discovery.name} at ` +
-            `${state.places?.[discovery.locationId]?.label ||
-                discovery.locationId}.`
-    });
-
-    return {
-        ok: true,
-        created: true,
-        action: 'quest_discovery_reconcile',
-        discovery: clone(discovery),
-        questId: quest.id,
-        questGate: {
-            completed: progression.completedGate,
-            next: progression.nextGate
-        },
-
-        state: progression.state
-    };
-}
-
 function findQuestByDiscoveryId(state, discoveryId) {
     assert(
         typeof discoveryId === 'string' &&
@@ -10921,10 +10823,6 @@ function resolveSelectedQuestEvent(test) {
     assert(
         ['hidden', 'searched', 'found'].includes(discovery.state),
         `Cannot find discovery from state ${discovery.state}`
-    );
-    assert(
-        !discovery.requiredAction || discovery.state === 'searched',
-        'The authored search/recovery action must occur first'
     );
 
     discovery.state = discovery.acquisitionPolicy === 'auto_on_reveal'
@@ -12335,11 +12233,6 @@ function resolveVendorSelection(test) {
         'Trade selection requires presence at the open shop'
     );
 
-    assert(
-        test.action === 'stage',
-        `Unsupported vendor selection action: ${test.action}`
-    );
-
     const basket = test.basket;
 
     assert(
@@ -12347,7 +12240,7 @@ function resolveVendorSelection(test) {
         Array.isArray(basket.buy) &&
         Array.isArray(basket.sell) &&
         basket.buy.length + basket.sell.length > 0,
-        'Select at least one item to stage a trade'
+        'Select at least one item to trade'
     );
 
     const stock = resolveVendorAction({
@@ -15629,44 +15522,6 @@ function resolveBatch(args) {
                     };
                     break;
                 }
-                case 'quest_discovery_prepare': {
-                    const state = clone(test.state);
-                    ensureQuestJournal(state);
-
-                    const quest = test.questId !== undefined
-                        ? findQuestById(state, test.questId)
-                        : state.activeQuest;
-
-                    assert(
-                        quest,
-                        test.questId !== undefined
-                            ? `Unknown quest ID: ${test.questId}`
-                            : 'No selected quest'
-                    );
-
-                    const discovery =
-                        prepareRecoverCargoDiscovery(quest) ||
-                        prepareHerbForagingDiscovery(quest) ||
-                        prepareV2QuestDiscoveries(quest);
-
-                    assert(
-                        discovery,
-                        'This quest has no supported discovery preparation'
-                    );
-
-                    result = {
-                        ok: true,
-                        action: 'quest_discovery_prepare',
-                        questId: quest.id,
-                        discoveryId: discovery.id,
-                        state
-                    };
-                    break;
-                }
-
-                case 'quest_discovery_reconcile':
-                    result = reconcileQuestDiscovery(test);
-                    break;
 
                 case 'quest_event':
                     result = resolveQuestEvent(test);
@@ -15729,68 +15584,6 @@ function resolveBatch(args) {
                     break;
                 }
 
-                case 'quest_site_inspect': {
-                    const state = clone(test.state);
-
-                    assert(
-                        typeof test.questId === 'string' &&
-                        test.questId.length > 0,
-                        'Quest site inspection requires a questId'
-                    );
-
-                    const quest = findQuestById(
-                        state,
-                        test.questId
-                    );
-
-                    assert(
-                        quest?.status === 'in_progress',
-                        `Quest ${test.questId} is not in progress`
-                    );
-
-                    assert(
-                        quest.destinationId &&
-                        state.currentLocationId === quest.destinationId,
-                        'Travel to the quest destination first'
-                    );
-
-                    assert(
-                        quest.currentGate?.step === 1 &&
-                        quest.currentGate.step < quest.gates,
-                        'The first gate is not available for inspection'
-                    );
-
-                    assert(
-                        !['active', 'spotted'].includes(
-                            state.encounter?.status
-                        ),
-                        'Resolve or avoid the nearby encounter first'
-                    );
-
-                    const place = state.places[quest.destinationId];
-
-                    assert(
-                        place,
-                        'Quest inspection destination is missing'
-                    );
-
-                    const evidence = quest.facts?.evidence
-                        ? `Inspected ${quest.facts.evidence} at ${place.label}.`
-                        : `Reached ${place.label} and inspected the signs relevant to the first gate.`;
-
-                    result = resolveQuestAction({
-                        state,
-                        questId: quest.id,
-                        action: 'clear_gate',
-                        objectiveCompleted: true,
-                        completionEvidence: evidence
-                    });
-
-                    result.action = 'quest_site_inspect';
-                    result.questId = quest.id;
-                    result.evidence = evidence;
-                    break;
-                }
                     case 'debug_create_rumor': {
                     const state = clone(test.state);
                     assert(
@@ -17439,25 +17232,9 @@ function questDiscoveryContextPacket(quest, state) {
             '  These are quest cargo, not personal loot.'
         );
     }
-
-    if (discovery.requiredAction && discovery.state === 'hidden') {
-        lines.push(
-            '* **If the required action actually occurs, report:**',
-            `  <plan><AETHERMOOR:SEARCHED quest_item=${
-                discovery.id
-            }></plan>`
-        );
-    }
-
     lines.push(
         '* **If the object is actually recovered or exposed, report:**',
-        `  <plan><AETHERMOOR:FOUND quest_item=${
-            discovery.id
-        }></plan>`,
-        discovery.requiredAction && discovery.state === 'hidden'
-            ? '  If both events happen in one reply, report SEARCHED ' +
-              'before FOUND.'
-            : '  Do not repeat an earlier SEARCHED event.',
+        `  `,
         '* Keep the story in-world. Do not recite these instructions, ' +
           'tags, or extension mechanics to the players.'
     );
@@ -17550,19 +17327,6 @@ function questDiscoveryNarrationPacket(result, quest) {
     }
 
     return lines.join('\n');
-}
-
-function questSiteInspectionPacket(result, quest) {
-    return [
-        `At ${quest.facts.site || quest.facts.place || quest.facts.wreck}, ` +
-            `the crew inspected the quest site.`,
-        `Evidence found: ${result.evidence}`,
-        `Gate ${result.completedGate.step} completed: ` +
-            result.completedGate.objective,
-        `Next gate ${result.nextGate.step}/${quest.gates}: ` +
-            result.nextGate.objective,
-        'Do not reveal the hidden cause or claim later gates are complete.'
-    ].join('\n');
 }
 
 function questDeliveryNarrationPacket(result, quest) {
@@ -18227,7 +17991,6 @@ async function runStoredMechanic(args) {
                     [
                         'check_work',
                         'reveal_work',
-                        'seed_npc',
                         'prepare_npc_seeds',
                         'claim_npc_seed'
                     ].includes(oneCase.action)
@@ -18454,14 +18217,6 @@ async function runStoredMechanic(args) {
 
 
             : batch &&
-              oneCase?.kind === 'quest_discovery_reconcile' &&
-              caseResult.created
-                ? questDiscoveryNarrationPacket(
-                    caseResult,
-                    findQuestById(nextState, caseResult.questId)
-                )
-
-            : batch &&
               oneCase?.kind === 'quest_event' &&
               caseResult.created
                 ? questDiscoveryNarrationPacket(
@@ -18471,13 +18226,6 @@ async function runStoredMechanic(args) {
                             nextState,
                             caseResult.questItemId
                         )
-                )
-
-            : batch &&
-              oneCase?.kind === 'quest_site_inspect'
-                ? questSiteInspectionPacket(
-                    caseResult,
-                    findQuestById(nextState, caseResult.questId)
                 )
 
             : batch &&
@@ -18535,11 +18283,7 @@ async function runStoredMechanic(args) {
             );
         }
 
-        const rumorPackets = [
-            ...(caseResult.rumorArrivalPackets || []),
-            ...arrivedRumors.packets
-        ];
-
+        const rumorPackets = arrivedRumors.packets;
         for (const packet of rumorPackets) {
             appendAethermoorHandoff(
                 handoffQueue,
@@ -19058,11 +18802,8 @@ function registerTools() {
                                     'travel',
                                     'instance',
                                     'journey',
-                                    'quest_discovery_prepare',
                                     'quest_delivery',
-                                    'quest_discovery_reconcile',
                                     'quest_event',
-                                    'quest_site_inspect',
                                     'quest_reveal_terminal',
                                     'engage',
                                     'avoid',
@@ -19302,7 +19043,6 @@ function registerTools() {
                                     'import',
                                     'check_work',
                                     'reveal_work',
-                                    'seed_npc',
                                     'status',
                                     'export',
                                     'accept',
@@ -21601,6 +21341,12 @@ async function openAethermoorShopWindow() {
     }
 
     function refresh() {
+        for (const { key, wornKey, skip } of buyButtons) {
+            if (skip && !selectedSales.has(wornKey) && selectedBuys.has(key)) {
+                selectedBuys.delete(key);
+            }
+        }
+
         const { cost, proceeds, remaining } = totals();
 
         ledger.textContent =
@@ -21611,16 +21357,22 @@ async function openAethermoorShopWindow() {
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
-        for (const { button, key, price, number, variant } of buyButtons) {
+        for (const {
+            button, key, wornKey, skip, price, number, variant
+        } of buyButtons) {
             const selected = selectedBuys.get(key);
             const isSelected =
                 selected?.number === number &&
                 selected?.variant === variant;
+            const floorBlocked = skip && !selectedSales.has(wornKey);
 
             button.setAttribute('aria-pressed', String(isSelected));
             button.disabled =
-                !selected &&
-                remaining < price;
+                floorBlocked ||
+                (!selected && remaining < price);
+            button.title = floorBlocked
+                ? 'Worn gear already meets this zone’s vendor floor (select the worn item to sell to replace it).'
+                : '';
         }
 
         for (const { button, key } of saleButtons) {
@@ -21631,29 +21383,14 @@ async function openAethermoorShopWindow() {
         }
     }
 
-    const bonusNames = {
-        crewAtk: 'Crew ATK',
-        tansyMaxHp: 'Tansy MaxHP',
-        qtikMaxHp: 'Q’tik MaxHP',
-        frontlineDef: 'Frontline DEF',
-        crewLuk: 'Crew LUK'
-    };
-
     for (const entry of stock.catalog) {
         const key = `${entry.owner}:${entry.slot}`;
-        const owner = entry.owner === 'qtik' ? "Q'tik" : 'Tansy';
+        const wornKey = `worn:${entry.owner}:${entry.slot}`;
 
         for (const option of entry.variants) {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'aethermoor-trade-option';
-
-            const effects = Object.entries(option.bonus)
-                .filter(([, amount]) => amount > 0)
-                .map(([name, amount]) =>
-                    `+${amount} ${bonusNames[name] || name}`
-                );
-
             const worn =
                 state.crew.gear?.[entry.owner]?.[entry.slot];
 
@@ -21731,6 +21468,8 @@ async function openAethermoorShopWindow() {
             buyButtons.push({
                 button,
                 key,
+                wornKey,
+                skip: entry.skip,
                 price: entry.price,
                 number: entry.number,
                 variant: option.variant
@@ -23925,6 +23664,9 @@ async function renderWorldTab(host) {
         .filter(settlement => {
             if (!settlement?.locationId) return false;
             if (settlement.locationId === currentLocationId) return false;
+            if (settlement.locationId === nearbySettlement?.locationId) {
+                return false;
+            }
 
             /*
              * The next primary settlement already has its own ONWARD entry.
@@ -26559,12 +26301,12 @@ function extractAethermoorQuestEvents(text) {
     }
 
     const foundPattern =
-        /<AETHERMOOR:(SEARCHED|FOUND)\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
+        /<AETHERMOOR:FOUND\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
 
     for (const match of text.matchAll(foundPattern)) {
         events.push({
-            event: match[1].toLowerCase(),
-            questItemId: match[2]
+            event: 'found',
+            questItemId: match[1]
         });
     }
 
@@ -26592,110 +26334,6 @@ function extractAethermoorQuestEvents(text) {
 
     return [...itemEvents, ...deliveryEvents].map(
         ({ index: _index, ...event }) => event
-    );
-}
-
-/*
- * Narration validation is separate from mechanics resolution.
- * Detect recognizable private packet leakage without attempting to
- * judge all prose or silently rewriting the assistant's message.
- *
- * This is a narrow safeguard, not proof of narrative correctness.
- * An LLM can still invent unsupported content without copying a header.
- */
-const aethermoorNarrationWarnings = new WeakMap();
-
-function leakedAethermoorContext(text) {
-    if (typeof text !== 'string') return [];
-    text = aethermoorNonCodeText(text);
-    const leaks = [];
-
-    /*
-     * A marker mention is not sufficient evidence of a leaked handoff.
-     * Require the opening marker, the private-context heading, and the
-     * closing marker in their actual packet positions. Fenced and inline
-     * code examples have already been excluded from this inspection.
-     */
-    const handoffPattern =
-        /^\s*<aethermoor-mechanics-handoff>\s*\r?\n\s*PRIVATE ENGINE CONTEXT\b[\s\S]*?^\s*<aethermoor-mechanics-handoff>\s*$/im;
-
-    if (handoffPattern.test(text)) {
-        leaks.push('complete engine handoff');
-    }
-
-    const signatures = [
-        {
-            label: 'private scene context',
-            pattern: /^\s*PRIVATE SCENE CONTEXT\b/im
-        },
-        {
-            label: 'private delivery context',
-            pattern: /^\s*PRIVATE QUEST TURN-IN CONTEXT\b/im
-        },
-        {
-            label: 'internal rumor contract',
-            pattern: /^\s*AUTHORITATIVE RUMOR ARRIVAL RESULT\b/im
-        },
-        {
-            label: 'internal completion contract',
-            pattern: /^\s*AUTHORITATIVE QUEST COMPLETION CONTRACT\b/im
-        }
-    ];
-
-    for (const signature of signatures) {
-        if (signature.pattern.test(text)) {
-            leaks.push(signature.label);
-        }
-    }
-
-    return leaks;
-}
-
-function warnAethermoorNarrationLeak(message, leaks) {
-    const metadata = getContext().chatMetadata;
-
-    /*
-     * SillyTavern may report the same reply through both received and
-     * rendered events. Deduplicate warnings in memory, never by saving
-     * a mechanics revision or consuming RNG.
-     */
-    if (metadata && typeof metadata === 'object') {
-        let warned = aethermoorNarrationWarnings.get(metadata);
-
-        if (!warned) {
-            warned = new Set();
-            aethermoorNarrationWarnings.set(metadata, warned);
-        }
-
-        const signature =
-            `${message.messageId ?? 'unknown'}:` +
-            worldHash(message.text);
-
-        if (warned.has(signature)) return;
-
-        warned.add(signature);
-
-        if (warned.size > 100) {
-            warned.delete(warned.values().next().value);
-        }
-    }
-
-    console.warn(
-        '[Aethermoor] Private engine context leaked into assistant reply',
-        {
-            messageId: message.messageId,
-            detected: leaks,
-            questEventsRejected: true
-        }
-    );
-
-    toastr.warning(
-        'Recognizable engine-instruction text appeared outside a code example. ' +
-        'This may be technical discussion or copied narration context; ' +
-        'inspect the reply before diagnosing a problem. ' +
-        'Discovery and delivery tags from this reply were ignored. ' +
-        'Saved mechanics were not undone or rerolled.',
-        'Aethermoor: Instruction-text match'
     );
 }
 
@@ -27824,7 +27462,9 @@ function registerAethermoorGenerationCleanup() {
                 handoffIds: aethermoorInjectedHandoff?.ids || []
             });
 
-            void processAethermoorAssistantEvents(data);
+            if (!aethermoorRoleplayHandoffsPaused) {
+                void processAethermoorAssistantEvents(data);
+            }
             const injected = aethermoorInjectedHandoff;
             if (!injected) {
                 return;

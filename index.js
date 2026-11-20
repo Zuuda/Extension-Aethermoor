@@ -26506,9 +26506,13 @@ globalThis.aethermoorMechanicsInterceptor =
                                 contextState.zone
                             }>{"key":"cosmetic name"}</AETHERMOOR:STOCK_NAMES>`,
                             'Replace the example JSON with ALL requested ' +
-                                'keys. Use the keys exactly. Names are ' +
-                                'cosmetic only: no numbers, HP, prices, ' +
-                                'tiers, stats, or mechanical claims.',
+                                'keys. Use the keys exactly. Give each item ' +
+                                'a distinct, evocative, locally grounded name ' +
+                                '(vary materials, craft styles, and motifs—do ' +
+                                'not repeat the same material prefix across ' +
+                                'every item). Names are cosmetic only: no ' +
+                                'numbers, HP, prices, tiers, stats, or ' +
+                                'mechanical claims.',
                             'Do not recite this request or delay the ' +
                                 'ordinary scene to discuss naming.'
                         ].join('\n')

@@ -17234,7 +17234,7 @@ function questDiscoveryContextPacket(quest, state) {
     }
     lines.push(
         '* **If the object is actually recovered or exposed, report:**',
-        `  `,
+        `<plan><AETHERMOOR:FOUND quest_item=${discovery.id}></plan>`,
         '* Keep the story in-world. Do not recite these instructions, ' +
           'tags, or extension mechanics to the players.'
     );
@@ -24417,6 +24417,7 @@ function updateCombatAbilityButtons(panel, state) {
     const used = state.encounter?.used || {};
     const potionUses =
         normalizeEncounterPotionUses(state.encounter);
+    const hasPotions = potionOptionsFor(state).length > 0;
 
     if (used.stun && combatSelections.qtik === 'stun') {
         combatSelections.qtik = 'fire_melee';
@@ -24431,14 +24432,14 @@ function updateCombatAbilityButtons(panel, state) {
     }
 
     if (
-        potionUses.qtik >= 4 &&
+        (!hasPotions || potionUses.qtik >= 4) &&
         combatSelections.qtik === 'drink'
     ) {
         combatSelections.qtik = 'fire_melee';
     }
 
     if (
-        potionUses.tansy >= 4 &&
+        (!hasPotions || potionUses.tansy >= 4) &&
         combatSelections.tansy === 'drink'
     ) {
         combatSelections.tansy = 'visor';
@@ -24456,14 +24457,16 @@ function updateCombatAbilityButtons(panel, state) {
             (group === 'qtik' && value === 'ice_patch' && used.icePatch) ||
             (group === 'tansy' && value === 'surge' && used.surge) ||
             (group === 'qtik' && value === 'drink' &&
-                potionUses.qtik >= 4) ||
+                (!hasPotions || potionUses.qtik >= 4)) ||
             (group === 'tansy' && value === 'drink' &&
-                potionUses.tansy >= 4);
+                (!hasPotions || potionUses.tansy >= 4));
 
         button.disabled = Boolean(exhausted);
         button.title = exhausted
             ? value === 'drink'
-                ? 'This character has used four potions this encounter'
+                ? (!hasPotions
+                    ? 'No potions in stock'
+                    : 'This character has used four potions this encounter')
                 : 'Already used in this encounter'
             : '';
 
@@ -25370,9 +25373,9 @@ async function openCombatPanel(inlineHost) {
             );
 
             const foeLabel = id => {
-                const index = result.summary?.encounter?.foes
-                    ?.findIndex(foe => foe.id === id) ?? -1;
-                return index >= 0 ? `Opponent ${index + 1}` : id;
+                const foes = result.summary?.encounter?.foes || [];
+                const index = foes.findIndex(foe => foe.id === id);
+                return index >= 0 ? combatFoeLabel(foes[index], index) : id;
             };
 
             aethermoorLastCombatLog = [

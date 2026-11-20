@@ -10208,18 +10208,17 @@ function resolveQuestSeed(test) {
         repTierAtOffer: rep.label,
     };
 
-        if (structureV2) {
-        quest.targetId = `quest-target-${quest.id}`;
+    quest.targetId = `quest-target-${quest.id}`;
 
-        for (const gate of quest.gatesData) {
-            if (gate.trigger === 'linked_combat') {
-                gate.linkedTargetId = quest.targetId;
-            }
+    for (const gate of quest.gatesData) {
+        if (gate.trigger === 'linked_combat') {
+            gate.linkedTargetId = quest.targetId;
         }
+    }
 
-        if (quest.currentGate?.trigger === 'linked_combat') {
-            quest.currentGate.linkedTargetId = quest.targetId;
-        }
+    if (quest.currentGate?.trigger === 'linked_combat') {
+        quest.currentGate.linkedTargetId = quest.targetId;
+    }
 
     quest.targetId = `quest-target-${quest.id}`;
 

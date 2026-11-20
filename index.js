@@ -2385,43 +2385,6 @@ function applyConsumableItem(state, item, recipient) {
             'new applications blocked for this turn.',
         potionsUsed: encounter.potionsUsed
     };
-
-        /*
-     * Stacking debuffs currently affect shared Crew mechanics rather
-     * than separate character status lists. Either protagonist can
-     * cleanse them, spending their own potion allowance.
-     *
-     * Stamp immunity with the current encounter turn instead of a
-     * decrementing duration. This covers all three exchanges and expires
-     * automatically when resolveTurn increments encounter.turn again.
-     * Repeated UI reads cannot extend the protection.
-     */
-    let stacksRemoved = Object.values(encounter.hexStacks || {})
-        .reduce((total, stacks) => total + Number(stacks), 0);
-
-    encounter.hexStacks = {};
-
-    for (const foe of encounter.foes) {
-        if (!['elite', 'boss'].includes(foe.role)) continue;
-
-        stacksRemoved += Number(foe.passiveStacks || 0);
-        foe.passiveStacks = 0;
-    }
-
-    encounter.debuffImmunityTurn = encounter.turn;
-
-    return {
-        item,
-        recipient,
-        effect: 'cleanse',
-        scope: 'crew',
-        stacksRemoved,
-        immunityTurn: encounter.turn,
-        note:
-            'All Hex and Elite/Boss passive stacks cleared; ' +
-            'new applications blocked for this turn.',
-        potionsUsed: encounter.potionsUsed
-    };
 }
 
 const ELITE_TELEGRAPHS = [

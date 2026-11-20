@@ -4481,10 +4481,17 @@ if (frontliners.length > 0) {
             packDrop: encounterRewards.packDrop
                 ? clone(encounterRewards.packDrop)
                 : null,
+            questGate: questGate ? clone(questGate) : null,
             levelUps: clone(levelUps),
             xpProgress: {
                 level: c.level,
                 xp: c.xp
+            },
+            postFightHp: {
+                qtik: c.qtik.hp,
+                qtikMax: finalStats.qtikMaxHp,
+                tansy: c.tansy.hp,
+                tansyMax: finalStats.tansyMaxHp
             },
             death: victoryDeath ? clone(victoryDeath) : null,
             narrativeTurns: clone(encounter.narrativeTurns || [])
@@ -5765,15 +5772,8 @@ function resolveArrivedRumors(stateInput) {
                 'genuine_unclaimed_quest_or_dungeon_hook';
 
         let offeredQuest = null;
-        let offerDeferred = false;
 
-               if (isQuestHook) {
-            /*
-             * An existing offer or accepted quest no longer defers this
-             * opportunity. Quest generation saves the new offer in the
-             * journal while preserving the compatibility-selected quest.
-             * The locked inquiry remains the one-off creation boundary.
-             */
+        if (isQuestHook) {
             const offered = resolveQuestSeed({
                 state,
                 inquiryId: leadId,
@@ -5790,26 +5790,24 @@ function resolveArrivedRumors(stateInput) {
             arrival = lead.arrivalResolution;
         }
 
-        if (!offerDeferred) {
-            lead.status = 'investigated';
-            lead.finding = arrival.finding;
+        lead.status = 'investigated';
+        lead.finding = arrival.finding;
 
-            recordCrewKnowledge(state, {
-                id: `knowledge-rumor-arrival-${lead.id}`,
-                kind: 'rumor_resolution',
-                knowledgeType: 'observation',
-                certainty: 'engine_established',
-                summary:
-                    `The crew learned that this rumor resolved as ` +
-                    `${arrival.finding.replaceAll('_', ' ')}.`,
-                source: {
-                    id: lead.id,
-                    type: 'rumor'
-                },
-                learnedAtLocationId: place.id,
-                learnedAtZone: arrival.zone
-            });
-        }
+        recordCrewKnowledge(state, {
+            id: `knowledge-rumor-arrival-${lead.id}`,
+            kind: 'rumor_resolution',
+            knowledgeType: 'observation',
+            certainty: 'engine_established',
+            summary:
+                `The crew learned that this rumor resolved as ` +
+                `${arrival.finding.replaceAll('_', ' ')}.`,
+            source: {
+                id: lead.id,
+                type: 'rumor'
+            },
+            learnedAtLocationId: place.id,
+            learnedAtZone: arrival.zone
+        });
 
         const shouldAnnounce =
             arrival.announced !== true ||
@@ -5826,13 +5824,6 @@ function resolveArrivedRumors(stateInput) {
             lines.push(
                 questOfferNarrationPacket(offeredQuest),
                 'The offer remains unaccepted. Leave acceptance to the player.'
-            );
-        } else if (offerDeferred) {
-            lines.push(
-                'This rumor has a genuine hook, but its quest offer is pending',
-                'because another quest or offer already occupies the quest slot.',
-                'Do not invent the pending quest, its requirements, or rewards.',
-                'Do not claim that the destination is empty or exhausted.'
             );
         } else if (
             arrival.finding === 'travelogue_flub_benign_oddity'
@@ -5873,9 +5864,9 @@ function resolveArrivedRumors(stateInput) {
             leadId,
             destinationId: place.id,
             finding: arrival.finding,
-            offerDeferred,
             questId: offeredQuest?.id || null
         });
+
     }
 
     return { state, packets, resolutions };
@@ -6304,7 +6295,12 @@ function resolveInstanceChestOpen(test) {
         };
     }
 
-    const loot = rollChestLoot(state, instance.zone, room.chest.id);
+    const loot = rollChestLoot(
+        state,
+        instance.zone,
+        room.chest.id,
+        'instance_chest'
+    );
 
     room.chest.opened = true;
     room.chest.loot = clone(loot);
@@ -6822,7 +6818,7 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
  * future instance chests. Applies the rolled reward immediately to saved
  * state so no GM-to-extension tag is required.
  */
-function rollChestLoot(state, zone, sourceId) {
+function rollChestLoot(state, zone, sourceId, source = 'hidden_cache') {
     assert(ZONES[zone], `Unknown chest loot zone: ${zone}`);
 
     state.inventory ||= {};
@@ -6924,7 +6920,7 @@ function rollChestLoot(state, zone, sourceId) {
     const generated = rollLootFromState(state, 'wild', zone);
     const item = {
         ...generated.item,
-        acquiredFrom: 'hidden_cache',
+        acquiredFrom: source,
         acquiredAtStep: sourceId,
         bound: false
     };
@@ -12403,16 +12399,6 @@ function resolveVendorSelection(test) {
         'Trade selection requires presence at the open shop'
     );
 
-    if (test.action === 'discard') {
-        state.vendorMenu.pendingBasket = null;
-
-        return {
-            ok: true,
-            action: 'discard',
-            state
-        };
-    }
-
     assert(
         test.action === 'stage',
         `Unsupported vendor selection action: ${test.action}`
@@ -14172,70 +14158,6 @@ function resolveBossGearCheck(test) {
         effectiveCrewAtk,
         gearCheckFailed: effectiveCrewAtk <= boss.def,
         combatAllowed: effectiveCrewAtk > boss.def,
-        state
-    };
-}
-
-function resolveFleeRoll(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'flee requires state'
-    );
-
-    const state = clone(test.state);
-    const encounter = state.encounter;
-
-    assert(
-        encounter &&
-        encounter.status === 'active',
-        'flee requires state.encounter to be active'
-    );
-
-    const crewStats =
-        derived(state.crew);
-
-    const rollValue =
-        roll(state, 6);
-
-    const lukBonus =
-        Math.min(
-            3,
-            Math.floor(crewStats.luk / 5)
-        );
-
-    const total =
-        rollValue + lukBonus;
-
-    const threshold = 6;
-    const success = total >= threshold;
-
-    encounter.fleeAttempts =
-        Number(encounter.fleeAttempts || 0) + 1;
-
-    if (success) {
-        encounter.status = 'fled';
-        encounter.fledOnAttempt =
-            encounter.fleeAttempts;
-    }
-
-    return {
-        ok: true,
-        action: 'flee',
-        roll: rollValue,
-        lukBonus,
-        total,
-        threshold,
-        success,
-        enemyResponseResolved: false,
-        note: success
-            ? 'Encounter fled successfully'
-            : 'Flee failed',
-        rewards: {
-            xp: 0,
-            silver: 0,
-            loot: []
-        },
         state
     };
 }
@@ -16615,32 +16537,16 @@ function resolveBatch(args) {
                     );
 
                     result = resolveQuestAction({
-
                         state,
                         questId: quest.id,
                         action: 'complete',
                         objectiveCompleted: true,
                         completionEvidence:
-                            quest.turnIn.discoveryId
-                                ? `Delivered ${
-                                    quest.discoveries?.find(
-                                        item =>
-                                            item.id ===
-                                            quest.turnIn.discoveryId
-                                    )?.name ||
-                                    quest.facts?.cargo ||
-                                    'the quest cargo'
-                                } to ${quest.turnIn.recipient}.`
-                                : quest.structureV2?.family ===
-                                    'rescue_person'
-                                    ? `Returned ${
-                                        quest.facts.person
-                                    } safely to ${
-                                        quest.turnIn.recipient
-                                    }.`
-                                    : `Reported the completed objective to ${
-                                        quest.turnIn.recipient
-                                    }.`
+                            `Delivered ${
+                                cargo.name ||
+                                quest.facts?.cargo ||
+                                'the quest cargo'
+                            } to ${quest.turnIn.recipient}.`
                     });
 
                     result.action = 'quest_delivery';
@@ -18441,6 +18347,15 @@ async function runStoredMechanic(args) {
 
         if (recovery) {
             caseResult.outOfCombatRecovery = recovery;
+
+            if (
+                nextState.encounter?.victoryReceipt?.encounterId ===
+                nextState.encounter?.id &&
+                nextState.encounter.victoryReceipt.postFightHp
+            ) {
+                nextState.encounter.victoryReceipt.postFightHp.qtik =
+                    nextState.crew.qtik.hp;
+            }
         }
 
         caseResult.state = nextState;
@@ -19481,19 +19396,15 @@ function registerTools() {
                                     'list',
                                     'settle',
                                     'stock',
-                                    'open',
                                     'enter',
                                     'move',
                                     'exit',
                                     'theme',
                                     'open_chest',
-                                    'stage',
-                                    'discard',
                                     'commit',
                                     'buy',
                                     'spend',
                                     'earn',
-                                    'paid',
                                     'sell',
                                     'grant',
                                     'use',
@@ -23255,7 +23166,19 @@ function combatRecapPrompt(receipt) {
         receipt.packDrop?.result ===
         'diegetic_quest_breadcrumb'
     ) {
-        lines.push('A quest breadcrumb was found.');
+        if (receipt.packDrop.breadcrumbId) {
+            lines.push(
+                'The cleared pack left a visible quest breadcrumb.',
+                `Breadcrumb reference: ${receipt.packDrop.breadcrumbId}.`,
+                'Give it a modest, setting-fitting physical form. ' +
+                    'Do not invent its eventual quest, sponsor, objective, ' +
+                    'destination, or reward.',
+                'Finding it is not the decision to pursue it. Leave ' +
+                    'that choice to the protagonists.'
+            );
+        } else {
+            lines.push('A quest breadcrumb was found.');
+        }
     }
 
     if (receipt.xpProgress) {
@@ -23272,7 +23195,45 @@ function combatRecapPrompt(receipt) {
         }
     }
 
+    if (receipt.postFightHp) {
+        lines.push(
+            `After the fight: Q'tik ${receipt.postFightHp.qtik}/` +
+                `${receipt.postFightHp.qtikMax} HP; ` +
+                `Tansy ${receipt.postFightHp.tansy}/` +
+                `${receipt.postFightHp.tansyMax} HP.`
+        );
+    }
+
+    if (receipt.questGate) {
+        const questGate = receipt.questGate;
+        lines.push(
+            `Quest gate ${questGate.completed.step} completed` +
+                (questGate.questId
+                    ? ` for quest ${questGate.questId}`
+                    : '') +
+                '.',
+            questGate.next
+                ? `Next objective: ${questGate.next.objective}`
+                : questGate.questCompletion
+                    ? 'The System completed this quest and applied its rewards.'
+                    : 'The missing person is free; bring them safely to the origin settlement.'
+        );
+
+        if (questGate.questCompletion) {
+            const rewards = questGate.questCompletion.rewards;
+            lines.push(
+                `Quest rewards applied: ${rewards.xp} XP, ` +
+                    `${rewards.silver} silver, ` +
+                    `${rewards.repSteps} reputation steps.`,
+                ...rewards.loot.map(item =>
+                    `System salvage received: ${item.name}.`
+                )
+            );
+        }
+    }
+
     return lines.join('\n');
+
 }
 
 async function copyCombatRecapPrompt(receipt) {
@@ -26674,10 +26635,6 @@ function extractAethermoorQuestEvents(text) {
             index: match.index
         });
     }
-
-    const searchedFoundPositions = events
-        .filter(event => event.event !== 'delivered')
-        .map(event => event.index);
 
     const deliveryEvents = events
         .filter(event => event.event === 'delivered')

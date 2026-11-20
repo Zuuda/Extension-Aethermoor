@@ -3011,10 +3011,9 @@ const summonDamageMultiplier =
             return 0;
         }
 
-        return c.weasels.active *
+        return 2 * c.weasels.active *
             summonDamageMultiplier;
     }
-
 
     encounter.used ||= { stun: false, icePatch: false, surge: false };
     encounter.used.surge ??= false;
@@ -8064,51 +8063,25 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Implement this as one shared naming path after inn services, not
  *   separate GM-naming handshakes for each shop.
  *
- * IMPLEMENTED — BETA PENDING: Diegetic inn services
- * - Flat-price meals (1/3/5s), rooms (1/2/5s), and hot water (2s)
- *   establish ordinary living costs without zone scaling.
- * - ASK_INN opens a movable services window. Selection stages a quote;
- *   only fictional agreement and INN_AGREED deduct silver once.
- * - Inn purchases currently grant no buffs, healing, inventory items,
- *   or automatic passage of time. Verify staging, payment, and replay.
+ * DONE — Direct-confirm settlement shops (Blacksmith, Herbalist, Inn)
+ * - Opening a shop from the Shops tab is read-only; clicking Confirm
+ *   validates and commits the exchange immediately without GM tags or
+ *   staged quotes. Shop transactions stay silent while the fiction handles
+ *   the scene.
+ * - Blacksmith commits sales and purchases atomically; purchased gear
+ *   enters Bag Reserves unbound, and selling worn gear updates stats/HP.
+ * - Herbalist trades zone-grade healing potions and Cleansing Tonics;
+ *   owned bottles retain their purchase-zone healing grade.
+ * - Inn Services tracks flat-price meals (1/3/5s), rooms (1/2/5s), and
+ *   hot water (2s) as expenses only; buff food remains future work.
  *
- * IMPLEMENTED — BETA PENDING: Incidental expense accounting
- * - For expenses outside extension shops, EXPENSE_PAID reports silver
- *   already paid in the fiction. A proposed price is not a payment.
- * - The extension deducts the reported amount once and retains an internal
- *   receipt for duplicate protection. It sends no receipt to the narrator:
- *   the payment has already been described.
- * - Shop transactions remain on their separate engine-owned paths.
- * - Verify duplicate notifications, insufficient saved silver, and
- *   multiple payments reported in one assistant reply during beta.
- *
- * IMPLEMENTED — BETA PENDING: Diegetic vendor trade
- * - ASK_WARES opens the extension-rendered, two-sided trade window.
- * - Clicks select stock variants, Bag Reserves, or worn gear. Close stages
- *   a quote; Discard clears it. Neither action transfers possessions.
- * - After fictional agreement, TRADE_AGREED revalidates the complete
- *   basket and commits sales and purchases atomically. Sale proceeds may
- *   fund purchases; the final purse cannot be negative.
- * - Sold worn gear is removed and derived stats/HP are updated by the
- *   engine. Purchased gear enters Bag Reserves unbound; equipping remains
- *   a separate engine action.
- * - A saved receipt prevents duplicate assistant notifications from
- *   repeating the trade. Verify staging, stale-basket rejection, mixed
- *   purchases and sales, worn-gear HP changes, and replay during beta.
- *
- * IMPLEMENTED — BETA PENDING: Diegetic herbalist trade
- *
- * IMPLEMENTED — BETA PENDING: Inventory readout and basic item actions
- * - Inventory displays saved potions, Bag Reserves, and worn gear.
- * - Potion labels carry their authoritative healing value; redundant
- *   explanatory text is omitted.
- * - Eligible Bag Reserve gear can be equipped through the existing engine
- *   action. Healing potions can be used outside combat on a selected
- *   protagonist. Cleansing Tonic remains combat-only for now.
- * - Equip and outside-combat healing now queue the saved result for the
- *   next GM reply; UI actions do not require an assistant protocol tag.
- * - Verify equip replacement, HP/stat changes, potion use, and duplicate
- *   button events during beta.
+ * DONE — Inventory, Purse & Curios
+ * - Inventory provides direct Purse controls (− Spend / + Earn) for
+ *   fictional meals, tips, sundries, and custom trades.
+ * - Displays saved potions (with HP values), Valuables & Curios (with
+ *   Sell / Remove), Bag Reserves (Equip), and worn gear.
+ * - Equip and outside-combat healing queue the saved result for the next
+ *   GM reply; UI actions do not require an assistant protocol tag.
  *
  * PLANNED — Currency presentation
  * - Centralize silver formatting before introducing denominations such as
@@ -8122,11 +8095,6 @@ function rollQuestTerminalThreat(state, rank, zone) {
  *   eventually purchases.
  * - Keep listing settlement and NPC/vendor purchases as separate saved
  *   mechanics until their handshake contracts are authored.
- * - Owned bottles, including older grades, may be sold. Quantities show
- *   projected silver; closing stages but does not exchange anything.
- * - Fictional agreement commits the revalidated buy/sell basket once.
- *   Purchased bottles retain their saved healing grade. Test the full
- *   handshake, affordability, mixed exchange, and duplicate receipt in beta.
  *
  * PARTIAL — Migration and validation
  * - Existing saves receive world, journey, potion, and quest migrations.
@@ -8202,9 +8170,9 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - Verify duplicate notifications, insufficiently free scenes, normal-pack
  *   requests, Elite requests, and narration after the combat receipt.
  * 
- * - Travel rolls 98–100 resolve as quiet travel until significant discoveries
- *   and rare events have authored saved outcomes and narration contracts.
- *   Do not present an undefined roll as an invitation to invent an event.
+ * - Travel rolls 58–65 resolve as Hidden Caches (weasel finds) with immediate
+ *   loot commit and a one-way GM handoff. Rolls 98–100 discover rare one-time
+ *   Hidden Instances (3–5 rooms, 50/50 Elite Lair or Chest Vault).
  * - Include encounter ID, journey progress, quest gate, objective resolution,
  *   delivery readiness, and reward status where relevant.
  * - Prevent prose from implying combat, discovery, arrival, or reward events
@@ -8532,11 +8500,8 @@ function rollQuestTerminalThreat(state, rank, zone) {
  * - A later-zone continuation needs its own local site, appropriate
  *   difficulty, and satisfying objective. Earlier clues may enrich it
  *   but must not be required homework for players who missed them.
- * - Travel roll 97 remains social opportunity; 98–100 currently resolve
- *   as quiet travel. A possible future roll-100 result is a saved,
- *   exceptional current-zone location, such as a one-time dungeon.
- * - Do not enable that result until its destination and arrival contracts
- *   exist. Do not impose a per-zone cap before play shows one is needed.
+ * - Travel rolls 98–100 discover rare one-time Hidden Instances in the
+ *   current zone without a per-zone cap.
  *
  * DEFERRED UNTIL CORE FLOWS ARE STABLE
  *
@@ -12345,10 +12310,9 @@ function resolveTradeAction(test) {
 }
 
 /*
- * A staged trade is a quote, not a transaction. Preserve exactly which
- * stock options and owned items were selected, along with a snapshot of
- * the owned items. A later commit must revalidate everything against
- * current state; a saved quote is never authority to grant an item.
+ * Validates and prices a vendor trade basket against current state.
+ * Called internally by resolveVendorTradeCommit() before mutating gear
+ * or silver.
  */
 function resolveVendorSelection(test) {
     assert(
@@ -13214,10 +13178,9 @@ function normalizeConsumableInventory(inventory) {
 }
 
 /*
- * The herbalist has its own staged basket. Selection is not payment.
- * Prices, ownership, and funds are recalculated at agreement time.
- * A message-derived receipt prevents a duplicate assistant notification
- * from applying the exchange twice. No potion is equipped or used here.
+ * Direct-confirm herbalist exchange. Validates quantities, ownership,
+ * and funds on one clone, then commits sales, purchases, and silver
+ * atomically. No potion is equipped or used here.
  */
 function resolveHerbalistAction(test) {
     assert(
@@ -19365,7 +19328,6 @@ function registerTools() {
                                     'spend',
                                     'earn',
                                     'sell',
-                                    'grant',
                                     'use',
                                     'list_food',
                                     'apply',
@@ -19429,7 +19391,7 @@ function registerTools() {
                             basket: {
                                 type: 'object',
                                 description:
-                                    'Engine-validated pending vendor selection; not a purchase'
+                                    'Shop trade selection submitted for direct commit'
                             },
 
                             names: {
@@ -21513,10 +21475,8 @@ function renderCrewKnowledge(state) {
 }
 
 /*
- * A shop visit presents both sides of a possible exchange. Clicks are
- * local UI selection only. Close stages a quote; Discard cancels it.
- * Neither action commits a trade. The player must agree in the fiction
- * before a later engine operation may exchange money or gear.
+ * Two-sided Blacksmith trade window. Clicks are local UI selection only;
+ * Cancel closes without changes, and Confirm commits the trade immediately.
  */
 async function openAethermoorShopWindow() {
     addAethermoorPanelStyles();
@@ -21918,9 +21878,9 @@ async function openAethermoorShopWindow() {
 }
 
 /*
- * Potion quantities and prices come from consumableDefinition().
- * Button clicks alter only the projected basket. Close stages it;
- * the fictional agreement tag is required for the actual exchange.
+ * Herbalist trade window. Potion quantities and prices come from
+ * consumableDefinition(). Cancel closes without changes; Confirm commits
+ * the exchange immediately.
  */
 async function openAethermoorHerbalistWindow() {
     addAethermoorPanelStyles();
@@ -22211,8 +22171,8 @@ async function openAethermoorHerbalistWindow() {
 }
 
 /*
- * Inn selections are UI-local until Close stages a quote. Closing does
- * not deduct silver. The narrator's later agreement report commits it.
+ * Inn Services window. Selections are UI-local; Cancel closes without
+ * changes, and Confirm deducts silver immediately.
  */
 async function openAethermoorInnWindow() {
     addAethermoorPanelStyles();
@@ -22488,10 +22448,9 @@ async function openAethermoorInnWindow() {
 }
 
 /*
- * Inventory is a read-only view of this chat's saved mechanics state.
- * Rendering cannot consume potions, equip gear, change silver, or reopen
- * a shop automatically. Shop reopen controls require the crew to remain
- * at the settlement where the corresponding window was opened.
+ * Inventory renders saved mechanics state: Purse controls, Potions &
+ * Tonics, Valuables & Curios, Bag Reserves, and Worn Gear. Rendering
+ * itself is strictly read-only.
  */
 async function renderInventoryTab(host) {
     let snapshot;
@@ -22989,11 +22948,9 @@ async function renderInventoryTab(host) {
 }
 
 /*
- * Shops is a manual opening path, not a second trade system.
- * The existing open operations establish the current settlement's menu;
- * the existing windows still stage selections, and the existing agreement
- * events still commit them. A stable UI reference avoids depending on an
- * assistant message while preserving each open operation's idempotency.
+ * Shops opens the settlement's direct-confirm windows (Blacksmith,
+ * Herbalist, Inn Services). Opening any window is read-only; clicking
+ * Confirm inside the window commits the exchange immediately.
  */
 async function renderShopsTab(host) {
     let snapshot;
@@ -27585,11 +27542,19 @@ globalThis.aethermoorMechanicsInterceptor =
          * saved contact results so a resumed conversation does not depend
          * on a consumed one-use handoff or long-term LLM memory.
          */
-        if (contextState) {
+        if (
+            contextState &&
+            !contextState.currentJourney &&
+            !contextState.activeInstanceId &&
+            !['active', 'spotted'].includes(
+                contextState.encounter?.status
+            )
+        ) {
             const settlement = Object.values(
                 contextState.world?.settlements || {}
             ).find(entry =>
-                entry.locationId === contextState.currentLocationId
+                entry.locationId === contextState.currentLocationId &&
+                entry.zone === contextState.zone
             );
 
             if (settlement) {

@@ -1474,13 +1474,10 @@ function validate(state) {
                 `Missing guaranteed gear for ${foe.id}`
             );
 
-            const expectedRawStat =
-                ZONES[encounter.zone].base +
-                (
-                    foe.role === 'elite'
-                        ? 1
-                        : 5
-                );
+            const expectedRawStat = lootStatFromRarity(
+                encounter.zone,
+                foe.role === 'elite' ? 'uncommon' : 'epic'
+            );
 
             assert(
                 gear.rawStat === expectedRawStat,
@@ -1580,13 +1577,10 @@ function validate(state) {
             `${encounter.type} guaranteed gear metadata is required`
         );
 
-        const expectedRawStat =
-            ZONES[encounter.zone].base +
-            (
-                encounter.type === 'elite'
-                    ? 1
-                    : 5
-            );
+        const expectedRawStat = lootStatFromRarity(
+            encounter.zone,
+            encounter.type === 'elite' ? 'uncommon' : 'epic'
+        );
 
         assert(
             gear.rawStat === expectedRawStat,
@@ -1748,6 +1742,32 @@ function systemLogCardHtml({ accent, heading, rightHtml = '', bodyHtml, buttons 
     `</div>`;
 }
 
+function formatGearLabel(item) {
+    if (!item || typeof item !== 'object') return 'Unnamed gear';
+
+    const rawName = String(item.name || 'Unnamed gear').trim();
+    const baseName = rawName
+        .replace(/^(?:Tansy|Q['’]tik)\s+/i, '')
+        .replace(/\s*\(Stat\s+\d+\)\s*$/i, '')
+        .trim() || rawName;
+
+    const ownerLabel = item.classRestricted
+        ? 'Off-Class'
+        : item.owner === 'qtik'
+            ? "Q'tik"
+            : item.owner === 'tansy'
+                ? 'Tansy'
+                : null;
+
+    const stat = item.rawStat ?? item.stat;
+    const meta = [
+        ownerLabel,
+        Number.isInteger(stat) && stat > 0 ? `Stat ${stat}` : null
+    ].filter(Boolean);
+
+    return meta.length ? `${baseName} (${meta.join(' · ')})` : baseName;
+}
+
 function contractOfferedCardHtml(quest) {
     const salvage = quest.salvage || {};
     const salvageColor = salvage.rarityColor || '#ffffff';
@@ -1760,7 +1780,7 @@ function contractOfferedCardHtml(quest) {
         bodyHtml:
             `<div><b style="color:#ffffff;">${escapeSystemLogHtml(quest.title)}</b> — ${escapeSystemLogHtml(quest.currentGate?.objective || '')}</div>` +
             `<div style="margin-top:4px;"><b>Payout:</b> <b style="color:#4ade80;">${quest.payout.xp} XP</b> | <b style="color:#ffd166;">${quest.payout.silver}s</b> | <b style="color:#38bdf8;">+${quest.payout.repSteps} Rep</b></div>` +
-            `<div><b>Salvage:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(salvage.name || 'Salvage')}</b> <span style="color:#9caab8;">(${escapeSystemLogHtml(salvage.rarity || 'Common')})</span></div>`,
+            `<div><b>Salvage:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(salvage.name ? formatGearLabel(salvage) : 'Salvage')}</b></div>`,
         buttons: ['accept', 'decline', 'close']
     });
 }
@@ -1769,7 +1789,7 @@ function contractCompleteCardHtml({ title, rank = null, rewards }) {
     const salvage = (rewards?.loot || [])[0] || null;
     const salvageColor = salvage?.rarityColor || '#ffffff';
     const salvageHtml = salvage
-        ? `<div style="margin-top:4px;"><b style="color:#e5a93c;">Salvage Awarded:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(salvage.name)}</b> <span style="color:#9caab8;">(${escapeSystemLogHtml(salvage.rarity || 'Common')}${Number.isInteger(salvage.sellValue) ? ` • Pawn: ${salvage.sellValue}s` : ''})</span></div>`
+        ? `<div style="margin-top:4px;"><b style="color:#e5a93c;">Salvage Awarded:</b> <b style="color:${salvageColor};">${escapeSystemLogHtml(formatGearLabel(salvage))}</b>${Number.isInteger(salvage.sellValue) ? ` <span style="color:#9caab8;">(Pawn: ${salvage.sellValue}s)</span>` : ''}</div>`
         : '';
 
     return systemLogCardHtml({
@@ -1884,8 +1904,8 @@ function acquiredItemsCardHtml(entries) {
 
         return `<div style="${divider}">` +
             `<div style="display:flex; justify-content:space-between; gap:8px;">` +
-                `<b style="color:${color};">${escapeSystemLogHtml(item.name)}</b>` +
-                `<span style="color:#6e7f91; white-space:nowrap;">${escapeSystemLogHtml(slot)} — ${escapeSystemLogHtml(item.rarity || 'Common')}</span>` +
+                `<b style="color:${color};">${escapeSystemLogHtml(formatGearLabel(item))}</b>` +
+                `<span style="color:#6e7f91; white-space:nowrap;">${escapeSystemLogHtml(slot)}</span>` +
             `</div>` +
             `<div>${formatAcquiredBonusHtml(item)}${pawn}</div>` +
         `</div>`;
@@ -5265,21 +5285,14 @@ const eliteChance =
                 .map(foe => ({
                     foeId: foe.id,
                     source: foe.role,
-                    rawStat:
-                        ZONES[test.zone].base +
-                        (
-                            foe.role === 'elite'
-                                ? 1
-                                : 5
-                        ),
+                    rawStat: lootStatFromRarity(
+                        test.zone,
+                        foe.role === 'elite' ? 'uncommon' : 'epic'
+                    ),
                     pawnSilver:
-                        2 * (
-                            ZONES[test.zone].base +
-                            (
-                                foe.role === 'elite'
-                                    ? 1
-                                    : 5
-                            )
+                        2 * lootStatFromRarity(
+                            test.zone,
+                            foe.role === 'elite' ? 'uncommon' : 'epic'
                         )
                 }))
         };
@@ -5431,16 +5444,10 @@ const eliteChance =
                     : undefined
         };
 
-        const zoneBase =
-            ZONES[test.zone].base;
-
-        const rawStat =
-            zoneBase +
-            (
-                kind === 'elite'
-                    ? 1
-                    : 5
-            );
+        const rawStat = lootStatFromRarity(
+            test.zone,
+            kind === 'elite' ? 'uncommon' : 'epic'
+        );
 
         const baseKillXp =
             mobStats(level, kind).xpBase;
@@ -7671,7 +7678,6 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
         const zone = zoneNumber(key);
         if (zone === null) return undefined;
 
-        const base = ZONES[zone].base;
         const silverUnit = 10 * zone - 4;
 
         function reward(
@@ -7691,13 +7697,12 @@ const QUEST_REWARD_TABLES = new Proxy({}, {
         }
 
         return {
-            F: reward('F', 1, 1, 'common', base),
-            E: reward('E', 1.5, 1, 'common', base),
-            D: reward('D', 3, 2, 'uncommon', base + 1),
-            C: reward('C', 5, 2, 'uncommon', base + 1),
-            B: reward('B', 9, 2, 'rare', base + 3)
+            F: reward('F', 1, 1, 'common', lootStatFromRarity(zone, 'common')),
+            E: reward('E', 1.5, 1, 'common', lootStatFromRarity(zone, 'common')),
+            D: reward('D', 3, 2, 'uncommon', lootStatFromRarity(zone, 'uncommon')),
+            C: reward('C', 5, 2, 'uncommon', lootStatFromRarity(zone, 'uncommon')),
+            B: reward('B', 9, 2, 'rare', lootStatFromRarity(zone, 'rare'))
         };
-
     }
 });
 
@@ -7779,7 +7784,7 @@ function normalizeQuestRepTier(value) {
 }
 
 
-function makeQuestSalvage(zone, slotRoll, row) {
+function makeQuestSalvage(state, zone, slotRoll, row) {
     int(slotRoll, 'salvageSlotRoll', 1);
 
     assert(
@@ -7813,18 +7818,19 @@ function makeQuestSalvage(zone, slotRoll, row) {
         ? ` ${slot.variant[0].toUpperCase()}${slot.variant.slice(1)}`
         : '';
 
-    const ownerName =
-        slot.owner === 'qtik'
-            ? "Q'tik"
-            : 'Tansy';
-
     const stat =
         row.salvageStat;
 
+    const fallbackName =
+        `${material}${variantName} ${slotNames[slot.slot]}`;
+
     return {
-        name:
-            `${ownerName} ${material}${variantName} ` +
-            `${slotNames[slot.slot]} (Stat ${stat})`,
+        name: cosmeticStockName(
+            state,
+            gearCosmeticStockKey(slot.owner, slot.slot, slot.variant),
+            fallbackName,
+            zone
+        ),
         owner: slot.owner,
         slot: slot.slot,
         variant: slot.variant,
@@ -9375,6 +9381,7 @@ function resolveQuestSeed(test) {
 
     const salvage =
         makeQuestSalvage(
+            state,
             zone,
             salvageSlotRoll,
             row
@@ -12982,9 +12989,9 @@ function resolveStockNames(test) {
     };
 }
 
-function cosmeticStockName(state, key, fallback) {
+function cosmeticStockName(state, key, fallback, zone = state?.zone) {
     const name =
-        state.cosmeticStockNames?.[state.zone]?.[key];
+        state?.cosmeticStockNames?.[zone]?.[key];
 
     return typeof name === 'string' && name.trim().length > 0
         ? name
@@ -17933,10 +17940,18 @@ function lootStatFromRarity(zone, rarity) {
     const base = ZONES[zone].base;
 
     if (rarity === 'common') return base;
-    if (rarity === 'uncommon') return base + 1;
-    if (rarity === 'rare') return base + 3;
-    if (rarity === 'epic') return base + 5;
-    if (rarity === 'legendary') return base + 8;
+    if (rarity === 'uncommon') {
+        return Math.max(base + 1, Math.round(base * 1.25));
+    }
+    if (rarity === 'rare') {
+        return Math.max(base + 3, Math.round(base * 1.45));
+    }
+    if (rarity === 'epic') {
+        return Math.max(base + 5, Math.round(base * 1.7));
+    }
+    if (rarity === 'legendary') {
+        return Math.max(base + 8, Math.round(base * 2));
+    }
 
     throw new Error(`Unsupported loot rarity: ${rarity}`);
 }
@@ -17976,14 +17991,10 @@ function lootBonus(owner, slot, variant, stat) {
     return result;
 }
 
-function lootItemName(material, loot, stat) {
+function lootItemName(material, loot) {
     if (!loot.usable) {
         return `${material} ${loot.restriction}`;
     }
-
-    const ownerName = loot.owner === 'qtik'
-        ? "Q'tik"
-        : 'Tansy';
 
     const variantName = loot.variant
         ? ` ${loot.variant[0].toUpperCase()}${loot.variant.slice(1)}`
@@ -17994,15 +18005,14 @@ function lootItemName(material, loot, stat) {
         gloves: 'Bracers',
         chest: 'Chest',
         trousers: 'Trousers',
-        ring1: 'Band',
+        ring1: 'Ring',
         neck: 'Necklace',
         boots: 'Boots',
         amulet: 'Amulet',
         wristCuffs: 'Wrist Cuffs'
     };
 
-    return `${ownerName} ${material}${variantName} ` +
-        `${slotNames[loot.slot]} (Stat ${stat})`;
+    return `${material}${variantName} ${slotNames[loot.slot]}`;
 }
 
 function rollLootFromState(
@@ -18027,7 +18037,7 @@ function rollLootFromState(
             source,
             slotRoll,
             rarityRoll
-        }),
+        }, state),
         rolls: { slotRoll, rarityRoll }
     };
 }
@@ -18106,7 +18116,7 @@ function claimLockedLoot(test) {
     };
 }
 
-function resolveLootSeed(test) {
+function resolveLootSeed(test, state = null) {
     assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
 
     assert(
@@ -18135,13 +18145,21 @@ function resolveLootSeed(test) {
 
     const rarityInfo = LOOT_RARITY_INFO[rarity];
     const rawStat = lootStatFromRarity(test.zone, rarity);
+    const fallbackName = lootItemName(
+        ZONE_LOOT_MATERIALS[test.zone],
+        loot
+    );
 
     const item = {
-        name: lootItemName(
-            ZONE_LOOT_MATERIALS[test.zone],
-            loot,
-            rawStat
-        ),
+        name: loot.usable && state
+            ? cosmeticStockName(
+                state,
+                gearCosmeticStockKey(loot.owner, loot.slot, loot.variant),
+                fallbackName,
+                test.zone
+            )
+            : fallbackName,
+
         source: test.source,
         slot: loot.slot,
         owner: loot.owner,
@@ -19269,8 +19287,7 @@ function showAethermoorContractProgress(notice) {
             .map(([key, value]) => `+${value} ${bonusLabels[key] || key}`)
             .join(', ');
         salvage.textContent =
-            `System salvage: ${quest.salvage.name} ` +
-            `(${quest.salvage.rarity})` +
+            `System salvage: ${formatGearLabel(quest.salvage)}` +
             (bonusText ? ` — ${bonusText}` : '');
         popup.appendChild(salvage);
     }
@@ -19398,8 +19415,7 @@ async function showAethermoorContractOffer(
 
     const item = document.createElement('b');
     item.style.color = quest.salvage.rarityColor || '#d0d7de';
-    item.textContent =
-        `${quest.salvage.name} (${quest.salvage.rarity})`;
+    item.textContent = formatGearLabel(quest.salvage);
 
     const bonuses = Object.entries(quest.salvage.bonus || {})
         .filter(([, value]) => Number(value) > 0)
@@ -21534,14 +21550,13 @@ async function renderInventoryTab(host) {
         const name = document.createElement('div');
         name.className =
             `aethermoor-vendor-name ${rarityClass(item)}`;
-        name.textContent =
-            item.name || 'Unnamed gear';
+        name.textContent = formatGearLabel(item);
 
         const detail = document.createElement('div');
         detail.className = 'aethermoor-vendor-detail';
         detail.textContent =
-            `Stat ${item.rawStat ?? item.stat ?? 'unknown'} · ` +
             `${item.bound ? 'Bound' : 'Unbound'}`;
+
         main.append(name, detail);
 
         const comparison = itemComparison(item);
@@ -21626,12 +21641,11 @@ async function renderInventoryTab(host) {
             const name = document.createElement('div');
             name.className =
                 `aethermoor-vendor-name ${rarityClass(item)}`;
-            name.textContent = item.name || 'Unnamed gear';
+            name.textContent = formatGearLabel(item);
 
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
-            detail.textContent =
-                `${slot} · Stat ${item.stat ?? item.rawStat}`;
+            detail.textContent = slot;
 
             main.append(name, detail);
             row.appendChild(main);
@@ -26227,9 +26241,6 @@ globalThis.aethermoorMechanicsInterceptor =
             handoffIds: entries.map(entry => entry.id),
             text: message.mes
         });
-
-        const lastUserIndex = findLastUserMessage(chat);
-
         chat.splice(
             lastUserIndex >= 0
                 ? lastUserIndex + 1

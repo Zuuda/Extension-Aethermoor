@@ -23154,7 +23154,26 @@ function combatRecapPrompt(receipt) {
         }
     }
 
-if (receipt.postFightHp) {
+    if (receipt.death) {
+        const fallenNames = (receipt.death.fallen || [])
+            .map(owner => (owner === 'qtik' ? "Q'tik" : 'Tansy'))
+            .join(' and ');
+
+        lines.push(
+            `${fallenNames} fell during the fight (${receipt.death.xpLost} XP death penalty applied) ` +
+                'and respawned at the stone once the fight ended.'
+        );
+    }
+
+    if (receipt.postFightHp) {
+        lines.push(
+            `After the fight: Q'tik ${receipt.postFightHp.qtik}/` +
+                `${receipt.postFightHp.qtikMax} HP; ` +
+                `Tansy ${receipt.postFightHp.tansy}/` +
+                `${receipt.postFightHp.tansyMax} HP.`
+        );
+    }
+
     if (receipt.questGate) {
         const questGate = receipt.questGate;
         lines.push(
@@ -23184,8 +23203,8 @@ if (receipt.postFightHp) {
     }
 
     return lines.join('\n');
-
 }
+
 
 async function copyCombatRecapPrompt(receipt) {
     const text = combatRecapPrompt(receipt);

@@ -7356,11 +7356,16 @@ function resolveTravelStep(test) {
      * their current movement rules.
      */
     if (!journey && !test.destinationId) {
+        const currentPlace = state.places?.[state.currentLocationId];
         const settlement = Object.values(
             state.world?.settlements || {}
         ).find(entry =>
             entry.locationId === state.currentLocationId &&
             entry.zone === state.zone
+        ) || (
+            currentPlace?.kind === 'instance_entrance'
+                ? savedPrimarySettlement(state, state.zone)
+                : null
         );
 
         if (settlement) {
@@ -17067,18 +17072,6 @@ function travelNarrationPacket(result) {
                 'by a spotted encounter. The crew has not reached the destination.',
                 'Do not narrate arrival. The crew must resolve or avoid the encounter before travel continues.'
             );
-
-            if (result.movement?.arrivalDeferred) {
-                lines.push(
-                    'The crew has covered the route to the destination, but arrival ' +
-                    'is deferred until the encounter is resolved. No travel event ' +
-                    'will be rolled when that arrival is finalized.'
-                );
-            }
-        } else if (result.arrived) {
-            lines.push(
-                `The crew arrived at ${journey.destinationLabel}.`
-            );
         } else {
             lines.push(
                 `The crew is still traveling toward ${journey.destinationLabel}.`,
@@ -20579,13 +20572,21 @@ function showAethermoorContractProgress(notice) {
         salvage.className = 'aethermoor-contract-popup-salvage';
         salvage.style.color =
             quest.salvage.rarityColor || '#d0d7de';
+        const bonusLabels = {
+            crewAtk: 'Crew ATK',
+            tansyMaxHp: 'Tansy MaxHP',
+            qtikMaxHp: "Q'tik MaxHP",
+            frontlineDef: 'Frontline DEF',
+            crewLuk: 'Crew LUK'
+        };
+        const bonusText = Object.entries(quest.salvage.bonus || {})
+            .filter(([, value]) => Number(value) > 0)
+            .map(([key, value]) => `+${value} ${bonusLabels[key] || key}`)
+            .join(', ');
         salvage.textContent =
             `System salvage: ${quest.salvage.name} ` +
-            `(${quest.salvage.rarity}) — ` +
-            Object.entries(quest.salvage.bonus || {})
-                .filter(([, value]) => Number(value) > 0)
-                .map(([key, value]) => `+${value} ${key}`)
-                .join(', ');
+            `(${quest.salvage.rarity})` +
+            (bonusText ? ` — ${bonusText}` : '');
         popup.appendChild(salvage);
     }
 

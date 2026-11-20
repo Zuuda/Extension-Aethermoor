@@ -18255,13 +18255,16 @@ async function runStoredMechanic(args) {
             batch &&
             oneCase?.kind === 'quest_reveal_terminal' &&
             caseResult.created !== false
-                ? questTerminalNarrationPacket(
-                    nextState.encounter,
-                    findQuestById(
-                        nextState,
-                        nextState.encounter.questTerminal.questId
+                ? [
+                    discoveryNarrationPacket(nextState.encounter),
+                    questTerminalNarrationPacket(
+                        nextState.encounter,
+                        findQuestById(
+                            nextState,
+                            nextState.encounter.questTerminal.questId
+                        )
                     )
-                )
+                ].join('\n\n')
 
             : batch &&
               oneCase?.kind === 'instance' &&
@@ -18361,7 +18364,7 @@ async function runStoredMechanic(args) {
                     caseResult.quest ||
                         findQuestByDiscoveryId(
                             nextState,
-                            caseResult.questItemId
+                            oneCase.questItemId
                         )
                 )
 

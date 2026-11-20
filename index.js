@@ -6386,8 +6386,9 @@ function resolveInstanceAction(test) {
         'Reach the instance entrance and resolve travel or combat first'
     );
 
-    let room = null;
+     let room = null;
     let encounter = null;
+    let exitedFromRoomId = null;
 
     if (test.action === 'enter') {
         assert(
@@ -6432,10 +6433,16 @@ function resolveInstanceAction(test) {
     } else if (test.action === 'exit') {
         assert(
             state.activeInstanceId === instance.id &&
-            instance.currentRoomId === 'entrance',
-            'Return to the entrance before leaving the instance'
+            Boolean(instance.currentRoomId),
+            'Enter this instance before leaving it'
+        );
+        assert(
+            instance.currentRoomId === 'entrance' ||
+            instance.status === 'exhausted',
+            'Return to the entrance or clear the instance before leaving'
         );
 
+        exitedFromRoomId = instance.currentRoomId;
         instance.currentRoomId = null;
         state.activeInstanceId = null;
     } else {
@@ -6462,6 +6469,7 @@ function resolveInstanceAction(test) {
         instanceId: instance.id,
         action: test.action,
         requestedRoomId: test.roomId || null,
+        ...(exitedFromRoomId ? { exitedFromRoomId } : {}),
         roomId: room?.id || null,
         roomLabel: room?.label || null,
         roomFeature: room?.feature || null,
@@ -16341,8 +16349,16 @@ function instanceChestNarrationPacket(result) {
 
 function instanceNarrationPacket(result) {
     if (result.action === 'exit') {
+        const quickExit =
+            Boolean(result.exitedFromRoomId) &&
+            result.exitedFromRoomId !== 'entrance';
+
         return [
-            'The crew left the instance through its entrance.',
+            quickExit
+                ? 'The instance is cleared; the crew made their way back out ' +
+                    'to the surface (retracing the cleared halls or taking a ' +
+                    'side passage out).'
+                : 'The crew left the instance through its entrance.',
             'They are at the saved overland entrance; no travel segment ' +
                 'or random encounter was rolled.',
             'Previously visited rooms and room threats remain saved.'
@@ -19282,6 +19298,15 @@ function addAethermoorPanelStyles() {
             background: #181d23;
             border: 1px solid #2b3542;
             border-left: 3px solid #c084fc;
+        }
+
+        .aethermoor-map-node-clickable {
+            cursor: pointer;
+        }
+
+        .aethermoor-map-node-clickable:hover .aethermoor-map-node-main {
+            filter: brightness(1.35);
+            stroke-width: 2.5;
         }
     `;
 
@@ -22281,6 +22306,12 @@ async function renderInstanceTab(host) {
             const hasChest = Boolean(entry.chest && !entry.chest.opened);
             const isSide = Boolean(entry.feature);
             const cleared = entry.threatStatus === 'cleared';
+            const isAdjacent = room.exits.includes(entry.id);
+            const unmet = (entry.requiresCleared || []).filter(
+                requiredId =>
+                    instance.rooms[requiredId]?.threatStatus !== 'cleared'
+            );
+            const canMoveHere = isAdjacent && !blocked && unmet.length === 0;
 
             const group = document.createElementNS(svgNS, 'g');
 
@@ -22310,7 +22341,35 @@ async function renderInstanceTab(host) {
                                     ? '#4ade80'
                                     : '#4da6ff';
 
+            if (canMoveHere) {
+                group.setAttribute('class', 'aethermoor-map-node-clickable');
+
+                const hitbox = document.createElementNS(svgNS, 'circle');
+                hitbox.setAttribute('cx', String(cx));
+                hitbox.setAttribute('cy', String(cy));
+                hitbox.setAttribute('r', '16');
+                hitbox.setAttribute('fill', 'transparent');
+                group.appendChild(hitbox);
+
+                const halo = document.createElementNS(svgNS, 'circle');
+                halo.setAttribute('cx', String(cx));
+                halo.setAttribute('cy', String(cy));
+                halo.setAttribute('r', '13.5');
+                halo.setAttribute('fill', 'none');
+                halo.setAttribute('stroke', '#4da6ff');
+                halo.setAttribute('stroke-opacity', '0.45');
+                halo.setAttribute('stroke-width', '1');
+                group.appendChild(halo);
+
+                group.addEventListener('click', () => {
+                    copyAethermoorCommand(
+                        instanceCommand(instance.id, 'move', entry.id)
+                    );
+                });
+            }
+
             const circle = document.createElementNS(svgNS, 'circle');
+            circle.setAttribute('class', 'aethermoor-map-node-main');
             circle.setAttribute('cx', String(cx));
             circle.setAttribute('cy', String(cy));
             circle.setAttribute('r', isCurrent ? '12' : '10');
@@ -22341,6 +22400,7 @@ async function renderInstanceTab(host) {
             labelEl.setAttribute('fill', stroke);
             labelEl.setAttribute('font-size', '10');
             labelEl.setAttribute('font-family', 'Consolas, monospace');
+            labelEl.style.pointerEvents = 'none';
             labelEl.textContent = glyph;
             group.appendChild(labelEl);
 
@@ -22359,10 +22419,20 @@ async function renderInstanceTab(host) {
                             : cleared
                                 ? 'Cleared'
                                 : 'Visited';
+            const moveHint = canMoveHere
+                ? '\nClick to move here'
+                : isAdjacent && unmet.length > 0
+                    ? `\nBlocked — clear ${
+                        unmet.map(id => instance.rooms[id]?.label || id)
+                            .join(', ')
+                    } first`
+                    : isAdjacent && blocked
+                        ? '\nResolve or avoid the encounter first'
+                        : '';
 
             const titleEl = document.createElementNS(svgNS, 'title');
             titleEl.textContent =
-                `${entry.label}${isCurrent ? ' (Here)' : ''}\n${statusText}`;
+                `${entry.label}${isCurrent ? ' (Here)' : ''}\n${statusText}${moveHint}`;
             group.appendChild(titleEl);
             svg.appendChild(group);
         }
@@ -22380,7 +22450,7 @@ async function renderInstanceTab(host) {
         legend.style.textAlign = 'center';
         legend.style.marginTop = '4px';
         legend.textContent =
-            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited (hover for names)';
+            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited · Click adjacent room to move';
         mapWrap.appendChild(legend);
 
         const section = makeAethermoorSection(
@@ -22440,38 +22510,11 @@ async function renderInstanceTab(host) {
             section.appendChild(openChest);
         }
 
-        for (const exitId of room.exits) {
-            const destination = instance.rooms[exitId];
-            if (!destination) continue;
-
-            const unmet = (destination.requiresCleared || [])
-                .filter(requiredId =>
-                    instance.rooms[requiredId]?.threatStatus !== 'cleared'
-                );
-
-            const button = makeAethermoorAction(
-                unmet.length
-                    ? `${destination.label} · blocked`
-                    : `Move to ${destination.label}`,
-                'world',
-                () => copyAethermoorCommand(
-                    instanceCommand(instance.id, 'move', exitId)
-                )
-            );
-
-            button.disabled = blocked || unmet.length > 0;
-            if (unmet.length) {
-                button.title = `Clear ${
-                    unmet.map(id => instance.rooms[id]?.label || id)
-                        .join(', ')
-                } first.`;
-            }
-            section.appendChild(button);
-        }
-
-        if (room.id === 'entrance') {
+        if (room.id === 'entrance' || instance.status === 'exhausted') {
             const leave = makeAethermoorAction(
-                'Leave instance',
+                room.id === 'entrance'
+                    ? 'Leave instance'
+                    : 'Leave instance (cleared)',
                 'world',
                 () => copyAethermoorCommand(
                     instanceCommand(instance.id, 'exit')

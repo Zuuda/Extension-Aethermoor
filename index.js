@@ -366,8 +366,6 @@ function ensureWorldRecords(state) {
         };
         changed = true;
     }
-    state.reputation ||= {};
-
     if (!state.reputation) {
         state.reputation = {};
         changed = true;
@@ -10220,18 +10218,6 @@ function resolveQuestSeed(test) {
         quest.currentGate.linkedTargetId = quest.targetId;
     }
 
-    quest.targetId = `quest-target-${quest.id}`;
-
-    for (const gate of quest.gatesData) {
-        if (gate.trigger === 'linked_combat') {
-            gate.linkedTargetId = quest.targetId;
-        }
-    }
-
-    if (quest.currentGate?.trigger === 'linked_combat') {
-        quest.currentGate.linkedTargetId = quest.targetId;
-    }
-
     /*
      * Keep the rank-selected threat. V2 links the encounter to the
      * objective, but does not require every linked threat to be an
@@ -17611,7 +17597,9 @@ function combatNarrationPacket(result, actions) {
         return [
             'COMBAT ESCAPE RESULT — narrate naturally.',
             result.flee?.success
-                ? 'The surviving crew member escaped.'
+                ? (result.death
+                    ? 'The surviving crew member escaped.'
+                    : 'The crew escaped the encounter.')
                 : 'Escape failed; one enemy response was resolved.',
             ...(result.death
                 ? [
@@ -25648,6 +25636,7 @@ async function openCombatPanel(inlineHost) {
         inlineHost,
         state
     );
+    showSelectedPotionGroups();
 
     // Tooltips and debuff display are auxiliary UI. They must never prevent
     // the actual combat controls from rendering.

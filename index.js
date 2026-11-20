@@ -5123,15 +5123,8 @@ function spawnEncounter(test) {
 
         assert(
             activeQuest.terminalThreat &&
-            activeQuest.terminalThreat.resolved !== true &&
-            (
-                activeQuest.terminalThreat.revealed !== true ||
-                (
-                    ['fled', 'dead'].includes(state.encounter?.status) &&
-                    state.encounter.questTerminal?.questId === activeQuest.id
-                )
-            ),
-            'Quest terminal threat cannot be spawned again'
+            activeQuest.terminalThreat.resolved !== true,
+            'Quest terminal threat has already been resolved'
         );
 
         assert(
@@ -10228,15 +10221,27 @@ function resolveQuestSeed(test) {
             quest.currentGate.linkedTargetId = quest.targetId;
         }
 
-        /*
-         * Keep the rank-selected threat. V2 links the encounter to the
-         * objective, but does not require every linked threat to be an
-         * Elite; F/E use normal packs, D/C may roll a pack or Elite, and
-         * B uses an Elite as established by rollQuestTerminalThreat().
-         */
+    quest.targetId = `quest-target-${quest.id}`;
 
+    for (const gate of quest.gatesData) {
+        if (gate.trigger === 'linked_combat') {
+            gate.linkedTargetId = quest.targetId;
+        }
+    }
+
+    if (quest.currentGate?.trigger === 'linked_combat') {
+        quest.currentGate.linkedTargetId = quest.targetId;
+    }
+
+    /*
+     * Keep the rank-selected threat. V2 links the encounter to the
+     * objective, but does not require every linked threat to be an
+     * Elite; F/E use normal packs, D/C may roll a pack or Elite, and
+     * B uses an Elite as established by rollQuestTerminalThreat().
+     */
     registerQuestDestination(state, quest);
-        quest.turnIn ||= {
+
+    quest.turnIn ||= {
         locationId: issuerSettlement.locationId,
         settlementId: issuerSettlement.id,
         recipient: quest.facts?.sponsor ||
@@ -10288,7 +10293,6 @@ function resolveQuestSeed(test) {
         quest,
         state
     };
-  }
 }
 
 /*
@@ -20955,11 +20959,11 @@ async function renderQuestTab(host) {
         );
 
         const canRevealTerminal =
-            quest.structureV2?.version !== 2 &&
             quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
             quest.destinationId === state.currentLocationId &&
-            state.activeQuest?.id === quest.id &&
+            !state.currentJourney &&
+            !state.activeInstanceId &&
             !['active', 'spotted'].includes(state.encounter?.status);
 
         if (canRevealTerminal) {
@@ -21090,80 +21094,6 @@ async function renderQuestTab(host) {
         host.appendChild(section);
     }
 
-    /*
-     * Recovery for a narrated concern whose REVEAL_WORK tag was missed.
-     * This deliberately publishes the existing locked quest, not a new
-     * roll. The player should use it only after the concern was mentioned.
-     */
-    const currentSettlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    const pendingOffer = currentSettlement &&
-        Object.values(state.socialOpportunities?.contacts || {})
-            .find(contact =>
-                contact.settlementId === currentSettlement.id &&
-                contact.result === 'offer' &&
-                contact.pendingQuest
-            );
-
-    if (
-        pendingOffer &&
-        !state.currentJourney &&
-        !state.activeInstanceId &&
-        !['active', 'spotted'].includes(state.encounter?.status)
-    ) {
-        const recovery = makeAethermoorSection(
-            'UNPUBLISHED LOCAL CONCERN',
-            'If an NPC already described a job but its System offer ' +
-                'did not appear, publish that saved offer here. ' +
-                'This does not roll or invent another quest.',
-            'quest'
-        );
-
-        const publish = makeAethermoorAction(
-            'Publish mentioned offer',
-            'quest',
-            async () => {
-                publish.disabled = true;
-
-                try {
-                    const output = await runStoredMechanic({
-                        cases: [{
-                            name: 'ui_recover_work_reveal',
-                            kind: 'social',
-                            action: 'reveal_work',
-                            socialId: pendingOffer.id
-                        }]
-                    });
-
-                    assert(
-                        output?.ok === true &&
-                        output.results?.[0]?.ok !== false,
-                        output?.results?.[0]?.error ||
-                            'Could not publish saved offer'
-                    );
-
-                    await renderQuestTab(host);
-
-                } catch (error) {
-                    publish.disabled = false;
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor'
-                    );
-                }
-            }
-        );
-
-        recovery.appendChild(publish);
-        host.appendChild(recovery);
-    }
 
     if (accepted.length === 0 && offered.length === 0) {
         host.appendChild(
@@ -22501,18 +22431,27 @@ async function renderInventoryTab(host) {
         const actions = document.createElement('div');
         actions.className = 'aethermoor-inventory-item-actions';
         const inActiveCombat = state.encounter?.status === 'active';
+        const crewStats = derived(state.crew);
 
         if (definition?.type === 'potion') {
             for (const [recipient, label] of [
                 ['qtik', "Use on Q'tik"],
                 ['tansy', 'Use on Tansy']
             ]) {
+                const currentHp = state.crew?.[recipient]?.hp ?? 0;
+                const maxHp = recipient === 'qtik'
+                    ? crewStats.qtikMaxHp
+                    : crewStats.tansyMaxHp;
+                const fullHp = currentHp >= maxHp;
+
                 const use = document.createElement('button');
                 use.type = 'button';
                 use.textContent = label;
-                use.disabled = inActiveCombat;
+                use.disabled = inActiveCombat || fullHp;
                 if (inActiveCombat) {
                     use.title = 'Use potions from the Combat tab during an active fight.';
+                } else if (fullHp) {
+                    use.title = `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP.`;
                 }
 
                 use.addEventListener('click', async () => {
@@ -26201,6 +26140,7 @@ function updateAethermoorDebugButton() {
 let aethermoorRoleplayHandoffsPaused = readAethermoorHandoffsPaused();
 let aethermoorInjectedHandoff = null;
 function aethermoorTechnicalMessage(chat) {
+    if (!Array.isArray(chat)) return false;
     const index = findLastUserMessage(chat);
     const text = chat[index]?.mes;
 
@@ -26409,7 +26349,7 @@ function extractAethermoorQuestEvents(text) {
 
     for (const plan of text.matchAll(/<plan\b[^>]*>([\s\S]*?)<\/plan>/gi)) {
         for (const _match of plan[1].matchAll(
-            /<AETHERMOOR:INTRODUCE_NPC\s*>/g
+            /<AETHERMOOR:INTRODUCE_NPC\s*\/?>/g
         )) {
             events.push({
                 event: 'introduce_npc',
@@ -26418,14 +26358,14 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const themePattern =
-            /<AETHERMOOR:INSTANCE_THEME\s+instance=(?:"([A-Za-z0-9._:-]+)"|([A-Za-z0-9._:-]+))\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
+            /<AETHERMOOR:INSTANCE_THEME\s+instance=["']?([A-Za-z0-9._:-]+)["']?\s*>([\s\S]*?)<\/AETHERMOOR:INSTANCE_THEME>/g;
 
         for (const match of plan[1].matchAll(themePattern)) {
             try {
                 events.push({
                     event: 'instance_theme',
-                    instanceId: match[1] || match[2],
-                    names: JSON.parse(match[3].trim())
+                    instanceId: match[1],
+                    names: JSON.parse(match[2].trim())
                 });
             } catch (error) {
                 reportAethermoorError(
@@ -26437,14 +26377,14 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const namingPattern =
-            /<AETHERMOOR:STOCK_NAMES\s+zone=(?:"([1-9]\d*)"|([1-9]\d*))\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
+            /<AETHERMOOR:STOCK_NAMES\s+zone=["']?([1-9]\d*)["']?\s*>([\s\S]*?)<\/AETHERMOOR:STOCK_NAMES>/g;
 
         for (const match of plan[1].matchAll(namingPattern)) {
             try {
                 events.push({
                     event: 'stock_names',
-                    zone: Number(match[1] || match[2]),
-                    names: JSON.parse(match[3].trim())
+                    zone: Number(match[1]),
+                    names: JSON.parse(match[2].trim())
                 });
 
             } catch (error) {
@@ -26457,7 +26397,7 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const encounterRequestPattern =
-            /<AETHERMOOR:REQUEST_ENCOUNTER\s+type="(normal_pack|elite)"\s*>/g;
+            /<AETHERMOOR:REQUEST_ENCOUNTER\s+type=["']?(normal_pack|elite)["']?\s*\/?>/g;
 
         for (const match of plan[1].matchAll(
             encounterRequestPattern
@@ -26469,7 +26409,7 @@ function extractAethermoorQuestEvents(text) {
         }
 
         const breadcrumbPattern =
-            /<AETHERMOOR:FOLLOW_BREADCRUMB\s+id=([A-Za-z0-9._:-]+)\s*>/g;
+            /<AETHERMOOR:FOLLOW_BREADCRUMB\s+id=["']?([A-Za-z0-9._:-]+)["']?\s*\/?>/g;
 
         for (const match of plan[1].matchAll(breadcrumbPattern)) {
             events.push({
@@ -26477,20 +26417,10 @@ function extractAethermoorQuestEvents(text) {
                 breadcrumbId: match[1]
             });
         }
-
-        const revealPattern =
-            /<AETHERMOOR:REVEAL_WORK\s+social_id=([A-Za-z0-9._:-]{1,80})\s*>/g;
-
-        for (const match of plan[1].matchAll(revealPattern)) {
-            events.push({
-                event: 'reveal_work',
-                socialId: match[1]
-            });
-        }
     }
 
     const foundPattern =
-        /<AETHERMOOR:FOUND\s+quest_item=([A-Za-z0-9._:-]+)\s*>/g;
+        /<AETHERMOOR:FOUND\s+quest_item=["']?([A-Za-z0-9._:-]+)["']?\s*\/?>/g;
 
     for (const match of text.matchAll(foundPattern)) {
         events.push({
@@ -26500,7 +26430,7 @@ function extractAethermoorQuestEvents(text) {
     }
 
     const deliveredPattern =
-        /<AETHERMOOR:DELIVERED\s+quest_id=([A-Za-z0-9._:-]+)\s*>/g;
+        /<AETHERMOOR:DELIVERED\s+quest_id=["']?([A-Za-z0-9._:-]+)["']?\s*\/?>/g;
 
     for (const match of text.matchAll(deliveredPattern)) {
         events.push({
@@ -26609,17 +26539,8 @@ async function processAethermoorAssistantEvents(data) {
                         breadcrumbId: event.breadcrumbId
                     }]
                 });
-            } else if (event.event === 'reveal_work') {
-                result = await runStoredMechanic({
-                    cases: [{
-                        name: 'assistant_social_work_reveal',
-                        kind: 'social',
-                        action: 'reveal_work',
-                        socialId: event.socialId
-                    }]
-                });
-
             } else if (event.event === 'delivered') {
+
                 result = await runStoredMechanic({
                     cases: [{
                         name: 'assistant_herb_handover',
@@ -26897,8 +26818,6 @@ function settlementWorkContextPacket(state, settlement) {
         contractOfferedCardHtml(quest),
         '3. Immediately write a concise and thematic <template> ' +
             'recording this quest, objective, and rewards.',
-        '4. Emit this exact tag:',
-        `<plan><AETHERMOOR:REVEAL_WORK social_id=${pending.id}></plan>`,
         'The System offers and pays this quest, NOT the affected local ' +
             'party. Do not invent another objective, encounter, or reward.'
     ].join('\n');
@@ -27382,15 +27301,30 @@ globalThis.aethermoorMechanicsInterceptor =
                 entry.locationId === contextState.currentLocationId &&
                 entry.zone === contextState.zone
             );
-
             if (settlement) {
+                const pendingWork = Object.values(
+                    contextState.socialOpportunities?.contacts || {}
+                ).find(contact =>
+                    contact.settlementId === settlement.id &&
+                    contact.result === 'offer' &&
+                    contact.pendingQuest
+                );
+
                 entries.push({
                     id: `settlement-work-context-${settlement.id}`,
                     type: 'social_context',
                     packet: settlementWorkContextPacket(
                         contextState,
                         settlement
-                    )
+                    ),
+                    ...(pendingWork
+                        ? {
+                            pendingWorkReveal: {
+                                settlementId: settlement.id,
+                                socialId: pendingWork.id
+                            }
+                        }
+                        : {})
                 });
 
                 const namingEntries =
@@ -27486,7 +27420,10 @@ globalThis.aethermoorMechanicsInterceptor =
             chat,
             message,
             metadata,
-            ids: entries.map(entry => entry.id)
+            ids: entries.map(entry => entry.id),
+            pendingWorkReveals: entries
+                .map(entry => entry.pendingWorkReveal)
+                .filter(Boolean)
         };
 
         console.log(
@@ -27540,8 +27477,41 @@ async function consumeAethermoorHandoff(injected) {
             }
         }
 
+        let publishedWorkBefore = null;
+
+        for (const reveal of injected.pendingWorkReveals || []) {
+            if (!stored.state) continue;
+
+            const contact =
+                stored.state.socialOpportunities?.contacts?.[
+                    `${reveal.settlementId}:${reveal.socialId}`
+                ];
+
+            if (
+                contact?.result === 'offer' &&
+                contact.pendingQuest &&
+                contact.questId === contact.pendingQuest.id
+            ) {
+                publishedWorkBefore ||= clone(stored.state);
+                const published = resolveSocialWorkReveal({
+                    state: stored.state,
+                    socialId: reveal.socialId
+                });
+                stored.state = published.state;
+                stored.revision = (stored.revision || 0) + 1;
+            }
+        }
+
         if (getContext().chatMetadata === injected.metadata) {
             await getContext().saveMetadata();
+        }
+
+        if (publishedWorkBefore && stored.state) {
+            scheduleAethermoorContractNotifications(
+                publishedWorkBefore,
+                stored.state,
+                injected.metadata
+            );
         }
 
         injected.consumed = true;
@@ -27652,7 +27622,10 @@ function registerAethermoorGenerationCleanup() {
                 handoffIds: aethermoorInjectedHandoff?.ids || []
             });
 
-            if (!aethermoorRoleplayHandoffsPaused) {
+            if (
+                !aethermoorRoleplayHandoffsPaused &&
+                !aethermoorTechnicalMessage(getContext().chat)
+            ) {
                 void processAethermoorAssistantEvents(data);
             }
             const injected = aethermoorInjectedHandoff;

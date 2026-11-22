@@ -19167,9 +19167,9 @@ async function runStoredMechanic(args) {
             caseResult.outOfCombatRecovery = recovery;
 
             if (
-                nextState.encounter?.victoryReceipt?.encounterId ===
-                nextState.encounter?.id &&
-                nextState.encounter.victoryReceipt.postFightHp
+                nextState.encounter?.victoryReceipt?.postFightHp &&
+                nextState.encounter.victoryReceipt.encounterId ===
+                    nextState.encounter.id
             ) {
                 nextState.encounter.victoryReceipt.postFightHp.qtik =
                     nextState.crew.qtik.hp;
@@ -19188,9 +19188,9 @@ async function runStoredMechanic(args) {
             caseResult.unlockedAchievements = unlockedAchievements.map(a => a.id);
 
             if (
-                nextState.encounter?.victoryReceipt?.encounterId ===
-                nextState.encounter?.id &&
-                nextState.encounter.victoryReceipt.postFightHp
+                nextState.encounter?.victoryReceipt?.postFightHp &&
+                nextState.encounter.victoryReceipt.encounterId ===
+                    nextState.encounter.id
             ) {
                 const postStats = derived(nextState.crew);
                 nextState.encounter.victoryReceipt.postFightHp.qtik =

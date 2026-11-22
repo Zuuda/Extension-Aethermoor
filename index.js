@@ -14269,10 +14269,13 @@ function resolveHerbalistAction(test) {
 
 /*
  * Ordinary inn prices establish the civilian economy and do not scale
- * with zone. These are expenses, not food buffs, healing, lodging recovery,
- * or elapsed-time mechanics. The GM dresses the purchased service locally;
- * its saved ID and price remain engine-owned.
+ * with zone. Meals and hot water are expenses only (not food buffs or
+ * elapsed-time mechanics). Renting a room restores both protagonists to
+ * full HP (diegetically requiring at least a 2-hour nap or overnight rest).
+ * The GM dresses the purchased service locally; its saved ID and price
+ * remain engine-owned.
  */
+
 const INN_SERVICES = [
     { id: 'standard_meal', label: 'Standard filling fare', price: 1 },
     { id: 'better_meal', label: 'Better meal', price: 3 },
@@ -14394,11 +14397,40 @@ function resolveInnAction(test) {
 
     state.crew.purse = purseAfter;
 
+    const rentedRoom = choices.find(choice =>
+        ['common_room', 'private_room', 'luxurious_room'].includes(choice.id)
+    );
+
+    let restRecovery = null;
+
+    if (rentedRoom) {
+        const stats = derived(state.crew);
+        const qtikBefore = state.crew.qtik.hp;
+        const tansyBefore = state.crew.tansy.hp;
+
+        state.crew.qtik.hp = stats.qtikMaxHp;
+        state.crew.tansy.hp = stats.tansyMaxHp;
+        state.crew.qtik.maxHp = stats.qtikMaxHp;
+        state.crew.tansy.maxHp = stats.tansyMaxHp;
+
+        restRecovery = {
+            roomId: rentedRoom.id,
+            roomLabel: rentedRoom.label,
+            qtikHealed: stats.qtikMaxHp - qtikBefore,
+            tansyHealed: stats.tansyMaxHp - tansyBefore,
+            qtikHp: stats.qtikMaxHp,
+            qtikMaxHp: stats.qtikMaxHp,
+            tansyHp: stats.tansyMaxHp,
+            tansyMaxHp: stats.tansyMaxHp
+        };
+    }
+
     return {
         ok: true,
         created: true,
         action: 'commit',
         receipt: quote,
+        restRecovery,
         state
     };
 }
@@ -18259,6 +18291,32 @@ function inventoryActionNarrationPacket(result, action) {
     ].join('\n');
 }
 
+function innRestNarrationPacket(result) {
+    const recovery = result.restRecovery;
+    if (!recovery) return null;
+
+    const healedParts = [];
+    if (recovery.qtikHealed > 0) {
+        healedParts.push(
+            `Q'tik (+${recovery.qtikHealed} HP, now ${recovery.qtikHp}/${recovery.qtikMaxHp})`
+        );
+    }
+    if (recovery.tansyHealed > 0) {
+        healedParts.push(
+            `Tansy (+${recovery.tansyHealed} HP, now ${recovery.tansyHp}/${recovery.tansyMaxHp})`
+        );
+    }
+
+    return [
+        'PRIVATE INN REST RESULT — do not recite this heading.',
+        `The crew rented ${recovery.roomLabel} (${result.receipt.cost}s total spent at the inn).`,
+        healedParts.length
+            ? `Resting for at least two in-world hours (a nap or overnight sleep) restored full HP: ${healedParts.join('; ')}.`
+            : 'Both protagonists were already at full HP.',
+        'The silver deduction and full-HP recovery are already applied to saved state; portray the rest naturally.'
+    ].join('\n');
+}
+
 function questDiscoveryContextPacket(quest, state) {
     if (
         quest?.status !== 'in_progress' ||
@@ -19369,6 +19427,11 @@ async function runStoredMechanic(args) {
               oneCase.action === 'use' &&
               caseResult.recipient
                 ? inventoryActionNarrationPacket(caseResult, 'use')
+
+            : batch &&
+              oneCase?.kind === 'inn' &&
+              caseResult.restRecovery
+                ? innRestNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'trade' &&
@@ -21673,9 +21736,35 @@ function parseQueuedMoveCommand(command, state) {
     return null;
 }
 
+let aethermoorQueuedInn = null;
+
 function clearAethermoorQueuedMove() {
     aethermoorQueuedMove = null;
     updateAethermoorQueuedMoveBar();
+}
+
+function clearAethermoorQueuedInn() {
+    aethermoorQueuedInn = null;
+    updateAethermoorQueuedMoveBar();
+}
+
+function queueAethermoorInnOrder(choices, label) {
+    assert(
+        Array.isArray(choices) && choices.length > 0,
+        'Inn order is empty'
+    );
+
+    aethermoorQueuedInn = {
+        metadata: getContext().chatMetadata,
+        choices: clone(choices),
+        label
+    };
+
+    updateAethermoorQueuedMoveBar();
+    toastr.info(
+        `Queued: ${label}. Send your next message to apply.`,
+        'Aethermoor'
+    );
 }
 
 function updateAethermoorQueuedMoveBar() {
@@ -21685,31 +21774,61 @@ function updateAethermoorQueuedMoveBar() {
     if (!bar) return;
 
     const currentMetadata = getContext().chatMetadata;
-    const active =
+    const activeMove =
         aethermoorQueuedMove &&
         aethermoorQueuedMove.metadata === currentMetadata
             ? aethermoorQueuedMove
             : null;
+    const activeInn =
+        aethermoorQueuedInn &&
+        aethermoorQueuedInn.metadata === currentMetadata
+            ? aethermoorQueuedInn
+            : null;
 
-    if (!active) {
+    if (!activeMove && !activeInn) {
         bar.hidden = true;
         bar.replaceChildren();
         return;
     }
 
-    const text = document.createElement('span');
-    text.textContent = `Queued: ${active.label}`;
+    function makeQueuedRow(label, onCancel) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.justifyContent = 'space-between';
+        row.style.gap = '8px';
+        row.style.width = '100%';
 
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.className = 'aethermoor-queued-move-cancel';
-    cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', () => {
-        clearAethermoorQueuedMove();
-        toastr.info('Queued movement cancelled.', 'Aethermoor');
-    });
+        const text = document.createElement('span');
+        text.textContent = `Queued: ${label}`;
 
-    bar.replaceChildren(text, cancel);
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'aethermoor-queued-move-cancel';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', onCancel);
+
+        row.append(text, cancel);
+        return row;
+    }
+
+    const rows = [];
+    if (activeInn) {
+        rows.push(makeQueuedRow(activeInn.label, () => {
+            clearAethermoorQueuedInn();
+            toastr.info('Queued inn services cancelled.', 'Aethermoor');
+        }));
+    }
+    if (activeMove) {
+        rows.push(makeQueuedRow(activeMove.label, () => {
+            clearAethermoorQueuedMove();
+            toastr.info('Queued movement cancelled.', 'Aethermoor');
+        }));
+    }
+
+    bar.style.flexDirection = 'column';
+    bar.style.alignItems = 'stretch';
+    bar.replaceChildren(...rows);
     bar.hidden = false;
 }
 
@@ -22673,7 +22792,7 @@ async function openAethermoorInnWindow() {
     const confirm = document.createElement('button');
     confirm.type = 'button';
     confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
-    confirm.textContent = 'Confirm';
+    confirm.textContent = 'Queue';
 
     const close = document.createElement('button');
     close.type = 'button';
@@ -22688,7 +22807,8 @@ async function openAethermoorInnWindow() {
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
         `Purse: ${state.crew.purse}s\n` +
-        'Meals and lodging are expenses only. Choose services, then click Confirm.';
+        'Meals are expenses only. Renting a room restores full HP after at least a 2-hour nap or overnight rest.\n' +
+        'Choose services, then click Queue to apply on your next message.';
     panel.appendChild(summary);
 
     const columns = document.createElement('div');
@@ -22713,7 +22833,7 @@ async function openAethermoorInnWindow() {
 
         ledger.textContent =
             `Services −${cost}s · Projected purse: ${remaining}s\n` +
-            'Click Confirm to pay.';
+            'Click Queue to apply on your next roleplay message.';
         ledger.style.color =
             remaining < 0 ? '#f87171' : '#ffd166';
 
@@ -22812,7 +22932,7 @@ async function openAethermoorInnWindow() {
         columns.appendChild(column);
     }
 
-    confirm.addEventListener('click', async () => {
+    confirm.addEventListener('click', () => {
         const choices = [...quantities].map(
             ([id, quantity]) => ({ id, quantity })
         );
@@ -22822,34 +22942,20 @@ async function openAethermoorInnWindow() {
             return;
         }
 
-        confirm.disabled = true;
+        const cost = choices.reduce(
+            (sum, choice) =>
+                sum + (serviceById(choice.id)?.price || 0) * choice.quantity,
+            0
+        );
+        const hasRoom = choices.some(choice =>
+            ['common_room', 'private_room', 'luxurious_room'].includes(choice.id)
+        );
+        const label =
+            `Inn Services (−${cost}s` +
+            (hasRoom ? ' · Full HP rest)' : ')');
 
-        try {
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'commit_inn_services',
-                    kind: 'inn',
-                    action: 'commit',
-                    basket: { choices }
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not complete payment'
-            );
-            toastr.success('Inn services paid.', 'Aethermoor');
-            panel.remove();
-            if (aethermoorPanelOpen) {
-                renderAethermoorTab(aethermoorActiveTab);
-            }
-        } catch (error) {
-            confirm.disabled = false;
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
-        }
+        queueAethermoorInnOrder(choices, label);
+        panel.remove();
     });
 
     close.addEventListener('click', () => {
@@ -27470,6 +27576,7 @@ function openNarrationDebug() {
                 }
 
                 clearAethermoorQueuedMove();
+                clearAethermoorQueuedInn();
                 aethermoorLastCombatLog = '';
                 aethermoorLastCombatLogKey = null;
                 combatSelections.target = null;
@@ -28293,6 +28400,40 @@ globalThis.aethermoorMechanicsInterceptor =
 
          let movedThisTurn = false;
         const activeChatMetadata = getContext().chatMetadata;
+        const queuedInn =
+            aethermoorQueuedInn &&
+            aethermoorQueuedInn.metadata === activeChatMetadata
+                ? aethermoorQueuedInn
+                : null;
+
+        if (queuedInn) {
+            clearAethermoorQueuedInn();
+            try {
+                const output = await runStoredMechanic({
+                    cases: [{
+                        name: 'commit_inn_services',
+                        kind: 'inn',
+                        action: 'commit',
+                        basket: { choices: queuedInn.choices }
+                    }]
+                });
+
+                assert(
+                    output?.ok === true &&
+                    output.results?.[0]?.ok !== false,
+                    output?.results?.[0]?.error ||
+                        'Inn services were rejected'
+                );
+            } catch (error) {
+                reportAethermoorError(
+                    error,
+                    'Inn services failed',
+                    `inn-commit:${Date.now()}:` +
+                        `${error instanceof Error ? error.message : String(error)}`
+                );
+            }
+        }
+
         const queuedMove =
             aethermoorQueuedMove &&
             aethermoorQueuedMove.metadata === activeChatMetadata

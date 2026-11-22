@@ -1249,8 +1249,10 @@ function shadowMechanics(crew) {
 
         result.slots += 3 * count;
         if (shadow.type === 'archer') {
-            result.archerAttack += count * (1 + tier);
-            result.attack += count * (1 + tier);
+            // 5 ATK per Archer (~83% of 3 loose weasels' 6 ATK): always the
+            // safe ranged trade-off without overtaking loose-weasel DPS.
+            result.archerAttack += count * 5;
+            result.attack += count * 5;
         } else if (shadow.type === 'mender') {
             result.menderHeal += 2 * tier;
         } else if (shadow.type === 'hexer') {
@@ -3448,7 +3450,7 @@ function passiveAttackPenalty(encounter) {
         )
         .reduce(
             (total, passive) =>
-                total + 2 * passive.stacks,
+                total + 2 * enemyTier(passive.foe.level) * passive.stacks,
             0
         );
 }
@@ -3460,7 +3462,7 @@ function passiveDefensePenalty(encounter) {
         )
         .reduce(
             (total, passive) =>
-                total + 2 * passive.stacks,
+                total + 2 * enemyTier(passive.foe.level) * passive.stacks,
             0
         );
 }
@@ -3472,7 +3474,7 @@ function passiveRegenPenalty(encounter) {
         )
         .reduce(
             (total, passive) =>
-                total + 2 * passive.stacks,
+                total + 2 * enemyTier(passive.foe.level) * passive.stacks,
             0
         );
 }
@@ -3484,7 +3486,7 @@ function passiveBleedBonus(encounter) {
         )
         .reduce(
             (total, passive) =>
-                total + passive.stacks,
+                total + enemyTier(passive.foe.level) * passive.stacks,
             0
         );
 }
@@ -4249,28 +4251,6 @@ const summonDamageMultiplier =
         'Shadow-Warder sacrifice history must be an array'
     );
 
-    let pendingshadowWarderSacrificeId =
-        actions.shadowSacrificeId || null;
-
-    if (pendingshadowWarderSacrificeId) {
-        const shadow = c.shadows?.active?.find(
-            entry =>
-                entry.id === pendingshadowWarderSacrificeId &&
-                entry.type === 'warder'
-        );
-
-        assert(
-            shadow,
-            'Shadow sacrifice requires an active Shadow-Warder'
-        );
-
-        assert(
-            !encounter.shadowWarderSacrificeUsed.includes(
-                pendingshadowWarderSacrificeId
-            ),
-            'This Shadow-Warder has already sacrificed itself this fight'
-        );
-    }
     const turnEffects = [];
     const itemUse = {};
     const tape = checkTape(s);
@@ -4708,8 +4688,7 @@ function visorDisrupts(foe, enemyRoll) {
             qtikFireDamage;
 
         const vitalsBonus =
-
-            actions.tansy === 'vitals' && p >= 2 && p <= 4
+            actions.tansy === 'vitals' && p >= 2
                 ? Math.min(
                     targetDefense,
                     Math.floor((c.weasels.active + raised.slots) / 2)
@@ -4875,21 +4854,18 @@ function visorDisrupts(foe, enemyRoll) {
              * Drinking removes Fire/Ice bonuses, not ordinary
              * attack rolls, criticals, or Tansy's active command.
              */
+            const baseHit = Math.max(
+                1,
+                effectiveAttack -
+                targetDefense +
+                p + vitalsBonus
+            );
+
             const physicalDamage = p === 1
                 ? 1
                 : isCritical
-                    ? Math.max(
-                        6 + crewStats.luk,
-                        effectiveAttack -
-                        targetDefense +
-                        6 + crewStats.luk
-                    )
-                    : Math.max(
-                        1,
-                        effectiveAttack -
-                        targetDefense +
-                        p + vitalsBonus
-                    );
+                    ? Math.round(baseHit * 1.5) + crewStats.luk
+                    : baseHit;
 
             damage = physicalDamage + fireDamage + exposedBonus;
 
@@ -5017,59 +4993,8 @@ function visorDisrupts(foe, enemyRoll) {
         let frontlineDamage = 0;
         let backlineDamage = 0;
         let enemyHitCount = 0;
-        let shadowWarderAbsorbed = false;
-
-        /*
-         * A declared active Shadow-Warder can sacrifice itself once
-         * per fight to absorb one successful telegraph hit or E:6
-         * critical completely.
-         */
-          if (
-            pendingshadowWarderSacrificeId &&
-            !enemyMiss &&
-            (
-                e === 6 ||
-            responseEffects.length > 0
-
-            )
-        ) {
-
-            const activeIndex =
-                c.shadows.active.findIndex(
-                    entry =>
-                        entry.id === pendingshadowWarderSacrificeId &&
-                        entry.type === 'warder'
-                );
-
-            assert(
-                activeIndex >= 0,
-                'Declared Shadow-Warder is no longer active'
-            );
-
-            const [sacrificed] =
-                c.shadows.active.splice(activeIndex, 1);
-
-            encounter.shadowWarderSacrificeUsed.push(
-                pendingshadowWarderSacrificeId
-            );
-
-            pendingshadowWarderSacrificeId = null;
-            shadowWarderAbsorbed = true;
-
-            const absorbed = e === 6
-                ? 'enemy critical'
-                : `active elite/boss telegraph`;
-
-
-            const message =
-                `Shadow-Warder ${sacrificed.id} sacrificed itself ` +
-                `to absorb ${absorbed}`;
-
-            effects.push(message);
-            turnEffects.push(message);
-        }
-
-                if (!enemyMiss && !shadowWarderAbsorbed) {
+        let shadowWarderSavedTansy = false;
+        if (!enemyMiss) {
 
             /*
              * A successful Buffer cast activates its non-stacking
@@ -5209,7 +5134,7 @@ const castingBuffer = live(s).find(
 
                 if (foe.role === 'archer') {
                     const amount =
-                        4 * tier * (e === 6 ? 2 : 1);
+                        (3 * tier + foe.level) * (e === 6 ? 2 : 1);
 
                     backlineDamage += amount;
                     enemyHitCount++;
@@ -5372,7 +5297,40 @@ if (frontliners.length > 0) {
             encounter.crewTookDamage = true;
         }
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
-        c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
+
+        /*
+         * Once per fight, an active Shadow-Warder automatically sacrifices
+         * itself if an incoming blow would drop Tansy to 0 HP, leaving her
+         * standing at 1 HP.
+         */
+        if (
+            backlineDamage > 0 &&
+            c.tansy.hp > 0 &&
+            c.tansy.hp - backlineDamage <= 0
+        ) {
+            const warderIndex = (c.shadows?.active || []).findIndex(
+                entry =>
+                    entry.type === 'warder' &&
+                    !encounter.shadowWarderSacrificeUsed.includes(entry.id)
+            );
+
+            if (warderIndex >= 0) {
+                const [sacrificed] = c.shadows.active.splice(warderIndex, 1);
+                encounter.shadowWarderSacrificeUsed.push(sacrificed.id);
+                c.tansy.hp = 1;
+                shadowWarderSavedTansy = true;
+
+                const saveMessage =
+                    `Shadow-Warder ${sacrificed.id} sacrificed itself ` +
+                    `to intercept a lethal blow on Tansy (1 HP remaining)`;
+                effects.push(saveMessage);
+                turnEffects.push(saveMessage);
+            }
+        }
+
+        if (!shadowWarderSavedTansy) {
+            c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
+        }
 
         /*
          * End-of-exchange regeneration includes any Grave-Chill
@@ -5381,6 +5339,7 @@ if (frontliners.length > 0) {
         const effectiveRegen =
             crewStats.regen - passiveRegenPenalty(encounter);
         const menderHeal = shadowMechanics(c).menderHeal;
+        const menderHealed = [];
 
         if (c.qtik.hp > 0) {
             c.qtik.hp = Math.max(
@@ -5397,8 +5356,23 @@ if (frontliners.length > 0) {
                 );
             }
             if (menderHeal > 0) {
-                effects.push(`Shadow-Mender healed ${menderHeal} HP`);
+                menderHealed.push("Q'tik");
             }
+        }
+
+        if (c.tansy.hp > 0 && menderHeal > 0) {
+            c.tansy.hp = Math.min(
+                crewStats.tansyMaxHp,
+                c.tansy.hp + menderHeal
+            );
+            menderHealed.push('Tansy');
+        }
+
+        if (menderHealed.length > 0) {
+            effects.push(
+                `Shadow-Mender healed ${menderHealed.join(' & ')} ` +
+                `for ${menderHeal} HP`
+            );
         }
 
         if (actions.tansy === 'visor' && e === 1) {
@@ -5417,7 +5391,7 @@ if (frontliners.length > 0) {
             damage,
             hits,
             enemyMiss,
-            enemyAttackAbsorbed: shadowWarderAbsorbed,
+            enemyAttackAbsorbed: shadowWarderSavedTansy,
             frontlineDamage,
             backlineDamage,
             effectiveRegen,
@@ -25186,8 +25160,9 @@ function decorateAethermoorCombatControls(host, state) {
             vitals:
                 'Doubles loose-weasel and Shadow-Archer attack ' +
                 'contributions unless Ice Patch is used. Criticals on ' +
-                'player rolls 5–6. On rolls 2–4, adds damage up to ' +
-                `${vitalsPierce} target DEF, based on current summons.`,
+                'player rolls 5–6 (1.5× physical + LUK). On rolls 2–6, ' +
+                `adds damage up to ${vitalsPierce} target DEF, based on ` +
+                'current summons.',
 
             hamstring:
                 'Enemies miss on rolls 1–2, or 1–4 with Ice Patch. ' +
@@ -25249,32 +25224,33 @@ function decorateAethermoorCombatControls(host, state) {
               'Can be used preventively even with no current stacks.';
     }
 
-    const effects = [
+     const effects = [
         {
             key: 'armor_sunder',
             label: 'Armor Sunder',
-            describe: stacks =>
-                `−${2 * stacks} frontline DEF (−2 per stack).`
+            describe: (stacks, tier) =>
+                `−${2 * tier * stacks} frontline DEF (−${2 * tier} per stack).`
         },
         {
             key: 'grave_chill',
             label: 'Grave Chill',
-            describe: stacks =>
-                `−${2 * stacks} regeneration per exchange. ` +
-                'Negative regeneration deals internal damage.'
+            describe: (stacks, tier) =>
+                `−${2 * tier * stacks} regeneration per exchange ` +
+                `(−${2 * tier} per stack). Negative regeneration deals internal damage.`
         },
         {
             key: 'withering_lethargy',
             label: 'Withering Lethargy',
-            describe: stacks =>
-                `−${2 * stacks} Crew ATK (−2 per stack). ` +
+            describe: (stacks, tier) =>
+                `−${2 * tier * stacks} Crew ATK (−${2 * tier} per stack). ` +
                 'Effective attack is clamped to zero. Fire bonus is unaffected.'
         },
         {
             key: 'serrated_bleed',
             label: 'Serrated Bleed',
-            describe: stacks =>
-                `+${stacks} damage on successful frontline responses.`
+            describe: (stacks, tier) =>
+                `+${tier * stacks} damage on successful frontline responses ` +
+                `(+${tier} per stack).`
         }
     ];
 
@@ -25309,7 +25285,7 @@ function decorateAethermoorCombatControls(host, state) {
             appendCounter(
                 definition.label,
                 stacks,
-                definition.describe(stacks)
+                definition.describe(stacks, enemyTier(foe.level))
             );
         }
 

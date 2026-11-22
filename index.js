@@ -1697,14 +1697,14 @@ const AETHERMOOR_ACHIEVEMENTS = [
         title: 'Dressed for Trouble',
         requirement: 'Equip gear in all 9 of Tansy’s slots.',
         blurb: 'Not a single bare slot left—pocketed, laced, and ready to stab.',
-        bonus: { hp: 10, luk: 1 }
+        bonus: { tansyHp: 10, luk: 1 }
     },
     {
         id: 'full_kit_qtik',
         title: 'Decked Out',
         requirement: 'Equip gear in all 4 of Q’tik’s accessory slots.',
         blurb: 'Rings, cuffs, and amulet all humming in sync.',
-        bonus: { hp: 10, def: 1 }
+        bonus: { qtikHp: 10, def: 1 }
     },
     {
         id: 'full_kit_crew',
@@ -1826,11 +1826,13 @@ function achievementBonuses(crew) {
     const unlocked = new Set(
         Array.isArray(crew?.achievements) ? crew.achievements : []
     );
-    const totals = { hp: 0, atk: 0, def: 0, luk: 0 };
+    const totals = { qtikHp: 0, tansyHp: 0, atk: 0, def: 0, luk: 0 };
 
     for (const ach of AETHERMOOR_ACHIEVEMENTS) {
         if (!unlocked.has(ach.id) || !ach.bonus) continue;
-        totals.hp += Number(ach.bonus.hp || 0);
+        const sharedHp = Number(ach.bonus.hp || 0);
+        totals.qtikHp += sharedHp + Number(ach.bonus.qtikHp || 0);
+        totals.tansyHp += sharedHp + Number(ach.bonus.tansyHp || 0);
         totals.atk += Number(ach.bonus.atk || 0);
         totals.def += Number(ach.bonus.def || 0);
         totals.luk += Number(ach.bonus.luk || 0);
@@ -1842,7 +1844,14 @@ function achievementBonuses(crew) {
 function formatAchievementBonus(bonus) {
     if (!bonus) return 'None';
     const parts = [];
-    if (bonus.hp) parts.push(`+${bonus.hp} MaxHP`);
+    if (bonus.hp) {
+        parts.push(`+${bonus.hp} Crew MaxHP`);
+    } else if (bonus.qtikHp && bonus.tansyHp && bonus.qtikHp === bonus.tansyHp) {
+        parts.push(`+${bonus.qtikHp} Crew MaxHP`);
+    } else {
+        if (bonus.qtikHp) parts.push(`+${bonus.qtikHp} Q'tik MaxHP`);
+        if (bonus.tansyHp) parts.push(`+${bonus.tansyHp} Tansy MaxHP`);
+    }
     if (bonus.atk) parts.push(`+${bonus.atk} ATK`);
     if (bonus.def) parts.push(`+${bonus.def} DEF`);
     if (bonus.luk) parts.push(`+${bonus.luk} LUK`);
@@ -1884,8 +1893,8 @@ function derived(crew) {
     totals.atk += achBonus.atk;
     totals.def += achBonus.def;
     totals.luk += achBonus.luk;
-    totals.qtikMaxHp += achBonus.hp;
-    totals.tansyMaxHp += achBonus.hp;
+    totals.qtikMaxHp += achBonus.qtikHp;
+    totals.tansyMaxHp += achBonus.tansyHp;
 
     totals.regen = Math.round(totals.qtikMaxHp / 100);
     return totals;

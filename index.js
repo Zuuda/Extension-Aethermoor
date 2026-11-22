@@ -23334,6 +23334,20 @@ async function renderInventoryTab(host) {
 
     host.appendChild(bagSection);
 
+    const wornSlotLabels = {
+        weapon: 'Focus',
+        gloves: 'Bracers',
+        chest: 'Chest',
+        trousers: 'Trousers',
+        headgear: 'Headgear',
+        boots: 'Boots',
+        neck: 'Necklace',
+        ring1: 'Ring 1',
+        ring2: 'Ring 2',
+        amulet: 'Amulet',
+        wristCuffs: 'Wrist Cuffs'
+    };
+
     for (const [owner, label] of [
         ['tansy', 'TANSY'],
         ['qtik', "Q'TIK"]
@@ -23368,9 +23382,25 @@ async function renderInventoryTab(host) {
                 `aethermoor-vendor-name ${rarityClass(item)}`;
             name.textContent = formatGearLabel(item);
 
+            const bonus = gearBonus(owner, slot, {
+                ...item,
+                stat: item.stat ?? item.rawStat
+            });
+            const bonusParts = [
+                ['atk', 'ATK'],
+                ['def', 'DEF'],
+                ['hp', 'HP'],
+                ['luk', 'LUK']
+            ]
+                .filter(([key]) => Number(bonus[key]) > 0)
+                .map(([key, statLabel]) => `+${bonus[key]} ${statLabel}`);
+
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
-            detail.textContent = slot;
+            detail.textContent = [
+                wornSlotLabels[slot] || slot,
+                ...bonusParts
+            ].join(' · ');
 
             main.append(name, detail);
             row.appendChild(main);

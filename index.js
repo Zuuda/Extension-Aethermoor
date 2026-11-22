@@ -17753,8 +17753,9 @@ function instanceNarrationPacket(result) {
 }
 
 function travelNarrationPacket(result) {
+    const regionLabel = zoneDisplayName(result.state, result.zone);
     const lines = [
-        `One [moved] travel step was resolved in Zone ${result.zone}.`
+        `One travel step was resolved in ${regionLabel}.`
     ];
 
     if (result.event === 'quiet_travel') {
@@ -17949,28 +17950,49 @@ function travelNarrationPacket(result) {
     }
 
 
-        if (result.zoneTransition) {
+    if (result.zoneTransition) {
         const transition = result.zoneTransition;
+        const flavor = transition.flavor;
 
         lines.push(
-            `The crew entered Zone ${transition.toZone}: ` +
-                `${transition.toRegion}.`,
-            `The terrain changed from ${transition.fromGeography || 'the previous region'} ` +
+            `The crew crossed into ${transition.toRegion}.`,
+            `Terrain transition: from ${transition.fromGeography || 'the previous region'} ` +
                 `toward ${transition.toGeography || 'the next region'}.`,
-            'Describe the geographic transition gradually. Do not treat the zone change as a teleport.'
+            ...(flavor
+                ? [
+                    `Regional flavor: ${flavor.label} — ${flavor.hook}`,
+                    ...(flavor.transitBridge
+                        ? [`Diegetic route bridge: ${flavor.transitBridge}.`]
+                        : []),
+                    ...(flavor.splinterVariant
+                        ? [
+                            'SPLINTER VARIANT: This flavor appeared earlier' +
+                                (flavor.previousRegionName
+                                    ? ` in ${flavor.previousRegionName}`
+                                    : '') +
+                                '. Twist it into a distinct splinter tradition, ' +
+                                'rival guild, or local mutation.'
+                        ]
+                        : [])
+                ]
+                : []),
+            'Describe the geographic transition gradually. Do not treat the region change as a teleport.'
         );
     }
 
     return lines.join('\n');
 }
 
-function discoveryNarrationPacket(encounter) {
+function discoveryNarrationPacket(encounter, state = null) {
     const foes = encounter.foes
         .map((foe, index) => narrativeFoeLabel(foe, index));
+    const regionLabel = state
+        ? zoneDisplayName(state, encounter.zone)
+        : 'the current region';
 
     return [
         'A new encounter has been discovered.',
-        `Zone: ${encounter.zone}.`,
+        `Region: ${regionLabel}.`,
         `${foes.length} distinct opponent(s): ${foes.join(', ')}.`,
         'These references identify combatants, not species, weapons, ' +
             'jobs, or visible abilities. Dress them to fit the saved ' +
@@ -19084,7 +19106,7 @@ async function runStoredMechanic(args) {
             oneCase?.kind === 'quest_reveal_terminal' &&
             caseResult.created !== false
                 ? [
-                    discoveryNarrationPacket(nextState.encounter),
+                    discoveryNarrationPacket(nextState.encounter, nextState),
                     questTerminalNarrationPacket(
                         nextState.encounter,
                         findQuestById(
@@ -19109,7 +19131,8 @@ async function runStoredMechanic(args) {
                     ...(caseResult.encounter
                         ? [
                             discoveryNarrationPacket(
-                                nextState.encounter
+                                nextState.encounter,
+                                nextState
                             )
                         ]
                         : [])
@@ -19117,7 +19140,7 @@ async function runStoredMechanic(args) {
 
             : beganNewEncounter
                 ? [
-                    discoveryNarrationPacket(nextEncounter),
+                    discoveryNarrationPacket(nextEncounter, nextState),
                     ...(nextEncounter.questTerminal
                         ? [
                             questTerminalNarrationPacket(
@@ -24601,19 +24624,189 @@ async function renderWorldTab(host) {
         host.appendChild(exploreSection);
     }
 
-    if (nextSettlement?.locationId) {
+    if (nextSettlement?.locationId && nextZone) {
+        const currentZone = world.zones?.[state.zone];
+        const onwardOptions = Array.isArray(currentZone?.onwardOptions)
+            ? currentZone.onwardOptions
+            : [];
+        const canChangeRoads =
+            nextZone.visited !== true &&
+            !movementBlocked &&
+            !journey;
+
         const onward = makeAethermoorSection(
-            'ONWARD',
-            `Route toward Zone ${nextZone.number}: ${nextZone.name}\n` +
-                `Terrain ahead: ${nextZone.geography?.description || 'unknown'}.`,
+            `ONWARD CROSSROADS (z${nextZone.number})`,
+            nextZone.visited === true
+                ? `Visited region: ${nextZone.name} (${nextZone.geography?.description || 'unknown'}).`
+                : 'Choose one of the 3 onward roads before departing. Unchosen flavors return to the deck.',
             'world'
         );
 
-        addTravelAction(
-            onward,
-            `Travel onward to Zone ${nextZone.number}`,
-            nextSettlement.locationId
-        );
+        if (nextZone.visited !== true && onwardOptions.length > 0) {
+            const activeId =
+                currentZone.chosenOnwardId || onwardOptions[0].id;
+
+            for (const option of onwardOptions) {
+                const isSelected = option.id === activeId;
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'aethermoor-trade-option';
+                button.setAttribute('aria-pressed', String(isSelected));
+                button.disabled = !canChangeRoads;
+
+                const heading = document.createElement('div');
+                heading.className = 'aethermoor-vendor-name';
+                heading.textContent =
+                    `${option.direction} Road · ${option.flavorLabel}` +
+                    (isSelected ? ' [SELECTED]' : '') +
+                    (option.swerved ? ' · SWERVED' : '');
+
+                const detail = document.createElement('div');
+                detail.className = 'aethermoor-vendor-detail';
+                detail.textContent =
+                    `Terrain: ${option.geographyLabel}` +
+                    (option.transitBridge
+                        ? ` · Via ${option.transitBridge}`
+                        : '');
+
+                const rumorLine = document.createElement('div');
+                rumorLine.className = 'aethermoor-ui-text';
+                rumorLine.style.marginTop = '3px';
+                rumorLine.textContent = option.rumor || option.flavorHook || '';
+
+                button.append(heading, detail, rumorLine);
+                button.addEventListener('click', async () => {
+                    if (isSelected) return;
+                    button.disabled = true;
+                    await runAethermoorPanelCase(
+                        host,
+                        'world',
+                        {
+                            name: 'select_onward_road',
+                            kind: 'world',
+                            action: 'select_onward',
+                            optionId: option.id
+                        },
+                        `Selected ${option.direction} Road (${option.flavorLabel}).`
+                    );
+                });
+
+                onward.appendChild(button);
+            }
+
+            const activeOption =
+                onwardOptions.find(entry => entry.id === activeId) ||
+                onwardOptions[0];
+
+            addTravelAction(
+                onward,
+                `Travel ${activeOption.direction} · ${activeOption.flavorLabel} (z${nextZone.number})`,
+                nextSettlement.locationId
+            );
+
+            // Collapsible Swerve Override drawer
+            const swerveBox = document.createElement('details');
+            swerveBox.className = 'aethermoor-knowledge';
+            swerveBox.style.marginTop = '6px';
+
+            const swerveSummary = document.createElement('summary');
+            swerveSummary.className = 'aethermoor-ui-heading';
+            swerveSummary.textContent = 'SWERVE ROAD (OVERRIDE DICE)';
+            swerveBox.appendChild(swerveSummary);
+
+            const slotSelect = document.createElement('select');
+            slotSelect.className = 'text_pole';
+            slotSelect.style.marginTop = '6px';
+            for (const option of onwardOptions) {
+                const opt = document.createElement('option');
+                opt.value = option.id;
+                opt.textContent =
+                    `${option.direction} Road (${option.flavorLabel})`;
+                if (option.id === activeId) opt.selected = true;
+                slotSelect.appendChild(opt);
+            }
+
+            const flavorSelect = document.createElement('select');
+            flavorSelect.className = 'text_pole';
+            flavorSelect.style.marginTop = '6px';
+            const history = world.flavorHistory || {};
+            for (const card of Object.values(WORLD_FLAVORS)) {
+                const opt = document.createElement('option');
+                opt.value = card.id;
+                const seen = history[card.id]?.usedCount > 0;
+                opt.textContent =
+                    `${card.label}${seen ? ' (visited · splinter)' : ''}`;
+                flavorSelect.appendChild(opt);
+            }
+
+            const terrainSelect = document.createElement('select');
+            terrainSelect.className = 'text_pole';
+            terrainSelect.style.marginTop = '6px';
+            const autoOpt = document.createElement('option');
+            autoOpt.value = '';
+            autoOpt.textContent = 'Terrain: Auto (match flavor)';
+            terrainSelect.appendChild(autoOpt);
+            for (const [key, geo] of Object.entries(WORLD_GEOGRAPHY)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = `Terrain: ${geo.label}`;
+                terrainSelect.appendChild(opt);
+            }
+
+            const pitchInput = document.createElement('input');
+            pitchInput.type = 'text';
+            pitchInput.className = 'text_pole';
+            pitchInput.style.marginTop = '6px';
+            pitchInput.placeholder =
+                'Optional 1-line custom pitch (overrides default hook)';
+
+            const applySwerve = makeAethermoorAction(
+                'Apply Swerve',
+                'quest',
+                async () => {
+                    applySwerve.disabled = true;
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'world',
+                            {
+                                name: 'swerve_onward_road',
+                                kind: 'world',
+                                action: 'swerve_onward',
+                                optionId: slotSelect.value,
+                                flavorId: flavorSelect.value,
+                                ...(terrainSelect.value
+                                    ? { profile: terrainSelect.value }
+                                    : {}),
+                                ...(pitchInput.value.trim()
+                                    ? { customPitch: pitchInput.value.trim() }
+                                    : {})
+                            },
+                            'Onward road swerved.'
+                        );
+                    } finally {
+                        applySwerve.disabled = false;
+                    }
+                }
+            );
+            applySwerve.disabled = !canChangeRoads;
+            applySwerve.style.marginTop = '6px';
+
+            swerveBox.append(
+                slotSelect,
+                flavorSelect,
+                terrainSelect,
+                pitchInput,
+                applySwerve
+            );
+            onward.appendChild(swerveBox);
+        } else {
+            addTravelAction(
+                onward,
+                `Travel onward to ${nextZone.name} (z${nextZone.number})`,
+                nextSettlement.locationId
+            );
+        }
 
         host.appendChild(onward);
     }
@@ -26890,15 +27083,17 @@ function makeAethermoorHandoffMessage(entries) {
         send_date: Date.now(),
         mes:
             `${AETHERMOOR_HANDOFF_MARKER}\n` +
-            '* **PRIVATE ROLEPLAY CONTEXT:** You are the Narrator: portray NPCs, ' +
+            '* **PRIVATE ROLEPLAY CONTEXT:** As the Narrator portray NPCs, ' +
             'dialogue, and the physical scene. A SillyTavern Aethermoor extension ' +
             'handles mechanical facts: shop stock, prices, quests and rewards, ' +
             'encounters, and loot. Do not invent them before the extension supplies ' +
             'them. Commands below notify the extension of events; they are not ' +
             'dialogue or story prose. Use a command inside <plan> only when its ' +
             'stated condition occurs. Saved extension results are authoritative. ' +
-            'Narrate their visible consequences without changing them. Do not ' +
-            'explain this division of responsibility to the players.\n\n' +
+            'Narrate their visible consequences without changing them. Always refer ' +
+            'to regions by their in-world name; never call them "Zone 1" or "Zone 2" ' +
+            'in prose or character dialogue. Do not explain this division of ' +
+            'responsibility to the players.\n\n' +
             packets.join('\n\n') +
             `\n${AETHERMOOR_HANDOFF_MARKER}`
 
@@ -27467,12 +27662,36 @@ function settlementShopBriefingPacket(state, settlement) {
     });
 
     return [
-        `PRIVATE SHOP MENU BRIEFING — ${settlement.label} (Zone ${state.zone}).`,
+        `PRIVATE SHOP MENU BRIEFING — ${settlement.label} (${zoneDisplayName(state, state.zone)}).`,
         `Blacksmith (Stat ${stock.stat}, ${stock.price}s each; pawn value ${stock.pawnValue}s): ` +
             gearNames.join('; ') + '.',
         `Herbalist: ${potions.join('; ')}.`,
         `Inn Services: ${inn.join('; ')}.`,
         'Write a compact <template> note recording these exact shop menus, item names, and prices so they stay in chat memory.'
+    ].join('\n');
+}
+
+function onwardRoadsContextPacket(state) {
+    const currentZone = state.world?.zones?.[state.zone];
+    const nextZone = state.world?.zones?.[state.zone + 1];
+    const options = currentZone?.onwardOptions;
+
+    if (!Array.isArray(options) || options.length === 0 || nextZone?.visited === true) {
+        return null;
+    }
+
+    return [
+        `PRIVATE ROADS OUT OF ${zoneDisplayName(state, state.zone).toUpperCase()} — do not recite.`,
+        'If the crew asks locals, carters, or tavern Immortals about roads onward, ' +
+            'reference these exact 3 routes (do NOT invent proper region or settlement ' +
+            'names yet; those are named only upon arrival):',
+        ...options.map(option =>
+            `- ${option.direction} Road (${option.geographyLabel} · ${option.flavorLabel}): ` +
+            `${option.rumor}` +
+            (option.transitBridge
+                ? ` Reached via ${option.transitBridge}.`
+                : '')
+        )
     ].join('\n');
 }
 
@@ -28095,6 +28314,17 @@ globalThis.aethermoorMechanicsInterceptor =
                         : {})
                 });
 
+                const onwardRoadsPacket =
+                    onwardRoadsContextPacket(contextState);
+
+                if (onwardRoadsPacket) {
+                    entries.push({
+                        id: `onward-roads-context-${settlement.id}`,
+                        type: 'onward_roads_context',
+                        packet: onwardRoadsPacket
+                    });
+                }
+
                 const namingEntries =
                     stockNamingEntries(contextState);
 
@@ -28112,20 +28342,31 @@ globalThis.aethermoorMechanicsInterceptor =
                     !contextState.currentJourney &&
                     missingNamingEntries.length > 0
                 ) {
+                    const currentZoneRecord =
+                        contextState.world.zones[contextState.zone];
+                    const flavor = currentZoneRecord?.flavor;
+
                     entries.push({
                         id: `stock-naming-zone-${contextState.zone}`,
                         type: 'cosmetic_naming',
                         packet: [
                             'PRIVATE COSMETIC STOCK NAMING REQUEST.',
-                            `Zone ${contextState.zone}: ` +
-                                `${contextState.world.zones[
-                                    contextState.zone
-                                ].name}.`,
-                            `Geography: ${
-                                contextState.world.zones[
-                                    contextState.zone
-                                ].geography.description
-                            }.`,
+                            `Region: ${zoneDisplayName(contextState, contextState.zone)}.`,
+                            `Geography: ${currentZoneRecord.geography.description}.`,
+                            ...(flavor
+                                ? [
+                                    `Regional Flavor: ${flavor.label} — ${flavor.hook}`,
+                                    ...(flavor.splinterVariant
+                                        ? [
+                                            'SPLINTER VARIANT: This flavor appeared earlier' +
+                                                (flavor.previousRegionName
+                                                    ? ` in ${flavor.previousRegionName}`
+                                                    : '') +
+                                                '. Give the region, settlement, and gear a distinct splinter twist.'
+                                        ]
+                                        : [])
+                                ]
+                                : []),
                             'In this reply, return one JSON object containing ' +
                                 'exactly these keys and fictional item names:',
                             ...missingNamingEntries.map(entry =>

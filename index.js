@@ -2991,6 +2991,119 @@ function achievementUnlockedCardHtml(unlocked) {
     });
 }
 
+const TRADE_MARKET_LABELS = {
+    lowball_trolls: 'Lowball Trolls (Unsold)',
+    standard_market: 'Standard Market',
+    guild_bulk_buyer: 'Guild Bulk Buyer',
+    bidding_war: 'Bidding War',
+    whale_collector_buyout: 'Whale Collector Buyout'
+};
+
+function aetherNetReceiptCardHtml(settlements) {
+    if (!Array.isArray(settlements) || settlements.length === 0) return '';
+
+    const totalSilver = settlements.reduce(
+        (sum, entry) => sum + Number(entry.silverGained || 0),
+        0
+    );
+
+    const rows = settlements.map((entry, index) => {
+        const divider = index > 0
+            ? 'border-top:1px solid #1f2730; margin-top:6px; padding-top:6px;'
+            : '';
+        const item = entry.item || {};
+        const color = item.rarityColor || '#ffffff';
+        const outcomeLabel =
+            TRADE_MARKET_LABELS[entry.marketResult] ||
+            (entry.status === 'sold' ? 'Sold' : 'Unsold');
+        const rightText = entry.status === 'sold'
+            ? `<b style="color:#ffd166;">+${entry.silverGained}s</b>`
+            : `<b style="color:#f87171;">Returned</b>`;
+
+        return `<div style="${divider}">` +
+            `<div style="display:flex; justify-content:space-between; gap:8px;">` +
+                `<b style="color:${color};">${escapeSystemLogHtml(formatGearLabel(item))}</b>` +
+                `<span style="white-space:nowrap;">${rightText}</span>` +
+            `</div>` +
+            `<div style="color:#9caab8;">${escapeSystemLogHtml(outcomeLabel)}</div>` +
+        `</div>`;
+    }).join('');
+
+    return systemLogCardHtml({
+        accent: '#38bdf8',
+        heading: 'System Log // Aether-Net Escrow',
+        rightHtml: totalSilver > 0
+            ? `<b style="color:#ffd166;">+${totalSilver}s Total</b>`
+            : `<span style="color:#f87171;">No Sales</span>`,
+        bodyHtml: rows,
+        buttons: ['close']
+    });
+}
+
+function tradeSettleNarrationPacket(result) {
+    const settlements = result.settlements || [];
+    const totalSilver = settlements.reduce(
+        (sum, entry) => sum + Number(entry.silverGained || 0),
+        0
+    );
+
+    const hasWhaleOrRare = settlements.some(entry =>
+        entry.status === 'sold' && (
+            entry.marketResult === 'whale_collector_buyout' ||
+            entry.item?.slot === 'skill_tome' ||
+            ['rare', 'epic', 'legendary'].includes(
+                String(entry.item?.rarity || '').toLowerCase()
+            )
+        )
+    );
+    const hasBiddingWar = settlements.some(
+        entry => entry.marketResult === 'bidding_war'
+    );
+    const hasGuildBulk = settlements.some(
+        entry => entry.marketResult === 'guild_bulk_buyer'
+    );
+    const hasUnsold = settlements.some(
+        entry => entry.status === 'unsold'
+    );
+
+    const toneGuidance = hasWhaleOrRare
+        ? 'PRESENTATION WEIGHT: High spectacle. An absurdly rich Immortal, ' +
+          'collector, or streamer snapped up the listing while regional ' +
+          'Trade-Stream chat lost its mind over the overpay (3–5 short ' +
+          'Twitch-style Immortal handles/comments beneath the card).'
+        : hasBiddingWar
+            ? 'PRESENTATION WEIGHT: Lively Bidding War. Show 3–5 short ' +
+              'Immortal handles sniping and trash-talking in the Trade-Stream ' +
+              'feed beneath the card.'
+            : hasGuildBulk
+                ? 'PRESENTATION WEIGHT: Clean escrow slip with a brief, dry ' +
+                  'guild-quartermaster note (e.g., stocking recruit gear).'
+                : hasUnsold && totalSilver === 0
+                    ? 'PRESENTATION WEIGHT: Unsold / Lowball Trolls. Show 1–2 ' +
+                      'obnoxious lowball whisper-offers explaining why the ' +
+                      'listing expired and bounced back to Bag Reserves.'
+                    : 'PRESENTATION WEIGHT: Quiet Standard Market escrow. Keep ' +
+                      'it grounded and concise—at most a 1-line buyer note ' +
+                      '(e.g., "ty fast trade") or none at all. Do NOT invent ' +
+                      'livestream hype for ordinary starter gear.';
+
+    return [
+        'AETHER-NET TRADE-STREAM SETTLEMENT — narrate when the crew checks their listings.',
+        ...settlements.map(entry => {
+            const label = TRADE_MARKET_LABELS[entry.marketResult] || entry.status;
+            return entry.status === 'sold'
+                ? `- SOLD: ${formatGearLabel(entry.item)} for +${entry.silverGained}s (${label}).`
+                : `- UNSOLD: ${formatGearLabel(entry.item)} returned to Bag Reserves (${label}).`;
+        }),
+        'Display this exact System Escrow HTML card verbatim (visible to Q’tik and Tansy, not ordinary NPCs):',
+        aetherNetReceiptCardHtml(settlements),
+        toneGuidance,
+        'System Escrow transfers items and silver automatically—no in-person ' +
+            'delivery or meetup is required. Silver and returned items are ' +
+            'ALREADY applied to saved state; do not add or deduct silver again.'
+    ].join('\n');
+}
+
 function evaluateAethermoorAchievements(
     beforeState,
     afterState,
@@ -3124,12 +3237,20 @@ function evaluateAethermoorAchievements(
     }
     if (
         oneCase?.kind === 'trade' &&
-        oneCase.action === 'settle' &&
-        caseResult?.status === 'sold'
+        ['settle', 'settle_all'].includes(oneCase.action)
     ) {
-        stats.tradeSilver += Number(caseResult?.silverGained || 0);
-        if (caseResult.marketResult === 'whale_collector_buyout') {
-            stats.whaleBuyout = true;
+        const settled = Array.isArray(caseResult?.settlements)
+            ? caseResult.settlements
+            : caseResult?.status === 'sold'
+                ? [caseResult]
+                : [];
+
+        for (const entry of settled) {
+            if (entry.status !== 'sold') continue;
+            stats.tradeSilver += Number(entry.silverGained || 0);
+            if (entry.marketResult === 'whale_collector_buyout') {
+                stats.whaleBuyout = true;
+            }
         }
     }
 
@@ -12767,6 +12888,7 @@ function resolveTradeAction(test) {
     state.inventory ||= {};
     state.inventory.bagReserves ||= [];
     state.inventory.activeTradeListings ||= [];
+    state.inventory.tradeHistory ||= [];
 
     assert(
         Array.isArray(state.inventory.bagReserves),
@@ -12779,7 +12901,7 @@ function resolveTradeAction(test) {
     );
 
     assert(
-        ['pawn', 'list', 'settle'].includes(test.action),
+        ['pawn', 'list', 'withdraw', 'settle', 'settle_all'].includes(test.action),
         `Unsupported trade action: ${test.action}`
     );
 
@@ -12830,7 +12952,7 @@ function resolveTradeAction(test) {
 
         assert(
             state.inventory.activeTradeListings.length < 3,
-            'Trade-Stream already has three active listings'
+            'Aether-Net already has three active listings'
         );
 
         assert(
@@ -12845,7 +12967,7 @@ function resolveTradeAction(test) {
             item &&
             item.bound !== true &&
             item.tradeStreamEligible !== false,
-            'Only unbound Trade-Stream-eligible gear may be listed'
+            'Only unbound Aether-Net-eligible gear may be listed'
         );
 
         const tradeStat =
@@ -12858,7 +12980,6 @@ function resolveTradeAction(test) {
         );
 
         const tradeRoll = roll(state, 6);
-        const buyerRoll = roll(state, 6);
         const rarity =
             String(item.rarity || 'Common').toLowerCase();
 
@@ -12906,15 +13027,6 @@ function resolveTradeAction(test) {
             }
         }
 
-        const buyers = {
-            1: 'Sweaty Min-Maxer',
-            2: 'Roleplayer in Fancy Cloak',
-            3: 'Guild Logistics Mule',
-            4: 'Nervous Lowbie',
-            5: 'Over-Geared Alt',
-            6: 'Crafter Looking for Scrap'
-        };
-
         const listingId =
             test.listingId ||
             `listing-${Date.now()}-${state.inventory.activeTradeListings.length + 1}`;
@@ -12925,15 +13037,13 @@ function resolveTradeAction(test) {
             listedAt: test.listedAt || null,
 
             /*
-             * This result is locked at listing time. Settlement reveals
-             * it later and does not accept or generate a new trade roll.
+             * Market outcome is locked at listing time; settlement reveals
+             * it later without rerolling. No hardcoded buyer stereotypes.
              */
             lockedSale: {
                 status: saleStatus,
                 result: marketResult,
-                tradeRoll: tradeRoll,
-                buyer: buyers[buyerRoll],
-                buyerRoll: buyerRoll,
+                tradeRoll,
                 tradeStat,
                 multiplier,
                 proceeds:
@@ -12964,6 +13074,124 @@ function resolveTradeAction(test) {
         return result;
     }
 
+    if (test.action === 'withdraw') {
+        int(test.listingIndex, 'listingIndex', 0);
+
+        assert(
+            test.listingIndex < state.inventory.activeTradeListings.length,
+            `No active listing at index ${test.listingIndex}`
+        );
+
+        const [listing] = state.inventory.activeTradeListings.splice(
+            test.listingIndex,
+            1
+        );
+
+        delete listing.lockedSale;
+        delete listing.listingId;
+        delete listing.listedAt;
+
+        state.inventory.bagReserves.push(listing);
+
+        result.status = 'withdrawn';
+        result.returnedToBag = true;
+        result.item = listing;
+
+        return result;
+    }
+
+    function settleListing(listing) {
+        assert(
+            listing && listing.bound !== true,
+            'Bound gear cannot be settled through Aether-Net'
+        );
+
+        assert(
+            listing.lockedSale &&
+            ['sold', 'unsold'].includes(listing.lockedSale.status),
+            'Listing has no locked sale result'
+        );
+
+        const lockedSale = listing.lockedSale;
+
+        assert(
+            lockedSale.revealed !== true,
+            'Aether-Net listing has already been settled'
+        );
+
+        lockedSale.revealed = true;
+
+        if (lockedSale.status === 'unsold') {
+            delete listing.lockedSale;
+            delete listing.listingId;
+            delete listing.listedAt;
+
+            state.inventory.bagReserves.push(listing);
+
+            return {
+                status: 'unsold',
+                marketResult: lockedSale.result,
+                silverGained: 0,
+                returnedToBag: true,
+                item: clone(listing)
+            };
+        }
+
+        const proceeds = Number(lockedSale.proceeds);
+
+        assert(
+            Number.isInteger(proceeds) && proceeds >= 0,
+            'Locked Aether-Net proceeds are invalid'
+        );
+
+        state.crew.purse += proceeds;
+        state.inventory.tradeHistory.push({
+            name: listing.name || 'Unnamed item',
+            rarity: listing.rarity || 'Common',
+            rarityColor: listing.rarityColor || '#ffffff',
+            rawStat: listing.rawStat ?? null,
+            marketResult: lockedSale.result,
+            proceeds,
+            zone: state.zone
+        });
+        state.inventory.tradeHistory =
+            state.inventory.tradeHistory.slice(-25);
+
+        return {
+            status: 'sold',
+            marketResult: lockedSale.result,
+            multiplier: lockedSale.multiplier,
+            silverGained: proceeds,
+            returnedToBag: false,
+            item: clone(listing)
+        };
+    }
+
+    if (test.action === 'settle_all') {
+        assert(
+            state.inventory.activeTradeListings.length > 0,
+            'No active Aether-Net listings to settle'
+        );
+
+        const batch = state.inventory.activeTradeListings.splice(0);
+        const settlements = batch.map(settleListing);
+        const totalSilver = settlements.reduce(
+            (sum, entry) => sum + entry.silverGained,
+            0
+        );
+        const soldCount = settlements.filter(
+            entry => entry.status === 'sold'
+        ).length;
+
+        result.settlements = settlements;
+        result.silverGained = totalSilver;
+        result.soldCount = soldCount;
+        result.unsoldCount = settlements.length - soldCount;
+        result.status = soldCount > 0 ? 'sold' : 'unsold';
+
+        return result;
+    }
+
     int(test.listingIndex, 'listingIndex', 0);
 
     assert(
@@ -12972,66 +13200,19 @@ function resolveTradeAction(test) {
         `No active listing at index ${test.listingIndex}`
     );
 
-    const listing =
-        state.inventory.activeTradeListings[test.listingIndex];
-
-    assert(
-        listing &&
-        listing.bound !== true,
-        'Bound gear cannot be settled through Trade-Stream'
-    );
-
-    assert(
-        listing.lockedSale &&
-        ['sold', 'unsold'].includes(listing.lockedSale.status),
-        'Listing has no locked sale result'
-    );
-
-    const lockedSale =
-        listing.lockedSale;
-
-    assert(
-        lockedSale.revealed !== true,
-        'Trade-Stream listing has already been settled'
-    );
-
-    lockedSale.revealed = true;
-    result.item = listing;
-
-    state.inventory.activeTradeListings.splice(
+    const [listing] = state.inventory.activeTradeListings.splice(
         test.listingIndex,
         1
     );
+    const settled = settleListing(listing);
 
-    if (lockedSale.status === 'unsold') {
-        delete listing.lockedSale;
-        delete listing.listingId;
-        delete listing.listedAt;
-
-        state.inventory.bagReserves.push(listing);
-
-        result.status = 'unsold';
-        result.silverGained = 0;
-        result.returnedToBag = true;
-
-        return result;
-    }
-
-    const proceeds =
-        Number(lockedSale.proceeds);
-
-    assert(
-        Number.isInteger(proceeds) && proceeds >= 0,
-        'Locked Trade-Stream proceeds are invalid'
-    );
-
-    result.status = 'sold';
-    result.silverGained = proceeds;
-    result.multiplier = lockedSale.multiplier;
-    result.buyer = lockedSale.buyer;
-    result.marketResult = lockedSale.result;
-
-    state.crew.purse += proceeds;
+    result.item = settled.item;
+    result.status = settled.status;
+    result.silverGained = settled.silverGained;
+    result.multiplier = settled.multiplier;
+    result.marketResult = settled.marketResult;
+    result.returnedToBag = settled.returnedToBag;
+    result.settlements = [settled];
 
     return result;
 }
@@ -19188,6 +19369,13 @@ async function runStoredMechanic(args) {
               oneCase.action === 'use' &&
               caseResult.recipient
                 ? inventoryActionNarrationPacket(caseResult, 'use')
+
+            : batch &&
+              oneCase?.kind === 'trade' &&
+              ['settle', 'settle_all'].includes(oneCase.action) &&
+              Array.isArray(caseResult.settlements) &&
+              caseResult.settlements.length > 0
+                ? tradeSettleNarrationPacket(caseResult)
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&

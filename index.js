@@ -20277,6 +20277,11 @@ function addAethermoorPanelStyles() {
             border-top: 2px solid #fbbf24;
         }
 
+        .aethermoor-tab[data-tab="aethernet"].active {
+            color: #ffffff;
+            border-top: 2px solid #38bdf8;
+        }
+
         .aethermoor-tab:disabled {
             opacity: 0.4;
             cursor: not-allowed;
@@ -20891,7 +20896,7 @@ function ensureAethermoorTabViews() {
 
     for (const tab of [
         'combat', 'quests', 'world', 'instances', 'inventory', 'shops',
-        'achievements'
+        'achievements', 'aethernet'
     ]) {
 
         const view = document.createElement('section');
@@ -21254,6 +21259,8 @@ async function runAethermoorPanelCase(host, tab, caseData, successText) {
             await renderQuestTab(host);
         } else if (tab === 'inventory') {
             await renderInventoryTab(host);
+        } else if (tab === 'aethernet') {
+            await renderAetherNetTab(host);
         } else {
             await renderWorldTab(host);
         }
@@ -23373,19 +23380,298 @@ async function renderInventoryTab(host) {
         host.appendChild(wornSection);
     }
 
-    const listings = inventory.activeTradeListings || [];
+}
 
-    if (listings.length) {
+/*
+ * Aether-Net Trade-Stream tab: manage up to 3 active listings, quick-list
+ * unbound gear from Bag Reserves, and inspect lifetime sales. Settling
+ * queues one combined System Escrow HTML receipt and tiered GM handoff.
+ */
+async function renderAetherNetTab(host) {
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.replaceChildren();
         host.appendChild(
             makeAethermoorSection(
-                `TRADE-STREAM LISTINGS · ${listings.length}`,
-                listings.map(item =>
-                    item.name || item.listingId || 'Unnamed listing'
-                ).join('\n'),
+                'AETHER-NET',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
                 'world'
             )
         );
+        return;
     }
+
+    const state = snapshot.state;
+    const inventory = state.inventory || {};
+    const listings = inventory.activeTradeListings || [];
+    const bag = inventory.bagReserves || [];
+    const history = inventory.tradeHistory || [];
+
+    host.replaceChildren();
+    markCampaignViewRendered(snapshot);
+
+    function rarityClass(item) {
+        return `aethermoor-rarity-${
+            String(item?.rarity || 'common').toLowerCase()
+        }`;
+    }
+
+    // 1. Active Listings (0/3)
+    const activeSection = makeAethermoorSection(
+        `ACTIVE LISTINGS · ${listings.length}/3`,
+        listings.length
+            ? 'Market rolls lock when posted. Settle when checking the board, or Withdraw back to Bag Reserves.'
+            : 'No active listings. Post unbound gear from Bag Reserves below.',
+        'world'
+    );
+
+    if (listings.length > 1) {
+        const settleAll = makeAethermoorAction(
+            `Settle All (${listings.length})`,
+            'world',
+            async () => {
+                settleAll.disabled = true;
+                try {
+                    const out = await runAethermoorPanelCase(
+                        host,
+                        'aethernet',
+                        {
+                            name: 'aethernet_settle_all',
+                            kind: 'trade',
+                            action: 'settle_all'
+                        },
+                        null
+                    );
+                    const res = out?.results?.[0]?.result;
+                    if (res) {
+                        toastr.success(
+                            res.silverGained > 0
+                                ? `Settled ${res.soldCount} sale(s) for +${res.silverGained}s` +
+                                    (res.unsoldCount ? ` (${res.unsoldCount} returned).` : '.')
+                                : `${res.unsoldCount} listing(s) went unsold and returned to Bag Reserves.`,
+                            'Aether-Net'
+                        );
+                    }
+                } finally {
+                    settleAll.disabled = false;
+                }
+            }
+        );
+        activeSection.appendChild(settleAll);
+    }
+
+    listings.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'aethermoor-inventory-item';
+
+        const main = document.createElement('div');
+        main.className = 'aethermoor-inventory-item-main';
+
+        const name = document.createElement('div');
+        name.className = `aethermoor-vendor-name ${rarityClass(item)}`;
+        name.textContent = formatGearLabel(item);
+
+        const detail = document.createElement('div');
+        detail.className = 'aethermoor-vendor-detail';
+        detail.textContent =
+            `${item.rarity || 'Common'} · ` +
+            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s` +
+            (item.slot === 'skill_tome' ? ' · Skill Tome (S=10)' : '');
+
+        main.append(name, detail);
+
+        const actions = document.createElement('div');
+        actions.className = 'aethermoor-inventory-item-actions';
+
+        const settle = document.createElement('button');
+        settle.type = 'button';
+        settle.textContent = 'Settle';
+        settle.addEventListener('click', async () => {
+            settle.disabled = true;
+            try {
+                const out = await runAethermoorPanelCase(
+                    host,
+                    'aethernet',
+                    {
+                        name: `aethernet_settle_${index}`,
+                        kind: 'trade',
+                        action: 'settle',
+                        listingIndex: index
+                    },
+                    null
+                );
+                const res = out?.results?.[0]?.result;
+                if (res) {
+                    toastr.info(
+                        res.status === 'sold'
+                            ? `Sold for +${res.silverGained}s (${TRADE_MARKET_LABELS[res.marketResult] || 'Sold'}).`
+                            : 'Unsold — returned to Bag Reserves.',
+                        'Aether-Net'
+                    );
+                }
+            } finally {
+                settle.disabled = false;
+            }
+        });
+
+        const withdraw = document.createElement('button');
+        withdraw.type = 'button';
+        withdraw.textContent = 'Withdraw';
+        withdraw.addEventListener('click', async () => {
+            withdraw.disabled = true;
+            try {
+                await runAethermoorPanelCase(
+                    host,
+                    'aethernet',
+                    {
+                        name: `aethernet_withdraw_${index}`,
+                        kind: 'trade',
+                        action: 'withdraw',
+                        listingIndex: index
+                    },
+                    'Listing withdrawn to Bag Reserves.'
+                );
+            } finally {
+                withdraw.disabled = false;
+            }
+        });
+
+        actions.append(settle, withdraw);
+        row.append(main, actions);
+        activeSection.appendChild(row);
+    });
+
+    host.appendChild(activeSection);
+
+    // 2. Ready to List (Unbound Bag Reserves)
+    const eligible = bag
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) =>
+            item &&
+            item.bound !== true &&
+            item.tradeStreamEligible !== false &&
+            Number.isInteger(Number(item.tradeStat || item.rawStat)) &&
+            Number(item.tradeStat || item.rawStat) > 0
+        );
+
+    const readySection = makeAethermoorSection(
+        `READY TO LIST · ${eligible.length}`,
+        eligible.length
+            ? 'Unbound gear from Bag Reserves eligible for Aether-Net.'
+            : 'No unbound gear ready to list.',
+        'world'
+    );
+
+    const atCap = listings.length >= 3;
+
+    for (const { item, index } of eligible) {
+        const row = document.createElement('div');
+        row.className = 'aethermoor-inventory-item';
+
+        const main = document.createElement('div');
+        main.className = 'aethermoor-inventory-item-main';
+
+        const name = document.createElement('div');
+        name.className = `aethermoor-vendor-name ${rarityClass(item)}`;
+        name.textContent = formatGearLabel(item);
+
+        const detail = document.createElement('div');
+        detail.className = 'aethermoor-vendor-detail';
+        detail.textContent =
+            `${item.rarity || 'Common'} · ` +
+            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s` +
+            (item.slot === 'skill_tome' ? ' · Skill Tome (S=10)' : '');
+
+        main.append(name, detail);
+
+        const actions = document.createElement('div');
+        actions.className = 'aethermoor-inventory-item-actions';
+
+        const listBtn = document.createElement('button');
+        listBtn.type = 'button';
+        listBtn.textContent = 'List';
+        listBtn.disabled = atCap;
+        if (atCap) {
+            listBtn.title = 'Aether-Net cap reached (3/3 active listings).';
+        }
+        listBtn.addEventListener('click', async () => {
+            listBtn.disabled = true;
+            try {
+                await runAethermoorPanelCase(
+                    host,
+                    'aethernet',
+                    {
+                        name: `aethernet_list_${index}`,
+                        kind: 'trade',
+                        action: 'list',
+                        itemIndex: index
+                    },
+                    'Item listed on Aether-Net.'
+                );
+            } finally {
+                listBtn.disabled = false;
+            }
+        });
+
+        actions.appendChild(listBtn);
+        row.append(main, actions);
+        readySection.appendChild(row);
+    }
+
+    host.appendChild(readySection);
+
+    // 3. Sales Ledger
+    const lifetimeSilver = Number(state.stats?.tradeSilver || 0);
+    const ledgerSection = makeAethermoorSection(
+        'SALES LEDGER',
+        `Lifetime Aether-Net Silver: ${lifetimeSilver}s · Recorded Sales: ${history.length}`,
+        'world'
+    );
+
+    if (history.length > 0) {
+        const drawer = document.createElement('details');
+        drawer.className = 'aethermoor-knowledge';
+        drawer.style.borderLeftColor = '#38bdf8';
+
+        const summary = document.createElement('summary');
+        summary.className = 'aethermoor-ui-heading';
+        summary.textContent = `RECENT SALES · ${history.length}`;
+        drawer.appendChild(summary);
+
+        for (const entry of [...history].reverse()) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const name = document.createElement('div');
+            name.className = 'aethermoor-vendor-name';
+            name.style.color = entry.rarityColor || '#ffffff';
+            name.textContent = `${entry.name} · +${entry.proceeds}s`;
+
+            const detail = document.createElement('div');
+            detail.className = 'aethermoor-vendor-detail';
+            detail.textContent =
+                `${TRADE_MARKET_LABELS[entry.marketResult] || entry.marketResult}` +
+                (entry.zone ? ` · z${entry.zone}` : '');
+
+            main.append(name, detail);
+            row.appendChild(main);
+            drawer.appendChild(row);
+        }
+
+        ledgerSection.appendChild(drawer);
+    }
+
+    host.appendChild(ledgerSection);
 }
 
 /*
@@ -25055,6 +25341,8 @@ function renderAethermoorTab(tab) {
         renderShopsTab(views.shops);
     } else if (tab === 'achievements') {
         renderAchievementsTab(views.achievements);
+    } else if (tab === 'aethernet') {
+        renderAetherNetTab(views.aethernet);
     }
 }
 
@@ -25311,7 +25599,8 @@ function openAethermoorPanel() {
             ['instances', 'Instance'],
             ['inventory', 'Inventory'],
             ['shops', 'Shops'],
-            ['achievements', 'Achievements']
+            ['achievements', 'Achievements'],
+            ['aethernet', 'Aether-Net']
         ]) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -25780,7 +26069,7 @@ function registerAethermoorCampaignAutoRefresh() {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            !['quests', 'world', 'instances', 'inventory', 'shops', 'achievements']
+            !['quests', 'world', 'instances', 'inventory', 'shops', 'achievements', 'aethernet']
                 .includes(aethermoorActiveTab) ||
             aethermoorCampaignRefreshBusy ||
             !aethermoorTabViews
@@ -25805,18 +26094,20 @@ function registerAethermoorCampaignAutoRefresh() {
         const host =
             aethermoorTabViews[aethermoorActiveTab];
 
-         const refresh =
+        const refresh =
             aethermoorActiveTab === 'quests'
                 ? renderQuestTab(host)
                 : aethermoorActiveTab === 'instances'
                     ? renderInstanceTab(host)
-                : aethermoorActiveTab === 'inventory'
+                    : aethermoorActiveTab === 'inventory'
                         ? renderInventoryTab(host)
                         : aethermoorActiveTab === 'shops'
                             ? renderShopsTab(host)
                             : aethermoorActiveTab === 'achievements'
                                 ? renderAchievementsTab(host)
-                                : renderWorldTab(host);
+                                : aethermoorActiveTab === 'aethernet'
+                                    ? renderAetherNetTab(host)
+                                    : renderWorldTab(host);
 
         Promise.resolve(refresh)
             .catch(error => {

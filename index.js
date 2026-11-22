@@ -1266,6 +1266,587 @@ function shadowMechanics(crew) {
     return result;
 }
 
+/*
+ * Achievements are zero-RNG milestones with small flat stat rewards.
+ * Unlocked IDs are stored on state.crew.achievements so derived() can
+ * apply them automatically without changing any combat/UI callers.
+ * Tiered entries share a `chain` key so the Unearned drawer & chat table
+ * only display the next chaseable rung.
+ */
+const AETHERMOOR_ACHIEVEMENTS = [
+    // --- Combat & Escalation ---
+    {
+        id: 'first_blood',
+        chain: 'kills',
+        title: 'First Blood',
+        requirement: 'Defeat your first foe.',
+        blurb: 'Every legend starts with somebody swinging first. Mostly you.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'kills_10',
+        chain: 'kills',
+        title: 'Field Clearing',
+        requirement: 'Defeat 10 foes.',
+        blurb: 'Ten down and the local wildlife is already rethinking its life choices.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'kills_50',
+        chain: 'kills',
+        title: 'Seasoned Blades',
+        requirement: 'Defeat 50 foes.',
+        blurb: 'Fifty fights later, you have stopped counting bruises and started counting silver.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'kills_100',
+        chain: 'kills',
+        title: 'Centurion',
+        requirement: 'Defeat 100 foes.',
+        blurb: 'One hundred hostiles cleared. The regional ecology sends its regards.',
+        bonus: { atk: 2 }
+    },
+    {
+        id: 'elite_1',
+        chain: 'elites',
+        title: 'Apex Hunter',
+        requirement: 'Defeat your first Elite.',
+        blurb: 'Bigger, meaner, and still folded in half.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'elite_5',
+        chain: 'elites',
+        title: 'Giant Killer',
+        requirement: 'Defeat 5 Elites.',
+        blurb: 'Regional terrors are starting to look like walking loot bags.',
+        bonus: { hp: 10, atk: 1 }
+    },
+    {
+        id: 'sovereign_down',
+        title: 'Sovereign Down',
+        requirement: 'Defeat your first Zone Boss.',
+        blurb: 'You knocked the biggest piece off the board and kept walking.',
+        bonus: { hp: 15, atk: 2 }
+    },
+    {
+        id: 'untouchable',
+        title: 'Untouchable',
+        requirement: 'Win a fight taking 0 total HP damage.',
+        blurb: 'Not a scratch, not a scuff, not even a dry-cleaning bill.',
+        bonus: { def: 1 }
+    },
+    {
+        id: 'punching_up',
+        chain: 'punch_up',
+        title: 'Punching Up',
+        requirement: 'Defeat a foe 5+ levels above your crew level.',
+        blurb: 'Recommended level brackets are more of a polite suggestion.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'severe_disparity',
+        chain: 'punch_up',
+        title: 'Severe Disparity',
+        requirement: 'Defeat a foe 10+ levels above your crew level.',
+        blurb: 'The System flagged this fight as ill-advised. You won anyway.',
+        bonus: { atk: 2, luk: 1 }
+    },
+
+    // --- Daredevil / Risky ---
+    {
+        id: 'by_a_hair',
+        title: 'By a Hair',
+        requirement: 'Win a fight with Q’tik or Tansy surviving at 15% HP or less.',
+        blurb: 'Walked away on fumes, stubbornness, and pure spite.',
+        bonus: { hp: 15, luk: 1 }
+    },
+    {
+        id: 'dry_powder',
+        title: 'Dry Powder',
+        requirement: 'Defeat an Elite or Boss without using any potions or tonics.',
+        blurb: 'Saved the good bottles for a real emergency. Again.',
+        bonus: { hp: 10, def: 1 }
+    },
+    {
+        id: 'no_one_left_behind',
+        title: 'No One Left Behind',
+        requirement: 'Win a fight on the same exchange a companion hits 0 HP.',
+        blurb: 'Cut it so close the Respawn Stone barely had time to warm up.',
+        bonus: { hp: 15 }
+    },
+    {
+        id: 'iron_stomach',
+        title: 'Iron Stomach',
+        requirement: 'Use 4 potions on one character in a single fight and win.',
+        blurb: 'At this point you are more river-reed tonic than person.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'tactical_withdrawal',
+        title: 'Tactical Withdrawal',
+        requirement: 'Successfully flee from an encounter.',
+        blurb: 'Running away is just advancing in a more survivable direction.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'clean_getaway',
+        title: 'Clean Getaway',
+        requirement: 'Successfully flee after a companion hits 0 HP.',
+        blurb: 'Live to argue about whose fault that was.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'stonebound',
+        title: 'Stonebound',
+        requirement: 'Experience your first Respawn Stone return.',
+        blurb: 'Welcome to immortality. The gravel tastes terrible.',
+        bonus: { hp: 10 }
+    },
+
+    // --- Levels (10 through 100) ---
+    ...[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(lvl => ({
+        id: `level_${lvl}`,
+        chain: 'level',
+        title: `Tier Mark: Level ${lvl}`,
+        requirement: `Reach Level ${lvl}.`,
+        blurb: `Level ${lvl} reached. The frontier is starting to look a little smaller.`,
+        bonus: { hp: 5, atk: 1 }
+    })),
+
+    // --- Exploration, Caches, Chests, Instances, Rumors ---
+    {
+        id: 'zone_2',
+        chain: 'zone',
+        title: 'Beyond the Palisade',
+        requirement: 'Cross into a new region beyond Thornhaven.',
+        blurb: 'Out of the cradle and onto the real road.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'zone_5',
+        chain: 'zone',
+        title: 'Long Road',
+        requirement: 'Reach a Zone 5 region.',
+        blurb: 'Five regions deep and your boots are still holding together.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'zone_10',
+        chain: 'zone',
+        title: 'Deep Frontier',
+        requirement: 'Reach a Zone 10 region.',
+        blurb: 'Far past the starter corridors where the tourists turn back.',
+        bonus: { hp: 15, def: 1 }
+    },
+    {
+        id: 'cache_1',
+        chain: 'caches',
+        title: 'Sharp Nose',
+        requirement: 'Find your first Hidden Cache.',
+        blurb: 'Somebody hid that well. Just not well enough.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'cache_10',
+        chain: 'caches',
+        title: 'Scavenger’s Eye',
+        requirement: 'Find 10 Hidden Caches.',
+        blurb: 'Ten hidden stashes liberated from ditches, stumps, and loose stones.',
+        bonus: { hp: 5, luk: 1 }
+    },
+    {
+        id: 'cache_50',
+        chain: 'caches',
+        title: 'Stashed Away',
+        requirement: 'Find 50 Hidden Caches.',
+        blurb: 'At this point the continent is basically your personal pantry.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'cache_100',
+        chain: 'caches',
+        title: 'Nothing Stays Hidden',
+        requirement: 'Find 100 Hidden Caches.',
+        blurb: 'A hundred secret caches found. Nothing stays buried for long around you.',
+        bonus: { hp: 15, luk: 2 }
+    },
+    {
+        id: 'chest_1',
+        chain: 'chests',
+        title: 'First Latch',
+        requirement: 'Open your first Instance Chest.',
+        blurb: 'Nothing beats the sound of a rusty lid finally giving way.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'chest_10',
+        chain: 'chests',
+        title: 'Vault Cracker',
+        requirement: 'Open 10 Instance Chests.',
+        blurb: 'Ten sealed vaults cracked open and emptied to the floorboards.',
+        bonus: { hp: 5, luk: 1 }
+    },
+    {
+        id: 'chest_50',
+        chain: 'chests',
+        title: 'Hoard Breaker',
+        requirement: 'Open 50 Instance Chests.',
+        blurb: 'Pre-Calamity locks are practically popping open out of politeness.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'chest_100',
+        chain: 'chests',
+        title: 'Master of Locks',
+        requirement: 'Open 100 Instance Chests.',
+        blurb: 'One hundred chests looted. If it has a hinge, it belongs to you.',
+        bonus: { hp: 15, luk: 2 }
+    },
+    {
+        id: 'instance_1',
+        chain: 'instances',
+        title: 'Into the Dark',
+        requirement: 'Enter your first Instance.',
+        blurb: 'Wet stone, bad smells, and terrible lighting—must be loot inside.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'instance_10',
+        chain: 'instances',
+        title: 'Delver',
+        requirement: 'Enter 10 distinct Instances.',
+        blurb: 'Ten basements, vaults, and ruins explored without losing your nerve.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'instance_50',
+        chain: 'instances',
+        title: 'Dungeon Regular',
+        requirement: 'Enter 50 distinct Instances.',
+        blurb: 'You spend more time under hills than most moles.',
+        bonus: { hp: 10, def: 1 }
+    },
+    {
+        id: 'instance_100',
+        chain: 'instances',
+        title: 'Underworld Tourist',
+        requirement: 'Enter 100 distinct Instances.',
+        blurb: 'A hundred ruined doors kicked open across the continent.',
+        bonus: { hp: 15, def: 2 }
+    },
+    {
+        id: 'site_cleared',
+        title: 'Site Cleared',
+        requirement: 'Completely exhaust your first Instance.',
+        blurb: 'Every corner checked, every threat down, nothing left breathing.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'off_the_charts',
+        title: 'Off the Charts',
+        requirement: 'Discover a rare Hidden Instance.',
+        blurb: 'Not on any road map, and all the better for it.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'rumor_1',
+        chain: 'rumors',
+        title: 'Chasing Whispers',
+        requirement: 'Investigate your first traveler rumor.',
+        blurb: 'Could be treasure, could be nonsense. Only one way to find out.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'rumor_10',
+        chain: 'rumors',
+        title: 'Rumor Mill',
+        requirement: 'Investigate 10 traveler rumors.',
+        blurb: 'Ten roadside tips followed to the bitter—or shiny—end.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'rumor_50',
+        chain: 'rumors',
+        title: 'Trail Hound',
+        requirement: 'Investigate 50 traveler rumors.',
+        blurb: 'If somebody whispers about lights in a ditch, you are already walking.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'rumor_100',
+        chain: 'rumors',
+        title: 'Every Tavern’s Story',
+        requirement: 'Investigate 100 traveler rumors.',
+        blurb: 'A hundred rumors chased down. Half the gossip is about you now.',
+        bonus: { hp: 15, luk: 2 }
+    },
+
+    // --- Contracts & Standing ---
+    {
+        id: 'humble_start',
+        chain: 'quest_rank',
+        title: 'Humble Start',
+        requirement: 'Complete your first Rank F contract.',
+        blurb: 'Everyone starts with somebody’s chores. Silver still spends.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'rank_d',
+        chain: 'quest_rank',
+        title: 'Moving Up',
+        requirement: 'Complete a Rank D contract.',
+        blurb: 'Past the errand work and into jobs with actual teeth.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'rank_c',
+        chain: 'quest_rank',
+        title: 'Serious Work',
+        requirement: 'Complete a Rank C contract.',
+        blurb: 'When a town has a real problem, they stop calling rookies.',
+        bonus: { hp: 10, atk: 1 }
+    },
+    {
+        id: 'rank_b',
+        chain: 'quest_rank',
+        title: 'High Priority',
+        requirement: 'Complete a Rank B contract.',
+        blurb: 'Region-scale trouble handled without breaking stride.',
+        bonus: { hp: 15, atk: 2 }
+    },
+    {
+        id: 'quest_1',
+        chain: 'quests',
+        title: 'First Contract',
+        requirement: 'Complete your first contract.',
+        blurb: 'Congratulations! You fulfilled your first contract—here is to a hundred more!',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'quest_5',
+        chain: 'quests',
+        title: 'Reliable Hands',
+        requirement: 'Complete 5 contracts.',
+        blurb: 'Five jobs done right. Word travels fast in small towns.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'quest_20',
+        chain: 'quests',
+        title: 'Veteran Contractors',
+        requirement: 'Complete 20 contracts.',
+        blurb: 'You have left a trail of people who know your name—and owe you a drink.',
+        bonus: { atk: 1, luk: 1 }
+    },
+    {
+        id: 'rep_known',
+        chain: 'reputation',
+        title: 'Familiar Faces',
+        requirement: 'Reach Known standing in any settlement.',
+        blurb: 'The innkeeper remembers your order before you sit down.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'rep_respected',
+        chain: 'reputation',
+        title: 'Well Regarded',
+        requirement: 'Reach Well Respected standing in any settlement.',
+        blurb: 'Doors open faster when locals trust your boots.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'rep_renowned',
+        chain: 'reputation',
+        title: 'Local Legend',
+        requirement: 'Reach Renowned standing in any settlement.',
+        blurb: 'Your names are going to outlive the tavern roof.',
+        bonus: { hp: 15, luk: 1 }
+    },
+
+    // --- Gear & Economy ---
+    {
+        id: 'proper_kit',
+        chain: 'gear_rarity',
+        title: 'Proper Kit',
+        requirement: 'Equip your first Uncommon item.',
+        blurb: 'Goodbye starter scraps, hello real metalwork.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'fine_workmanship',
+        chain: 'gear_rarity',
+        title: 'Fine Workmanship',
+        requirement: 'Equip your first Rare item.',
+        blurb: 'Blue-grade steel with the weight to prove it.',
+        bonus: { hp: 10, atk: 1 }
+    },
+    {
+        id: 'relic_grade',
+        chain: 'gear_rarity',
+        title: 'Relic-Grade',
+        requirement: 'Equip your first Epic item.',
+        blurb: 'The kind of salvage that makes Immortals stare in the tavern.',
+        bonus: { hp: 15, atk: 2 }
+    },
+    {
+        id: 'full_kit_tansy',
+        title: 'Dressed for Trouble',
+        requirement: 'Equip gear in all 9 of Tansy’s slots.',
+        blurb: 'Not a single bare slot left—pocketed, laced, and ready to stab.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'full_kit_qtik',
+        title: 'Decked Out',
+        requirement: 'Equip gear in all 4 of Q’tik’s accessory slots.',
+        blurb: 'Rings, cuffs, and amulet all humming in sync.',
+        bonus: { hp: 10, def: 1 }
+    },
+    {
+        id: 'full_kit_crew',
+        title: 'Fully Outfitted',
+        requirement: 'Equip gear in every slot across both Tansy and Q’tik.',
+        blurb: 'Thirteen slots filled. You finally look like proper adventurers.',
+        bonus: { hp: 15, atk: 1, def: 1 }
+    },
+    {
+        id: 'all_common_gear',
+        title: 'Humble Uniform',
+        requirement: 'Fill all 13 crew gear slots wearing only Common items.',
+        blurb: 'Nothing flashy, just honest iron from head to toe.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'all_uncommon_gear',
+        title: 'Green Machine',
+        requirement: 'Fill all 13 crew gear slots wearing only Uncommon items.',
+        blurb: 'Every single slot gleaming Uncommon—pure dedication to the grind.',
+        bonus: { hp: 15, atk: 1, def: 1 }
+    },
+    {
+        id: 'field_medicine',
+        title: 'Field Medicine',
+        requirement: 'Use your first healing potion or tonic.',
+        blurb: 'Turns out medicine works better when you actually drink it.',
+        bonus: { hp: 5 }
+    },
+    {
+        id: 'curio_broker',
+        title: 'Curio Broker',
+        requirement: 'Sell 5 salvaged curios.',
+        blurb: 'One dead empire’s trash is your smoked-trout budget.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'whale_bait',
+        title: 'Whale Bait',
+        requirement: 'Trigger a Whale Collector Buyout on the Aether-Net.',
+        blurb: 'Somewhere out there, a rich Immortal just overpaid wildly.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'mob_silver_100',
+        chain: 'mob_silver',
+        title: 'Coin From Carnage',
+        requirement: 'Earn 100 cumulative silver from defeating mobs.',
+        blurb: 'A hundred silver pried straight off hostile hides.',
+        bonus: { atk: 1 }
+    },
+    {
+        id: 'mob_silver_500',
+        chain: 'mob_silver',
+        title: 'Blood Money',
+        requirement: 'Earn 500 cumulative silver from defeating mobs.',
+        blurb: 'Five hundred silver earned the loud, violent way.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'mob_silver_1000',
+        chain: 'mob_silver',
+        title: 'Monster Payroll',
+        requirement: 'Earn 1,000 cumulative silver from defeating mobs.',
+        blurb: 'A thousand silver in combat salvage. The wilderness is paying your rent.',
+        bonus: { hp: 15, atk: 1 }
+    },
+    {
+        id: 'shop_silver_100',
+        chain: 'shop_silver',
+        title: 'Counter Regular',
+        requirement: 'Earn 100 cumulative silver selling items at shops.',
+        blurb: 'The local pawnbroker already has the scales ready when you walk in.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'shop_silver_500',
+        chain: 'shop_silver',
+        title: 'Pawn Baron',
+        requirement: 'Earn 500 cumulative silver selling items at shops.',
+        blurb: 'Five hundred silver across the counter without blinking.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'shop_silver_1000',
+        chain: 'shop_silver',
+        title: 'Liquidator',
+        requirement: 'Earn 1,000 cumulative silver selling items at shops.',
+        blurb: 'A thousand silver moved in local trade. Every merchant knows your pockets.',
+        bonus: { hp: 10, luk: 1 }
+    },
+    {
+        id: 'trade_silver_100',
+        chain: 'trade_silver',
+        title: 'Aether-Net Debut',
+        requirement: 'Earn 100 cumulative silver from the Aether-Net Trade-Stream.',
+        blurb: 'First hundred silver off the market board. Welcome to the hustle.',
+        bonus: { luk: 1 }
+    },
+    {
+        id: 'trade_silver_500',
+        chain: 'trade_silver',
+        title: 'Stream Hustler',
+        requirement: 'Earn 500 cumulative silver from the Aether-Net Trade-Stream.',
+        blurb: 'Five hundred silver from Immortals who hate farming their own gear.',
+        bonus: { hp: 10 }
+    },
+    {
+        id: 'trade_silver_1000',
+        chain: 'trade_silver',
+        title: 'Market Shark',
+        requirement: 'Earn 1,000 cumulative silver from the Aether-Net Trade-Stream.',
+        blurb: 'A thousand silver off the Trade-Stream. Certified loot tycoons.',
+        bonus: { hp: 10, luk: 2 }
+    }
+];
+
+function achievementBonuses(crew) {
+    const unlocked = new Set(
+        Array.isArray(crew?.achievements) ? crew.achievements : []
+    );
+    const totals = { hp: 0, atk: 0, def: 0, luk: 0 };
+
+    for (const ach of AETHERMOOR_ACHIEVEMENTS) {
+        if (!unlocked.has(ach.id) || !ach.bonus) continue;
+        totals.hp += Number(ach.bonus.hp || 0);
+        totals.atk += Number(ach.bonus.atk || 0);
+        totals.def += Number(ach.bonus.def || 0);
+        totals.luk += Number(ach.bonus.luk || 0);
+    }
+
+    return totals;
+}
+
+function formatAchievementBonus(bonus) {
+    if (!bonus) return 'None';
+    const parts = [];
+    if (bonus.hp) parts.push(`+${bonus.hp} MaxHP`);
+    if (bonus.atk) parts.push(`+${bonus.atk} ATK`);
+    if (bonus.def) parts.push(`+${bonus.def} DEF`);
+    if (bonus.luk) parts.push(`+${bonus.luk} LUK`);
+    return parts.join(', ') || 'None';
+}
+
 function derived(crew) {
     assert(crew && typeof crew === 'object', 'Crew state is required');
     const level = int(crew.level, 'crew.level', 1);
@@ -1296,6 +1877,13 @@ function derived(crew) {
         totals.def += bonus.def;
         totals.qtikMaxHp += bonus.hp;
     }
+
+    const achBonus = achievementBonuses(crew);
+    totals.atk += achBonus.atk;
+    totals.def += achBonus.def;
+    totals.luk += achBonus.luk;
+    totals.qtikMaxHp += achBonus.hp;
+    totals.tansyMaxHp += achBonus.hp;
 
     totals.regen = Math.round(totals.qtikMaxHp / 100);
     return totals;
@@ -2031,6 +2619,321 @@ function xpProgressNarrationLines(crew, levelUps = []) {
         'These are visible System facts.'
     ];
 }
+
+function achievementUnlockedCardHtml(unlocked) {
+    if (!Array.isArray(unlocked) || unlocked.length === 0) return '';
+
+    const rows = unlocked.map((ach, index) => {
+        const divider = index > 0
+            ? 'border-top:1px solid #1f2730; margin-top:6px; padding-top:6px;'
+            : '';
+
+        return `<div style="${divider}">` +
+            `<div style="display:flex; justify-content:space-between; gap:8px;">` +
+                `<b style="color:#ffd166;">${escapeSystemLogHtml(ach.title)}</b>` +
+                `<span style="color:#4ade80; white-space:nowrap;">${escapeSystemLogHtml(formatAchievementBonus(ach.bonus))}</span>` +
+            `</div>` +
+            `<div style="color:#9caab8; font-style:italic;">${escapeSystemLogHtml(ach.blurb)}</div>` +
+        `</div>`;
+    }).join('');
+
+    return systemLogCardHtml({
+        accent: '#ffd166',
+        heading: unlocked.length === 1
+            ? 'System Log // Achievement Unlocked'
+            : `System Log // ${unlocked.length} Achievements Unlocked`,
+        bodyHtml: rows,
+        buttons: ['close']
+    });
+}
+
+function evaluateAethermoorAchievements(
+    beforeState,
+    afterState,
+    caseResult,
+    oneCase,
+    recovery
+) {
+    if (!afterState?.crew) return [];
+
+    afterState.crew.achievements ||= [];
+    afterState.stats ||= {};
+    const stats = afterState.stats;
+
+    stats.kills = Number(stats.kills || 0);
+    stats.elites = Number(stats.elites || 0);
+    stats.bosses = Number(stats.bosses || 0);
+    stats.caches = Number(stats.caches || 0);
+    stats.chests = Number(stats.chests || 0);
+    stats.enteredInstanceIds ||= [];
+    stats.potionsUsed = Number(stats.potionsUsed || 0);
+    stats.curiosSold = Number(stats.curiosSold || 0);
+    stats.mobSilver = Number(stats.mobSilver || 0);
+    stats.shopSilver = Number(stats.shopSilver || 0);
+    stats.tradeSilver = Number(stats.tradeSilver || 0);
+    stats.fled = Number(stats.fled || 0);
+    stats.deaths = Number(stats.deaths || 0);
+    stats.maxPunchUp = Number(stats.maxPunchUp || 0);
+    stats.maxZoneReached = Math.max(
+        Number(stats.maxZoneReached || 1),
+        Number(afterState.zone || 1)
+    );
+
+    // 1. Update cumulative counters from this committed operation
+    const kills = Array.isArray(caseResult?.kills) ? caseResult.kills : [];
+    if (kills.length > 0) {
+        stats.kills += kills.length;
+        for (const kill of kills) {
+            if (kill.role === 'elite') stats.elites += 1;
+            if (kill.role === 'boss') stats.bosses += 1;
+            const gap = Number(kill.level || 0) - Number(beforeState?.crew?.level || 1);
+            if (gap > stats.maxPunchUp) stats.maxPunchUp = gap;
+        }
+    }
+
+    if (caseResult?.itemUse?.qtik) stats.potionsUsed += 1;
+    if (caseResult?.itemUse?.tansy) stats.potionsUsed += 1;
+    if (oneCase?.kind === 'consumable' && oneCase.action === 'use') {
+        stats.potionsUsed += Number(caseResult?.quantity || 1);
+    }
+
+    if (caseResult?.flee?.success === true) {
+        stats.fled += 1;
+        if (caseResult?.death?.fallen?.length > 0) {
+            stats.cleanGetaway = true;
+        }
+    }
+
+    if (caseResult?.death?.fallen?.length > 0) {
+        stats.deaths += 1;
+    }
+
+    const justClearedEncounter =
+        afterState.encounter?.status === 'cleared' &&
+        beforeState?.encounter?.status !== 'cleared';
+
+    if (justClearedEncounter) {
+        const enc = afterState.encounter;
+        stats.mobSilver += Number(caseResult?.rewards?.silver || 0);
+
+        if (enc.crewTookDamage !== true) {
+            stats.untouchable = true;
+        }
+
+        const hadEliteOrBoss = (enc.foes || []).some(
+            foe => foe.role === 'elite' || foe.role === 'boss'
+        );
+        if (hadEliteOrBoss && Number(enc.potionsUsed || 0) === 0) {
+            stats.dryPowder = true;
+        }
+
+        const uses = enc.potionUsesByCharacter || {};
+        if (Number(uses.qtik || 0) >= 4 || Number(uses.tansy || 0) >= 4) {
+            stats.ironStomach = true;
+        }
+
+        if (caseResult?.death?.fallen?.length > 0 && !caseResult.death.totalDefeat) {
+            stats.noOneLeftBehind = true;
+        }
+
+        const d = derived(afterState.crew);
+        const qtikEndHp = recovery ? recovery.beforeHp : afterState.crew.qtik.hp;
+        const tansyEndHp = afterState.crew.tansy.hp;
+        if (
+            (qtikEndHp > 0 && qtikEndHp <= Math.floor(d.qtikMaxHp * 0.15)) ||
+            (tansyEndHp > 0 && tansyEndHp <= Math.floor(d.tansyMaxHp * 0.15))
+        ) {
+            stats.byAHair = true;
+        }
+    }
+
+    if (oneCase?.kind === 'travel' && caseResult?.created) {
+        if (caseResult.event === 'hidden_cache') stats.caches += 1;
+    }
+
+    if (oneCase?.kind === 'instance' && caseResult?.created) {
+        if (oneCase.action === 'open_chest') stats.chests += 1;
+        if (
+            oneCase.action === 'enter' &&
+            caseResult.instanceId &&
+            !stats.enteredInstanceIds.includes(caseResult.instanceId)
+        ) {
+            stats.enteredInstanceIds.push(caseResult.instanceId);
+        }
+    }
+
+    if (oneCase?.kind === 'curio' && oneCase.action === 'sell') {
+        stats.curiosSold += 1;
+        stats.shopSilver += Number(caseResult?.silverGained || 0);
+    }
+    if (oneCase?.kind === 'vendor' && oneCase.action === 'commit') {
+        stats.shopSilver += Number(caseResult?.receipt?.proceeds || 0);
+    }
+    if (oneCase?.kind === 'herbalist' && oneCase.action === 'commit') {
+        stats.shopSilver += Number(caseResult?.receipt?.proceeds || 0);
+    }
+    if (oneCase?.kind === 'consumable' && oneCase.action === 'sell') {
+        stats.shopSilver += Number(caseResult?.proceeds || 0);
+    }
+    if (oneCase?.kind === 'trade' && oneCase.action === 'pawn') {
+        stats.shopSilver += Number(caseResult?.silverGained || 0);
+    }
+    if (
+        oneCase?.kind === 'trade' &&
+        oneCase.action === 'settle' &&
+        caseResult?.status === 'sold'
+    ) {
+        stats.tradeSilver += Number(caseResult?.silverGained || 0);
+        if (caseResult.marketResult === 'whale_collector_buyout') {
+            stats.whaleBuyout = true;
+        }
+    }
+
+    // 2. Inspect current state snapshots
+    const completedQuests = ensureQuestJournal(afterState).completed || [];
+    const completedRanks = new Set(completedQuests.map(q => q?.rank));
+    const investigatedRumors = Object.values(afterState.leads || {}).filter(
+        lead => lead?.kind === 'rumor' && lead.status === 'investigated' && lead.testOnly !== true
+    ).length;
+    const allInstances = Object.values(afterState.instances || {});
+    const exhaustedInstances = allInstances.filter(i => i?.status === 'exhausted').length;
+    const hiddenInstances = allInstances.filter(i => i?.kind === 'hidden').length;
+
+    const repTiers = new Set(
+        Object.values(afterState.reputation || {}).map(r => r?.tier)
+    );
+
+    const tansyWorn = TANSY_SLOTS
+        .map(slot => afterState.crew.gear?.tansy?.[slot])
+        .filter(item => item && Number(item.stat ?? item.rawStat) > 0);
+    const qtikWorn = QTIK_SLOTS
+        .map(slot => afterState.crew.gear?.qtik?.[slot])
+        .filter(item => item && Number(item.stat ?? item.rawStat) > 0);
+    const allWorn = [...tansyWorn, ...qtikWorn];
+    const all13Filled =
+        tansyWorn.length === TANSY_SLOTS.length &&
+        qtikWorn.length === QTIK_SLOTS.length;
+    const wornRarities = new Set(
+        allWorn.map(item => String(item.rarity || 'Common').toLowerCase())
+    );
+
+    const checks = {
+        first_blood: stats.kills >= 1,
+        kills_10: stats.kills >= 10,
+        kills_50: stats.kills >= 50,
+        kills_100: stats.kills >= 100,
+        elite_1: stats.elites >= 1,
+        elite_5: stats.elites >= 5,
+        sovereign_down: stats.bosses >= 1,
+        untouchable: Boolean(stats.untouchable),
+        punching_up: stats.maxPunchUp >= 5,
+        severe_disparity: stats.maxPunchUp >= 10,
+        by_a_hair: Boolean(stats.byAHair),
+        dry_powder: Boolean(stats.dryPowder),
+        no_one_left_behind: Boolean(stats.noOneLeftBehind),
+        iron_stomach: Boolean(stats.ironStomach),
+        tactical_withdrawal: stats.fled >= 1,
+        clean_getaway: Boolean(stats.cleanGetaway),
+        stonebound: stats.deaths >= 1,
+        zone_2: stats.maxZoneReached >= 2,
+        zone_5: stats.maxZoneReached >= 5,
+        zone_10: stats.maxZoneReached >= 10,
+        cache_1: stats.caches >= 1,
+        cache_10: stats.caches >= 10,
+        cache_50: stats.caches >= 50,
+        cache_100: stats.caches >= 100,
+        chest_1: stats.chests >= 1,
+        chest_10: stats.chests >= 10,
+        chest_50: stats.chests >= 50,
+        chest_100: stats.chests >= 100,
+        instance_1: stats.enteredInstanceIds.length >= 1,
+        instance_10: stats.enteredInstanceIds.length >= 10,
+        instance_50: stats.enteredInstanceIds.length >= 50,
+        instance_100: stats.enteredInstanceIds.length >= 100,
+        site_cleared: exhaustedInstances >= 1,
+        off_the_charts: hiddenInstances >= 1,
+        rumor_1: investigatedRumors >= 1,
+        rumor_10: investigatedRumors >= 10,
+        rumor_50: investigatedRumors >= 50,
+        rumor_100: investigatedRumors >= 100,
+        humble_start: completedRanks.has('F'),
+        rank_d: completedRanks.has('D'),
+        rank_c: completedRanks.has('C'),
+        rank_b: completedRanks.has('B'),
+        quest_1: completedQuests.length >= 1,
+        quest_5: completedQuests.length >= 5,
+        quest_20: completedQuests.length >= 20,
+        rep_known: repTiers.has('Known') || repTiers.has('Well Respected') || repTiers.has('Renowned'),
+        rep_respected: repTiers.has('Well Respected') || repTiers.has('Renowned'),
+        rep_renowned: repTiers.has('Renowned'),
+        proper_kit: wornRarities.has('uncommon') || wornRarities.has('rare') || wornRarities.has('epic') || wornRarities.has('legendary'),
+        fine_workmanship: wornRarities.has('rare') || wornRarities.has('epic') || wornRarities.has('legendary'),
+        relic_grade: wornRarities.has('epic') || wornRarities.has('legendary'),
+        full_kit_tansy: tansyWorn.length === TANSY_SLOTS.length,
+        full_kit_qtik: qtikWorn.length === QTIK_SLOTS.length,
+        full_kit_crew: all13Filled,
+        all_common_gear: all13Filled && allWorn.every(i => String(i.rarity || 'Common').toLowerCase() === 'common'),
+        all_uncommon_gear: all13Filled && allWorn.every(i => String(i.rarity || '').toLowerCase() === 'uncommon'),
+        field_medicine: stats.potionsUsed >= 1,
+        curio_broker: stats.curiosSold >= 5,
+        whale_bait: Boolean(stats.whaleBuyout),
+        mob_silver_100: stats.mobSilver >= 100,
+        mob_silver_500: stats.mobSilver >= 500,
+        mob_silver_1000: stats.mobSilver >= 1000,
+        shop_silver_100: stats.shopSilver >= 100,
+        shop_silver_500: stats.shopSilver >= 500,
+        shop_silver_1000: stats.shopSilver >= 1000,
+        trade_silver_100: stats.tradeSilver >= 100,
+        trade_silver_500: stats.tradeSilver >= 500,
+        trade_silver_1000: stats.tradeSilver >= 1000
+    };
+
+    for (const lvl of [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) {
+        checks[`level_${lvl}`] = afterState.crew.level >= lvl;
+    }
+
+    const already = new Set(afterState.crew.achievements);
+    const newlyUnlocked = [];
+
+    for (const ach of AETHERMOOR_ACHIEVEMENTS) {
+        if (!already.has(ach.id) && checks[ach.id] === true) {
+            newlyUnlocked.push(ach);
+        }
+    }
+
+    if (newlyUnlocked.length === 0) return [];
+
+    const beforeStats = derived(afterState.crew);
+
+    for (const ach of newlyUnlocked) {
+        afterState.crew.achievements.push(ach.id);
+    }
+
+    const afterStats = derived(afterState.crew);
+    const qtikHpDelta = afterStats.qtikMaxHp - beforeStats.qtikMaxHp;
+    const tansyHpDelta = afterStats.tansyMaxHp - beforeStats.tansyMaxHp;
+
+    if (afterState.crew.qtik.hp > 0 && qtikHpDelta > 0) {
+        afterState.crew.qtik.hp = Math.min(
+            afterStats.qtikMaxHp,
+            afterState.crew.qtik.hp + qtikHpDelta
+        );
+    }
+    if (afterState.crew.tansy.hp > 0 && tansyHpDelta > 0) {
+        afterState.crew.tansy.hp = Math.min(
+            afterStats.tansyMaxHp,
+            afterState.crew.tansy.hp + tansyHpDelta
+        );
+    }
+
+    afterState.crew.qtik.maxHp = afterStats.qtikMaxHp;
+    afterState.crew.qtik.def = afterStats.def;
+    afterState.crew.qtik.regen = afterStats.regen;
+    afterState.crew.tansy.maxHp = afterStats.tansyMaxHp;
+
+    return newlyUnlocked;
+}
+
 
 function checkTape(state) {
     return {
@@ -4024,6 +4927,9 @@ function visorDisrupts(foe, enemyRoll) {
                 );
 
             c.qtik.hp -= reflected;
+            if (reflected > 0) {
+                encounter.crewTookDamage = true;
+            }
 
             effects.push(
                 `Spiked Carapace reflected ` +
@@ -4462,6 +5368,9 @@ if (frontliners.length > 0) {
             backlineDamage = 0;
         }
 
+        if (frontlineDamage > 0 || backlineDamage > 0) {
+            encounter.crewTookDamage = true;
+        }
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
         c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
 
@@ -17672,6 +18581,34 @@ async function runStoredMechanic(args) {
             }
         }
 
+        const unlockedAchievements = evaluateAethermoorAchievements(
+            savedState,
+            nextState,
+            caseResult,
+            oneCase,
+            recovery
+        );
+
+        if (unlockedAchievements.length > 0) {
+            caseResult.unlockedAchievements = unlockedAchievements.map(a => a.id);
+
+            if (
+                nextState.encounter?.victoryReceipt?.encounterId ===
+                nextState.encounter?.id &&
+                nextState.encounter.victoryReceipt.postFightHp
+            ) {
+                const postStats = derived(nextState.crew);
+                nextState.encounter.victoryReceipt.postFightHp.qtik =
+                    nextState.crew.qtik.hp;
+                nextState.encounter.victoryReceipt.postFightHp.qtikMax =
+                    postStats.qtikMaxHp;
+                nextState.encounter.victoryReceipt.postFightHp.tansy =
+                    nextState.crew.tansy.hp;
+                nextState.encounter.victoryReceipt.postFightHp.tansyMax =
+                    postStats.tansyMaxHp;
+            }
+        }
+
         caseResult.state = nextState;
 
         if (arrivedRumors.resolutions.length > 0) {
@@ -17929,6 +18866,22 @@ async function runStoredMechanic(args) {
                 {
                     type: 'rumor_arrival',
                     packet
+                },
+                revision
+            );
+        }
+
+        if (unlockedAchievements.length > 0) {
+            appendAethermoorHandoff(
+                handoffQueue,
+                {
+                    type: 'achievement',
+                    packet: [
+                        'ACHIEVEMENT UNLOCKED — display this exact System HTML card ' +
+                            'verbatim (visible to Q’tik and Tansy, not ordinary NPCs):',
+                        achievementUnlockedCardHtml(unlockedAchievements),
+                        'The stat bonuses are already applied to saved state.'
+                    ].join('\n')
                 },
                 revision
             );

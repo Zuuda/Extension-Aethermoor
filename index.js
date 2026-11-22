@@ -25108,13 +25108,31 @@ async function renderWorldTab(host) {
             !movementBlocked &&
             !journey;
 
-        const onward = makeAethermoorSection(
-            `ONWARD CROSSROADS (z${nextZone.number})`,
+        const onwardDrawer = document.createElement('details');
+        onwardDrawer.className = 'aethermoor-knowledge';
+        onwardDrawer.open = Boolean(renderWorldTab.onwardOpen);
+        onwardDrawer.addEventListener('toggle', () => {
+            renderWorldTab.onwardOpen = onwardDrawer.open;
+        });
+
+        const onwardSummary = document.createElement('summary');
+        onwardSummary.className = 'aethermoor-ui-heading';
+        onwardSummary.textContent = `ONWARD CROSSROADS (z${nextZone.number})`;
+        onwardDrawer.appendChild(onwardSummary);
+
+        const onward = document.createElement('div');
+        onward.style.display = 'grid';
+        onward.style.gap = '7px';
+        onward.style.marginTop = '8px';
+
+        const onwardIntro = document.createElement('div');
+        onwardIntro.className = 'aethermoor-ui-text';
+        onwardIntro.textContent =
             nextZone.visited === true
                 ? `Visited region: ${nextZone.name} (${nextZone.geography?.description || 'unknown'}).`
-                : 'Choose one of the 3 onward roads before departing. Unchosen flavors return to the deck.',
-            'world'
-        );
+                : 'Choose one of the 3 onward roads before departing. Unchosen flavors return to the deck.';
+        onward.appendChild(onwardIntro);
+        onwardDrawer.appendChild(onward);
 
         if (nextZone.visited !== true && onwardOptions.length > 0) {
             const activeId =
@@ -25282,7 +25300,7 @@ async function renderWorldTab(host) {
             );
         }
 
-        host.appendChild(onward);
+        host.appendChild(onwardDrawer);
     }
 }
 

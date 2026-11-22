@@ -19616,24 +19616,27 @@ function addAethermoorPanelStyles() {
         }
 
         .aethermoor-tabs {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 4px;
-            padding: 7px 8px 0;
+            padding: 7px 8px;
             background: #101419;
             border-bottom: 1px solid #1f2730;
         }
 
         .aethermoor-tab {
-            flex: 1 1 0;
             min-width: 0;
-            padding: 7px 8px;
+            padding: 6px 6px;
             color: #9caab8;
             background: #181d23;
             border: 1px solid #2b3542;
-            border-bottom: 0;
+            border-radius: 2px;
             cursor: pointer;
             font-size: 11px;
             font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .aethermoor-tab[data-tab="combat"].active {
@@ -19664,6 +19667,11 @@ function addAethermoorPanelStyles() {
         .aethermoor-tab[data-tab="shops"].active {
             color: #ffffff;
             border-top: 2px solid #ffd166;
+        }
+
+        .aethermoor-tab[data-tab="achievements"].active {
+            color: #ffffff;
+            border-top: 2px solid #fbbf24;
         }
 
         .aethermoor-tab:disabled {
@@ -20279,7 +20287,8 @@ function ensureAethermoorTabViews() {
     aethermoorTabViews = {};
 
     for (const tab of [
-        'combat', 'quests', 'world', 'instances', 'inventory', 'shops'
+        'combat', 'quests', 'world', 'instances', 'inventory', 'shops',
+        'achievements'
     ]) {
 
         const view = document.createElement('section');
@@ -22874,6 +22883,232 @@ async function renderShopsTab(host) {
     }
 }
 
+function nextChaseableAchievements(unlockedSet) {
+    const seenChains = new Set();
+    const list = [];
+
+    for (const ach of AETHERMOOR_ACHIEVEMENTS) {
+        if (unlockedSet.has(ach.id)) continue;
+        if (ach.chain) {
+            if (seenChains.has(ach.chain)) continue;
+            seenChains.add(ach.chain);
+        }
+        list.push(ach);
+    }
+
+    return list;
+}
+
+function achievementsChatTableHtml(state) {
+    const unlockedSet = new Set(
+        Array.isArray(state.crew?.achievements) ? state.crew.achievements : []
+    );
+    const chaseable = nextChaseableAchievements(unlockedSet);
+    const totals = achievementBonuses(state.crew);
+
+    const rows = chaseable.map(ach =>
+        `<tr>` +
+            `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#ffffff; font-weight:700; white-space:nowrap;">${escapeSystemLogHtml(ach.title)}</td>` +
+            `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#9caab8;">${escapeSystemLogHtml(ach.requirement)}</td>` +
+            `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#4ade80; white-space:nowrap;">${escapeSystemLogHtml(formatAchievementBonus(ach.bonus))}</td>` +
+        `</tr>`
+    ).join('');
+
+    const tableHtml = chaseable.length > 0
+        ? `<table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:11px;">` +
+            `<thead><tr>` +
+                `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Achievement</th>` +
+                `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Requirement</th>` +
+                `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Bonus</th>` +
+            `</tr></thead>` +
+            `<tbody>${rows}</tbody>` +
+          `</table>`
+        : `<div style="margin-top:6px; color:#4ade80;">All milestones unlocked!</div>`;
+
+    return `<div style="background:#12161c; border:1px solid #2b3542; border-left:3px solid #ffd166; border-radius:2px; padding:8px 10px; font-family:'Segoe UI', Tahoma, sans-serif; font-size:11px; color:#d0d7de; line-height:1.4; max-width:560px;">` +
+        `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; border-bottom:1px solid #1f2730; padding-bottom:4px; margin-bottom:4px;">` +
+            `<b style="color:#ffd166; text-transform:uppercase; letter-spacing:0.6px;">System Log // Unearned Achievements</b>` +
+            `<span style="color:#9caab8; white-space:nowrap;">Unlocked: <b style="color:#ffffff;">${unlockedSet.size}/${AETHERMOOR_ACHIEVEMENTS.length}</b></span>` +
+        `</div>` +
+        `<div style="color:#9caab8;"><b>Active Bonuses:</b> <span style="color:#4ade80;">${escapeSystemLogHtml(formatAchievementBonus(totals))}</span></div>` +
+        tableHtml +
+    `</div>`;
+}
+
+async function copyAethermoorAchievementsTable(state) {
+    const html = achievementsChatTableHtml(state);
+
+    try {
+        await navigator.clipboard.writeText(html);
+    } catch (_error) {
+        const input = document.createElement('textarea');
+        input.value = html;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+
+        assert(copied, 'Could not copy achievements table');
+    }
+
+    toastr.info(
+        'Unearned achievements HTML table copied for chat.',
+        'Aethermoor'
+    );
+}
+
+async function renderAchievementsTab(host) {
+    let snapshot;
+
+    try {
+        snapshot = await readStoredCombatState();
+    } catch (error) {
+        host.replaceChildren();
+        host.appendChild(
+            makeAethermoorSection(
+                'ACHIEVEMENTS',
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
+                'quest'
+            )
+        );
+        return;
+    }
+
+    const state = snapshot.state;
+    host.replaceChildren();
+    markCampaignViewRendered(snapshot);
+
+    const unlockedSet = new Set(
+        Array.isArray(state.crew?.achievements) ? state.crew.achievements : []
+    );
+    const earned = AETHERMOOR_ACHIEVEMENTS.filter(ach => unlockedSet.has(ach.id));
+    const unearned = nextChaseableAchievements(unlockedSet);
+    const totals = achievementBonuses(state.crew);
+
+    host.appendChild(
+        makeAethermoorSection(
+            `ACHIEVEMENTS · ${earned.length}/${AETHERMOOR_ACHIEVEMENTS.length}`,
+            `Active Bonuses: ${formatAchievementBonus(totals)}`,
+            'quest'
+        )
+    );
+
+    // Drawer 1: Earned Achievements
+    const earnedDrawer = document.createElement('details');
+    earnedDrawer.className = 'aethermoor-knowledge';
+    earnedDrawer.style.borderLeftColor = '#ffd166';
+    earnedDrawer.open = true;
+
+    const earnedSummary = document.createElement('summary');
+    earnedSummary.className = 'aethermoor-ui-heading';
+    earnedSummary.textContent = `EARNED · ${earned.length}`;
+    earnedDrawer.appendChild(earnedSummary);
+
+    if (earned.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'aethermoor-ui-text';
+        empty.style.marginTop = '6px';
+        empty.textContent = 'No achievements unlocked yet.';
+        earnedDrawer.appendChild(empty);
+    } else {
+        for (const ach of earned) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const title = document.createElement('div');
+            title.className = 'aethermoor-vendor-name';
+            title.style.color = '#ffd166';
+            title.textContent = ach.title;
+
+            const blurb = document.createElement('div');
+            blurb.className = 'aethermoor-vendor-detail';
+            blurb.style.fontStyle = 'italic';
+            blurb.textContent = ach.blurb;
+
+            const reward = document.createElement('div');
+            reward.className = 'aethermoor-inventory-gain';
+            reward.textContent = formatAchievementBonus(ach.bonus);
+
+            main.append(title, blurb, reward);
+            row.appendChild(main);
+            earnedDrawer.appendChild(row);
+        }
+    }
+
+    host.appendChild(earnedDrawer);
+
+    // Drawer 2: Unearned Achievements (Next Chaseable Tier)
+    const unearnedDrawer = document.createElement('details');
+    unearnedDrawer.className = 'aethermoor-knowledge';
+    unearnedDrawer.style.borderLeftColor = '#9caab8';
+
+    const unearnedSummary = document.createElement('summary');
+    unearnedSummary.className = 'aethermoor-ui-heading';
+    unearnedSummary.textContent = `UNEARNED (NEXT TIER) · ${unearned.length}`;
+    unearnedDrawer.appendChild(unearnedSummary);
+
+    const copyBtn = makeAethermoorAction(
+        'Copy Table for Chat',
+        'quest',
+        () => {
+            void copyAethermoorAchievementsTable(state).catch(error => {
+                toastr.error(
+                    error instanceof Error ? error.message : String(error),
+                    'Aethermoor'
+                );
+            });
+        }
+    );
+    copyBtn.style.marginTop = '8px';
+    copyBtn.title =
+        'Copies a styled HTML table of chaseable unearned achievements to paste into your reply when Tansy checks the tab.';
+    unearnedDrawer.appendChild(copyBtn);
+
+    if (unearned.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'aethermoor-ui-text';
+        empty.style.marginTop = '6px';
+        empty.textContent = 'Every milestone has been unlocked!';
+        unearnedDrawer.appendChild(empty);
+    } else {
+        for (const ach of unearned) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const title = document.createElement('div');
+            title.className = 'aethermoor-vendor-name';
+            title.textContent = ach.title;
+
+            const req = document.createElement('div');
+            req.className = 'aethermoor-vendor-detail';
+            req.textContent = ach.requirement;
+
+            const reward = document.createElement('div');
+            reward.className = 'aethermoor-inventory-gain';
+            reward.textContent = formatAchievementBonus(ach.bonus);
+
+            main.append(title, req, reward);
+            row.appendChild(main);
+            unearnedDrawer.appendChild(row);
+        }
+    }
+
+    host.appendChild(unearnedDrawer);
+}
+
 function combatRecapPrompt(receipt) {
     const lines = [
         'Please narrate the completed fight as a concise, cinematic scene.',
@@ -24045,6 +24280,8 @@ function renderAethermoorTab(tab) {
         renderInventoryTab(views.inventory);
     } else if (tab === 'shops') {
         renderShopsTab(views.shops);
+    } else if (tab === 'achievements') {
+        renderAchievementsTab(views.achievements);
     }
 }
 
@@ -24300,7 +24537,8 @@ function openAethermoorPanel() {
             ['world', 'World'],
             ['instances', 'Instance'],
             ['inventory', 'Inventory'],
-            ['shops', 'Shops']
+            ['shops', 'Shops'],
+            ['achievements', 'Achievements']
         ]) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -24769,7 +25007,7 @@ function registerAethermoorCampaignAutoRefresh() {
         if (
             !aethermoorPanelOpen ||
             aethermoorPanelElement?.hidden ||
-            !['quests', 'world', 'instances', 'inventory', 'shops']
+            !['quests', 'world', 'instances', 'inventory', 'shops', 'achievements']
                 .includes(aethermoorActiveTab) ||
             aethermoorCampaignRefreshBusy ||
             !aethermoorTabViews
@@ -24794,7 +25032,7 @@ function registerAethermoorCampaignAutoRefresh() {
         const host =
             aethermoorTabViews[aethermoorActiveTab];
 
-        const refresh =
+         const refresh =
             aethermoorActiveTab === 'quests'
                 ? renderQuestTab(host)
                 : aethermoorActiveTab === 'instances'
@@ -24803,7 +25041,9 @@ function registerAethermoorCampaignAutoRefresh() {
                         ? renderInventoryTab(host)
                         : aethermoorActiveTab === 'shops'
                             ? renderShopsTab(host)
-                            : renderWorldTab(host);
+                            : aethermoorActiveTab === 'achievements'
+                                ? renderAchievementsTab(host)
+                                : renderWorldTab(host);
 
         Promise.resolve(refresh)
             .catch(error => {

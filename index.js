@@ -4317,6 +4317,7 @@ function combatNarrativeTurn(
 
     const actionLabels = {
         fire_melee: 'Fire Melee',
+        bodyguard: 'Bodyguard',
         ice_melee: 'Ice Melee',
         stun: 'Stun',
         ice_patch: 'Ice Patch',
@@ -4324,6 +4325,7 @@ function combatNarrativeTurn(
         drink: 'Drink',
         visor: 'Visor',
         vitals: 'Vitals',
+        overrun: 'Overrun',
         hamstring: 'Hamstring',
         recall: 'Recall',
         surge: 'Surge',
@@ -4389,7 +4391,9 @@ function combatNarrativeTurn(
             }
 
             for (const effect of exchange.effects || []) {
-                if (effect.includes('intercepted')) {
+                if (effect.includes('Bodyguard intercepted')) {
+                    events.push("Q'tik intercepted an attack aimed at Tansy.");
+                } else if (effect.includes('intercepted')) {
                     events.push('An opponent intercepted an attack.');
                 } else if (
                     effect.includes('interrupted') ||
@@ -4558,7 +4562,7 @@ function resolveTurn({
     } else {
         assert(
             [
-                'fire_melee', 'ice_melee', 'stun',
+                'fire_melee', 'bodyguard', 'stun',
                 'ice_patch', 'frost_stomp', 'drink'
             ].includes(actions.qtik),
             `Unsupported Q'tik action: ${actions.qtik}`
@@ -4566,7 +4570,7 @@ function resolveTurn({
 
         assert(
             [
-                'visor', 'vitals', 'hamstring',
+                'visor', 'vitals', 'overrun',
                 'recall', 'surge', 'drink', 'raise_shadow'
             ].includes(actions.tansy),
             `Unsupported Tansy action: ${actions.tansy}`
@@ -4660,14 +4664,12 @@ function resolveTurn({
         2 * state.crew.weasels.active -
         initialShadows.attack;
 /*
- * Only Vitals empowers loose Shadow-Weasels and Shadow-Archers.
- * Visor and Hamstring are utility commands.
- * Ice Patch still suppresses the Vitals summon multiplier.
+ * Vitals empowers loose Shadow-Weasels and Shadow-Archers.
+ * Ice Patch no longer suppresses the Vitals multiplier.
  */
 
 const summonDamageMultiplier =
-    actions.tansy === 'vitals' &&
-    actions.qtik !== 'ice_patch'
+    actions.tansy === 'vitals'
         ? 2
         : 1;
 
@@ -4751,9 +4753,9 @@ const summonDamageMultiplier =
         declaredStunTarget &&
         declaredStunTarget.role !== 'brute' &&
         guardingBrute &&
-        tape.enemy[0] >
-            (actions.tansy === 'hamstring' ? 2 : 1) &&
-        actions.tansy !== 'visor'
+        tape.enemy[0] > 1 &&
+        actions.tansy !== 'visor' &&
+        actions.tansy !== 'overrun'
             ? guardingBrute.id
             : declaredStunTarget?.id || null;
 
@@ -4949,17 +4951,29 @@ function currentBuffer() {
     );
 }
 
-function visorDisrupts(foe, enemyRoll) {
-    return (
-        actions.tansy === 'visor' &&
-        foe &&
-        foe.id === actions.target &&
-        enemyRoll >= 2 &&
-        enemyRoll <= 4
-    );
+let visorGuaranteedExchange = null;
+
+function visorDisrupts(foe, enemyRoll, ex = 1) {
+    if (
+        actions.tansy !== 'visor' ||
+        !foe ||
+        foe.id !== actions.target
+    ) {
+        return false;
+    }
+
+    if (
+        visorGuaranteedExchange === null ||
+        visorGuaranteedExchange === ex
+    ) {
+        visorGuaranteedExchange = ex;
+        return true;
+    }
+
+    return enemyRoll >= 2 && enemyRoll <= 4;
 }
 
-        function enemyDefense(foe) {
+    function enemyDefense(foe, isFireTarget = false) {
         const buffer = currentBuffer();
         const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
         const telegraphBonus = Number(
@@ -4971,14 +4985,18 @@ function visorDisrupts(foe, enemyRoll) {
         const stunReduction =
             actions.qtik === 'stun' &&
              foe.id === stunTargetId
-
                 ? 4 * enemyTier(foe.level)
+                : 0;
+
+        const fireShred =
+            actions.qtik === 'fire_melee' && isFireTarget
+                ? Math.max(2, 2 * enemyTier(foe.level))
                 : 0;
 
         return Math.max(
             0,
             foe.def + bufferBonus + telegraphBonus -
-            stunReduction - shadowMechanics(c).hexStrip
+            stunReduction - fireShred - shadowMechanics(c).hexStrip
         );
     }
 
@@ -5017,12 +5035,11 @@ function visorDisrupts(foe, enemyRoll) {
         }
 
         const patchActive = actions.qtik === 'ice_patch';
-        const hamstringActive = actions.tansy === 'hamstring';
+        const bodyguardActive = actions.qtik === 'bodyguard';
+        const overrunActive = actions.tansy === 'overrun';
+        const isAoE = actions.qtik === 'frost_stomp' || overrunActive;
 
-        const missLimit = patchActive
-            ? (hamstringActive ? 4 : 3)
-            : (hamstringActive ? 2 : 1);
-
+        const missLimit = patchActive ? 3 : 1;
         const enemyMiss = e <= missLimit;
 
         const stunnedFoeId =
@@ -5036,7 +5053,7 @@ function visorDisrupts(foe, enemyRoll) {
 
         /*
          * Tansy's action controls summons.
-         * Q'tik drinking has no effect on their contribution.
+         * Bodyguard forfeits Q'tik's personal attack (2 * level) to guard Tansy.
          */
         const raised = shadowMechanics(c);
 
@@ -5046,12 +5063,16 @@ function visorDisrupts(foe, enemyRoll) {
         const activeShadowAttack =
             activeDamageShadowAttack(raised);
 
-        const unpenalizedAttack =
-            actions.tansy === 'recall'
-            ? baseAndGearAttack + activeDamageShadowAttack(raised)
-            : baseAndGearAttack +
-            exchangeWeaselAttack +
-            activeDamageShadowAttack(raised);
+        const qtikBaseContribution = bodyguardActive ? 2 * c.level : 0;
+
+        const unpenalizedAttack = Math.max(
+            0,
+            (actions.tansy === 'recall'
+                ? baseAndGearAttack + activeShadowAttack
+                : baseAndGearAttack +
+                  exchangeWeaselAttack +
+                  activeShadowAttack) - qtikBaseContribution
+        );
 
         const effectiveAttack = Math.max(
             0,
@@ -5060,12 +5081,7 @@ function visorDisrupts(foe, enemyRoll) {
             passiveAttackPenalty(encounter)
         );
 
-        /*
-         * Like Fire, the stance bonus scales from derived stats before
-         * encounter debuffs. Debuffs still reduce the resulting DEF.
-         * The separate -1 Base Bleed benefit remains unchanged.
-         */
-        const iceDefenseBonus = actions.qtik === 'ice_melee'
+        const bodyguardDefenseBonus = bodyguardActive
             ? Math.max(2, Math.floor(crewStats.def / 3))
             : 0;
 
@@ -5074,7 +5090,7 @@ function visorDisrupts(foe, enemyRoll) {
             crewStats.def -
             hexPenalty -
             passiveDefensePenalty(encounter) +
-            iceDefenseBonus
+            bodyguardDefenseBonus
         );
 
         let target = fleeing
@@ -5107,9 +5123,10 @@ function visorDisrupts(foe, enemyRoll) {
             target.role !== 'brute' &&
             !(actions.qtik === 'stun' && ex === 0) &&
             !enemyMiss &&
+            !patchActive &&
             brute.id !== stunnedFoeId &&
             actions.tansy !== 'visor' &&
-            actions.qtik !== 'frost_stomp'
+            !isAoE
         ) {
             effects.push(`${brute.id} intercepted with Guard`);
             target = brute;
@@ -5127,29 +5144,25 @@ function visorDisrupts(foe, enemyRoll) {
             p === 6 ||
             (actions.tansy === 'vitals' && p === 5);
 
-        const targetDefense = enemyDefense(target);
+        const targetDefense = enemyDefense(target, true);
 
         /*
          * Q'tik's personal damage is kept separate from Tansy's
-         * summons. Thorns reflects only this amount back to Q'tik.
+         * summons. Bodyguard deals no personal attack and takes no reflection.
          */
         const qtikPhysicalDamage =
-            p === 1
-                ? 1
-                : Math.max(
-                    1,
-                    2 * c.level -
-                    targetDefense +
-                    p
-                );
+            bodyguardActive
+                ? 0
+                : p === 1
+                    ? 1
+                    : Math.max(
+                        1,
+                        2 * c.level -
+                        targetDefense +
+                        p
+                    );
 
-        const qtikFireDamage =
-            actions.qtik === 'fire_melee'
-                ? Math.max(
-                    3,
-                    Math.floor(derived(c).atk / 5)
-                )
-                : 0;
+        const qtikFireDamage = fireDamage;
 
         const qtikPersonalDamage =
             qtikPhysicalDamage +
@@ -5178,18 +5191,26 @@ function visorDisrupts(foe, enemyRoll) {
 
         let damage = 0;
         let hits = [];
-        
+
         const targetedCarapace =
             activeTelegraphs.find(
                 entry => entry.foe.id === target.id
             )?.effect?.reflectsQtikDamage === true;
 
-        if (actions.qtik === 'frost_stomp') {
+        if (isAoE && !fleeing) {
             const stompTargets = [...live(s)].sort((a, b) => {
                 const aIndex = s.encounter.foes.indexOf(a);
                 const bIndex = s.encounter.foes.indexOf(b);
                 return aIndex - bIndex;
             });
+
+            // Frost Stomp = 50%, Overrun = 60%, Both together = 75%.
+            const aoeFactor =
+                actions.qtik === 'frost_stomp' && overrunActive
+                    ? 0.75
+                    : overrunActive
+                        ? 0.6
+                        : 0.5;
 
             let totalAttempted = 0;
             let totalApplied = 0;
@@ -5204,36 +5225,34 @@ function visorDisrupts(foe, enemyRoll) {
                     continue;
                 }
 
-                const baseStomp = Math.max(
+                const isPrimary = primaryTarget.id === target.id;
+                const baseAoE = Math.max(
                     0,
                     Math.floor(
                         (
                             effectiveAttack -
-                            enemyDefense(primaryTarget)
-                        ) / 2
+                            enemyDefense(primaryTarget, isPrimary)
+                        ) * aoeFactor
                     )
                 );
 
                 let attempted = p === 1
                     ? Math.max(
                         1,
-                        Math.floor(baseStomp / 2)
+                        Math.floor(baseAoE / 2)
                     )
-                    : baseStomp + p;
+                    : baseAoE + p;
 
                 /*
-                 * Vitals/LUK and Exposed apply only to the declared
-                 * primary target, never to spillover targets.
+                 * Vitals/LUK, Fire Melee bonus, and Exposed apply only to
+                 * the declared primary target, never to spillover targets.
                  */
-                if (
-                    primaryTarget.id === target.id &&
-                    p !== 1
-                ) {
+                if (isPrimary && p !== 1) {
                     attempted += (
                         isCritical
                             ? crewStats.luk
                             : vitalsBonus
-                    ) + exposedBonus;
+                    ) + exposedBonus + fireDamage;
                 }
 
                 attempted = Math.max(
@@ -5462,6 +5481,7 @@ function visorDisrupts(foe, enemyRoll) {
         let backlineDamage = 0;
         let enemyHitCount = 0;
         let shadowWarderSavedTansy = false;
+        let bodyguardInterceptsLeft = bodyguardActive ? 1 : 0;
         if (!enemyMiss) {
 
             /*
@@ -5474,7 +5494,7 @@ const castingBuffer = live(s).find(
         foe.role === 'buffer' &&
         foe.id !== stunnedFoeId &&
         !specialistInterrupted &&
-        !visorDisrupts(foe, e)
+        !visorDisrupts(foe, e, ex)
 );
 
             if (castingBuffer) {
@@ -5493,18 +5513,8 @@ const castingBuffer = live(s).find(
                     Math.round((lead.atk - effectiveDefense) / 10)
                 );
 
-                if (actions.qtik === 'ice_melee') {
+                if (bodyguardActive) {
                     baseBleed = Math.max(1, baseBleed - 1);
-                }
-
-                if (hamstringActive) {
-                    baseBleed = Math.max(
-                        1,
-                        baseBleed -
-                        Math.floor(
-                            (c.weasels.active + raised.slots) / 6
-                        )
-                    );
                 }
 
                 baseBleed = Math.max(
@@ -5591,7 +5601,7 @@ const castingBuffer = live(s).find(
                         'hexer',
                         'buffer'
                     ].includes(foe.role) &&
-                    visorDisrupts(foe, e)
+                    visorDisrupts(foe, e, ex)
                 ) {
                     effects.push(
                         `Visor disrupted ` +
@@ -5604,13 +5614,24 @@ const castingBuffer = live(s).find(
                     const amount =
                         (3 * tier + foe.level) * (e === 6 ? 2 : 1);
 
-                    backlineDamage += amount;
-                    enemyHitCount++;
+                    if (bodyguardInterceptsLeft > 0) {
+                        bodyguardInterceptsLeft -= 1;
+                        frontlineDamage += amount;
+                        enemyHitCount++;
 
-                    effects.push(
-                        `${foe.id} dealt ` +
-                        `${amount} damage to Tansy`
-                    );
+                        effects.push(
+                            `Bodyguard intercepted ${foe.id}'s shot ` +
+                            `(${amount} damage redirected to Q'tik)`
+                        );
+                    } else {
+                        backlineDamage += amount;
+                        enemyHitCount++;
+
+                        effects.push(
+                            `${foe.id} dealt ` +
+                            `${amount} damage to Tansy`
+                        );
+                    }
                 }
 
                 if (foe.role === 'mender') {
@@ -5708,7 +5729,7 @@ if (frontliners.length > 0) {
             continue;
         }
 
-        if (visorDisrupts(foe, e)) {
+        if (visorDisrupts(foe, e, ex)) {
             effects.push(
                 `Visor disrupted ${foe.id}'s passive`
             );
@@ -19221,7 +19242,7 @@ function combatNarrationPacket(result, actions) {
 
     const qtikActions = {
         fire_melee: 'Fire Melee',
-        ice_melee: 'Ice Melee',
+        bodyguard: 'Bodyguard',
         stun: 'Stun',
         ice_patch: 'Ice Patch',
         frost_stomp: 'Frost Stomp',
@@ -19231,7 +19252,7 @@ function combatNarrationPacket(result, actions) {
     const tansyActions = {
         visor: 'Visor',
         vitals: 'Vitals',
-        hamstring: 'Hamstring',
+        overrun: 'Overrun',
         recall: 'Recall',
         surge: 'Surge',
         drink: 'Drink',
@@ -26973,23 +26994,21 @@ function decorateAethermoorCombatControls(host, state) {
     const shadows = shadowMechanics(crew);
     const summons = crew.weasels.active + shadows.slots;
     const fire = Math.max(3, Math.floor(stats.atk / 5));
-    const hamstringReduction = Math.floor(summons / 6);
     const vitalsPierce = Math.floor(summons / 2);
 
     const descriptions = {
         qtik: {
             fire_melee:
                 `Adds ${fire} Fire damage per exchange ` +
-                `(max(3, floor(current derived ATK / 5))). ` +
-                `Recalculated if summons change. ATK debuffs do not ` +
-                `reduce this Fire bonus. Carapace can reflect it.`,
-           
-            ice_melee:
-                `Adds +${Math.max(2, Math.floor(stats.def / 3))} ` +
-                'frontline DEF this turn ' +
-                '(max(2, floor(derived DEF / 3))). ' +
-                'The bonus is calculated before encounter debuffs. ' +
-                'Also reduces Base Bleed by 1, minimum Base Bleed 1.',
+                '(max(3, floor(derived ATK / 5)), unaffected by ATK debuffs) ' +
+                'and shreds target DEF by max(2, 2 × Target Tier) for the turn. ' +
+                'Carapace can reflect Q’tik’s personal damage.',
+
+            bodyguard:
+                `Hunkers down to protect Tansy: intercepts 1 Archer hit per exchange ` +
+                `onto Q’tik, adds +${Math.max(2, Math.floor(stats.def / 3))} frontline DEF, ` +
+                'and reduces Base Bleed by 1 (min 1). Forfeits Q’tik’s personal attack ' +
+                'this turn (and takes no Carapace reflection).',
 
             stun:
                 'Once per encounter. The stunned foe loses its first ' +
@@ -26998,44 +27017,39 @@ function decorateAethermoorCombatControls(host, state) {
                 'A guarding Brute may intercept.',
 
             ice_patch:
-                'Once per encounter. Enemies miss on rolls 1–3, or 1–4 ' +
-                'with Hamstring, for all three exchanges. Suppresses ' +
-                'Vitals summon-damage amplification.',
+                'Once per encounter. Freezes the floor: enemies miss on ' +
+                'rolls 1–3 for all three exchanges and Brute Guard is ' +
+                'stripped for the turn. Works freely with Vitals.',
 
             frost_stomp:
-                'Hits all living enemies each exchange. Base damage ' +
-                'is floor((effective Crew ATK − target DEF) / 2), ' +
-                'plus the player roll on successful rolls. Excess ' +
-                'damage spills forward. Interrupts ordinary specialists ' +
-                'in exchange 1 and bypasses Brute Guard.',
+                'Hits all living enemies each exchange (50% of ATK − DEF + roll; ' +
+                '75% when paired with Overrun). Excess damage spills forward. ' +
+                'Interrupts ordinary specialists in Exchange 1 and bypasses Guard.',
 
             drink:
                 'Choose a stocked potion below. Four potions per ' +
                 'character per encounter, including cleansing tonics. ' +
                 'Healing/cleansing occurs before exchanges. Ordinary ' +
-                'attack rolls continue, but Fire/Ice action bonuses do not.'
+                'attack rolls continue, but Fire/Bodyguard bonuses do not.'
         },
 
         tansy: {
             visor:
-                'Bypasses Brute Guard. On enemy rolls 2–4, disrupts ' +
-                'the selected specialist action or Elite/Boss passive ' +
-                'stack application. It does not cancel the telegraph. ' +
-                `Enemy roll 1 grants Exposed: +${stats.luk} damage ` +
-                'on the next successful physical hit.',
+                'Bypasses Brute Guard. Guaranteed to disrupt the selected ' +
+                'specialist action or Elite/Boss passive stack on its first ' +
+                'un-interrupted response of the turn, and disrupts on enemy ' +
+                'rolls 2–4 on remaining exchanges. Does not cancel telegraphs. ' +
+                `Enemy roll 1 grants Exposed (+${stats.luk} damage).`,
 
             vitals:
-                'Doubles loose-weasel and Shadow-Archer attack ' +
-                'contributions unless Ice Patch is used. Criticals on ' +
-                'player rolls 5–6 (1.5× physical + LUK). On rolls 2–6, ' +
-                `adds damage up to ${vitalsPierce} target DEF, based on ` +
-                'current summons.',
+                'Doubles loose-weasel and Shadow-Archer attack contributions. ' +
+                'Criticals on player rolls 5–6 (1.5× physical + LUK). On rolls 2–6, ' +
+                `pierces up to ${vitalsPierce} target DEF based on current summons.`,
 
-            hamstring:
-                'Enemies miss on rolls 1–2, or 1–4 with Ice Patch. ' +
-                `Currently reduces Base Bleed by ${hamstringReduction} ` +
-                '(floor(occupied summon slots / 6)), minimum 1. ' +
-                'Does not by itself bypass Guard on successful enemy rolls.',
+            overrun:
+                'AoE weasel swarm. Bypasses Brute Guard and hits all living foes ' +
+                'each exchange (60% of ATK − DEF + roll; 75% when paired with ' +
+                'Frost Stomp). Excess damage spills forward.',
 
             recall:
                 'Removes loose-weasel attack participation and protects ' +
@@ -27562,7 +27576,7 @@ async function openCombatPanel(inlineHost) {
         'qtik',
         [
             { value: 'fire_melee', label: 'Fire Melee' },
-            { value: 'ice_melee', label: 'Ice Melee' },
+            { value: 'bodyguard', label: 'Bodyguard' },
             { value: 'stun', label: 'Stun' },
             { value: 'ice_patch', label: 'Ice Patch' },
             { value: 'frost_stomp', label: 'Frost Stomp' },
@@ -27582,7 +27596,7 @@ async function openCombatPanel(inlineHost) {
         [
             { value: 'visor', label: 'Visor' },
             { value: 'vitals', label: 'Vitals' },
-            { value: 'hamstring', label: 'Hamstring' },
+            { value: 'overrun', label: 'Overrun' },
             { value: 'recall', label: 'Recall' },
             { value: 'surge', label: 'Surge' },
             { value: 'drink', label: 'Drink Potion' }
@@ -27709,8 +27723,20 @@ async function openCombatPanel(inlineHost) {
                             `(${hit.hp} left)`
                         );
 
+                    const rollTag =
+                        `[P:${exchange.playerRoll}` +
+                        (exchange.enemyRoll != null
+                            ? `/E:${exchange.enemyRoll}`
+                            : '') +
+                        `]`;
+                    const missNote = exchange.enemyMiss
+                        ? (exchange.enemyRoll === 1
+                            ? '  Enemy attack missed (rolled 1).'
+                            : '  Enemy attack missed (Ice Patch).')
+                        : null;
+
                     return [
-                        `Exchange ${exchange.exchange}: ` +
+                        `Exchange ${exchange.exchange} ${rollTag}: ` +
                             (hits.join('; ') || 'No damage dealt'),
                         ...(exchange.frontlineDamage > 0
                             ? [`  Q'tik took ${exchange.frontlineDamage} damage.`]
@@ -27718,13 +27744,12 @@ async function openCombatPanel(inlineHost) {
                         ...(exchange.backlineDamage > 0
                             ? [`  Tansy took ${exchange.backlineDamage} damage.`]
                             : []),
-                        ...(exchange.enemyMiss
-                            ? ['  Enemy attack missed.']
-                            : []),
+                        ...(missNote ? [missNote] : []),
                         ...(exchange.effects || []).map(effect =>
                             `  ${effect}`
                         )
                     ].join('\n');
+
                 }),
                 ...(result.turnEffects || []),
                 '',

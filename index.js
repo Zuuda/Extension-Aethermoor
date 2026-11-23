@@ -7690,6 +7690,52 @@ function markInstanceRoomThreatCleared(state) {
 }
 
 /*
+ * Find the shortest safe path between two rooms in an instance.
+ * Intermediate rooms must already be visited and free of unresolved
+ * threats so the crew can retrace explored halls without bypassing
+ * unexplored rooms or active threats.
+ */
+function findInstancePath(instance, fromRoomId, targetRoomId) {
+    if (!instance?.rooms || !fromRoomId || !targetRoomId) return null;
+    if (fromRoomId === targetRoomId) return null;
+
+    const start = instance.rooms[fromRoomId];
+    const goal = instance.rooms[targetRoomId];
+    if (!start || !goal) return null;
+
+    const queue = [[fromRoomId]];
+    const seen = new Set([fromRoomId]);
+
+    while (queue.length > 0) {
+        const path = queue.shift();
+        const currentId = path[path.length - 1];
+        const current = instance.rooms[currentId];
+
+        for (const nextId of current?.exits || []) {
+            if (seen.has(nextId)) continue;
+
+            const next = instance.rooms[nextId];
+            if (!next) continue;
+
+            const blockedByThreat = (next.requiresCleared || []).some(
+                reqId => instance.rooms[reqId]?.threatStatus !== 'cleared'
+            );
+            if (blockedByThreat) continue;
+
+            seen.add(nextId);
+            const nextPath = [...path, nextId];
+            if (nextId === targetRoomId) return nextPath;
+
+            if (next.visited && next.threatStatus !== 'unresolved') {
+                queue.push(nextPath);
+            }
+        }
+    }
+
+    return null;
+}
+
+/*
  * Instance commands identify one saved user-message event. Their replay
  * returns its locked result before checking the crew's current room.
  * Local movement uses no overland segment or random travel-event roll.
@@ -7737,9 +7783,10 @@ function resolveInstanceAction(test) {
         'Reach the instance entrance and resolve travel or combat first'
     );
 
-     let room = null;
+    let room = null;
     let encounter = null;
     let exitedFromRoomId = null;
+    let passedThrough = [];
 
     if (test.action === 'enter') {
         assert(
@@ -7758,13 +7805,6 @@ function resolveInstanceAction(test) {
             'Enter this instance before moving between rooms'
         );
 
-        const from = instance.rooms[instance.currentRoomId];
-
-        assert(
-            from?.exits.includes(test.roomId),
-            'That room is not an exit from the current room'
-        );
-
         room = instance.rooms[test.roomId];
 
         assert(
@@ -7780,8 +7820,24 @@ function resolveInstanceAction(test) {
             );
         }
 
+        const path = findInstancePath(
+            instance,
+            instance.currentRoomId,
+            room.id
+        );
+
+        assert(
+            path,
+            'No explored safe path reaches that room'
+        );
+
+        passedThrough = path
+            .slice(1, -1)
+            .map(id => instance.rooms[id].label);
+
         instance.currentRoomId = room.id;
     } else if (test.action === 'exit') {
+
         assert(
             state.activeInstanceId === instance.id &&
             Boolean(instance.currentRoomId),
@@ -7821,6 +7877,7 @@ function resolveInstanceAction(test) {
         action: test.action,
         requestedRoomId: test.roomId || null,
         ...(exitedFromRoomId ? { exitedFromRoomId } : {}),
+        ...(passedThrough.length > 0 ? { passedThrough } : {}),
         roomId: room?.id || null,
         roomLabel: room?.label || null,
         roomFeature: room?.feature || null,
@@ -18379,6 +18436,12 @@ function instanceNarrationPacket(result) {
             ? 'entered'
             : 'moved within'} the instance.`,
         `Current room: ${result.roomLabel}.`,
+        ...(Array.isArray(result.passedThrough) && result.passedThrough.length > 0
+            ? [
+                `They retraced their steps through ${result.passedThrough.join(' → ')} ` +
+                    'to reach this room (those rooms are already cleared; summarize the walk briefly in passing).'
+            ]
+            : []),
         result.firstVisit
             ? 'This is the first visit to this room.'
             : 'This room was already visited. Do not treat this revisit ' +
@@ -25068,15 +25131,15 @@ async function renderInstanceTab(host) {
             const hasChest = Boolean(entry.chest && !entry.chest.opened);
             const isSide = Boolean(entry.feature);
             const cleared = entry.threatStatus === 'cleared';
-            const isAdjacent = room.exits.includes(entry.id);
             const unmet = (entry.requiresCleared || []).filter(
                 requiredId =>
                     instance.rooms[requiredId]?.threatStatus !== 'cleared'
             );
-            const canMoveHere = isAdjacent && !blocked && unmet.length === 0;
-
+            const path = !isCurrent && !blocked
+                ? findInstancePath(instance, room.id, entry.id)
+                : null;
+            const canMoveHere = Boolean(path);
             const group = document.createElementNS(svgNS, 'g');
-
             const fill = isCurrent
                 ? '#2d1b4e'
                 : isQueued
@@ -25191,13 +25254,15 @@ async function renderInstanceTab(host) {
                                 ? 'Cleared'
                                 : 'Visited';
             const moveHint = canMoveHere
-                ? '\nClick to move here'
-                : isAdjacent && unmet.length > 0
+                ? (path.length > 2
+                    ? '\nClick to retrace steps and move here'
+                    : '\nClick to move here')
+                : !isCurrent && unmet.length > 0
                     ? `\nBlocked — clear ${
                         unmet.map(id => instance.rooms[id]?.label || id)
                             .join(', ')
                     } first`
-                    : isAdjacent && blocked
+                    : !isCurrent && blocked
                         ? '\nResolve or avoid the encounter first'
                         : '';
 
@@ -25221,7 +25286,7 @@ async function renderInstanceTab(host) {
         legend.style.textAlign = 'center';
         legend.style.marginTop = '4px';
         legend.textContent =
-            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited · Click adjacent room to move';
+            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited · Click any reachable room to move';
         mapWrap.appendChild(legend);
 
         const section = makeAethermoorSection(

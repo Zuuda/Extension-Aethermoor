@@ -10053,54 +10053,196 @@ const QUEST_ARCHETYPES = [
  * Saved zone geography remains available to the narrator for scenery,
  * names, and gradual transitions; it does not exclude an objective.
  */
-    const familyByArchetype = {
-        recover_cargo: 'retrieve_item',
-        territorial_beast: 'defeat_elite',
-        ruin_clearance: 'defeat_elite'
-    };
+const QUEST_ARCHETYPES_BY_CHANNEL = {
+    social: new Set([
+        'recover_cargo',
+        'imperial_survey',
+        'ruin_clearance',
+        'territorial_beast',
+        'missing_person'
+    ]),
+    overland: new Set([
+        'recover_cargo',
+        'imperial_survey',
+        'ruin_clearance',
+        'territorial_beast',
+        'missing_person',
+        'sealed_cache',
+        'dormant_hazard'
+    ]),
+    instance: new Set([
+        'sealed_cache',
+        'dormant_hazard'
+    ])
+};
 
-    const family =
-        archetype.id === 'herb_foraging'
-            ? 'retrieve_item'
-            : archetype.id === 'missing_person'
-                ? 'rescue_person'
-                : familyByArchetype[archetype.id];
+function eligibleQuestScenarios(
+    _state,
+    archetype,
+    _zone,
+    rank,
+    channel = 'overland'
+) {
+    // Retired from new offers; existing saved Herb Foraging quests remain valid.
+    if (archetype.id === 'herb_foraging') return [];
 
-    if (!family) return null;
-    let v2Facts;
+    const allowedForChannel =
+        QUEST_ARCHETYPES_BY_CHANNEL[channel] ||
+        QUEST_ARCHETYPES_BY_CHANNEL.overland;
 
-    if (archetype.id === 'recover_cargo') {
-        v2Facts = {
-            item: facts.cargo,
-            destination: facts.place
-        };
-    } else if (archetype.id === 'herb_foraging') {
+    if (!allowedForChannel.has(archetype.id)) return [];
 
-        v2Facts = {
-            item: facts.herb,
-            destination: facts.place
-        };
-    } else if (archetype.id === 'missing_person') {
-        v2Facts = {
-            person: facts.person,
-            place: facts.place,
-            evidence: facts.evidence,
-            variantId
-        };
-    } else if (archetype.id === 'territorial_beast') {
-        v2Facts = {
-            target: facts.beast,
-            territory: facts.place,
-            lair: facts.place
-        };
+    // Rank F errands belong to Town social contacts only.
+    if (rank === 'F' && channel !== 'social') return [];
 
-    } else {
-        v2Facts = {
-            target: facts.threat,
-            territory: facts.site,
-            lair: facts.site
-        };
+    return (archetype.scenarios || []).filter(scenario => {
+        if (
+            Array.isArray(scenario.ranks) &&
+            !scenario.ranks.includes(rank)
+        ) {
+            return false;
+        }
+
+        if (rank === 'F') {
+            return [
+                'recover_cargo',
+                'imperial_survey',
+                'ruin_clearance',
+                'territorial_beast'
+            ].includes(archetype.id) &&
+                scenario.ranks?.includes('F') === true;
+        }
+
+        if (archetype.id !== 'missing_person') return true;
+
+        if (scenario.variantId === 'lost') return rank === 'D';
+        if (scenario.variantId === 'abducted') {
+            return rank === 'C' || rank === 'B';
+        }
+
+        return false;
+    });
+}
+
+function eligibleQuestArchetypes(state, zone, rank, channel = 'overland') {
+    return QUEST_ARCHETYPES
+        .map(archetype => ({
+            archetype,
+            scenarios: eligibleQuestScenarios(
+                state,
+                archetype,
+                zone,
+                rank,
+                channel
+            )
+        }))
+        .filter(entry => entry.scenarios.length > 0);
+}
+
+function buildQuestFacts(
+    state,
+    archetype,
+    zone,
+    eligibleScenarios,
+    rank
+) {
+    assert(
+        eligibleScenarios.length > 0,
+        `Quest archetype ${archetype.id} has no scenario compatible with Zone ${zone}`
+    );
+
+    let variantRoll = null;
+    let variantId =
+        archetype.variantId ||
+        eligibleScenarios[0].variantId ||
+        null;
+
+    let scenarios = eligibleScenarios;
+
+    if ([
+        'recover_cargo',
+        'missing_person',
+        'imperial_survey',
+        'sealed_cache',
+        'dormant_hazard'
+    ].includes(archetype.id)) {
+        const variants = [
+            ...new Set(
+                eligibleScenarios.map(scenario => scenario.variantId)
+            )
+        ];
+
+        assert(
+            variants.every(id => typeof id === 'string' && id.length > 0),
+            `${archetype.label} scenarios need authored variantId values`
+        );
+
+        variantRoll = roll(state, variants.length);
+        variantId = variants[variantRoll - 1];
+
+        scenarios = eligibleScenarios.filter(
+            scenario => scenario.variantId === variantId
+        );
     }
+
+    const scenarioRoll = roll(state, scenarios.length);
+    const scenario = scenarios[scenarioRoll - 1];
+
+    assert(
+        scenario &&
+        typeof scenario.pitch === 'string' &&
+        scenario.facts &&
+        typeof scenario.facts === 'object',
+        `Quest archetype ${archetype.id} has an invalid scenario`
+    );
+
+    const facts = clone(scenario.facts);
+    const stakesByArchetype = {
+        recover_cargo: {
+            F: 'a misplaced crate of everyday goods left near town',
+            E: 'ordinary supplies needed for routine local work',
+            D: 'valuable property whose loss harms its local owner',
+            C: 'essential supplies needed by the community',
+            B: 'region-critical cargo whose loss disrupts several communities'
+        },
+        imperial_survey: {
+            F: 'a routine local inspection plate near town',
+            E: 'usable Imperial hardware needed by local craftspeople',
+            D: 'a scarce Pre-Calamity reading or component worth real silver',
+            C: 'an essential Imperial relay component for settlement upkeep'
+        },
+        sealed_cache: {
+            E: 'a minor unclaimed stash tucked inside old stonework',
+            D: 'a sealed Pre-Calamity cache untouched since the fall',
+            C: 'a well-hidden Imperial strongbox holding high-grade salvage',
+            B: 'a sealed Magistrate-grade vault cache of rare value'
+        },
+        dormant_hazard: {
+            E: 'a localized Pre-Calamity hazard stirring inside an old ruin',
+            D: 'an active construct or breached vault threatening nearby ground',
+            C: 'a dangerous dormant security site encroaching on the region',
+            B: 'a major Pre-Calamity threat holding a sealed inner site'
+        },
+        ruin_clearance: {
+            F: 'a nuisance disrupting one ordinary work area',
+            E: 'a limited danger disrupting one local worksite',
+            D: 'a threat preventing important local work or travel',
+            C: 'a danger disrupting an essential community route or service',
+            B: 'a major threat affecting routes or work across the region'
+        },
+        territorial_beast: {
+            F: 'a nuisance animal disrupting routine local work',
+            E: 'an animal nuisance affecting a limited local area',
+            D: 'a dangerous animal threatening regular local travel or work',
+            C: 'a threat disrupting an essential route or community activity',
+            B: 'a territorial threat affecting travel or work across the region'
+        },
+        missing_person: {
+            D: 'one lost person whose safe return matters to the affected party',
+            C: 'one abducted person held by a hostile group',
+            B: 'an abducted person whose loss has serious consequences beyond one household'
+        }
+    };
 
     const rankStakes = stakesByArchetype[archetype.id]?.[rank];
 

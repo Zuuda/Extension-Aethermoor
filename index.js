@@ -22248,7 +22248,6 @@ async function openAethermoorShopWindow() {
             button.className = 'aethermoor-trade-option';
             const worn =
                 state.crew.gear?.[entry.owner]?.[entry.slot];
-
             const wornBonus = gearBonus(
                 entry.owner,
                 entry.slot,
@@ -22257,8 +22256,9 @@ async function openAethermoorShopWindow() {
 
             const comparisonKeys = {
                 crewAtk: ['atk', 'Crew ATK'],
-                tansyMaxHp: ['hp', 'Tansy MaxHP'],
-                qtikMaxHp: ['hp', 'Q’tik MaxHP'],
+                ...(entry.owner === 'qtik'
+                    ? { qtikMaxHp: ['hp', 'Q’tik MaxHP'] }
+                    : { tansyMaxHp: ['hp', 'Tansy MaxHP'] }),
                 frontlineDef: ['def', 'Frontline DEF'],
                 crewLuk: ['luk', 'Crew LUK']
             };
@@ -23370,13 +23370,13 @@ async function renderInventoryTab(host) {
             targetSlot,
             worn
         );
-
+        const hpLabel = item.owner === 'qtik' ? "Q'tik MaxHP" : 'Tansy MaxHP';
         const differences = [];
 
         for (const [key, label] of [
             ['atk', 'ATK'],
             ['def', 'DEF'],
-            ['hp', 'HP'],
+            ['hp', hpLabel],
             ['luk', 'LUK']
         ]) {
             const difference =
@@ -23553,10 +23553,11 @@ async function renderInventoryTab(host) {
                 ...item,
                 stat: item.stat ?? item.rawStat
             });
+            const hpLabel = owner === 'qtik' ? "Q'tik MaxHP" : 'Tansy MaxHP';
             const bonusParts = [
                 ['atk', 'ATK'],
                 ['def', 'DEF'],
-                ['hp', 'HP'],
+                ['hp', hpLabel],
                 ['luk', 'LUK']
             ]
                 .filter(([key]) => Number(bonus[key]) > 0)

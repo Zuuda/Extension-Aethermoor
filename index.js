@@ -26824,7 +26824,9 @@ function updateCombatAbilityButtons(panel, state) {
             (group === 'tansy' && value === 'drink' &&
                 (!hasPotions || potionUses.tansy >= 4));
 
-        button.disabled = Boolean(exhausted);
+        button.disabled = false;
+        button.setAttribute('aria-disabled', String(Boolean(exhausted)));
+        button.dataset.exhausted = exhausted ? 'true' : 'false';
         button.title = exhausted
             ? value === 'drink'
                 ? (!hasPotions
@@ -26995,6 +26997,10 @@ function makeChoiceGroup(
         }
 
         button.addEventListener('click', () => {
+            if (button.getAttribute('aria-disabled') === 'true') {
+                return;
+            }
+
             onSelect(option.value);
 
             for (const sibling of choices.querySelectorAll(
@@ -27014,9 +27020,97 @@ function makeChoiceGroup(
     return wrapper;
 }
 
-function decorateAethermoorCombatControls(host, state) {
+function estimateCombatDamageTag(state, qtikAction, tansyAction) {
     const crew = state.crew;
-    const encounter = state.encounter;
+    const encounter = state.encounter?.status === 'active'
+        ? state.encounter
+        : null;
+    const stats = derived(crew);
+    const shadows = shadowMechanics(crew);
+    const activeWeasels = tansyAction === 'surge'
+        ? Math.max(0, 3 + Math.floor(crew.level / 2) - shadows.slots)
+        : crew.weasels.active;
+
+    const baseAndGearAttack =
+        stats.atk - 2 * crew.weasels.active - shadows.attack;
+    const summonMult = tansyAction === 'vitals' ? 2 : 1;
+    const looseWeaselAtk = tansyAction === 'recall'
+        ? 0
+        : 2 * activeWeasels * summonMult;
+    const activeShadowAtk = tansyAction === 'recall'
+        ? shadows.archerAttack
+        : (shadows.attack - shadows.archerAttack) +
+          shadows.archerAttack * summonMult;
+    const qtikBasePenalty = qtikAction === 'bodyguard' ? 2 * crew.level : 0;
+
+    const unpenalizedAtk = Math.max(
+        0,
+        (tansyAction === 'recall'
+            ? baseAndGearAttack + activeShadowAtk
+            : baseAndGearAttack + looseWeaselAtk + activeShadowAtk) -
+            qtikBasePenalty
+    );
+
+    const hexPenalty = encounter
+        ? Object.entries(encounter.hexStacks || {}).reduce(
+            (total, [id, stacks]) => {
+                const hexer = (encounter.foes || []).find(
+                    foe => foe.hp > 0 && foe.id === id && foe.role === 'hexer'
+                );
+                return total + (
+                    hexer
+                        ? 2 * enemyTier(hexer.level) * Number(stacks)
+                        : 0
+                );
+            },
+            0
+        )
+        : 0;
+    const passivePenalty = encounter ? passiveAttackPenalty(encounter) : 0;
+    const effectiveAtk = Math.max(
+        0,
+        unpenalizedAtk - hexPenalty - passivePenalty
+    );
+
+    const fireDmg = qtikAction === 'fire_melee'
+        ? Math.max(3, Math.floor(stats.atk / 5))
+        : 0;
+
+    const isAoE = qtikAction === 'frost_stomp' || tansyAction === 'overrun';
+
+    if (isAoE) {
+        const aoeFactor =
+            qtikAction === 'frost_stomp' && tansyAction === 'overrun'
+                ? 0.75
+                : tansyAction === 'overrun'
+                    ? 0.6
+                    : 0.5;
+        const baseAoE = Math.max(0, Math.floor(effectiveAtk * aoeFactor));
+        const minDmg = Math.max(1, baseAoE + 2);
+        const maxDmg = Math.max(1, baseAoE + 6);
+        return `${minDmg}–${maxDmg} raw dmg/foe`;
+    }
+
+    const normalMaxRoll = tansyAction === 'vitals' ? 4 : 5;
+    const minHit = Math.max(1, effectiveAtk + 2) + fireDmg;
+    const maxHit = Math.max(1, effectiveAtk + normalMaxRoll) + fireDmg;
+
+    const critMinRoll = tansyAction === 'vitals' ? 5 : 6;
+    const critMin =
+        Math.round(Math.max(1, effectiveAtk + critMinRoll) * 1.5) +
+        stats.luk + fireDmg;
+    const critMax =
+        Math.round(Math.max(1, effectiveAtk + 6) * 1.5) +
+        stats.luk + fireDmg;
+    const critText = critMin === critMax
+        ? `crit ${critMax}`
+        : `crit ${critMin}–${critMax}`;
+
+    return `${minHit}–${maxHit} raw dmg (${critText})`;
+}
+
+function updateCombatTooltips(host, state, { previewOnly = false } = {}) {
+    const crew = state.crew;
     const stats = derived(crew);
     const shadows = shadowMechanics(crew);
     const summons = crew.weasels.active + shadows.slots;
@@ -27024,6 +27118,7 @@ function decorateAethermoorCombatControls(host, state) {
     const vitalsPierce = Math.floor(summons / 2);
 
     const descriptions = {
+
         qtik: {
             fire_melee:
                 `Adds ${fire} Fire damage per exchange ` +
@@ -27105,14 +27200,33 @@ function decorateAethermoorCombatControls(host, state) {
         '.aethermoor-combat-choice[data-group="qtik"], ' +
         '.aethermoor-combat-choice[data-group="tansy"]'
     )) {
-        const description =
-            descriptions[button.dataset.group]?.[button.dataset.value];
+        const group = button.dataset.group;
+        const value = button.dataset.value;
+        const description = descriptions[group]?.[value];
+        if (!description) continue;
 
-        if (description) {
-            button.title =
-                (button.disabled ? 'Unavailable: already used to its limit.\n\n' : '') +
-                description;
-        }
+        const qtikAction = group === 'qtik'
+            ? value
+            : previewOnly
+                ? 'stun'
+                : combatSelections.qtik;
+        const tansyAction = group === 'tansy'
+            ? value
+            : previewOnly
+                ? 'visor'
+                : combatSelections.tansy;
+
+        const damageTag = estimateCombatDamageTag(
+            state,
+            qtikAction,
+            tansyAction
+        );
+        const prefix =
+            button.dataset.exhausted === 'true'
+                ? 'Unavailable: already used to its limit.\n\n'
+                : '';
+
+        button.title = `${prefix}${damageTag}\n${description}`;
     }
 
     for (const button of host.querySelectorAll(
@@ -27131,8 +27245,15 @@ function decorateAethermoorCombatControls(host, state) {
               'One tonic protects both protagonists; two cannot stack. ' +
               'Can be used preventively even with no current stacks.';
     }
+}
 
-     const effects = [
+function decorateAethermoorCombatControls(host, state) {
+    updateCombatTooltips(host, state, { previewOnly: false });
+
+    const encounter = state.encounter;
+    if (encounter?.status !== 'active') return;
+
+    const effects = [
         {
             key: 'armor_sunder',
             label: 'Armor Sunder',
@@ -27291,12 +27412,15 @@ function ensureAethermoorCombatChoiceStyles() {
         }
 
         .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:disabled {
+        .aethermoor-combat-choice:disabled,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-choice[aria-disabled="true"] {
             opacity: 0.35;
             cursor: not-allowed;
             transform: none;
             animation: none;
         }
+
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-controls {
             width: 100%;
@@ -27354,6 +27478,65 @@ function ensureAethermoorCombatChoiceStyles() {
     `;
 
     document.head.appendChild(style);
+}
+const QTIK_COMBAT_OPTIONS = [
+    { value: 'fire_melee', label: 'Fire Melee' },
+    { value: 'bodyguard', label: 'Bodyguard' },
+    { value: 'stun', label: 'Stun' },
+    { value: 'ice_patch', label: 'Ice Patch' },
+    { value: 'frost_stomp', label: 'Frost Stomp' },
+    { value: 'drink', label: 'Drink Potion' }
+];
+
+const TANSY_COMBAT_OPTIONS = [
+    { value: 'visor', label: 'Visor' },
+    { value: 'vitals', label: 'Vitals' },
+    { value: 'overrun', label: 'Overrun' },
+    { value: 'recall', label: 'Recall' },
+    { value: 'surge', label: 'Surge' },
+    { value: 'drink', label: 'Drink Potion' }
+];
+
+function appendCombatCommandPreview(inlineHost, state) {
+    const currentStats = derived(state.crew);
+    const controls = document.createElement('div');
+    controls.className = 'aethermoor-combat-controls';
+
+    const note = document.createElement('div');
+    note.className = 'aethermoor-ui-text';
+    note.textContent =
+        'Commands locked outside active combat — hover for live raw damage & details.';
+
+    const qtikGroup = makeChoiceGroup(
+        `Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`,
+        'qtik',
+        QTIK_COMBAT_OPTIONS,
+        null,
+        () => {}
+    );
+
+    const tansyGroup = makeChoiceGroup(
+        `Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`,
+        'tansy',
+        TANSY_COMBAT_OPTIONS,
+        null,
+        () => {}
+    );
+
+    controls.append(note, qtikGroup, tansyGroup);
+
+    for (const button of controls.querySelectorAll('.aethermoor-combat-choice')) {
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-pressed', 'false');
+    }
+
+    inlineHost.appendChild(controls);
+
+    try {
+        updateCombatTooltips(controls, state, { previewOnly: true });
+    } catch (error) {
+        console.warn('[Aethermoor] Combat preview tooltips failed', error);
+    }
 }
 
 async function openCombatPanel(inlineHost) {
@@ -27482,6 +27665,7 @@ async function openCombatPanel(inlineHost) {
 
         section.appendChild(actions);
         inlineHost.appendChild(section);
+        appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
@@ -27551,6 +27735,7 @@ async function openCombatPanel(inlineHost) {
 
         section.appendChild(flee);
         inlineHost.appendChild(section);
+        appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
@@ -27587,6 +27772,7 @@ async function openCombatPanel(inlineHost) {
             appendVictoryReceipt(inlineHost, receipt);
         }
 
+        appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
@@ -27603,18 +27789,12 @@ async function openCombatPanel(inlineHost) {
         `Q'tik (${state.crew.qtik.hp}/` +
             `${currentStats.qtikMaxHp} HP)`,
         'qtik',
-        [
-            { value: 'fire_melee', label: 'Fire Melee' },
-            { value: 'bodyguard', label: 'Bodyguard' },
-            { value: 'stun', label: 'Stun' },
-            { value: 'ice_patch', label: 'Ice Patch' },
-            { value: 'frost_stomp', label: 'Frost Stomp' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
+        QTIK_COMBAT_OPTIONS,
         combatSelections.qtik,
         value => {
             combatSelections.qtik = value;
             showSelectedPotionGroups();
+            updateCombatTooltips(inlineHost, state, { previewOnly: false });
         }
     );
 
@@ -27622,18 +27802,12 @@ async function openCombatPanel(inlineHost) {
         `Tansy (${state.crew.tansy.hp}/` +
             `${currentStats.tansyMaxHp} HP)`,
         'tansy',
-        [
-            { value: 'visor', label: 'Visor' },
-            { value: 'vitals', label: 'Vitals' },
-            { value: 'overrun', label: 'Overrun' },
-            { value: 'recall', label: 'Recall' },
-            { value: 'surge', label: 'Surge' },
-            { value: 'drink', label: 'Drink Potion' }
-        ],
+        TANSY_COMBAT_OPTIONS,
         combatSelections.tansy,
         value => {
             combatSelections.tansy = value;
             showSelectedPotionGroups();
+            updateCombatTooltips(inlineHost, state, { previewOnly: false });
         }
     );
 

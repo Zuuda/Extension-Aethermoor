@@ -22940,6 +22940,35 @@ async function openAethermoorShopWindow() {
         }
     }
 
+    function addSale(item, choice, label) {
+        const rawStat = item.rawStat ?? item.stat;
+        if (!Number.isInteger(rawStat) || rawStat <= 0) return;
+
+        const key = choice.location === 'worn'
+            ? `worn:${choice.owner}:${choice.slot}`
+            : `bag:${choice.index}`;
+
+        const proceeds = rawStat * 2;
+        const rarity = String(item.rarity || 'common').toLowerCase();
+        const slotText = gearSlotLabel(item, choice.slot);
+        const sourceText = choice.location === 'worn' ? 'Worn' : 'Bag';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'aethermoor-trade-option';
+
+        const heading = document.createElement('div');
+        heading.className = `aethermoor-vendor-name aethermoor-rarity-${rarity}`;
+        heading.textContent = `${item.name || label} · +${proceeds}s`;
+
+        const detail = document.createElement('div');
+        detail.className = 'aethermoor-vendor-detail';
+        detail.textContent = [sourceText, slotText, `Stat ${rawStat}`]
+            .filter(Boolean)
+            .join(' · ');
+
+        button.append(heading, detail);
+
         button.addEventListener('click', () => {
             if (selectedSales.has(key)) {
                 selectedSales.delete(key);
@@ -24340,10 +24369,11 @@ async function renderAetherNetTab(host) {
 
         const detail = document.createElement('div');
         detail.className = 'aethermoor-vendor-detail';
-        detail.textContent =
-            `${item.rarity || 'Common'} · ` +
-            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s` +
-            (item.slot === 'skill_tome' ? ' · Skill Tome (S=10)' : '');
+        detail.textContent = [
+            gearSlotLabel(item),
+            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s`,
+            item.slot === 'skill_tome' ? 'Skill Tome (S=10)' : null
+        ].filter(Boolean).join(' · ');
 
         main.append(name, detail);
 

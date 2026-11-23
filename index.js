@@ -12700,28 +12700,7 @@ function resolveGearGrant(test) {
     };
 }
 
-function resolveEquipSlot(ownerGear, item, requestedSlot = null) {
-    const isRing = item?.slot === 'ring1' || item?.slot === 'ring2';
-
-    if (!isRing) {
-        return item.slot;
-    }
-
-    if (requestedSlot === 'ring1' || requestedSlot === 'ring2') {
-        return requestedSlot;
-    }
-
-    const occupied = slot =>
-        Number(ownerGear?.[slot]?.stat ?? ownerGear?.[slot]?.rawStat ?? 0) > 0;
-
-    if (!occupied(item.slot)) return item.slot;
-    const otherRing = item.slot === 'ring1' ? 'ring2' : 'ring1';
-    if (!occupied(otherRing)) return otherRing;
-
-    return item.slot;
-}
-
-function equipBagItem(stateInput, itemIndex, requestedSlot = null) {
+function equipBagItem(stateInput, itemIndex) {
     assert(
         stateInput &&
         typeof stateInput === 'object',
@@ -12783,33 +12762,17 @@ function equipBagItem(stateInput, itemIndex, requestedSlot = null) {
         `Invalid ${item.owner} equipment slot: ${item.slot}`
     );
 
-    if (requestedSlot !== null && requestedSlot !== undefined) {
-        const isRing = item.slot === 'ring1' || item.slot === 'ring2';
-        assert(
-            isRing
-                ? ['ring1', 'ring2'].includes(requestedSlot)
-                : requestedSlot === item.slot,
-            `Cannot equip ${item.slot} into ${requestedSlot}`
-        );
-    }
-
-    const targetSlot = resolveEquipSlot(
-        state.crew.gear[item.owner],
-        item,
-        requestedSlot
-    );
-
-    if (item.owner === 'tansy' && MODULAR_TANSY.has(targetSlot)) {
+    if (item.owner === 'tansy' && MODULAR_TANSY.has(item.slot)) {
         assert(
             ['vitality', 'luck'].includes(item.variant),
-            `Tansy ${targetSlot} requires vitality or luck variant`
+            `Tansy ${item.slot} requires vitality or luck variant`
         );
     }
 
     if (item.owner === 'qtik') {
         assert(
             ['vitality', 'bulwark'].includes(item.variant),
-            `Q'tik ${targetSlot} requires vitality or bulwark variant`
+            `Q'tik ${item.slot} requires vitality or bulwark variant`
         );
     }
 
@@ -12820,11 +12783,10 @@ function equipBagItem(stateInput, itemIndex, requestedSlot = null) {
         state.crew[item.owner];
 
     const oldItem =
-        state.crew.gear[item.owner][targetSlot] || null;
+        state.crew.gear[item.owner][item.slot] || null;
 
     const equippedItem = {
         ...item,
-        slot: targetSlot,
         stat: item.rawStat,
         bound: true,
         classRestricted: false,
@@ -12838,27 +12800,27 @@ function equipBagItem(stateInput, itemIndex, requestedSlot = null) {
      */
     state.inventory.bagReserves.splice(itemIndex, 1);
 
-    if (oldItem && Number(oldItem.stat) > 0) {
-        state.inventory.bagReserves.push({
-            ...oldItem,
-            name: oldItem.name || 'Replaced gear',
-            owner: item.owner,
-            slot: targetSlot,
-            rawStat: oldItem.stat,
-            bound: Boolean(oldItem.bound),
-            classRestricted: false,
-            tradeStreamEligible: oldItem.bound !== true,
-            sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
-            bonus: lootBonus(
-                item.owner,
-                targetSlot,
-                oldItem.variant || null,
-                oldItem.stat
-            )
-        });
-    }
+if (oldItem && Number(oldItem.stat) > 0) {
+    state.inventory.bagReserves.push({
+        ...oldItem,
+        name: oldItem.name || 'Replaced gear',
+        owner: item.owner,
+        slot: item.slot,
+        rawStat: oldItem.stat,
+        bound: Boolean(oldItem.bound),
+        classRestricted: false,
+        tradeStreamEligible: oldItem.bound !== true,
+        sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
+        bonus: lootBonus(
+            item.owner,
+            item.slot,
+            oldItem.variant || null,
+            oldItem.stat
+        )
+    });
+}
 
-    state.crew.gear[item.owner][targetSlot] =
+    state.crew.gear[item.owner][item.slot] =
         equippedItem;
 
     const newDerived =
@@ -16519,8 +16481,7 @@ function resolveBatch(args) {
                     if (test.action === 'equip') {
                         result = equipBagItem(
                             test.state,
-                            test.itemIndex,
-                            test.targetSlot
+                            test.itemIndex
                         );
                     } else if (test.action === 'grant') {
                         result = resolveGearGrant(test);
@@ -21780,13 +21741,6 @@ let aethermoorQueuedInn = null;
 function clearAethermoorQueuedMove() {
     aethermoorQueuedMove = null;
     updateAethermoorQueuedMoveBar();
-    if (
-        aethermoorPanelOpen &&
-        aethermoorActiveTab === 'instances' &&
-        aethermoorTabViews?.instances
-    ) {
-        void renderInstanceTab(aethermoorTabViews.instances);
-    }
 }
 
 function clearAethermoorQueuedInn() {
@@ -21898,13 +21852,6 @@ function copyAethermoorCommand(command) {
     };
 
     updateAethermoorQueuedMoveBar();
-    if (
-        aethermoorPanelOpen &&
-        aethermoorActiveTab === 'instances' &&
-        aethermoorTabViews?.instances
-    ) {
-        void renderInstanceTab(aethermoorTabViews.instances);
-    }
     toastr.info(
         `Queued: ${parsed.label}. Send your next message to move.`,
         'Aethermoor'
@@ -22262,6 +22209,7 @@ async function openAethermoorShopWindow() {
             button.className = 'aethermoor-trade-option';
             const worn =
                 state.crew.gear?.[entry.owner]?.[entry.slot];
+
             const wornBonus = gearBonus(
                 entry.owner,
                 entry.slot,
@@ -22270,9 +22218,8 @@ async function openAethermoorShopWindow() {
 
             const comparisonKeys = {
                 crewAtk: ['atk', 'Crew ATK'],
-                ...(entry.owner === 'qtik'
-                    ? { qtikMaxHp: ['hp', 'Q’tik MaxHP'] }
-                    : { tansyMaxHp: ['hp', 'Tansy MaxHP'] }),
+                tansyMaxHp: ['hp', 'Tansy MaxHP'],
+                qtikMaxHp: ['hp', 'Q’tik MaxHP'],
                 frontlineDef: ['def', 'Frontline DEF'],
                 crewLuk: ['luk', 'Crew LUK']
             };
@@ -23362,17 +23309,12 @@ async function renderInventoryTab(host) {
             return null;
         }
 
-        const targetSlot = resolveEquipSlot(
-            currentGear[item.owner],
-            item
-        );
-
         const worn =
-            currentGear[item.owner]?.[targetSlot] || null;
+            currentGear[item.owner]?.[item.slot] || null;
 
         const candidateBonus = gearBonus(
             item.owner,
-            targetSlot,
+            item.slot,
             {
                 stat: item.rawStat,
                 variant: item.variant
@@ -23381,16 +23323,16 @@ async function renderInventoryTab(host) {
 
         const wornBonus = gearBonus(
             item.owner,
-            targetSlot,
+            item.slot,
             worn
         );
-        const hpLabel = item.owner === 'qtik' ? "Q'tik MaxHP" : 'Tansy MaxHP';
+
         const differences = [];
 
         for (const [key, label] of [
             ['atk', 'ATK'],
             ['def', 'DEF'],
-            ['hp', hpLabel],
+            ['hp', 'HP'],
             ['luk', 'LUK']
         ]) {
             const difference =
@@ -23465,48 +23407,31 @@ async function renderInventoryTab(host) {
             item.slot &&
             item.classRestricted !== true
         ) {
-            const isRing = item.slot === 'ring1' || item.slot === 'ring2';
-            const ownerGear = currentGear[item.owner] || {};
-            const bothRingsFilled =
-                isRing &&
-                Number(ownerGear.ring1?.stat ?? ownerGear.ring1?.rawStat ?? 0) > 0 &&
-                Number(ownerGear.ring2?.stat ?? ownerGear.ring2?.rawStat ?? 0) > 0;
+            const equip = document.createElement('button');
+            equip.type = 'button';
+            equip.textContent = 'Equip';
 
-            const targets = bothRingsFilled
-                ? [
-                    { label: 'Equip R1', slot: 'ring1' },
-                    { label: 'Equip R2', slot: 'ring2' }
-                ]
-                : [{ label: 'Equip', slot: null }];
+            equip.addEventListener('click', async () => {
+                equip.disabled = true;
 
-            for (const target of targets) {
-                const equip = document.createElement('button');
-                equip.type = 'button';
-                equip.textContent = target.label;
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'inventory',
+                        {
+                            name: `equip_inventory_item_${index}`,
+                            kind: 'gear',
+                            action: 'equip',
+                            itemIndex: index
+                        },
+                        'Gear equipped.'
+                    );
+                } finally {
+                    equip.disabled = false;
+                }
+            });
 
-                equip.addEventListener('click', async () => {
-                    equip.disabled = true;
-
-                    try {
-                        await runAethermoorPanelCase(
-                            host,
-                            'inventory',
-                            {
-                                name: `equip_inventory_item_${index}`,
-                                kind: 'gear',
-                                action: 'equip',
-                                itemIndex: index,
-                                ...(target.slot ? { targetSlot: target.slot } : {})
-                            },
-                            'Gear equipped.'
-                        );
-                    } finally {
-                        equip.disabled = false;
-                    }
-                });
-
-                actions.appendChild(equip);
-            }
+            actions.appendChild(equip);
         }
 
         row.append(main, actions);
@@ -23567,11 +23492,10 @@ async function renderInventoryTab(host) {
                 ...item,
                 stat: item.stat ?? item.rawStat
             });
-            const hpLabel = owner === 'qtik' ? "Q'tik MaxHP" : 'Tansy MaxHP';
             const bonusParts = [
                 ['atk', 'ATK'],
                 ['def', 'DEF'],
-                ['hp', hpLabel],
+                ['hp', 'HP'],
                 ['luk', 'LUK']
             ]
                 .filter(([key]) => Number(bonus[key]) > 0)
@@ -24587,19 +24511,9 @@ async function renderInstanceTab(host) {
             }
         }
 
-        const activeQueuedRoomId =
-            aethermoorQueuedMove &&
-            aethermoorQueuedMove.metadata === getContext().chatMetadata &&
-            aethermoorQueuedMove.parsed?.kind === 'instance' &&
-            aethermoorQueuedMove.parsed.instanceId === instance.id &&
-            aethermoorQueuedMove.parsed.action === 'move'
-                ? aethermoorQueuedMove.parsed.roomId
-                : null;
-
         for (const entry of knownRooms) {
             const { cx, cy } = toPx(entry.id);
             const isCurrent = entry.id === room.id;
-            const isQueued = entry.id === activeQueuedRoomId;
             const unvisited = !entry.visited;
             const hasThreat = entry.threatStatus === 'unresolved';
             const hasChest = Boolean(entry.chest && !entry.chest.opened);
@@ -24616,33 +24530,29 @@ async function renderInstanceTab(host) {
 
             const fill = isCurrent
                 ? '#2d1b4e'
-                : isQueued
-                    ? '#2a2312'
-                    : unvisited
-                        ? '#12161c'
-                        : hasThreat
-                            ? '#2b181c'
-                            : hasChest
-                                ? '#2a2312'
-                                : isSide
-                                    ? '#132433'
-                                    : '#181d23';
+                : unvisited
+                    ? '#12161c'
+                    : hasThreat
+                        ? '#2b181c'
+                        : hasChest
+                            ? '#2a2312'
+                            : isSide
+                                ? '#132433'
+                                : '#181d23';
 
             const stroke = isCurrent
                 ? '#c084fc'
-                : isQueued
-                    ? '#ffd166'
-                    : unvisited
-                        ? '#6e7f91'
-                        : hasThreat
-                            ? '#ef4444'
-                            : hasChest
-                                ? '#ffd166'
-                                : isSide
-                                    ? '#38bdf8'
-                                    : cleared
-                                        ? '#4ade80'
-                                        : '#4da6ff';
+                : unvisited
+                    ? '#6e7f91'
+                    : hasThreat
+                        ? '#ef4444'
+                        : hasChest
+                            ? '#ffd166'
+                            : isSide
+                                ? '#38bdf8'
+                                : cleared
+                                    ? '#4ade80'
+                                    : '#4da6ff';
 
             if (canMoveHere) {
                 group.setAttribute('class', 'aethermoor-map-node-clickable');
@@ -24657,11 +24567,11 @@ async function renderInstanceTab(host) {
                 const halo = document.createElementNS(svgNS, 'circle');
                 halo.setAttribute('cx', String(cx));
                 halo.setAttribute('cy', String(cy));
-                halo.setAttribute('r', isQueued ? '14.5' : '13.5');
+                halo.setAttribute('r', '13.5');
                 halo.setAttribute('fill', 'none');
-                halo.setAttribute('stroke', isQueued ? '#ffd166' : '#4da6ff');
-                halo.setAttribute('stroke-opacity', isQueued ? '0.95' : '0.45');
-                halo.setAttribute('stroke-width', isQueued ? '2' : '1');
+                halo.setAttribute('stroke', '#4da6ff');
+                halo.setAttribute('stroke-opacity', '0.45');
+                halo.setAttribute('stroke-width', '1');
                 group.appendChild(halo);
 
                 group.addEventListener('click', () => {
@@ -24678,13 +24588,8 @@ async function renderInstanceTab(host) {
             circle.setAttribute('r', isCurrent ? '12' : '10');
             circle.setAttribute('fill', fill);
             circle.setAttribute('stroke', stroke);
-            circle.setAttribute(
-                'stroke-width',
-                isCurrent || isQueued ? '2.5' : '1.5'
-            );
-            if (unvisited && !isQueued) {
-                circle.setAttribute('stroke-dasharray', '3 2');
-            }
+            circle.setAttribute('stroke-width', isCurrent ? '2.5' : '1.5');
+            if (unvisited) circle.setAttribute('stroke-dasharray', '3 2');
             group.appendChild(circle);
 
             const glyph = unvisited
@@ -25994,6 +25899,18 @@ function aethermoorStatusReadouts(state) {
         { key: 'silver', text: `Silver: ${crew.purse}s` }
     ];
 }
+
+async function copyAethermoorStatus() {
+    // Read at click time: the displayed tab may not have refreshed yet.
+    const state = getContext().chatMetadata?.[
+        AETHERMOOR_METADATA_KEY
+    ]?.state;
+
+    assert(state?.crew, 'No saved crew status to copy');
+
+    const text = aethermoorStatusReadouts(state)
+        .map(readout => readout.text)
+        .join('\n');
 
     try {
         await navigator.clipboard.writeText(text);
@@ -27324,7 +27241,7 @@ async function openCombatPanel(inlineHost) {
  * Disabling recording preserves existing evidence; Clear removes it.
  */
 const AETHERMOOR_DEBUG_KEY = 'aethermoorNarrationDebug';
-const AETHERMOOR_DEBUG_LIMIT = 100;
+const AETHERMOOR_DEBUG_LIMIT = 30;
 
 function saveNarrationDebugChange(metadata, change) {
     return queueAethermoor(async () => {
@@ -27360,26 +27277,15 @@ function recordNarrationDebug(type, details) {
     const metadata = getContext().chatMetadata;
     if (metadata?.[AETHERMOOR_DEBUG_KEY]?.enabled !== true) return;
 
-    const dedupeKey = type === 'assistant_notification'
-        ? `reply:${details?.messageId ?? 'none'}:${worldHash(String(details?.text ?? ''))}`
-        : null;
-
     // Capture values now, before queued work or message rendering changes them.
     const entry = {
         time: new Date().toISOString(),
         type,
         revision: metadata[AETHERMOOR_METADATA_KEY]?.revision ?? null,
-        ...(dedupeKey ? { dedupeKey } : {}),
         details: clone(details)
     };
 
     void saveNarrationDebugChange(metadata, debug => {
-        if (
-            dedupeKey &&
-            debug.entries.some(saved => saved.dedupeKey === dedupeKey)
-        ) {
-            return;
-        }
         debug.entries.push(entry);
     }).catch(error => {
         console.warn('[Aethermoor] Diagnostic save failed', error);
@@ -27529,7 +27435,7 @@ function openNarrationDebug() {
             output.appendChild(empty);
         }
 
-        [...entries].reverse().forEach((entry, index) => {
+        entries.forEach((entry, index) => {
             const details = entry.details || {};
             const record = document.createElement('section');
             record.className = 'aethermoor-debug-record';
@@ -27537,7 +27443,7 @@ function openNarrationDebug() {
             const heading = document.createElement('div');
             heading.className = 'aethermoor-ui-heading';
             heading.textContent =
-                `${entries.length - index}. ${entry.type} · ` +
+                `${index + 1}. ${entry.type} · ` +
                 `${entry.time}`;
 
             const metadataLine = document.createElement('div');

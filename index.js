@@ -2756,6 +2756,25 @@ function systemLogCardHtml({ accent, heading, rightHtml = '', bodyHtml, buttons 
         `<div style="display:flex; justify-content:flex-end; gap:6px; margin-top:7px; padding-top:5px; border-top:1px solid #1f2730;">${buttonHtml}</div>` +
     `</div>`;
 }
+const GEAR_SLOT_LABELS = {
+    weapon: 'Weapon',
+    gloves: 'Bracers',
+    chest: 'Chest',
+    trousers: 'Trousers',
+    headgear: 'Headgear',
+    boots: 'Boots',
+    neck: 'Necklace',
+    ring1: 'Ring 1',
+    ring2: 'Ring 2',
+    amulet: 'Amulet',
+    wristCuffs: 'Wrist Cuffs'
+};
+
+function gearSlotLabel(item, fallbackSlot = null) {
+    if (item?.classRestricted) return 'Off-Class';
+    const slot = item?.slot || fallbackSlot;
+    return GEAR_SLOT_LABELS[slot] || slot || null;
+}
 
 function formatGearLabel(item) {
     if (!item || typeof item !== 'object') return 'Unnamed gear';
@@ -22621,7 +22640,7 @@ function renderCrewKnowledge(state) {
             )}` +
                 (
                     Number.isInteger(entry.learnedAtZone)
-                        ? ` · Zone ${entry.learnedAtZone}`
+                        ? ` · ${zoneDisplayName(state, entry.learnedAtZone)} (z${entry.learnedAtZone})`
                         : ''
                 )
         ];
@@ -22726,10 +22745,10 @@ async function openAethermoorShopWindow() {
     header.append(title, headerActions);
     windowElement.appendChild(header);
 
-    const summary = document.createElement('div');
+     const summary = document.createElement('div');
     summary.className = 'aethermoor-shop-summary';
     summary.textContent =
-        `Zone ${state.zone} · Purse: ${state.crew.purse}s\n` +
+        `${zoneDisplayName(state, state.zone)} (z${state.zone}) · Purse: ${state.crew.purse}s\n` +
         'Select items to buy or sell, then click Confirm.';
     windowElement.appendChild(summary);
 
@@ -22847,6 +22866,12 @@ async function openAethermoorShopWindow() {
                 crewLuk: ['luk', 'Crew LUK']
             };
 
+            const ownerLabel = entry.owner === 'qtik' ? "Q'tik" : 'Tansy';
+            const slotTag = entry.slot === 'weapon' ? 'Weapon' : entry.slotName;
+            const wornText = entry.equippedStat > 0
+                ? `Worn: Stat ${entry.equippedStat}`
+                : 'Empty slot';
+
             const heading = document.createElement('div');
             heading.className = 'aethermoor-vendor-name';
             heading.textContent =
@@ -22856,8 +22881,7 @@ async function openAethermoorShopWindow() {
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
             detail.textContent =
-                `Common · Stat ${entry.stat} · ` +
-                `Equipped Stat ${entry.equippedStat}`;
+                `${ownerLabel} · ${slotTag} · Stat ${entry.stat} · ${wornText}`;
 
             button.append(heading, detail);
 
@@ -22915,22 +22939,6 @@ async function openAethermoorShopWindow() {
             });
         }
     }
-
-    function addSale(item, choice, label) {
-        const rawStat = item.rawStat ?? item.stat;
-        if (!Number.isInteger(rawStat) || rawStat <= 0) return;
-
-        const key = choice.location === 'worn'
-            ? `worn:${choice.owner}:${choice.slot}`
-            : `bag:${choice.index}`;
-
-        const proceeds = rawStat * 2;
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'aethermoor-trade-option';
-        button.textContent =
-            `${item.name || label} · +${proceeds}s\n` +
-            `${label} · ${item.rarity || 'Common'} · Stat ${rawStat}`;
 
         button.addEventListener('click', () => {
             if (selectedSales.has(key)) {
@@ -23843,7 +23851,7 @@ async function renderInventoryTab(host) {
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
             detail.textContent =
-                `Zone ${curio.zone} ${curio.rarity || 'Common'} · ` +
+                `${zoneDisplayName(state, curio.zone)} (z${curio.zone}) · ` +
                 `Value ${curio.value}s`;
 
             main.append(name, detail);
@@ -24008,8 +24016,10 @@ async function renderInventoryTab(host) {
 
         const detail = document.createElement('div');
         detail.className = 'aethermoor-vendor-detail';
-        detail.textContent =
-            `${item.bound ? 'Bound' : 'Unbound'}`;
+        detail.textContent = [
+            gearSlotLabel(item),
+            item.bound ? 'Bound' : 'Unbound'
+        ].filter(Boolean).join(' · ');
 
         main.append(name, detail);
 
@@ -24063,20 +24073,6 @@ async function renderInventoryTab(host) {
 
     host.appendChild(bagSection);
 
-    const wornSlotLabels = {
-        weapon: 'Focus',
-        gloves: 'Bracers',
-        chest: 'Chest',
-        trousers: 'Trousers',
-        headgear: 'Headgear',
-        boots: 'Boots',
-        neck: 'Necklace',
-        ring1: 'Ring 1',
-        ring2: 'Ring 2',
-        amulet: 'Amulet',
-        wristCuffs: 'Wrist Cuffs'
-    };
-
     for (const [owner, label] of [
         ['tansy', 'TANSY'],
         ['qtik', "Q'TIK"]
@@ -24127,7 +24123,7 @@ async function renderInventoryTab(host) {
             const detail = document.createElement('div');
             detail.className = 'aethermoor-vendor-detail';
             detail.textContent = [
-                wornSlotLabels[slot] || slot,
+                GEAR_SLOT_LABELS[slot] || slot,
                 ...bonusParts
             ].join(' · ');
 
@@ -24239,10 +24235,11 @@ async function renderAetherNetTab(host) {
 
         const detail = document.createElement('div');
         detail.className = 'aethermoor-vendor-detail';
-        detail.textContent =
-            `${item.rarity || 'Common'} · ` +
-            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s` +
-            (item.slot === 'skill_tome' ? ' · Skill Tome (S=10)' : '');
+        detail.textContent = [
+            gearSlotLabel(item),
+            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s`,
+            item.slot === 'skill_tome' ? 'Skill Tome (S=10)' : null
+        ].filter(Boolean).join(' · ');
 
         main.append(name, detail);
 
@@ -25771,7 +25768,7 @@ async function renderWorldTab(host) {
             entry.className = 'aethermoor-ui-text';
             entry.style.marginTop = '8px';
             entry.textContent =
-                `Zone ${place.zone} · ${place.label} · ` +
+                `${zoneDisplayName(state, place.zone)} (z${place.zone}) · ${place.label} · ` +
                 `${lead.status === 'known' ? 'Unresolved' : 'Investigated'}\n` +
                 `${lead.claim || lead.label || lead.id}`;
             history.appendChild(entry);
@@ -27348,9 +27345,11 @@ async function openCombatPanel(inlineHost) {
         inlineHost.appendChild(
             makeAethermoorSection(
                 'COMBAT',
-                error instanceof Error
-                    ? error.message
-                    : String(error),
+                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                    ? 'No campaign yet. Open World to start one.'
+                    : error instanceof Error
+                        ? error.message
+                        : String(error),
                 'combat'
             )
         );
@@ -27964,12 +27963,16 @@ function openNarrationDebug() {
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Narration Debug');
 
+    panel.style.zIndex = '10002';
+
     const header = document.createElement('header');
     header.className = 'aethermoor-panel-header';
     const title = document.createElement('b');
+    title.className = 'aethermoor-panel-title';
     title.textContent = 'NARRATION DEBUG';
     const close = document.createElement('button');
     close.type = 'button';
+    close.className = 'aethermoor-panel-close';
     close.textContent = 'Close';
     close.addEventListener('click', () => panel.remove());
     header.append(title, close);
@@ -28276,6 +28279,18 @@ function openNarrationDebug() {
     );
     panel.append(header, body);
     document.body.appendChild(panel);
+
+    const debugGeometryKey = 'aethermoorDebugWindowGeometry';
+    restoreAethermoorPanelGeometry(panel, debugGeometryKey);
+    enableAethermoorPanelDragging(header, panel, debugGeometryKey);
+    panel.addEventListener('pointerup', () => {
+        setTimeout(() => {
+            if (panel.isConnected) {
+                saveAethermoorPanelGeometry(panel, debugGeometryKey);
+            }
+        }, 0);
+    });
+
     refresh();
 }
 

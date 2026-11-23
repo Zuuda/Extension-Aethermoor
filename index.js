@@ -12700,7 +12700,28 @@ function resolveGearGrant(test) {
     };
 }
 
-function equipBagItem(stateInput, itemIndex) {
+function resolveEquipSlot(ownerGear, item, requestedSlot = null) {
+    const isRing = item?.slot === 'ring1' || item?.slot === 'ring2';
+
+    if (!isRing) {
+        return item.slot;
+    }
+
+    if (requestedSlot === 'ring1' || requestedSlot === 'ring2') {
+        return requestedSlot;
+    }
+
+    const occupied = slot =>
+        Number(ownerGear?.[slot]?.stat ?? ownerGear?.[slot]?.rawStat ?? 0) > 0;
+
+    if (!occupied(item.slot)) return item.slot;
+    const otherRing = item.slot === 'ring1' ? 'ring2' : 'ring1';
+    if (!occupied(otherRing)) return otherRing;
+
+    return item.slot;
+}
+
+function equipBagItem(stateInput, itemIndex, requestedSlot = null) {
     assert(
         stateInput &&
         typeof stateInput === 'object',
@@ -12762,17 +12783,33 @@ function equipBagItem(stateInput, itemIndex) {
         `Invalid ${item.owner} equipment slot: ${item.slot}`
     );
 
-    if (item.owner === 'tansy' && MODULAR_TANSY.has(item.slot)) {
+    if (requestedSlot !== null && requestedSlot !== undefined) {
+        const isRing = item.slot === 'ring1' || item.slot === 'ring2';
+        assert(
+            isRing
+                ? ['ring1', 'ring2'].includes(requestedSlot)
+                : requestedSlot === item.slot,
+            `Cannot equip ${item.slot} into ${requestedSlot}`
+        );
+    }
+
+    const targetSlot = resolveEquipSlot(
+        state.crew.gear[item.owner],
+        item,
+        requestedSlot
+    );
+
+    if (item.owner === 'tansy' && MODULAR_TANSY.has(targetSlot)) {
         assert(
             ['vitality', 'luck'].includes(item.variant),
-            `Tansy ${item.slot} requires vitality or luck variant`
+            `Tansy ${targetSlot} requires vitality or luck variant`
         );
     }
 
     if (item.owner === 'qtik') {
         assert(
             ['vitality', 'bulwark'].includes(item.variant),
-            `Q'tik ${item.slot} requires vitality or bulwark variant`
+            `Q'tik ${targetSlot} requires vitality or bulwark variant`
         );
     }
 
@@ -12783,10 +12820,11 @@ function equipBagItem(stateInput, itemIndex) {
         state.crew[item.owner];
 
     const oldItem =
-        state.crew.gear[item.owner][item.slot] || null;
+        state.crew.gear[item.owner][targetSlot] || null;
 
     const equippedItem = {
         ...item,
+        slot: targetSlot,
         stat: item.rawStat,
         bound: true,
         classRestricted: false,
@@ -12800,27 +12838,27 @@ function equipBagItem(stateInput, itemIndex) {
      */
     state.inventory.bagReserves.splice(itemIndex, 1);
 
-if (oldItem && Number(oldItem.stat) > 0) {
-    state.inventory.bagReserves.push({
-        ...oldItem,
-        name: oldItem.name || 'Replaced gear',
-        owner: item.owner,
-        slot: item.slot,
-        rawStat: oldItem.stat,
-        bound: Boolean(oldItem.bound),
-        classRestricted: false,
-        tradeStreamEligible: oldItem.bound !== true,
-        sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
-        bonus: lootBonus(
-            item.owner,
-            item.slot,
-            oldItem.variant || null,
-            oldItem.stat
-        )
-    });
-}
+    if (oldItem && Number(oldItem.stat) > 0) {
+        state.inventory.bagReserves.push({
+            ...oldItem,
+            name: oldItem.name || 'Replaced gear',
+            owner: item.owner,
+            slot: targetSlot,
+            rawStat: oldItem.stat,
+            bound: Boolean(oldItem.bound),
+            classRestricted: false,
+            tradeStreamEligible: oldItem.bound !== true,
+            sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
+            bonus: lootBonus(
+                item.owner,
+                targetSlot,
+                oldItem.variant || null,
+                oldItem.stat
+            )
+        });
+    }
 
-    state.crew.gear[item.owner][item.slot] =
+    state.crew.gear[item.owner][targetSlot] =
         equippedItem;
 
     const newDerived =
@@ -16481,7 +16519,8 @@ function resolveBatch(args) {
                     if (test.action === 'equip') {
                         result = equipBagItem(
                             test.state,
-                            test.itemIndex
+                            test.itemIndex,
+                            test.targetSlot
                         );
                     } else if (test.action === 'grant') {
                         result = resolveGearGrant(test);
@@ -23309,12 +23348,17 @@ async function renderInventoryTab(host) {
             return null;
         }
 
+        const targetSlot = resolveEquipSlot(
+            currentGear[item.owner],
+            item
+        );
+
         const worn =
-            currentGear[item.owner]?.[item.slot] || null;
+            currentGear[item.owner]?.[targetSlot] || null;
 
         const candidateBonus = gearBonus(
             item.owner,
-            item.slot,
+            targetSlot,
             {
                 stat: item.rawStat,
                 variant: item.variant
@@ -23323,7 +23367,7 @@ async function renderInventoryTab(host) {
 
         const wornBonus = gearBonus(
             item.owner,
-            item.slot,
+            targetSlot,
             worn
         );
 
@@ -23407,31 +23451,48 @@ async function renderInventoryTab(host) {
             item.slot &&
             item.classRestricted !== true
         ) {
-            const equip = document.createElement('button');
-            equip.type = 'button';
-            equip.textContent = 'Equip';
+            const isRing = item.slot === 'ring1' || item.slot === 'ring2';
+            const ownerGear = currentGear[item.owner] || {};
+            const bothRingsFilled =
+                isRing &&
+                Number(ownerGear.ring1?.stat ?? ownerGear.ring1?.rawStat ?? 0) > 0 &&
+                Number(ownerGear.ring2?.stat ?? ownerGear.ring2?.rawStat ?? 0) > 0;
 
-            equip.addEventListener('click', async () => {
-                equip.disabled = true;
+            const targets = bothRingsFilled
+                ? [
+                    { label: 'Equip R1', slot: 'ring1' },
+                    { label: 'Equip R2', slot: 'ring2' }
+                ]
+                : [{ label: 'Equip', slot: null }];
 
-                try {
-                    await runAethermoorPanelCase(
-                        host,
-                        'inventory',
-                        {
-                            name: `equip_inventory_item_${index}`,
-                            kind: 'gear',
-                            action: 'equip',
-                            itemIndex: index
-                        },
-                        'Gear equipped.'
-                    );
-                } finally {
-                    equip.disabled = false;
-                }
-            });
+            for (const target of targets) {
+                const equip = document.createElement('button');
+                equip.type = 'button';
+                equip.textContent = target.label;
 
-            actions.appendChild(equip);
+                equip.addEventListener('click', async () => {
+                    equip.disabled = true;
+
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'inventory',
+                            {
+                                name: `equip_inventory_item_${index}`,
+                                kind: 'gear',
+                                action: 'equip',
+                                itemIndex: index,
+                                ...(target.slot ? { targetSlot: target.slot } : {})
+                            },
+                            'Gear equipped.'
+                        );
+                    } finally {
+                        equip.disabled = false;
+                    }
+                });
+
+                actions.appendChild(equip);
+            }
         }
 
         row.append(main, actions);

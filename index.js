@@ -21741,6 +21741,13 @@ let aethermoorQueuedInn = null;
 function clearAethermoorQueuedMove() {
     aethermoorQueuedMove = null;
     updateAethermoorQueuedMoveBar();
+    if (
+        aethermoorPanelOpen &&
+        aethermoorActiveTab === 'instances' &&
+        aethermoorTabViews?.instances
+    ) {
+        void renderInstanceTab(aethermoorTabViews.instances);
+    }
 }
 
 function clearAethermoorQueuedInn() {
@@ -21852,6 +21859,13 @@ function copyAethermoorCommand(command) {
     };
 
     updateAethermoorQueuedMoveBar();
+    if (
+        aethermoorPanelOpen &&
+        aethermoorActiveTab === 'instances' &&
+        aethermoorTabViews?.instances
+    ) {
+        void renderInstanceTab(aethermoorTabViews.instances);
+    }
     toastr.info(
         `Queued: ${parsed.label}. Send your next message to move.`,
         'Aethermoor'
@@ -24511,9 +24525,19 @@ async function renderInstanceTab(host) {
             }
         }
 
+        const activeQueuedRoomId =
+            aethermoorQueuedMove &&
+            aethermoorQueuedMove.metadata === getContext().chatMetadata &&
+            aethermoorQueuedMove.parsed?.kind === 'instance' &&
+            aethermoorQueuedMove.parsed.instanceId === instance.id &&
+            aethermoorQueuedMove.parsed.action === 'move'
+                ? aethermoorQueuedMove.parsed.roomId
+                : null;
+
         for (const entry of knownRooms) {
             const { cx, cy } = toPx(entry.id);
             const isCurrent = entry.id === room.id;
+            const isQueued = entry.id === activeQueuedRoomId;
             const unvisited = !entry.visited;
             const hasThreat = entry.threatStatus === 'unresolved';
             const hasChest = Boolean(entry.chest && !entry.chest.opened);
@@ -24530,29 +24554,33 @@ async function renderInstanceTab(host) {
 
             const fill = isCurrent
                 ? '#2d1b4e'
-                : unvisited
-                    ? '#12161c'
-                    : hasThreat
-                        ? '#2b181c'
-                        : hasChest
-                            ? '#2a2312'
-                            : isSide
-                                ? '#132433'
-                                : '#181d23';
+                : isQueued
+                    ? '#2a2312'
+                    : unvisited
+                        ? '#12161c'
+                        : hasThreat
+                            ? '#2b181c'
+                            : hasChest
+                                ? '#2a2312'
+                                : isSide
+                                    ? '#132433'
+                                    : '#181d23';
 
             const stroke = isCurrent
                 ? '#c084fc'
-                : unvisited
-                    ? '#6e7f91'
-                    : hasThreat
-                        ? '#ef4444'
-                        : hasChest
-                            ? '#ffd166'
-                            : isSide
-                                ? '#38bdf8'
-                                : cleared
-                                    ? '#4ade80'
-                                    : '#4da6ff';
+                : isQueued
+                    ? '#ffd166'
+                    : unvisited
+                        ? '#6e7f91'
+                        : hasThreat
+                            ? '#ef4444'
+                            : hasChest
+                                ? '#ffd166'
+                                : isSide
+                                    ? '#38bdf8'
+                                    : cleared
+                                        ? '#4ade80'
+                                        : '#4da6ff';
 
             if (canMoveHere) {
                 group.setAttribute('class', 'aethermoor-map-node-clickable');
@@ -24567,11 +24595,11 @@ async function renderInstanceTab(host) {
                 const halo = document.createElementNS(svgNS, 'circle');
                 halo.setAttribute('cx', String(cx));
                 halo.setAttribute('cy', String(cy));
-                halo.setAttribute('r', '13.5');
+                halo.setAttribute('r', isQueued ? '14.5' : '13.5');
                 halo.setAttribute('fill', 'none');
-                halo.setAttribute('stroke', '#4da6ff');
-                halo.setAttribute('stroke-opacity', '0.45');
-                halo.setAttribute('stroke-width', '1');
+                halo.setAttribute('stroke', isQueued ? '#ffd166' : '#4da6ff');
+                halo.setAttribute('stroke-opacity', isQueued ? '0.95' : '0.45');
+                halo.setAttribute('stroke-width', isQueued ? '2' : '1');
                 group.appendChild(halo);
 
                 group.addEventListener('click', () => {
@@ -24588,8 +24616,13 @@ async function renderInstanceTab(host) {
             circle.setAttribute('r', isCurrent ? '12' : '10');
             circle.setAttribute('fill', fill);
             circle.setAttribute('stroke', stroke);
-            circle.setAttribute('stroke-width', isCurrent ? '2.5' : '1.5');
-            if (unvisited) circle.setAttribute('stroke-dasharray', '3 2');
+            circle.setAttribute(
+                'stroke-width',
+                isCurrent || isQueued ? '2.5' : '1.5'
+            );
+            if (unvisited && !isQueued) {
+                circle.setAttribute('stroke-dasharray', '3 2');
+            }
             group.appendChild(circle);
 
             const glyph = unvisited
@@ -25910,7 +25943,7 @@ async function copyAethermoorStatus() {
 
     const text = aethermoorStatusReadouts(state)
         .map(readout => readout.text)
-        .join('\n');
+        .join(' | ');
 
     try {
         await navigator.clipboard.writeText(text);
@@ -27241,7 +27274,7 @@ async function openCombatPanel(inlineHost) {
  * Disabling recording preserves existing evidence; Clear removes it.
  */
 const AETHERMOOR_DEBUG_KEY = 'aethermoorNarrationDebug';
-const AETHERMOOR_DEBUG_LIMIT = 30;
+const AETHERMOOR_DEBUG_LIMIT = 100;
 
 function saveNarrationDebugChange(metadata, change) {
     return queueAethermoor(async () => {
@@ -27277,15 +27310,26 @@ function recordNarrationDebug(type, details) {
     const metadata = getContext().chatMetadata;
     if (metadata?.[AETHERMOOR_DEBUG_KEY]?.enabled !== true) return;
 
+    const dedupeKey = type === 'assistant_notification'
+        ? `reply:${details?.messageId ?? 'none'}:${worldHash(String(details?.text ?? ''))}`
+        : null;
+
     // Capture values now, before queued work or message rendering changes them.
     const entry = {
         time: new Date().toISOString(),
         type,
         revision: metadata[AETHERMOOR_METADATA_KEY]?.revision ?? null,
+        ...(dedupeKey ? { dedupeKey } : {}),
         details: clone(details)
     };
 
     void saveNarrationDebugChange(metadata, debug => {
+        if (
+            dedupeKey &&
+            debug.entries.some(saved => saved.dedupeKey === dedupeKey)
+        ) {
+            return;
+        }
         debug.entries.push(entry);
     }).catch(error => {
         console.warn('[Aethermoor] Diagnostic save failed', error);
@@ -27435,7 +27479,7 @@ function openNarrationDebug() {
             output.appendChild(empty);
         }
 
-        entries.forEach((entry, index) => {
+        [...entries].reverse().forEach((entry, index) => {
             const details = entry.details || {};
             const record = document.createElement('section');
             record.className = 'aethermoor-debug-record';
@@ -27443,7 +27487,7 @@ function openNarrationDebug() {
             const heading = document.createElement('div');
             heading.className = 'aethermoor-ui-heading';
             heading.textContent =
-                `${index + 1}. ${entry.type} · ` +
+                `${entries.length - index}. ${entry.type} · ` +
                 `${entry.time}`;
 
             const metadataLine = document.createElement('div');

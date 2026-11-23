@@ -3504,10 +3504,13 @@ function resolveClearedPackDrop(state) {
             `Breadcrumb ${breadcrumbId} already exists`
         );
 
+        const fromInstance = Boolean(encounter.instanceId);
+
         state.breadcrumbs[breadcrumbId] = {
             id: breadcrumbId,
             encounterId: encounter.id,
             zone: encounter.zone,
+            fromInstance,
             settlementId: issuer.id,
             locationId: state.currentLocationId,
             position: clone(
@@ -3516,12 +3519,14 @@ function resolveClearedPackDrop(state) {
             ),
             questSeed: {
                 source: 'pack_drop',
+                fromInstance,
                 roll: value,
                 result: 'diegetic_quest_breadcrumb'
             },
             questSeedConsumed: false,
             questId: null
         };
+
 
         // Preserve the encounter's existing drop metadata, but the
         // independent breadcrumb is now the offer's authority.
@@ -9571,6 +9576,7 @@ const QUEST_ARCHETYPES = [
         scenarios: [
             {
                 variantId: 'abandoned_transport',
+                ranks: ['F', 'E', 'D', 'C', 'B'],
                 pitch:
                     'A shipment was left behind when its transport failed. ' +
                     'The issuer wants the consignment recovered.',
@@ -9587,6 +9593,7 @@ const QUEST_ARCHETYPES = [
             },
             {
                 variantId: 'diverted_shipment',
+                ranks: ['E', 'D', 'C', 'B'],
                 pitch:
                     'A shipment was diverted from its intended route. ' +
                     'The issuer wants the consignment recovered.',
@@ -9603,6 +9610,7 @@ const QUEST_ARCHETYPES = [
             },
             {
                 variantId: 'stolen_shipment',
+                ranks: ['D', 'C', 'B'],
                 pitch:
                     'A shipment was stolen in transit. The issuer wants ' +
                     'the consignment recovered.',
@@ -9830,7 +9838,7 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'the animal’s defended approach'
                 }
             },
-            {
+             {
                 ranks: ['E', 'D', 'C'],
                 pitch:
                     'An animal is threatening a place local workers ' +
@@ -9846,9 +9854,193 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'the animal’s established hunting path'
                 }
             }
-        ],
-   }
+        ]
+    },
+
+    /*
+     * Replaces Herb Foraging for Town/Overland non-combat contracts.
+     * Physical Pre-Calamity infrastructure checks give the crew tactile
+     * objects and mechanisms to interact with in text RP.
+     */
+    {
+        id: 'imperial_survey',
+        label: 'Imperial Survey',
+        scenarios: [
+            {
+                variantId: 'levee_gauge',
+                ranks: ['F', 'E', 'D'],
+                pitch:
+                    'Local wardens need a brass inspection plate pulled from ' +
+                    'an old Imperial gauge before seasonal wear ruins it.',
+                truth:
+                    'The old gauge housing is still intact, though jammed by ' +
+                    'mineral crust and overgrowth.',
+                facts: {
+                    sponsor: 'the local route wardens',
+                    sample: 'the Imperial gauge plate',
+                    place: 'the old Imperial gauge station',
+                    evidence: 'weathered Imperial survey markers',
+                    obstacle: 'a jammed housing overgrown with debris'
+                }
+            },
+            {
+                variantId: 'boundary_relay',
+                ranks: ['E', 'D', 'C'],
+                pitch:
+                    'Local artificers want an intact relay-core salvaged from ' +
+                    'a dead Pre-Calamity boundary pylon.',
+                truth:
+                    'The relay-core remains seated inside the corroded pylon ' +
+                    'casing, requiring careful extraction.',
+                facts: {
+                    sponsor: 'the local artificer guild',
+                    sample: 'the salvaged relay-core',
+                    place: 'the dead Imperial boundary pylon',
+                    evidence: 'corroded conduit lines leading to the pylon',
+                    obstacle: 'a seized bronze access hatch'
+                }
+            },
+            {
+                variantId: 'salvage_assay',
+                ranks: ['F', 'E', 'D', 'C'],
+                pitch:
+                    'A local smith wants a clean alloy sample chipped from an ' +
+                    'old Imperial structure to test if the site is worth salvaging.',
+                truth:
+                    'An uncorroded seam remains accessible inside the outer ' +
+                    'masonry of the site.',
+                facts: {
+                    sponsor: 'the local smithy',
+                    sample: 'the Imperial alloy assay sample',
+                    place: 'the weathered Imperial structure',
+                    evidence: 'stamped Imperial foundry markings',
+                    obstacle: 'crumbling masonry covering the intact seam'
+                }
+            }
+        ]
+    },
+
+    /*
+     * Sponsor-free Pre-Calamity stash leads for Instance & Overland
+     * breadcrumbs. Auto-pays on recovery; the System's locked salvage
+     * and silver represent the physical contents of the opened cache.
+     */
+    {
+        id: 'sealed_cache',
+        label: 'Sealed Pre-Calamity Cache',
+        scenarios: [
+            {
+                variantId: 'paymaster_strongbox',
+                ranks: ['E', 'D', 'C', 'B'],
+                pitch:
+                    'An old Imperial tally points to a concealed paymaster ' +
+                    'locker sealed before the Calamity.',
+                truth:
+                    'The strongbox survived intact in a tucked-away recess, ' +
+                    'its latch frozen by centuries of mineral crust.',
+                facts: {
+                    cache: 'the sealed paymaster strongbox',
+                    place: 'the old Imperial recess',
+                    evidence: 'faded Imperial sector markings',
+                    obstacle: 'a corroded bolt-seal hiding the locker'
+                }
+            },
+            {
+                variantId: 'cipher_compartment',
+                ranks: ['E', 'D', 'C', 'B'],
+                pitch:
+                    'A surviving maintenance cipher indicates a hidden ' +
+                    'service compartment built into a nearby Imperial structure.',
+                truth:
+                    'A recessed cache sits behind a false inspection plate ' +
+                    'that opens once its release pin is found.',
+                facts: {
+                    cache: 'the hidden service compartment',
+                    place: 'the marked Imperial structure',
+                    evidence: 'matching alignment marks etched into the stone',
+                    obstacle: 'a recessed release mechanism hidden in the stonework'
+                }
+            },
+            {
+                variantId: 'scout_dead_drop',
+                ranks: ['E', 'D', 'C', 'B'],
+                pitch:
+                    'A salvaged trail-note marks an unclaimed dead-drop left ' +
+                    'behind by an earlier surveyor or delver.',
+                truth:
+                    'The waterproof pack was wedged out of sight and never ' +
+                    'retrieved by whoever cached it.',
+                facts: {
+                    cache: 'the unclaimed dead-drop cache',
+                    place: 'the marked drop site',
+                    evidence: 'a faded scratch-mark left by the previous delver',
+                    obstacle: 'loose rubble and brush concealing the drop'
+                }
+            }
+        ]
+    },
+
+    /*
+     * Sponsor-free combat leads for Instance & Overland breadcrumbs.
+     * The clue is ancient; the threat is still-running Pre-Calamity
+     * hardware or a modern squatter that moved through a breached seal.
+     */
+    {
+        id: 'dormant_hazard',
+        label: 'Dormant Imperial Hazard',
+        scenarios: [
+            {
+                variantId: 'rogue_automaton',
+                ranks: ['E', 'D', 'C', 'B'],
+                pitch:
+                    'An old maintenance log flags an active Pre-Calamity ' +
+                    'defense unit still running its security loop nearby.',
+                truth:
+                    'The leyline-fed constructs never received a shutdown ' +
+                    'order and attack anything entering their patrol zone.',
+                facts: {
+                    site: 'the active Imperial patrol section',
+                    threat: 'the rogue Pre-Calamity constructs',
+                    evidence: 'fresh scrape-marks and faint arcane-copper hum',
+                    obstacle: 'an automated choke-point guarding the sector'
+                }
+            },
+            {
+                variantId: 'breached_seal',
+                ranks: ['E', 'D', 'C', 'B'],
+                pitch:
+                    'A damaged Imperial survey log points to a sister-vault ' +
+                    'whose outer seal collapsed, letting something move inside.',
+                truth:
+                    'Hostile squatters have claimed the breached vault as ' +
+                    'their den.',
+                facts: {
+                    site: 'the breached sister-vault',
+                    threat: 'the vault occupants',
+                    evidence: 'recent tracks passing through the cracked seal',
+                    obstacle: 'a narrow approach watched from inside the breach'
+                }
+            },
+            {
+                variantId: 'leyline_anomaly',
+                ranks: ['D', 'C', 'B'],
+                pitch:
+                    'An Imperial warning slate marks a leaking conduit node ' +
+                    'that has drawn or warped a dangerous local threat.',
+                truth:
+                    'A hostile threat has nested around the leaking aether ' +
+                    'conduit and fiercely defends the ground.',
+                facts: {
+                    site: 'the leaking Imperial conduit node',
+                    threat: 'the conduit-warped threat',
+                    evidence: 'scorched mineral crust and erratic aether static',
+                    obstacle: 'unstable ground around the leaking conduit'
+                }
+            }
+        ]
+    }
 ];
+
 
 /*
  * Sunken Salvage and its fixed-site discoveries are retired from new
@@ -9861,133 +10053,54 @@ const QUEST_ARCHETYPES = [
  * Saved zone geography remains available to the narrator for scenery,
  * names, and gradual transitions; it does not exclude an objective.
  */
-function eligibleQuestScenarios(_state, archetype, _zone, rank) {
-    return (archetype.scenarios || []).filter(scenario => {
-        if (
-            Array.isArray(scenario.ranks) &&
-            !scenario.ranks.includes(rank)
-        ) {
-            return false;
-        }
-
-        // F offers are limited to explicitly authored menial scenarios.
-        if (rank === 'F') {
-            return [
-                'herb_foraging',
-                'ruin_clearance',
-                'territorial_beast'
-            ].includes(archetype.id) &&
-                scenario.ranks?.includes('F') === true;
-        }
-
-        if (archetype.id !== 'missing_person') return true;
-
-        if (scenario.variantId === 'lost') return rank === 'D';
-        if (scenario.variantId === 'abducted') {
-            return rank === 'C' || rank === 'B';
-        }
-
-        return false;
-    });
-}
-
-function eligibleQuestArchetypes(state, zone, rank) {
-    return QUEST_ARCHETYPES
-        .map(archetype => ({
-            archetype,
-            scenarios: eligibleQuestScenarios(
-                state,
-                archetype,
-                zone,
-                rank
-            )
-        }))
-        .filter(entry => entry.scenarios.length > 0);
-}
-
-function buildQuestFacts(
-    state,
-    archetype,
-    zone,
-    eligibleScenarios,
-    rank
-) {
-
-    assert(
-        eligibleScenarios.length > 0,
-        `Quest archetype ${archetype.id} has no scenario compatible with Zone ${zone}`
-    );
-
-    let variantRoll = null;
-    let variantId =
-        archetype.variantId ||
-        eligibleScenarios[0].variantId ||
-        null;
-
-    let scenarios = eligibleScenarios;
-
-    if (
-        archetype.id === 'recover_cargo' ||
-        archetype.id === 'missing_person'
-    ) {
-        const variants = [
-            ...new Set(
-                eligibleScenarios.map(scenario => scenario.variantId)
-            )
-        ];
-
-        assert(
-            variants.every(id => typeof id === 'string' && id.length > 0),
-            `${archetype.label} scenarios need authored variantId values`
-        );
-
-        variantRoll = roll(state, variants.length);
-        variantId = variants[variantRoll - 1];
-
-        scenarios = eligibleScenarios.filter(
-            scenario => scenario.variantId === variantId
-        );
-    }
-
-    const scenarioRoll = roll(state, scenarios.length);
-    const scenario = scenarios[scenarioRoll - 1];
-
-    assert(
-        scenario &&
-        typeof scenario.pitch === 'string' &&
-        scenario.facts &&
-        typeof scenario.facts === 'object',
-        `Quest archetype ${archetype.id} has an invalid scenario`
-    );
-
-    const facts = clone(scenario.facts);
-    const stakesByArchetype = {
-        recover_cargo: {
-            E: 'ordinary supplies needed for routine local work',
-            D: 'valuable property whose loss harms its local owner',
-            C: 'essential supplies needed by the community',
-            B: 'region-critical cargo whose loss disrupts several communities'
-        },
-        ruin_clearance: {
-            F: 'a nuisance disrupting one ordinary work area',
-            E: 'a limited danger disrupting one local worksite',
-            D: 'a threat preventing important local work or travel',
-            C: 'a danger disrupting an essential community route or service',
-            B: 'a major threat affecting routes or work across the region'
-        },
-        territorial_beast: {
-            F: 'a nuisance animal disrupting routine local work',
-            E: 'an animal nuisance affecting a limited local area',
-            D: 'a dangerous animal threatening regular local travel or work',
-            C: 'a threat disrupting an essential route or community activity',
-            B: 'a territorial threat affecting travel or work across the region'
-        },
-        missing_person: {
-            D: 'one lost person whose safe return matters to the affected party',
-            C: 'one abducted person held by a hostile group',
-            B: 'an abducted person whose loss has serious consequences beyond one household'
-        }
+    const familyByArchetype = {
+        recover_cargo: 'retrieve_item',
+        territorial_beast: 'defeat_elite',
+        ruin_clearance: 'defeat_elite'
     };
+
+    const family =
+        archetype.id === 'herb_foraging'
+            ? 'retrieve_item'
+            : archetype.id === 'missing_person'
+                ? 'rescue_person'
+                : familyByArchetype[archetype.id];
+
+    if (!family) return null;
+    let v2Facts;
+
+    if (archetype.id === 'recover_cargo') {
+        v2Facts = {
+            item: facts.cargo,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'herb_foraging') {
+
+        v2Facts = {
+            item: facts.herb,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'missing_person') {
+        v2Facts = {
+            person: facts.person,
+            place: facts.place,
+            evidence: facts.evidence,
+            variantId
+        };
+    } else if (archetype.id === 'territorial_beast') {
+        v2Facts = {
+            target: facts.beast,
+            territory: facts.place,
+            lair: facts.place
+        };
+
+    } else {
+        v2Facts = {
+            target: facts.threat,
+            territory: facts.site,
+            lair: facts.site
+        };
+    }
 
     const rankStakes = stakesByArchetype[archetype.id]?.[rank];
 
@@ -10335,8 +10448,11 @@ function buildQuestV2PlanForOffer(
      */
     const familyByArchetype = {
         recover_cargo: 'retrieve_item',
+        imperial_survey: 'retrieve_item',
+        sealed_cache: 'retrieve_item',
         territorial_beast: 'defeat_elite',
-        ruin_clearance: 'defeat_elite'
+        ruin_clearance: 'defeat_elite',
+        dormant_hazard: 'defeat_elite'
     };
 
     const family =
@@ -10354,8 +10470,17 @@ function buildQuestV2PlanForOffer(
             item: facts.cargo,
             destination: facts.place
         };
+    } else if (archetype.id === 'imperial_survey') {
+        v2Facts = {
+            item: facts.sample,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'sealed_cache') {
+        v2Facts = {
+            item: facts.cache,
+            destination: facts.place
+        };
     } else if (archetype.id === 'herb_foraging') {
-
         v2Facts = {
             item: facts.herb,
             destination: facts.place
@@ -10373,7 +10498,6 @@ function buildQuestV2PlanForOffer(
             territory: facts.place,
             lair: facts.place
         };
-
     } else {
         v2Facts = {
             target: facts.threat,
@@ -10771,10 +10895,23 @@ function resolveQuestSeed(test) {
      * scenarios determine which of those ranks can actually be offered.
      * Never consume a quest trigger by rolling an impossible rank.
      */
+    const channel =
+        sourceSeed.source === 'social'
+            ? 'social'
+            : breadcrumb?.fromInstance === true ||
+              sourceSeed.fromInstance === true
+                ? 'instance'
+                : 'overland';
+
     const availableRanks = rep.ranks
         .map(rank => ({
             rank,
-            archetypes: eligibleQuestArchetypes(state, zone, rank)
+            archetypes: eligibleQuestArchetypes(
+                state,
+                zone,
+                rank,
+                channel
+            )
         }))
         .filter(entry => entry.archetypes.length > 0);
 
@@ -10963,6 +11100,7 @@ function resolveQuestSeed(test) {
         variantId: authored.variantId,
         scenarioRoll: authored.scenarioRoll,
         source: sourceSeed.source,
+        channel,
         sourceRoll: sourceSeed.roll,
         sourceResult: sourceSeed.result,
         terminalThreat: {
@@ -11033,6 +11171,7 @@ function resolveQuestSeed(test) {
         originSettlementId: issuerSettlement.id,
         originLocationId: issuerSettlement.locationId,
         repTierAtOffer: rep.label,
+        requiresDelivery: archetype.id !== 'sealed_cache'
     };
 
     quest.targetId = `quest-target-${quest.id}`;
@@ -11087,6 +11226,8 @@ function resolveQuestSeed(test) {
      * Defeat-elite discoveries are prepared after acceptance.
      */
     prepareRecoverCargoDiscovery(quest);
+    prepareImperialSurveyDiscovery(quest);
+    prepareSealedCacheDiscovery(quest);
     prepareHerbForagingDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
@@ -11412,6 +11553,209 @@ function prepareHerbForagingDiscovery(quest) {
 
     quest.turnIn.discoveryId = herbId;
     return quest.discoveries.find(item => item.id === herbId);
+}
+
+function prepareImperialSurveyDiscovery(quest) {
+    if (
+        quest?.archetype?.id !== 'imperial_survey' ||
+        quest.structureV2?.family !== 'retrieve_item' ||
+        !quest.destinationId
+    ) {
+        return null;
+    }
+
+    assert(
+        quest.turnIn && typeof quest.turnIn === 'object',
+        'Imperial Survey has no locked turn-in record'
+    );
+
+    quest.discoveries ||= [];
+
+    const sample = quest.facts.sample;
+    const place = quest.facts.place;
+    const evidence = quest.facts.evidence;
+    const obstacle = quest.facts.obstacle;
+
+    const definitions = {
+        locate: {
+            suffix: 'survey-markers',
+            kind: 'evidence',
+            name: `Survey markings for ${sample}`,
+            hidingPlace: `${evidence} at ${place}`,
+            significance:
+                `The markings pinpoint where ${sample} is mounted.`
+        },
+        reach_inner_site: {
+            suffix: 'survey-approach',
+            kind: 'evidence',
+            name: `Way past ${obstacle}`,
+            hidingPlace: `within ${place}`,
+            significance:
+                `Clearing or bypassing ${obstacle} gives direct access to ${sample}.`
+        },
+        find_access: {
+            suffix: 'survey-release',
+            kind: 'evidence',
+            name: `Method to free ${sample}`,
+            hidingPlace: `on the fixture at ${place}`,
+            significance:
+                `This allows ${sample} to be removed intact.`
+        },
+        recover: {
+            suffix: 'survey-sample',
+            kind: 'quest_item',
+            name: sample,
+            hidingPlace: `at ${place}, beyond ${obstacle}`,
+            significance:
+                `This is the required survey item for ${quest.turnIn.recipient}.`,
+            requiredAction: 'collect_survey_sample',
+            questCargo: true
+        }
+    };
+
+    for (const gate of quest.gatesData) {
+        const definition = definitions[gate.stage];
+        if (!definition || gate.trigger !== 'discovery') continue;
+
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(item => item.id === id);
+
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: definition.kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance,
+                ...(definition.requiredAction
+                    ? { requiredAction: definition.requiredAction }
+                    : {}),
+                ...(definition.questCargo ? { questCargo: true } : {})
+            };
+            quest.discoveries.push(discovery);
+        }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const sampleId = `${quest.id}-survey-sample`;
+    assert(
+        quest.discoveries.some(item => item.id === sampleId),
+        'Imperial Survey has no final sample discovery'
+    );
+
+    quest.turnIn.discoveryId = sampleId;
+    return quest.discoveries.find(item => item.id === sampleId);
+}
+
+function prepareSealedCacheDiscovery(quest) {
+    if (
+        quest?.archetype?.id !== 'sealed_cache' ||
+        quest.structureV2?.family !== 'retrieve_item' ||
+        !quest.destinationId
+    ) {
+        return null;
+    }
+
+    quest.discoveries ||= [];
+
+    const cache = quest.facts.cache;
+    const place = quest.facts.place;
+    const evidence = quest.facts.evidence;
+    const obstacle = quest.facts.obstacle;
+
+    const definitions = {
+        locate: {
+            suffix: 'cache-clue',
+            kind: 'evidence',
+            name: `Markings leading to ${cache}`,
+            hidingPlace: `${evidence} at ${place}`,
+            significance:
+                `The markings identify where ${cache} is concealed.`
+        },
+        reach_inner_site: {
+            suffix: 'cache-approach',
+            kind: 'evidence',
+            name: `Way to ${cache}`,
+            hidingPlace: `within ${place}`,
+            significance:
+                `This leads past ${obstacle} to the concealed stash.`
+        },
+        find_access: {
+            suffix: 'cache-release',
+            kind: 'evidence',
+            name: `Latch or cipher for ${cache}`,
+            hidingPlace: `beside ${cache} at ${place}`,
+            significance:
+                `This opens ${cache} without destroying its contents.`
+        },
+        recover: {
+            suffix: 'sealed-cache',
+            kind: 'quest_item',
+            name: cache,
+            hidingPlace: `at ${place}, beyond ${obstacle}`,
+            significance:
+                'Opening and claiming this stash completes the contract immediately.',
+            requiredAction: 'open_sealed_cache',
+            questCargo: false
+        }
+    };
+
+    for (const gate of quest.gatesData) {
+        const definition = definitions[gate.stage];
+        if (!definition || gate.trigger !== 'discovery') continue;
+
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(item => item.id === id);
+
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: definition.kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance,
+                ...(definition.requiredAction
+                    ? { requiredAction: definition.requiredAction }
+                    : {})
+            };
+            quest.discoveries.push(discovery);
+        }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const cacheId = `${quest.id}-sealed-cache`;
+    assert(
+        quest.discoveries.some(item => item.id === cacheId),
+        'Sealed Cache has no final cache discovery'
+    );
+
+    quest.turnIn ||= {
+        locationId: quest.originLocationId,
+        settlementId: quest.originSettlementId,
+        recipient: 'System'
+    };
+    quest.turnIn.discoveryId = cacheId;
+    return quest.discoveries.find(item => item.id === cacheId);
 }
 
  function prepareV2QuestDiscoveries(quest) {
@@ -11956,6 +12300,8 @@ function resolveQuestAction(test) {
         }
         if (quest.structureV2?.version === 2) {
             prepareRecoverCargoDiscovery(quest);
+            prepareImperialSurveyDiscovery(quest);
+            prepareSealedCacheDiscovery(quest);
             prepareHerbForagingDiscovery(quest);
             prepareV2QuestDiscoveries(quest);
 
@@ -12236,7 +12582,8 @@ function resolveQuestAction(test) {
          * on safe arrival. Completed historical quests are not reopened.
          */
         const cargoDelivery =
-            quest.structureV2?.family === 'retrieve_item';
+            quest.structureV2?.family === 'retrieve_item' &&
+            quest.requiresDelivery !== false;
 
         if (
             cargoDelivery ||
@@ -12326,7 +12673,10 @@ function resolveQuestAction(test) {
         'Quest cannot complete before its final gate'
     );
 
-    if (quest.structureV2?.family === 'retrieve_item') {
+    if (
+        quest.structureV2?.family === 'retrieve_item' &&
+        quest.requiresDelivery !== false
+    ) {
         assert(
             quest.deliveryReady === true &&
             state.currentLocationId === quest.turnIn?.locationId &&
@@ -12360,7 +12710,10 @@ function resolveQuestAction(test) {
      * over first. Record that transfer on the locked quest discovery
      * during the same completion operation as the payout.
      */
-    if (quest.structureV2?.family === 'retrieve_item') {
+    if (
+        quest.structureV2?.family === 'retrieve_item' &&
+        quest.requiresDelivery !== false
+    ) {
         const cargo = quest.discoveries?.find(
             item => item.id === quest.turnIn?.discoveryId
         );
@@ -18226,6 +18579,9 @@ function discoveryNarrationPacket(encounter, state = null) {
 
 const PUBLIC_QUEST_FACT_KEYS = {
     recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
+    imperial_survey: ['sponsor', 'sample', 'place', 'stakes'],
+    sealed_cache: ['cache', 'place', 'stakes'],
+    dormant_hazard: ['site', 'threat', 'stakes'],
     ruin_clearance: ['sponsor', 'site', 'stakes'],
     herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place', 'stakes'],
@@ -18243,13 +18599,16 @@ function publicQuestFactLines(quest) {
 }
 
 function questOfferNarrationPacket(quest) {
-    const sourceText = {
-        rumor: 'Following the rumor revealed a local concern.',
-        pack_drop: 'Following the pack breadcrumb revealed a local concern.',
-        social: 'A local concern was discovered.',
-        debug_test: 'A test trigger created this offer.'
-    }[quest.seed?.source] ||
-        'A local concern has been established.';
+    const sourceText =
+        quest.seed?.channel === 'instance'
+            ? 'Examining the ruin clue revealed an old Pre-Calamity lead (no living town sponsor).'
+            : {
+                rumor: 'Following the rumor revealed a local concern.',
+                pack_drop: 'Following the pack breadcrumb revealed a lead.',
+                social: 'A local concern was discovered.',
+                debug_test: 'A test trigger created this offer.'
+            }[quest.seed?.source] ||
+              'A local concern has been established.';
 
     return [
         '* **QUEST OFFERED!**',
@@ -18392,17 +18751,25 @@ function questDiscoveryContextPacket(quest, state) {
             : []),
         ...(quest.structureV2?.family === 'retrieve_item' &&
             quest.currentGate?.decisive === true
-            ? [
-                '* **RECOVERY IS NOT DELIVERY:** Once the required object ' +
-                    'is recovered, portray it as secured quest cargo. ' +
-                    'Do NOT show a completion window, award rewards, ' +
-                    'or claim the recipient has received it.',
-                `* **Return:** Bring this quest’s locked cargo to ${
-                    quest.turnIn.recipient
-                } at the issuing settlement. The System pays only ` +
-                    'after the actual handover is reported. Other ' +
-                    'accepted retrieval quests remain separate.'
-            ]
+            ? quest.requiresDelivery === false
+                ? [
+                    '* **SPONSOR-FREE CACHE:** Opening or claiming this cache ' +
+                        'completes the contract immediately once reported—no ' +
+                        'town delivery is required. Do NOT show a completion ' +
+                        'window yet; emit <AETHERMOOR:FOUND> and the System ' +
+                        'completion card will arrive on the next reply.'
+                ]
+                : [
+                    '* **RECOVERY IS NOT DELIVERY:** Once the required object ' +
+                        'is recovered, portray it as secured quest cargo. ' +
+                        'Do NOT show a completion window, award rewards, ' +
+                        'or claim the recipient has received it.',
+                    `* **Return:** Bring this quest’s locked cargo to ${
+                        quest.turnIn.recipient
+                    } at the issuing settlement. The System pays only ` +
+                        'after the actual handover is reported. Other ' +
+                        'accepted retrieval quests remain separate.'
+                ]
             : [])
 
     ];
@@ -18458,31 +18825,38 @@ function questDiscoveryNarrationPacket(result, quest) {
     if (result.questGate?.objectiveSecured) {
         const completion = result.questGate.questCompletion;
 
-        lines.push(
-            completion
-                ? 'QUEST COMPLETION CONFIRMED: The System validated this ' +
-                  'quest’s final objective and applied its rewards. The ' +
-                  'completion window belongs to the recovery scene already ' +
-                  'narrated; do not show it again or repeat the reward beat.'
-                : quest?.structureV2?.family === 'retrieve_item'
+        if (completion) {
+            const isSealedCache = quest?.requiresDelivery === false;
+            lines.push(
+                isSealedCache
+                    ? 'SEALED CACHE CLAIMED — The System completed the contract ' +
+                      'immediately. Portray the locked salvage item and silver below ' +
+                      'as physically resting inside the opened cache (while the System ' +
+                      'chimes XP and Rep). Display this exact System completion HTML ' +
+                      'card verbatim (visible to Q’tik and Tansy):'
+                    : 'The System validated this quest’s final objective and completed ' +
+                      'the contract. Display this exact System completion HTML card ' +
+                      'verbatim (visible to Q’tik and Tansy):',
+                contractCompleteCardHtml({
+                    title: completion.title || quest?.title || 'Contract',
+                    rank: completion.rank || quest?.rank || null,
+                    rewards: completion.rewards
+                }),
+                ...xpProgressNarrationLines(
+                    result.state?.crew,
+                    completion.levelUps || []
+                ),
+                'Rewards are already applied to saved state; do not add extra loot or coin.'
+            );
+        } else {
+            lines.push(
+                quest?.structureV2?.family === 'retrieve_item'
                     ? 'The required item is secured as quest cargo. Return ' +
                       'to the locked recipient; no quest rewards have ' +
                       'been paid and no completion window appeared.'
                     : 'The missing person has been found or freed; bring them ' +
                       'safely to the origin settlement before the System ' +
                       'completes the quest.'
-        );
-
-        if (completion) {
-            lines.push(
-                `Confirmed rewards: ${completion.rewards.xp} XP, ` +
-                `${completion.rewards.silver} silver, and ` +
-                `${completion.rewards.repSteps} reputation steps.`,
-                ...completion.rewards.loot.map(item =>
-                    `Confirmed System salvage: ${item.name}.`
-                ),
-                'These are confirmation of rewards already applied, ' +
-                    'not a new payout or an NPC handover.'
             );
         }
 
@@ -19981,10 +20355,19 @@ function formatQuestStatus(quest) {
         return 'No active quest offer.';
     }
 
-       const variantLabels = {
+    const variantLabels = {
         abandoned_transport: 'Abandoned Transport',
         diverted_shipment: 'Diverted Shipment',
         stolen_shipment: 'Stolen Shipment',
+        levee_gauge: 'Imperial Levee Gauge',
+        boundary_relay: 'Boundary Relay Core',
+        salvage_assay: 'Imperial Alloy Assay',
+        paymaster_strongbox: 'Paymaster Strongbox',
+        cipher_compartment: 'Cipher Compartment',
+        scout_dead_drop: 'Scout Dead-Drop',
+        rogue_automaton: 'Rogue Pre-Calamity Construct',
+        breached_seal: 'Breached Sister-Vault',
+        leyline_anomaly: 'Leaking Conduit Anomaly',
         lost: 'Lost Person',
         abducted: 'Abducted Person'
     };

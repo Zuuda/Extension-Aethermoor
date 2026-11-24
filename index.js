@@ -9855,26 +9855,28 @@ const QUEST_ARCHETYPES = [
      * supply names and setting details using the current zone context.
      */
     {
+    {
         id: 'missing_person',
-        label: 'Missing Person Search',
+        label: 'Find & Escort',
         scenarios: [
             {
                 variantId: 'lost',
-                ranks: ['D'],
+                ranks: ['F', 'E', 'D'],
                 pitch:
-                    'A person failed to return from a routine journey, and ' +
-                    'the affected party wants the crew to find them.',
+                    'Someone failed to return or is stranded nearby, and ' +
+                    'a local party wants them found and brought back safely.',
                 truth:
-                    'The traveler lost the route and is waiting at a nearby ' +
-                    'sheltered place.',
+                    'The missing contact is stuck or lying low at a nearby ' +
+                    'sheltered spot and needs an escort back.',
                 facts: {
-                    sponsor: 'the missing person’s concerned relative',
-                    person: 'the missing traveler',
+                    sponsor: 'a local contact or faction',
+                    person: 'the missing contact',
                     place: 'the last known location',
-                    evidence: 'signs left along the traveler’s route',
-                    obstacle: 'the traveler’s trail becomes difficult to follow'
+                    evidence: 'signs left along their route',
+                    obstacle: 'the trail becomes difficult to follow'
                 }
             },
+
             {
                 variantId: 'abducted',
                 ranks: ['C', 'B'],
@@ -10135,9 +10137,82 @@ const QUEST_ARCHETYPES = [
                 }
             }
         ]
+    },
+
+    /*
+     * Open, setting-agnostic sidequest skeletons for Town & Overland work.
+     * The engine locks the rank, gate count, threat/delivery rules, and
+     * rewards; the narrator freely dresses sponsor, motive, and opposition
+     * using the current settlement's active factions, NPCs, and zone flavor.
+     */
+    {
+        id: 'local_bounty',
+        label: 'Clear Threat',
+        scenarios: [
+            {
+                ranks: ['F', 'E', 'D', 'C', 'B'],
+                pitch:
+                    'A hostile threat is causing trouble near the settlement ' +
+                    'and needs to be cleared out.',
+                truth:
+                    'The hostile threat is actively holding the target site.',
+                facts: {
+                    sponsor: 'a local contact or faction',
+                    site: 'the contested site',
+                    threat: 'the hostile threat',
+                    evidence: 'fresh signs of hostile activity',
+                    obstacle: 'hostiles holding the area'
+                }
+            }
+        ]
+    },
+
+    {
+        id: 'field_job',
+        label: 'Field Job',
+        scenarios: [
+            {
+                ranks: ['F', 'E', 'D', 'C', 'B'],
+                pitch:
+                    'A local contact needs a specific hands-on task, ' +
+                    'inspection, repair, or sabotage completed at a nearby site.',
+                truth:
+                    'The objective can be completed on site once its ' +
+                    'practical obstacle is handled.',
+                facts: {
+                    sponsor: 'a local contact or faction',
+                    task: 'the field objective',
+                    place: 'the target site',
+                    evidence: 'signs pointing to the objective',
+                    obstacle: 'a practical obstacle or complication at the site'
+                }
+            }
+        ]
+    },
+
+    {
+        id: 'courier_recovery',
+        label: 'Recovery & Handover',
+        scenarios: [
+            {
+                ranks: ['F', 'E', 'D', 'C', 'B'],
+                pitch:
+                    'Something of value is missing, stranded, or held ' +
+                    'elsewhere, and a local party wants it recovered and brought back.',
+                truth:
+                    'The target item is waiting at the recovery site and ' +
+                    'must be brought back to the sponsor.',
+                facts: {
+                    sponsor: 'a local contact or faction',
+                    item: 'the target item or consignment',
+                    place: 'the recovery site',
+                    evidence: 'clues pointing to where it ended up',
+                    obstacle: 'an obstacle keeping the item out of reach'
+                }
+            }
+        ]
     }
 ];
-
 
 /*
  * Sunken Salvage and its fixed-site discoveries are retired from new
@@ -10152,17 +10227,15 @@ const QUEST_ARCHETYPES = [
  */
 const QUEST_ARCHETYPES_BY_CHANNEL = {
     social: new Set([
-        'recover_cargo',
-        'imperial_survey',
-        'ruin_clearance',
-        'territorial_beast',
+        'local_bounty',
+        'field_job',
+        'courier_recovery',
         'missing_person'
     ]),
     overland: new Set([
-        'recover_cargo',
-        'imperial_survey',
-        'ruin_clearance',
-        'territorial_beast',
+        'local_bounty',
+        'field_job',
+        'courier_recovery',
         'missing_person',
         'sealed_cache',
         'dormant_hazard'
@@ -10202,17 +10275,19 @@ function eligibleQuestScenarios(
 
         if (rank === 'F') {
             return [
-                'recover_cargo',
-                'imperial_survey',
-                'ruin_clearance',
-                'territorial_beast'
+                'local_bounty',
+                'field_job',
+                'courier_recovery',
+                'missing_person'
             ].includes(archetype.id) &&
                 scenario.ranks?.includes('F') === true;
         }
 
         if (archetype.id !== 'missing_person') return true;
 
-        if (scenario.variantId === 'lost') return rank === 'D';
+        if (scenario.variantId === 'lost') {
+            return ['F', 'E', 'D'].includes(rank);
+        }
         if (scenario.variantId === 'abducted') {
             return rank === 'C' || rank === 'B';
         }
@@ -10335,11 +10410,35 @@ function buildQuestFacts(
             B: 'a territorial threat affecting travel or work across the region'
         },
         missing_person: {
+            F: 'a local contact who got stranded or pinned down near town',
+            E: 'a missing local whose safe return matters to their crew or kin',
             D: 'one lost person whose safe return matters to the affected party',
             C: 'one abducted person held by a hostile group',
             B: 'an abducted person whose loss has serious consequences beyond one household'
+        },
+        local_bounty: {
+            F: 'a minor local threat disrupting everyday work or safety',
+            E: 'a persistent threat pressuring local workers or travelers',
+            D: 'a dangerous threat blocking important local business or routes',
+            C: 'a serious hostile force disrupting the settlement',
+            B: 'a major regional threat endangering the wider territory'
+        },
+        field_job: {
+            F: 'a routine hands-on job near the settlement',
+            E: 'a practical field task locals cannot easily handle themselves',
+            D: 'a delicate or risky on-site job with real local stakes',
+            C: 'an urgent field operation affecting settlement affairs',
+            B: 'a high-stakes site operation with region-wide consequences'
+        },
+        courier_recovery: {
+            F: 'a misplaced item or small consignment left near town',
+            E: 'missing goods or records needed for local business',
+            D: 'valuable property whose loss hurts a local faction or owner',
+            C: 'critical goods or proof needed by the settlement',
+            B: 'region-critical cargo or evidence with major fallout'
         }
     };
+
 
     const rankStakes = stakesByArchetype[archetype.id]?.[rank];
 
@@ -10402,6 +10501,7 @@ const QUEST_V2_STRUCTURES = {
 
     rescue_person: {
         lost: {
+            1: ['find_person'],
             2: ['approach', 'find_person'],
             3: ['approach', 'track', 'find_person']
         },
@@ -10689,9 +10789,12 @@ function buildQuestV2PlanForOffer(
         recover_cargo: 'retrieve_item',
         imperial_survey: 'retrieve_item',
         sealed_cache: 'retrieve_item',
+        field_job: 'retrieve_item',
+        courier_recovery: 'retrieve_item',
         territorial_beast: 'defeat_elite',
         ruin_clearance: 'defeat_elite',
-        dormant_hazard: 'defeat_elite'
+        dormant_hazard: 'defeat_elite',
+        local_bounty: 'defeat_elite'
     };
 
     const family =
@@ -10717,6 +10820,16 @@ function buildQuestV2PlanForOffer(
     } else if (archetype.id === 'sealed_cache') {
         v2Facts = {
             item: facts.cache,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'field_job') {
+        v2Facts = {
+            item: facts.task,
+            destination: facts.place
+        };
+    } else if (archetype.id === 'courier_recovery') {
+        v2Facts = {
+            item: facts.item,
             destination: facts.place
         };
     } else if (archetype.id === 'herb_foraging') {
@@ -10755,7 +10868,7 @@ function buildQuestV2PlanForOffer(
 
     if (family === 'rescue_person') {
         const validGateCounts =
-            variantId === 'lost' ? [2, 3] :
+            variantId === 'lost' ? [1, 2, 3] :
             variantId === 'abducted' ? [3, 4, 5] :
             [];
 
@@ -11253,12 +11366,22 @@ function resolveQuestSeed(test) {
             row
         );
 
-    // Use the exact eligible pool that made this rank selectable.
-    const eligibleArchetypes = selectedRank.archetypes;
+    // Use the exact eligible pool that made this rank selectable,
+    // excluding the settlement's last offered archetype when alternatives exist.
+    state.lastQuestArchetypeBySettlement ||= {};
+    const lastArchetypeId =
+        state.lastQuestArchetypeBySettlement[issuerSettlement.id] || null;
+    const nonRepeating = selectedRank.archetypes.filter(
+        entry => entry.archetype.id !== lastArchetypeId
+    );
+    const eligibleArchetypes = nonRepeating.length > 0
+        ? nonRepeating
+        : selectedRank.archetypes;
     const archetypeRoll = roll(state, eligibleArchetypes.length);
     const selectedArchetype =
         eligibleArchetypes[archetypeRoll - 1];
     const archetype = selectedArchetype.archetype;
+    state.lastQuestArchetypeBySettlement[issuerSettlement.id] = archetype.id;
     const authored = buildQuestFacts(
         state,
         archetype,
@@ -11266,6 +11389,13 @@ function resolveQuestSeed(test) {
         selectedArchetype.scenarios,
         rank
     );
+
+    if (archetype.id === 'local_bounty') {
+        const isGroup = terminalThreat.kind === 'normal_pack';
+        authored.facts.threat = isGroup
+            ? 'the hostile group'
+            : 'the dangerous foe';
+    }
 
     /*
      * The threat type was locked above, before the quest structure is
@@ -11324,6 +11454,16 @@ function resolveQuestSeed(test) {
         Array.isArray(structureV2.gates) &&
         structureV2.gates.length === gates,
         `New quest archetype ${archetype.id} lacks a complete V2 plan`
+    );
+
+    // Non-combat contracts earn +0.5 pack XP to offset having no linked mob kills.
+    const hasLinkedCombat = structureV2.gates.some(
+        gate => gate.trigger === 'linked_combat'
+    );
+    const finalPackMultiplier =
+        questPackMultiplier + (hasLinkedCombat ? 0 : 0.5);
+    const finalQuestXp = Math.round(
+        referencePackXp * finalPackMultiplier
     );
 
     const questGatesData = clone(structureV2.gates);
@@ -11389,12 +11529,12 @@ function resolveQuestSeed(test) {
         objectiveResolution: null,
 
         payout: {
-            xp: questXp,
+            xp: finalQuestXp,
             silver: row.silver,
             repSteps: row.repSteps,
             xpBasis: referencePackXp,
             xpBasisType: 'canonical_mid_mixed_pack',
-            packMultiplier: questPackMultiplier
+            packMultiplier: finalPackMultiplier
 
         },
 
@@ -11410,7 +11550,7 @@ function resolveQuestSeed(test) {
         originSettlementId: issuerSettlement.id,
         originLocationId: issuerSettlement.locationId,
         repTierAtOffer: rep.label,
-        requiresDelivery: archetype.id !== 'sealed_cache'
+        requiresDelivery: !['sealed_cache', 'field_job'].includes(archetype.id)
     };
 
     quest.targetId = `quest-target-${quest.id}`;
@@ -11467,6 +11607,7 @@ function resolveQuestSeed(test) {
     prepareRecoverCargoDiscovery(quest);
     prepareImperialSurveyDiscovery(quest);
     prepareSealedCacheDiscovery(quest);
+    prepareOpenRetrievalDiscovery(quest);
     prepareHerbForagingDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
@@ -11995,6 +12136,108 @@ function prepareSealedCacheDiscovery(quest) {
     };
     quest.turnIn.discoveryId = cacheId;
     return quest.discoveries.find(item => item.id === cacheId);
+}
+
+function prepareOpenRetrievalDiscovery(quest) {
+    const idType = quest?.archetype?.id;
+    if (
+        !['field_job', 'courier_recovery'].includes(idType) ||
+        quest.structureV2?.family !== 'retrieve_item' ||
+        !quest.destinationId
+    ) {
+        return null;
+    }
+
+    const isFieldJob = idType === 'field_job';
+    const subject = isFieldJob ? quest.facts.task : quest.facts.item;
+    const place = quest.facts.place;
+    const evidence = quest.facts.evidence;
+    const obstacle = quest.facts.obstacle;
+
+    quest.discoveries ||= [];
+
+    const definitions = {
+        locate: {
+            suffix: 'open-clue',
+            kind: 'evidence',
+            name: `Lead pointing to ${subject}`,
+            hidingPlace: `${evidence} at ${place}`,
+            significance: `Pinpoints where ${subject} can be handled.`
+        },
+        reach_inner_site: {
+            suffix: 'open-approach',
+            kind: 'evidence',
+            name: `Way past ${obstacle}`,
+            hidingPlace: `within ${place}`,
+            significance: `Clears or bypasses ${obstacle} to reach ${subject}.`
+        },
+        find_access: {
+            suffix: 'open-access',
+            kind: 'evidence',
+            name: `Means to access ${subject}`,
+            hidingPlace: `at ${place}`,
+            significance: `Gives direct access to complete or recover ${subject}.`
+        },
+        recover: {
+            suffix: isFieldJob ? 'field-job-done' : 'recovered-item',
+            kind: 'quest_item',
+            name: subject,
+            hidingPlace: `at ${place}, beyond ${obstacle}`,
+            significance: isFieldJob
+                ? 'Completing this on-site task finishes the contract immediately.'
+                : `Must be brought back to ${quest.turnIn?.recipient || 'the sponsor'}.`,
+            requiredAction: isFieldJob ? 'complete_field_job' : 'recover_item',
+            questCargo: !isFieldJob
+        }
+    };
+
+    for (const gate of quest.gatesData) {
+        const definition = definitions[gate.stage];
+        if (!definition || gate.trigger !== 'discovery') continue;
+
+        const id = `${quest.id}-${definition.suffix}`;
+        let discovery = quest.discoveries.find(item => item.id === id);
+
+        if (!discovery) {
+            discovery = {
+                id,
+                kind: definition.kind,
+                name: definition.name,
+                locationId: quest.destinationId,
+                state: 'hidden',
+                acquisitionPolicy: 'auto_on_reveal',
+                hidingPlace: definition.hidingPlace,
+                significance: definition.significance,
+                ...(definition.requiredAction
+                    ? { requiredAction: definition.requiredAction }
+                    : {}),
+                ...(definition.questCargo ? { questCargo: true } : {})
+            };
+            quest.discoveries.push(discovery);
+        }
+
+        gate.requiredDiscoveryId = id;
+        gate.requiredDiscoveryState = 'acquired';
+
+        if (quest.currentGate?.step === gate.step) {
+            quest.currentGate.requiredDiscoveryId = id;
+            quest.currentGate.requiredDiscoveryState = 'acquired';
+        }
+    }
+
+    const finalId = `${quest.id}-${isFieldJob ? 'field-job-done' : 'recovered-item'}`;
+    assert(
+        quest.discoveries.some(item => item.id === finalId),
+        `${idType} has no final discovery`
+    );
+
+    quest.turnIn ||= {
+        locationId: quest.originLocationId,
+        settlementId: quest.originSettlementId,
+        recipient: isFieldJob ? 'System' : (quest.facts?.sponsor || 'the sponsor')
+    };
+    quest.turnIn.discoveryId = finalId;
+    return quest.discoveries.find(item => item.id === finalId);
 }
 
  function prepareV2QuestDiscoveries(quest) {
@@ -12541,6 +12784,7 @@ function resolveQuestAction(test) {
             prepareRecoverCargoDiscovery(quest);
             prepareImperialSurveyDiscovery(quest);
             prepareSealedCacheDiscovery(quest);
+            prepareOpenRetrievalDiscovery(quest);
             prepareHerbForagingDiscovery(quest);
             prepareV2QuestDiscoveries(quest);
 
@@ -18821,7 +19065,6 @@ function discoveryNarrationPacket(encounter, state = null) {
             'or retreat to the protagonists.'
     ].join('\n');
 }
-
 const PUBLIC_QUEST_FACT_KEYS = {
     recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
     imperial_survey: ['sponsor', 'sample', 'place', 'stakes'],
@@ -18830,7 +19073,10 @@ const PUBLIC_QUEST_FACT_KEYS = {
     ruin_clearance: ['sponsor', 'site', 'stakes'],
     herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place', 'stakes'],
-    territorial_beast: ['sponsor', 'beast', 'place', 'stakes']
+    territorial_beast: ['sponsor', 'beast', 'place', 'stakes'],
+    local_bounty: ['sponsor', 'site', 'threat', 'stakes'],
+    field_job: ['sponsor', 'task', 'place', 'stakes'],
+    courier_recovery: ['sponsor', 'item', 'place', 'stakes']
 };
 
 function publicQuestFactLines(quest) {
@@ -18998,12 +19244,19 @@ function questDiscoveryContextPacket(quest, state) {
             quest.currentGate?.decisive === true
             ? quest.requiresDelivery === false
                 ? [
-                    '* **SPONSOR-FREE CACHE:** Opening or claiming this cache ' +
-                        'completes the contract immediately once reported—no ' +
-                        'town delivery is required. Do NOT show a completion ' +
-                        'window yet; emit <AETHERMOOR:FOUND> and the System ' +
-                        'completion card will arrive on the next reply.'
+                    quest.archetype?.id === 'field_job'
+                        ? '* **ON-SITE FIELD JOB:** Completing this task finishes ' +
+                            'the contract immediately once reported—no town ' +
+                            'delivery is required. Do NOT show a completion ' +
+                            'window yet; emit <AETHERMOOR:FOUND> and the System ' +
+                            'completion card will arrive on the next reply.'
+                        : '* **SPONSOR-FREE CACHE:** Opening or claiming this cache ' +
+                            'completes the contract immediately once reported—no ' +
+                            'town delivery is required. Do NOT show a completion ' +
+                            'window yet; emit <AETHERMOOR:FOUND> and the System ' +
+                            'completion card will arrive on the next reply.'
                 ]
+
                 : [
                     '* **RECOVERY IS NOT DELIVERY:** Once the required object ' +
                         'is recovered, portray it as secured quest cargo. ' +
@@ -19071,7 +19324,8 @@ function questDiscoveryNarrationPacket(result, quest) {
         const completion = result.questGate.questCompletion;
 
         if (completion) {
-            const isSealedCache = quest?.requiresDelivery === false;
+            const isSealedCache = quest?.archetype?.id === 'sealed_cache';
+            const isFieldJob = quest?.archetype?.id === 'field_job';
             lines.push(
                 isSealedCache
                     ? 'SEALED CACHE CLAIMED — The System completed the contract ' +
@@ -19079,9 +19333,14 @@ function questDiscoveryNarrationPacket(result, quest) {
                       'as physically resting inside the opened cache (while the System ' +
                       'chimes XP and Rep). Display this exact System completion HTML ' +
                       'card verbatim (visible to Q’tik and Tansy):'
-                    : 'The System validated this quest’s final objective and completed ' +
-                      'the contract. Display this exact System completion HTML card ' +
-                      'verbatim (visible to Q’tik and Tansy):',
+                    : isFieldJob
+                        ? 'FIELD JOB COMPLETED — The System validated the on-site task ' +
+                          'and completed the contract immediately. Display this exact ' +
+                          'System completion HTML card verbatim (visible to Q’tik and Tansy):'
+                        : 'The System validated this quest’s final objective and completed ' +
+                          'the contract. Display this exact System completion HTML card ' +
+                          'verbatim (visible to Q’tik and Tansy):',
+
                 contractCompleteCardHtml({
                     title: completion.title || quest?.title || 'Contract',
                     rank: completion.rank || quest?.rank || null,
@@ -29269,11 +29528,20 @@ function settlementWorkContextPacket(state, settlement) {
     }
 
     const quest = pending.pendingQuest;
+    const zoneFlavor = state.world?.zones?.[state.zone]?.flavor;
+    const flavorHint = zoneFlavor?.label
+        ? `${zoneFlavor.label} (${zoneFlavor.hook})`
+        : 'the current settlement';
 
     return [
         `* **QUEST FOUND!** A quest from The System must appear in this reply.`,
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest),
+        `CREATIVE FREEDOM: Treat the concern and facts above as a loose ` +
+            `mechanical skeleton. Dress the sponsor, target, site, and motive ` +
+            `using ${settlement.label}'s active NPCs, factions, tensions, and ` +
+            `regional flavor: ${flavorHint}. Keep the mechanical scope intact ` +
+            `(do not add extra gates, encounters, or rewards).`,
         `System offer: ${quest.title}.`,
         `First objective: ${quest.currentGate.objective}`,
         `System rewards on completion: ${quest.payout.xp} XP, ` +

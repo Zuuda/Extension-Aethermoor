@@ -8997,20 +8997,21 @@ function resolveTravelStep(test) {
             state.places[outskirtsId].visited = true;
         }
     }
-
     const travelRoll = roll(state, 100);
 
     let event;
 
-    if (travelRoll <= 57) {
+    if (travelRoll <= 28) {
         event = 'quiet_travel';
-    } else if (travelRoll <= 65) {
+    } else if (travelRoll <= 55) {
+        event = 'passing_vignette';
+    } else if (travelRoll <= 63) {
         event = 'hidden_cache';
-    } else if (travelRoll <= 75) {
+    } else if (travelRoll <= 73) {
         event = 'environmental_sign';
-    } else if (travelRoll <= 85) {
+    } else if (travelRoll <= 82) {
         event = 'point_of_interest';
-    } else if (travelRoll <= 94) {
+    } else if (travelRoll <= 90) {
         event = 'wild_encounter';
     } else if (travelRoll <= 97) {
         event = 'social_opportunity';
@@ -18816,6 +18817,16 @@ function travelNarrationPacket(result) {
         lines.push(
             'Nothing notable was discovered on this stretch.'
         );
+    } else if (result.event === 'passing_vignette') {
+        lines.push(
+            'PASSING VIGNETTE — weave one brief, zero-mechanics living-world ' +
+                'moment into this stretch for the crew to notice or react to ' +
+                '(fits the current scene, region, or companions — e.g. passing ' +
+                'locals or Immortals, weather or terrain quirk, weasel antics, ' +
+                'or a Pre-Calamity detail).',
+            'Keep it purely diegetic: do NOT start combat, grant loot or silver, ' +
+                'offer a quest, or invent a rumor destination.'
+        );
     } else if (result.event === 'hidden_cache' && result.cache) {
         lines.push(
             '* **HIDDEN CACHE FOUND!** Tansy’s shadow-weasels sniffed out ' +
@@ -21409,8 +21420,48 @@ function addAethermoorPanelStyles() {
             border-left-color: #d99b26;
         }
 
+        .aethermoor-ui-section[data-accent="msq"] {
+            border-left-color: #c084fc;
+        }
+
         .aethermoor-ui-section[data-accent="world"] {
             border-left-color: #4da6ff;
+        }
+
+        .aethermoor-quest-drawer {
+            padding: 10px;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #d99b26;
+        }
+
+        .aethermoor-quest-drawer[data-msq="true"] {
+            border-left-color: #c084fc;
+            background: #161420;
+        }
+
+        .aethermoor-quest-drawer[data-history="true"] {
+            border-left-color: #6e7f91;
+        }
+
+        .aethermoor-quest-drawer > summary {
+            cursor: pointer;
+            color: #ffffff;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            list-style-position: outside;
+        }
+
+        .aethermoor-quest-drawer[data-msq="true"] > summary {
+            color: #c084fc;
+        }
+
+        .aethermoor-quest-drawer-body {
+            display: grid;
+            gap: 7px;
+            margin-top: 8px;
         }
 
         .aethermoor-ui-heading {
@@ -22265,16 +22316,35 @@ async function renderQuestTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    host.appendChild(
-        makeAethermoorSection(
-            'QUEST JOURNAL',
-            `${accepted.length} in progress · ${offered.length} offered\n` +
-            'Accepted quests remain in the journal alongside new offers.',
-            'quest'
-        )
-    );
+    function makeQuestDrawer(summaryText, bodyText, {
+        isMsq = false,
+        isHistory = false,
+        open = true
+    } = {}) {
+        const drawer = document.createElement('details');
+        drawer.className = 'aethermoor-quest-drawer';
+        drawer.open = open;
+        if (isMsq) drawer.dataset.msq = 'true';
+        if (isHistory) drawer.dataset.history = 'true';
 
-    function addQuestAction(section, quest, label, action) {
+        const summary = document.createElement('summary');
+        summary.textContent = summaryText;
+
+        const body = document.createElement('div');
+        body.className = 'aethermoor-quest-drawer-body';
+
+        if (bodyText) {
+            const text = document.createElement('div');
+            text.className = 'aethermoor-ui-text';
+            text.textContent = bodyText;
+            body.appendChild(text);
+        }
+
+        drawer.append(summary, body);
+        return { drawer, body };
+    }
+
+    function addQuestAction(container, quest, label, action) {
         const button = makeAethermoorAction(
             label,
             'quest',
@@ -22303,14 +22373,17 @@ async function renderQuestTab(host) {
             }
         );
 
-        section.appendChild(button);
+        container.appendChild(button);
     }
 
-    for (const quest of accepted) {
-        const section = makeAethermoorSection(
-            'IN PROGRESS',
+    function renderAcceptedQuest(quest) {
+        const isMsq = quest.isMsq === true;
+        const gateStep = quest.currentGate?.step || 1;
+        const prefix = isMsq ? 'MAIN STORY' : 'IN PROGRESS';
+        const { drawer, body } = makeQuestDrawer(
+            `${prefix} · ${quest.title} (${gateStep}/${quest.gates})`,
             formatQuestStatus(quest),
-            'quest'
+            { isMsq, open: true }
         );
 
         const canRevealTerminal =
@@ -22321,8 +22394,8 @@ async function renderQuestTab(host) {
             !state.activeInstanceId &&
             !['active', 'spotted'].includes(state.encounter?.status);
 
-         if (canRevealTerminal) {
-            section.appendChild(
+        if (canRevealTerminal) {
+            body.appendChild(
                 makeAethermoorAction(
                     'Reveal Quest Threat',
                     'combat',
@@ -22381,7 +22454,7 @@ async function renderQuestTab(host) {
 
             markFound.title =
                 'Manual fallback if the GM misses the <AETHERMOOR:FOUND> tag.';
-            section.appendChild(markFound);
+            body.appendChild(markFound);
         }
 
         const bringingPersonToSafety =
@@ -22401,19 +22474,19 @@ async function renderQuestTab(host) {
         const cargoName = cargoDiscovery?.name || 'the quest cargo';
 
         if (bringingPersonToSafety) {
-            section.appendChild(
+            body.appendChild(
                 makeAethermoorSection(
                     'BRING PERSON TO SAFETY',
                     `${quest.facts.person} must reach the origin ` +
                         'settlement. The System completes and pays this ' +
                         'quest on confirmed arrival; no NPC handover is required.',
-                    'quest'
+                    isMsq ? 'msq' : 'quest'
                 )
             );
         }
 
         if (returningWithCargo) {
-            section.appendChild(
+            body.appendChild(
                 makeAethermoorSection(
                     quest.deliveryReady
                         ? 'CARGO READY TO DELIVER'
@@ -22425,7 +22498,7 @@ async function renderQuestTab(host) {
                         : `Bring ${cargoName} back to ` +
                             `${quest.turnIn.recipient}. Recovery alone ` +
                             'does not complete the quest.',
-                    'quest'
+                    isMsq ? 'msq' : 'quest'
                 )
             );
 
@@ -22464,7 +22537,7 @@ async function renderQuestTab(host) {
 
                 confirmHandover.title =
                     'Manual fallback if the GM misses the <AETHERMOOR:DELIVERED> tag.';
-                section.appendChild(confirmHandover);
+                body.appendChild(confirmHandover);
             }
         }
 
@@ -22472,7 +22545,6 @@ async function renderQuestTab(host) {
             bringingPersonToSafety || returningWithCargo
                 ? quest.turnIn.locationId
                 : quest.destinationId;
-
 
         if (
             destinationId &&
@@ -22492,7 +22564,7 @@ async function renderQuestTab(host) {
                     (journey.status === 'paused'
                         ? ' · interrupted'
                         : '');
-                section.appendChild(progress);
+                body.appendChild(progress);
             }
 
             const move = makeAethermoorAction(
@@ -22505,8 +22577,6 @@ async function renderQuestTab(host) {
                             : returningWithCargo
                                 ? 'Return with quest cargo'
                                 : 'Travel to quest objective',
-
-
                 'quest',
                 () => copyAethermoorCommand(
                     destinationCommand(destinationId)
@@ -22514,25 +22584,37 @@ async function renderQuestTab(host) {
             );
 
             move.disabled = movementBlocked;
-            section.appendChild(move);
+            body.appendChild(move);
         }
 
-        addQuestAction(section, quest, 'Cancel Quest', 'cancel');
-        host.appendChild(section);
+        addQuestAction(body, quest, 'Cancel Quest', 'cancel');
+        host.appendChild(drawer);
     }
 
-    for (const quest of offered) {
-        const section = makeAethermoorSection(
-            'QUEST OFFER',
+    function renderOfferedQuest(quest) {
+        const isMsq = quest.isMsq === true;
+        const prefix = isMsq ? 'MAIN STORY OFFER' : 'QUEST OFFER';
+        const { drawer, body } = makeQuestDrawer(
+            `${prefix} · ${quest.title}`,
             formatQuestStatus(quest) + '\n\n' + (quest.pitch || ''),
-            'quest'
+            { isMsq, open: true }
         );
 
-        addQuestAction(section, quest, 'Accept Quest', 'accept');
-        addQuestAction(section, quest, 'Decline Quest', 'decline');
-        host.appendChild(section);
+        addQuestAction(body, quest, 'Accept Quest', 'accept');
+        addQuestAction(body, quest, 'Decline Quest', 'decline');
+        host.appendChild(drawer);
     }
 
+    // Pin MSQ quests to the very top (accepted or offered), then regular quests.
+    const msqAccepted = accepted.filter(quest => quest.isMsq === true);
+    const msqOffered = offered.filter(quest => quest.isMsq === true);
+    const sideAccepted = accepted.filter(quest => quest.isMsq !== true);
+    const sideOffered = offered.filter(quest => quest.isMsq !== true);
+
+    for (const quest of msqAccepted) renderAcceptedQuest(quest);
+    for (const quest of msqOffered) renderOfferedQuest(quest);
+    for (const quest of sideAccepted) renderAcceptedQuest(quest);
+    for (const quest of sideOffered) renderOfferedQuest(quest);
 
     if (accepted.length === 0 && offered.length === 0) {
         host.appendChild(
@@ -22552,15 +22634,23 @@ async function renderQuestTab(host) {
         ['Cancelled', journal.cancelled.length]
     ];
 
-    host.appendChild(
-        makeAethermoorSection(
-            'QUEST HISTORY',
-            historyCounts.map(([label, count]) => `${label}: ${count}`)
-                .join(' · '),
-            'quest'
-        )
+    const completedLines = journal.completed.length > 0
+        ? [...journal.completed]
+            .reverse()
+            .map(quest =>
+                `• ${quest.isMsq ? '[MSQ] ' : ''}${quest.title}`
+            )
+            .join('\n')
+        : 'No completed quests yet.';
+
+    const { drawer: historyDrawer } = makeQuestDrawer(
+        `QUEST HISTORY · ${historyCounts.map(([l, c]) => `${l}: ${c}`).join(' · ')}`,
+        completedLines,
+        { isHistory: true, open: false }
     );
+    host.appendChild(historyDrawer);
 }
+
 /*
  * Queued movement is stored in memory and scoped to the current chat's
  * metadata object. Sending the next roleplay reply consumes and clears it

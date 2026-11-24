@@ -9855,7 +9855,6 @@ const QUEST_ARCHETYPES = [
      * supply names and setting details using the current zone context.
      */
     {
-    {
         id: 'missing_person',
         label: 'Find & Escort',
         scenarios: [

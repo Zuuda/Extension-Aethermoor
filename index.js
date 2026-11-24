@@ -866,7 +866,12 @@ function ensureKnownInstance(state) {
     const id = `instance-z${zone}-known`;
     const entranceId = `${id}-entrance`;
     const anchor = savedPrimarySettlement(state, zone);
-    const label = `Known local site, Zone ${zone}`;
+    const label = cosmeticStockName(
+        state,
+        'world:known_instance_name',
+        `Regional site (${zoneDisplayName(state, zone)})`,
+        zone
+    );
     let changed = false;
 
     if (!state.instances[id]) {
@@ -15866,6 +15871,16 @@ function stockNamingEntries(state, targetZone = state.zone) {
         });
     }
 
+    const knownInstance = state.instances?.[`instance-z${targetZone}-known`];
+    if (knownInstance?.presentation?.established !== true) {
+        worldEntries.push({
+            key: 'world:known_instance_name',
+            description:
+                `evocative name for the region's main known dungeon or delve site fitting this ${zoneRecord?.geography?.description || 'region'} ` +
+                `(${zoneRecord?.flavor?.label || 'Post-Calamity Frontier'})`
+        });
+    }
+
     const gear = resolveVendorAction({
         action: 'stock',
         zone: targetZone,
@@ -16015,6 +16030,21 @@ function resolveStockNames(test) {
         }
         if (state.currentJourney?.destinationId === settlement.locationId) {
             state.currentJourney.destinationLabel = settlement.label;
+        }
+    }
+
+    if (typeof names['world:known_instance_name'] === 'string') {
+        const instanceName = names['world:known_instance_name'].trim();
+        const knownInstance = state.instances?.[`instance-z${targetZone}-known`];
+
+        if (knownInstance && knownInstance.presentation?.established !== true) {
+            knownInstance.label = instanceName;
+            if (state.places?.[knownInstance.entranceId]) {
+                state.places[knownInstance.entranceId].label = instanceName;
+            }
+            if (state.currentJourney?.destinationId === knownInstance.entranceId) {
+                state.currentJourney.destinationLabel = instanceName;
+            }
         }
     }
 
@@ -25623,6 +25653,76 @@ function nextChaseableAchievements(unlockedSet) {
     return list;
 }
 
+function achievementProgressText(state, ach) {
+    const stats = state.stats || {};
+    const completedQuests = ensureQuestJournal(state).completed?.length || 0;
+    const investigatedRumors = Object.values(state.leads || {}).filter(
+        lead => lead?.kind === 'rumor' && lead.status === 'investigated' && lead.testOnly !== true
+    ).length;
+
+    const tansyWorn = TANSY_SLOTS
+        .map(slot => state.crew?.gear?.tansy?.[slot])
+        .filter(item => item && Number(item.stat ?? item.rawStat) > 0);
+    const qtikWorn = QTIK_SLOTS
+        .map(slot => state.crew?.gear?.qtik?.[slot])
+        .filter(item => item && Number(item.stat ?? item.rawStat) > 0);
+    const allWorn = [...tansyWorn, ...qtikWorn];
+
+    const pairs = {
+        kills_10: [stats.kills || 0, 10],
+        kills_50: [stats.kills || 0, 50],
+        kills_100: [stats.kills || 0, 100],
+        elite_5: [stats.elites || 0, 5],
+        zone_2: [stats.maxZoneReached || state.zone || 1, 2],
+        zone_5: [stats.maxZoneReached || state.zone || 1, 5],
+        zone_10: [stats.maxZoneReached || state.zone || 1, 10],
+        cache_10: [stats.caches || 0, 10],
+        cache_50: [stats.caches || 0, 50],
+        cache_100: [stats.caches || 0, 100],
+        chest_10: [stats.chests || 0, 10],
+        chest_50: [stats.chests || 0, 50],
+        chest_100: [stats.chests || 0, 100],
+        instance_10: [(stats.enteredInstanceIds || []).length, 10],
+        instance_50: [(stats.enteredInstanceIds || []).length, 50],
+        instance_100: [(stats.enteredInstanceIds || []).length, 100],
+        rumor_10: [investigatedRumors, 10],
+        rumor_50: [investigatedRumors, 50],
+        rumor_100: [investigatedRumors, 100],
+        quest_5: [completedQuests, 5],
+        quest_20: [completedQuests, 20],
+        full_kit_tansy: [tansyWorn.length, TANSY_SLOTS.length],
+        full_kit_qtik: [qtikWorn.length, QTIK_SLOTS.length],
+        full_kit_crew: [allWorn.length, TANSY_SLOTS.length + QTIK_SLOTS.length],
+        all_common_gear: [
+            allWorn.filter(i => String(i.rarity || 'Common').toLowerCase() === 'common').length,
+            TANSY_SLOTS.length + QTIK_SLOTS.length
+        ],
+        all_uncommon_gear: [
+            allWorn.filter(i => String(i.rarity || '').toLowerCase() === 'uncommon').length,
+            TANSY_SLOTS.length + QTIK_SLOTS.length
+        ],
+        curio_broker: [stats.curiosSold || 0, 5],
+        mob_silver_100: [stats.mobSilver || 0, 100],
+        mob_silver_500: [stats.mobSilver || 0, 500],
+        mob_silver_1000: [stats.mobSilver || 0, 1000],
+        shop_silver_100: [stats.shopSilver || 0, 100],
+        shop_silver_500: [stats.shopSilver || 0, 500],
+        shop_silver_1000: [stats.shopSilver || 0, 1000],
+        trade_silver_100: [stats.tradeSilver || 0, 100],
+        trade_silver_500: [stats.tradeSilver || 0, 500],
+        trade_silver_1000: [stats.tradeSilver || 0, 1000]
+    };
+
+    const levelMatch = /^level_(\d+)$/.exec(ach.id);
+    const pair = levelMatch
+        ? [state.crew?.level || 1, Number(levelMatch[1])]
+        : pairs[ach.id];
+
+    if (!pair) return null;
+    const [current, target] = pair;
+    return `${Math.min(Number(current) || 0, target)}/${target}`;
+}
+
 function achievementsChatTableHtml(state) {
     const unlockedSet = new Set(
         Array.isArray(state.crew?.achievements) ? state.crew.achievements : []
@@ -25630,13 +25730,18 @@ function achievementsChatTableHtml(state) {
     const chaseable = nextChaseableAchievements(unlockedSet);
     const totals = achievementBonuses(state.crew);
 
-    const rows = chaseable.map(ach =>
-        `<tr>` +
+    const rows = chaseable.map(ach => {
+        const progress = achievementProgressText(state, ach);
+        const reqText = progress
+            ? `${ach.requirement} (${progress})`
+            : ach.requirement;
+
+        return `<tr>` +
             `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#ffffff; font-weight:700; white-space:nowrap;">${escapeSystemLogHtml(ach.title)}</td>` +
-            `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#9caab8;">${escapeSystemLogHtml(ach.requirement)}</td>` +
+            `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#9caab8;">${escapeSystemLogHtml(reqText)}</td>` +
             `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#4ade80; white-space:nowrap;">${escapeSystemLogHtml(formatAchievementBonus(ach.bonus))}</td>` +
-        `</tr>`
-    ).join('');
+        `</tr>`;
+    }).join('');
 
     const tableHtml = chaseable.length > 0
         ? `<table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:11px;">` +
@@ -25724,11 +25829,77 @@ async function renderAchievementsTab(host) {
         )
     );
 
-    // Drawer 1: Earned Achievements
+    // Drawer 1: Unearned Achievements (Next Chaseable Tier — open by default)
+    const unearnedDrawer = document.createElement('details');
+    unearnedDrawer.className = 'aethermoor-knowledge';
+    unearnedDrawer.style.borderLeftColor = '#9caab8';
+    unearnedDrawer.open = true;
+
+    const unearnedSummary = document.createElement('summary');
+    unearnedSummary.className = 'aethermoor-ui-heading';
+    unearnedSummary.textContent = `UNEARNED (NEXT TIER) · ${unearned.length}`;
+    unearnedDrawer.appendChild(unearnedSummary);
+
+    const copyBtn = makeAethermoorAction(
+        'Copy Table for Chat',
+        'quest',
+        () => {
+            void copyAethermoorAchievementsTable(state).catch(error => {
+                toastr.error(
+                    error instanceof Error ? error.message : String(error),
+                    'Aethermoor'
+                );
+            });
+        }
+    );
+    copyBtn.style.marginTop = '8px';
+    copyBtn.title =
+        'Copies a styled HTML table of chaseable unearned achievements to paste into your reply when Tansy checks the tab.';
+    unearnedDrawer.appendChild(copyBtn);
+
+    if (unearned.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'aethermoor-ui-text';
+        empty.style.marginTop = '6px';
+        empty.textContent = 'Every milestone has been unlocked!';
+        unearnedDrawer.appendChild(empty);
+    } else {
+        for (const ach of unearned) {
+            const row = document.createElement('div');
+            row.className = 'aethermoor-inventory-item';
+
+            const main = document.createElement('div');
+            main.className = 'aethermoor-inventory-item-main';
+
+            const progress = achievementProgressText(state, ach);
+
+            const title = document.createElement('div');
+            title.className = 'aethermoor-vendor-name';
+            title.textContent = progress
+                ? `${ach.title} · ${progress}`
+                : ach.title;
+
+            const req = document.createElement('div');
+            req.className = 'aethermoor-vendor-detail';
+            req.textContent = ach.requirement;
+
+            const reward = document.createElement('div');
+            reward.className = 'aethermoor-inventory-gain';
+            reward.textContent = formatAchievementBonus(ach.bonus);
+
+            main.append(title, req, reward);
+            row.appendChild(main);
+            unearnedDrawer.appendChild(row);
+        }
+    }
+
+    host.appendChild(unearnedDrawer);
+
+    // Drawer 2: Earned Achievements (collapsed by default)
     const earnedDrawer = document.createElement('details');
     earnedDrawer.className = 'aethermoor-knowledge';
     earnedDrawer.style.borderLeftColor = '#ffd166';
-    earnedDrawer.open = true;
+    earnedDrawer.open = false;
 
     const earnedSummary = document.createElement('summary');
     earnedSummary.className = 'aethermoor-ui-heading';
@@ -26500,20 +26671,21 @@ async function renderInstanceTab(host) {
 
         const heading = instance.kind === 'hidden'
             ? 'HIDDEN INSTANCE (ONE-TIME)'
-            : 'KNOWN INSTANCE';
+            : 'REGIONAL INSTANCE';
+
+        const statusDetail = atEntrance
+            ? '\nThe crew is at its entrance.'
+            : journey
+                ? `\nJourney: ${journey.completedSegments}/` +
+                    `${journey.totalSegments} segments` +
+                    (journey.status === 'paused'
+                        ? ' · interrupted'
+                        : '')
+                : '';
 
         const section = makeAethermoorSection(
             heading,
-            `${instance.label}\nStatus: ${instance.status}\n` +
-                (atEntrance
-                    ? 'The crew is at its entrance.'
-                    : journey
-                        ? `Journey: ${journey.completedSegments}/` +
-                            `${journey.totalSegments} segments` +
-                            (journey.status === 'paused'
-                                ? ' · interrupted'
-                                : '')
-                        : 'The entrance is a known destination.'),
+            `${instance.label}\nStatus: ${instance.status}${statusDetail}`,
             'world'
         );
 
@@ -26525,10 +26697,10 @@ async function renderInstanceTab(host) {
             atEntrance
                 ? 'Enter instance'
                 : journey?.completedSegments === journey?.totalSegments
-                    ? 'Finish journey to instance entrance'
+                    ? 'Arrive at instance'
                     : journey
-                        ? 'Continue to instance entrance'
-                        : 'Travel to instance entrance',
+                        ? 'Continue to instance'
+                        : 'Journey to instance',
             'world',
             () => copyAethermoorCommand(command)
         );
@@ -30882,6 +31054,9 @@ globalThis.aethermoorMechanicsInterceptor =
                             'PRIVATE INSTANCE IDENTITY REQUEST.',
                             `Engine-issued instance ID: ${instance.id}.`,
                             `Saved geography: ${geography}.`,
+                            ...(instance.label && !/^(?:Known|Hidden|Regional)\b/i.test(instance.label)
+                                ? [`Established site name (keep this exact name): ${instance.label}.`]
+                                : []),
                             instance.kind === 'hidden'
                                 ? 'This is a rare, forgotten one-time hidden site ' +
                                     '(such as a sealed Pre-Calamity cellar, collapsed ' +

@@ -2808,14 +2808,20 @@ function formatGearLabel(item) {
 }
 
 function contractOfferedCardHtml(quest) {
+    const isMsq = quest.isMsq === true;
     const salvage = quest.salvage || {};
     const salvageColor = salvage.rarityColor || '#ffffff';
     const gateLabel = `${quest.gates} ${quest.gates === 1 ? 'Gate' : 'Gates'}`;
+    const rightBadge = isMsq
+        ? `<b style="color:#c084fc;">${quest.msq?.isFinale ? 'Finale' : `Ch. ${quest.msq?.chapter || 1}`} · Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`
+        : `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`;
 
     return systemLogCardHtml({
-        accent: '#d99b26',
-        heading: 'System Log // Contract Offered',
-        rightHtml: `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`,
+        accent: isMsq ? '#c084fc' : '#d99b26',
+        heading: isMsq
+            ? 'System Log // Main Story Offered'
+            : 'System Log // Contract Offered',
+        rightHtml: rightBadge,
         bodyHtml:
             `<div><b style="color:#ffffff;">${escapeSystemLogHtml(quest.title)}</b> — ${escapeSystemLogHtml(quest.currentGate?.objective || '')}</div>` +
             `<div style="margin-top:4px;"><b>Payout:</b> <b style="color:#4ade80;">${quest.payout.xp} XP</b> | <b style="color:#ffd166;">${quest.payout.silver}s</b> | <b style="color:#38bdf8;">+${quest.payout.repSteps} Rep</b></div>` +
@@ -2824,7 +2830,7 @@ function contractOfferedCardHtml(quest) {
     });
 }
 
-function contractCompleteCardHtml({ title, rank = null, rewards }) {
+function contractCompleteCardHtml({ title, rank = null, rewards, isMsq = false }) {
     const salvage = (rewards?.loot || [])[0] || null;
     const salvageColor = salvage?.rarityColor || '#ffffff';
     const salvageHtml = salvage
@@ -2832,9 +2838,13 @@ function contractCompleteCardHtml({ title, rank = null, rewards }) {
         : '';
 
     return systemLogCardHtml({
-        accent: '#d99b26',
-        heading: 'System Log // Contract Complete',
-        rightHtml: rank ? `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(rank)}</b>` : '',
+        accent: isMsq ? '#c084fc' : '#d99b26',
+        heading: isMsq
+            ? 'System Log // Main Story Complete'
+            : 'System Log // Contract Complete',
+        rightHtml: rank
+            ? `<b style="color:${isMsq ? '#c084fc' : '#4ade80'};">Rank ${escapeSystemLogHtml(rank)}</b>`
+            : '',
         bodyHtml:
             `<div><b style="color:#ffffff;">${escapeSystemLogHtml(title)}</b> — <b style="color:#4ade80;">+${rewards.xp} XP</b> | <b style="color:#ffd166;">+${rewards.silver}s</b> | <b style="color:#38bdf8;">+${rewards.repSteps} Rep</b></div>` +
             salvageHtml,
@@ -6614,7 +6624,7 @@ function spawnEncounter(test) {
 
         assert(
             lockedThreat &&
-            ['normal_pack', 'elite'].includes(
+            ['normal_pack', 'elite', 'boss'].includes(
                 lockedThreat.kind
             ),
             'Quest has no supported locked terminal threat'
@@ -9259,6 +9269,14 @@ function resolveTravelStep(test) {
         };
 
         outcome.journey = clone(journey);
+    }
+
+    const activeMsq = state.world?.zones?.[state.zone]?.msq;
+    if (
+        activeMsq?.status === 'active' &&
+        Number(activeMsq.pendingBeatDelay || 0) > 0
+    ) {
+        activeMsq.pendingBeatDelay -= 1;
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
@@ -12841,6 +12859,15 @@ function resolveQuestAction(test) {
         quest.status = 'declined';
         saveQuestToJournal(state, quest);
 
+        if (quest.isMsq === true) {
+            const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
+            const msq = state.world?.zones?.[msqZone]?.msq;
+            if (msq) {
+                msq.activeQuestId = null;
+                msq.status = 'declined';
+            }
+        }
+
         for (const lead of Object.values(state.leads || {})) {
             if (
                 lead.id === `quest-return-${quest.id}` ||
@@ -12935,6 +12962,15 @@ function resolveQuestAction(test) {
         }
 
         saveQuestToJournal(state, quest);
+
+        if (quest.isMsq === true) {
+            const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
+            const msq = state.world?.zones?.[msqZone]?.msq;
+            if (msq) {
+                msq.activeQuestId = null;
+                msq.status = 'declined';
+            }
+        }
 
         for (const lead of Object.values(state.leads || {})) {
             if (
@@ -13236,12 +13272,37 @@ function resolveQuestAction(test) {
             'Bring the missing person to the origin settlement safely'
         );
     }
-
     quest.status = 'complete';
 
     quest.completionEvidence = test.completionEvidence.trim();
 
     saveQuestToJournal(state, quest);
+
+    if (quest.isMsq === true) {
+        const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
+        const msq = state.world?.zones?.[msqZone]?.msq;
+        if (msq) {
+            msq.completedChapters = Math.max(
+                Number(msq.completedChapters || 0),
+                Number(quest.msq?.chapter || 0)
+            );
+            msq.activeQuestId = null;
+
+            if (quest.msq?.isFinale || msq.completedChapters >= msq.totalChapters) {
+                msq.status = 'completed';
+                msq.pendingBeatDelay = 0;
+            } else {
+                const nextChapter = msq.completedChapters + 1;
+                const isNextFinale = nextChapter >= msq.totalChapters;
+                const hotLead = isNextFinale ||
+                    (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
+
+                msq.pendingBeatDelay = hotLead
+                    ? 0
+                    : 1 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+            }
+        }
+    }
 
     if (state.activeQuest?.id === quest.id) {
         state.activeQuest = null;
@@ -15461,6 +15522,325 @@ function resolveZoneSpine(test) {
     };
 }
 
+function ensureZoneMsqRecord(state, zone = state.zone) {
+    const zoneRecord = state.world?.zones?.[zone];
+    const spine = zoneRecord?.spine;
+
+    if (!zoneRecord || spine?.established !== true) {
+        return null;
+    }
+
+    if (!zoneRecord.msq) {
+        zoneRecord.msq = {
+            status: 'active',
+            chapter: 0,
+            completedChapters: 0,
+            totalChapters: Number(spine.chapterCount) || 5,
+            activeQuestId: null,
+            lastArchetypeId: null,
+            pendingBeatDelay: 0
+        };
+    }
+
+    return zoneRecord.msq;
+}
+
+function buildMsqChapterQuest(state, zone) {
+    const zoneRecord = savedZoneRecord(state, zone);
+    const spine = zoneRecord.spine;
+    const msq = ensureZoneMsqRecord(state, zone);
+
+    assert(
+        spine?.established === true && msq?.status === 'active',
+        `Zone ${zone} has no active MSQ spine`
+    );
+
+    const issuerSettlement = savedPrimarySettlement(state, zone);
+    const repRecord = state.reputation?.[issuerSettlement.reputationKey] || {
+        tier: 'Unknown',
+        steps: 0
+    };
+
+    const nextChapter = Number(msq.chapter || 0) + 1;
+    const total = Number(msq.totalChapters || spine.chapterCount || 5);
+    const isFinale = nextChapter >= total;
+    const revealChapter = Math.ceil(total / 2) + 1;
+    const phase = isFinale
+        ? 'finale'
+        : nextChapter >= revealChapter
+            ? 'escalation'
+            : 'opening';
+
+    const rank = isFinale
+        ? 'B'
+        : nextChapter === 1
+            ? (total >= 5 ? 'F' : 'E')
+            : phase === 'opening'
+                ? 'E'
+                : nextChapter === total - 1
+                    ? 'C'
+                    : 'D';
+
+    const row = QUEST_REWARD_TABLES[zone][rank];
+    const progression = QUEST_PROGRESSION[rank];
+
+    let archetype;
+    let gates;
+    let terminalThreat;
+
+    if (isFinale) {
+        archetype = QUEST_ARCHETYPES.find(entry => entry.id === 'local_bounty');
+        gates = 2;
+        terminalThreat = { kind: 'boss', zone, roll: null };
+    } else {
+        const poolIds = ['local_bounty', 'field_job', 'courier_recovery', 'missing_person'];
+        const candidates = poolIds
+            .map(id => QUEST_ARCHETYPES.find(entry => entry.id === id))
+            .filter(Boolean);
+        const nonRepeating = candidates.filter(
+            entry => entry.id !== msq.lastArchetypeId
+        );
+        const pickPool = nonRepeating.length > 0 ? nonRepeating : candidates;
+        archetype = pickPool[roll(state, pickPool.length) - 1];
+
+        gates = rank === 'F'
+            ? roll(state, 2)
+            : rank === 'C'
+                ? 3
+                : 2;
+
+        terminalThreat = rollQuestTerminalThreat(state, rank, zone);
+    }
+
+    const scenarios = eligibleQuestScenarios(
+        state,
+        archetype,
+        zone,
+        rank,
+        'social'
+    );
+    const authored = buildQuestFacts(
+        state,
+        archetype,
+        zone,
+        scenarios,
+        rank
+    );
+
+    if (archetype.id === 'local_bounty') {
+        authored.facts.threat = isFinale
+            ? spine.bossConcept
+            : terminalThreat.kind === 'normal_pack'
+                ? 'the hostile group'
+                : 'the dangerous foe';
+        if (isFinale) {
+            authored.pitch =
+                `The regional conflict reaches its breaking point against ${spine.bossConcept}.`;
+        }
+    }
+
+    const structureV2 = buildQuestV2PlanForOffer(
+        state,
+        archetype,
+        gates,
+        authored.facts,
+        authored.variantId
+    );
+
+    assert(
+        structureV2?.version === 2 &&
+        Array.isArray(structureV2.gates) &&
+        structureV2.gates.length === gates,
+        `MSQ chapter ${nextChapter} lacks a complete V2 plan`
+    );
+
+    const hasLinkedCombat = structureV2.gates.some(
+        gate => gate.trigger === 'linked_combat'
+    );
+    const referencePackXp = canonicalMixedPackXp(zone, state.crew.level);
+    const basePackMult =
+        progression.packMultiplier +
+        Math.max(0, gates - 1) * EXTRA_QUEST_GATE_PACK_MULTIPLIER;
+    const finalPackMultiplier = basePackMult + (hasLinkedCombat ? 0 : 0.5);
+    const finalQuestXp = Math.round(referencePackXp * finalPackMultiplier);
+
+    const salvageSlotRoll = roll(state, QUEST_SALVAGE_SLOTS.length);
+    const salvage = makeQuestSalvage(state, zone, salvageSlotRoll, row);
+
+    const questGatesData = clone(structureV2.gates);
+    const quest = {
+        id: `msq-z${zone}-ch${nextChapter}-${archetype.id}`,
+        title: isFinale
+            ? 'Main Story Finale · Regional Showdown'
+            : `Main Story Ch. ${nextChapter} · ${archetype.label}`,
+        rank,
+        isMsq: true,
+        msq: {
+            zone,
+            chapter: nextChapter,
+            isFinale,
+            phase
+        },
+        archetype: {
+            id: archetype.id,
+            label: archetype.label
+        },
+        variant: authored.variantId ? { id: authored.variantId } : null,
+        gates,
+        gatesData: questGatesData,
+        structureV2,
+        status: 'offered',
+        seed: {
+            zone,
+            repTier: repRecord.tier,
+            source: 'msq',
+            channel: 'msq',
+            archetypeId: archetype.id,
+            variantId: authored.variantId,
+            terminalThreat: {
+                kind: terminalThreat.kind,
+                zone: terminalThreat.zone,
+                roll: terminalThreat.roll
+            }
+        },
+        pitch: authored.pitch,
+        facts: authored.facts,
+        coreTruth: authored.truth,
+        currentGate: { ...questGatesData[0] },
+        objectiveResolution: null,
+        payout: {
+            xp: finalQuestXp,
+            silver: row.silver,
+            repSteps: row.repSteps,
+            xpBasis: referencePackXp,
+            xpBasisType: 'canonical_mid_mixed_pack',
+            packMultiplier: finalPackMultiplier
+        },
+        salvage,
+        terminalThreat: {
+            kind: terminalThreat.kind,
+            zone: terminalThreat.zone,
+            revealed: false,
+            resolved: false
+        },
+        town: issuerSettlement.reputationKey,
+        originSettlementId: issuerSettlement.id,
+        originLocationId: issuerSettlement.locationId,
+        repTierAtOffer: repRecord.tier,
+        requiresDelivery: !['sealed_cache', 'field_job'].includes(archetype.id)
+    };
+
+    quest.targetId = `quest-target-${quest.id}`;
+
+    for (const gate of quest.gatesData) {
+        if (gate.trigger === 'linked_combat') {
+            gate.linkedTargetId = quest.targetId;
+        }
+    }
+    if (quest.currentGate?.trigger === 'linked_combat') {
+        quest.currentGate.linkedTargetId = quest.targetId;
+    }
+
+    registerQuestDestination(state, quest);
+    saveQuestToJournal(state, quest);
+
+    prepareOpenRetrievalDiscovery(quest);
+    prepareV2QuestDiscoveries(quest);
+    validateRetrievalQuestDiscoveries(quest);
+
+    msq.chapter = nextChapter;
+    msq.activeQuestId = quest.id;
+    msq.lastArchetypeId = archetype.id;
+    msq.pendingBeatDelay = 0;
+
+    return quest;
+}
+
+function resolveMsqAction(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'MSQ check requires saved state'
+    );
+
+    const state = clone(test.state);
+    const zone = state.zone;
+    const msq = ensureZoneMsqRecord(state, zone);
+
+    if (
+        !msq ||
+        msq.status !== 'active' ||
+        state.currentJourney ||
+        state.activeInstanceId ||
+        ['active', 'spotted'].includes(state.encounter?.status)
+    ) {
+        return {
+            ok: true,
+            created: false,
+            action: 'check',
+            quest: null,
+            state
+        };
+    }
+
+    const journal = ensureQuestJournal(state);
+    const hasOpenMsq = [...journal.offered, ...journal.accepted].some(
+        quest =>
+            quest?.isMsq === true &&
+            (quest.msq?.zone ?? quest.seed?.zone) === zone &&
+            ['offered', 'in_progress'].includes(quest.status)
+    );
+
+    if (hasOpenMsq) {
+        return {
+            ok: true,
+            created: false,
+            action: 'check',
+            quest: null,
+            state
+        };
+    }
+
+    // Chapter 1 hooks the crew inside the settlement; later chapters can
+    // surface anywhere once Breathing Room finishes (or immediately on Hot Lead).
+    const atSettlement = Object.values(state.world?.settlements || {}).some(
+        entry =>
+            entry.locationId === state.currentLocationId &&
+            entry.zone === zone
+    );
+
+    if (msq.chapter === 0 && !atSettlement) {
+        return {
+            ok: true,
+            created: false,
+            action: 'check',
+            quest: null,
+            state
+        };
+    }
+
+    if (Number(msq.pendingBeatDelay || 0) > 0) {
+        msq.pendingBeatDelay -= 1;
+        return {
+            ok: true,
+            created: true,
+            action: 'check',
+            cooledDown: true,
+            quest: null,
+            state
+        };
+    }
+
+    const quest = buildMsqChapterQuest(state, zone);
+
+    return {
+        ok: true,
+        created: true,
+        action: 'check',
+        quest,
+        state
+    };
+}
+
 function stockNamingEntries(state, targetZone = state.zone) {
     const worldEntries = [];
     const zoneRecord = state.world?.zones?.[targetZone];
@@ -16675,9 +17055,13 @@ function resolveSocialWorkOpportunity(test) {
      * for a particular NPC. An unpublished success remains pending,
      * so subsequent replies cannot pile up hidden offers.
      */
-    // The first two successful local offers are easier to find. Failed
-    // conversations do not exhaust this introductory opportunity window.
-    const chance = counter.offers < 2 ? 2 : 20;
+    // When a zone has an active Spine/MSQ, the MSQ handles the arrival hook
+    // and town sidequests stay at a steady rare rate (1-in-12).
+    const hasZoneSpine =
+        state.world?.zones?.[state.zone]?.spine?.established === true;
+    const chance = hasZoneSpine
+        ? 12
+        : counter.offers < 2 ? 2 : 20;
     const value = roll(state, chance);
     const hasWork = value === 1;
     const contact = {
@@ -17546,7 +17930,9 @@ function resolveBatch(args) {
                 case 'zone_spine':
                     result = resolveZoneSpine(test);
                     break;
-
+                case 'msq':
+                    result = resolveMsqAction(test);
+                    break;
                 case 'world':
                     result = resolveWorldAction(test);
                     break;
@@ -19334,6 +19720,54 @@ function sidequestSpineGuidance(quest, state) {
     ];
 }
 
+function msqOfferNarrationPacket(quest, state) {
+    const zone = quest.msq?.zone ?? quest.seed?.zone ?? state?.zone;
+    const spine = state?.world?.zones?.[zone]?.spine;
+    const shape = ZONE_ARC_SHAPES.find(
+        entry => entry.id === spine?.arcShape
+    );
+    const phase = quest.msq?.phase || 'opening';
+
+    const secretLines = phase === 'finale'
+        ? [
+            `HIDDEN TRUTH (CLIMAX): ${spine?.hiddenTruth || ''}`,
+            `ZONE BOSS CONCEPT: ${spine?.bossConcept || ''}`,
+            'This is the regional Main Story Finale culminating in the Zone Boss showdown. ' +
+                'Build directly on the NPCs, factions, and choices established in chat.'
+        ]
+        : phase === 'escalation'
+            ? [
+                `HIDDEN TRUTH (NOW SURFACING): ${spine?.hiddenTruth || ''}`,
+                'The deeper conspiracy or root cause is now coming into focus. ' +
+                    'Weave this chapter directly out of what the crew has already done in chat. ' +
+                    'Do NOT spawn or reveal the Zone Boss yet.'
+            ]
+            : [
+                'EARLY CHAPTER: Keep this grounded in the open local tension and ' +
+                    'everyday fallout. Do NOT reveal the hidden truth or Zone Boss yet.'
+            ];
+
+    return [
+        '* **MAIN STORY CHAPTER OFFERED!**',
+        `Region: ${zoneDisplayName(state, zone)}.`,
+        ...(shape ? [`Arc Shape: ${shape.label} — ${shape.guidance}`] : []),
+        ...(spine
+            ? [
+                `Open Tension: ${spine.publicTension}`,
+                `Active Factions: ${spine.keyFactions.join(', ')}.`
+            ]
+            : []),
+        ...secretLines,
+        `Mechanical Skeleton: ${quest.pitch}`,
+        ...publicQuestFactLines(quest),
+        `First objective: ${quest.currentGate.objective}`,
+        'Portray the story hook naturally in-world first (NPCs cannot see System ' +
+            'windows; do NOT mention total chapter count or meta story structure). ' +
+            'Then display this exact System HTML card verbatim (visible only to Q’tik and Tansy):',
+        contractOfferedCardHtml(quest)
+    ].join('\n');
+}
+
 function questOfferNarrationPacket(quest, state = null) {
     const sourceText =
         quest.seed?.channel === 'instance'
@@ -19584,11 +20018,11 @@ function questDiscoveryNarrationPacket(result, quest) {
                         : 'The System validated this quest’s final objective and completed ' +
                           'the contract. Display this exact System completion HTML card ' +
                           'verbatim (visible to Q’tik and Tansy):',
-
                 contractCompleteCardHtml({
                     title: completion.title || quest?.title || 'Contract',
                     rank: completion.rank || quest?.rank || null,
-                    rewards: completion.rewards
+                    rewards: completion.rewards,
+                    isMsq: quest?.isMsq === true
                 }),
                 ...xpProgressNarrationLines(
                     result.state?.crew,
@@ -19641,7 +20075,8 @@ function questDeliveryNarrationPacket(result, quest) {
         contractCompleteCardHtml({
             title: quest.title,
             rank: quest.rank,
-            rewards
+            rewards,
+            isMsq: quest.isMsq === true
         }),
         ...xpProgressNarrationLines(
             result.state?.crew,
@@ -19712,7 +20147,8 @@ function questActionNarrationPacket(result, questAction) {
             contractCompleteCardHtml({
                 title: quest.title,
                 rank: quest.rank,
-                rewards
+                rewards,
+                isMsq: quest.isMsq === true
             }),
             ...xpProgressNarrationLines(
                 result.state?.crew,
@@ -19931,7 +20367,8 @@ function combatNarrationPacket(result, actions) {
                 contractCompleteCardHtml({
                     title: completedQuest?.title || 'Contract',
                     rank: completedQuest?.rank || null,
-                    rewards
+                    rewards,
+                    isMsq: completedQuest?.isMsq === true
                 })
             );
         }
@@ -20296,6 +20733,7 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
                 oneCase.kind === 'zone_spine' ||
+                oneCase.kind === 'msq' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 oneCase.kind === 'quest_event' ||
                 oneCase.kind === 'quest_delivery' ||
@@ -20569,10 +21007,17 @@ async function runStoredMechanic(args) {
                 ? questOfferNarrationPacket(caseResult.quest, nextState)
 
              : batch &&
+              oneCase?.kind === 'msq' &&
+              caseResult.created &&
+              caseResult.quest
+                ? msqOfferNarrationPacket(caseResult.quest, nextState)
+
+             : batch &&
               oneCase?.kind === 'debug_create_quest_offer' &&
               caseResult.created &&
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest, nextState)
+
 
             : questDeliveryPacket
                 ? questDeliveryPacket
@@ -22192,11 +22637,18 @@ function showAethermoorContractProgress(notice) {
     const header = document.createElement('div');
     header.className = 'aethermoor-contract-popup-header';
 
+    if (quest.isMsq === true) {
+        popup.style.borderLeftColor = '#c084fc';
+    }
+
     const heading = document.createElement('b');
     heading.className = 'aethermoor-contract-popup-heading';
+    if (quest.isMsq === true) {
+        heading.style.color = '#c084fc';
+    }
     heading.textContent = complete
-        ? 'System Log // Contract Complete'
-        : 'System Log // Gate Cleared';
+        ? (quest.isMsq ? 'System Log // Main Story Complete' : 'System Log // Contract Complete')
+        : (quest.isMsq ? 'System Log // Main Story Gate Cleared' : 'System Log // Gate Cleared');
 
     const label = document.createElement('b');
     label.className = 'aethermoor-contract-popup-rank';
@@ -22323,13 +22775,27 @@ async function showAethermoorContractOffer(
     const header = document.createElement('div');
     header.className = 'aethermoor-contract-popup-header';
 
+    if (quest.isMsq === true) {
+        popup.style.borderLeftColor = '#c084fc';
+    }
+
     const heading = document.createElement('span');
     heading.className = 'aethermoor-contract-popup-heading';
-    heading.textContent = 'System Log // Contract Offered';
+    if (quest.isMsq === true) {
+        heading.style.color = '#c084fc';
+    }
+    heading.textContent = quest.isMsq === true
+        ? 'System Log // Main Story Offered'
+        : 'System Log // Contract Offered';
 
     const rank = document.createElement('span');
     rank.className = 'aethermoor-contract-popup-rank';
-    rank.textContent = `RANK ${quest.rank}`;
+    if (quest.isMsq === true) {
+        rank.style.color = '#c084fc';
+    }
+    rank.textContent = quest.isMsq === true
+        ? `${quest.msq?.isFinale ? 'FINALE' : `CH. ${quest.msq?.chapter || 1}`} · RANK ${quest.rank}`
+        : `RANK ${quest.rank}`;
 
     header.append(heading, rank);
     popup.appendChild(header);
@@ -30169,6 +30635,33 @@ globalThis.aethermoorMechanicsInterceptor =
          * Do not check while an unpublished opportunity already exists.
          * The roll is made only in a free settlement scene.
          */
+        let msqOfferedThisTurn = false;
+        const msqCheckState =
+            getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
+
+        if (
+            msqCheckState?.world?.zones?.[msqCheckState.zone]?.spine?.established === true &&
+            !msqCheckState.currentJourney &&
+            !msqCheckState.activeInstanceId &&
+            !['active', 'spotted'].includes(msqCheckState.encounter?.status)
+        ) {
+            try {
+                const msqOut = await runStoredMechanic({
+                    cases: [{
+                        name: 'check_zone_msq_progression',
+                        kind: 'msq',
+                        action: 'check'
+                    }]
+                });
+
+                if (msqOut?.results?.[0]?.result?.quest) {
+                    msqOfferedThisTurn = true;
+                }
+            } catch (error) {
+                reportAethermoorError(error, 'MSQ progression check failed');
+            }
+        }
+
         const currentMetadata = getContext().chatMetadata;
         const currentState =
             currentMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
@@ -30182,6 +30675,7 @@ globalThis.aethermoorMechanicsInterceptor =
 
         if (
             !movedThisTurn &&
+            !msqOfferedThisTurn &&
             currentSettlement &&
             !currentState.currentJourney &&
             !currentState.activeInstanceId &&

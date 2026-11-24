@@ -468,6 +468,11 @@ function applyOnwardOptionToNextZone(state, fromZoneNumber, option) {
     const repKey = world.settlements[settlementId].reputationKey;
     state.reputation[repKey] ||= { tier: 'Unknown', steps: 0 };
 
+    // Discard pre-warmed stock names if the player cancels and switches onward roads.
+    if (state.cosmeticStockNames?.[nextNumber]) {
+        delete state.cosmeticStockNames[nextNumber];
+    }
+
     previous.chosenOnwardId = option.id;
 }
 
@@ -7455,7 +7460,7 @@ function resolveArrivedRumors(stateInput) {
 
         if (offeredQuest) {
             lines.push(
-                questOfferNarrationPacket(offeredQuest),
+                questOfferNarrationPacket(offeredQuest, state),
                 'The offer remains unaccepted. Leave acceptance to the player.'
             );
         } else if (
@@ -11489,6 +11494,17 @@ function resolveQuestSeed(test) {
         }
     };
 
+    const zoneSpine = state.world?.zones?.[zone]?.spine;
+    let spineTieIn = 'independent';
+
+    if (zoneSpine?.established === true) {
+        if (channel === 'social') {
+            spineTieIn = roll(state, 10) <= 7 ? 'fallout' : 'ordinary';
+        } else if (channel === 'overland') {
+            spineTieIn = roll(state, 10) <= 4 ? 'ripple' : 'independent';
+        }
+    }
+
     const quest = {
         id:
             `quest-${
@@ -11500,6 +11516,7 @@ function resolveQuestSeed(test) {
                             : `rumor-${inquiryRecord.id}`
                         : state.encounter.id
             }-${row.rank}-${questRoll}-${archetype.id}`,
+
         title:
             `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
@@ -11550,7 +11567,8 @@ function resolveQuestSeed(test) {
         originSettlementId: issuerSettlement.id,
         originLocationId: issuerSettlement.locationId,
         repTierAtOffer: rep.label,
-        requiresDelivery: !['sealed_cache', 'field_job'].includes(archetype.id)
+        requiresDelivery: !['sealed_cache', 'field_job'].includes(archetype.id),
+        spineTieIn
     };
 
     quest.targetId = `quest-target-${quest.id}`;
@@ -15277,9 +15295,175 @@ function resolveInnAction(test) {
  * change item identity, stats, healing, price, rarity, or ownership.
  * This is also offered to an existing chat at its current settlement.
  */
-function stockNamingEntries(state) {
+const ZONE_ARC_SHAPES = [
+    {
+        id: 'slow_burn',
+        label: 'The Slow Burn',
+        guidance:
+            'Start with small, seemingly mundane local friction that gradually ' +
+            'connects into a larger hidden conflict before the climax.'
+    },
+    {
+        id: 'open_turf_war',
+        label: 'Open Turf War',
+        guidance:
+            'Two local forces are already clashing openly; pragmatic jobs ' +
+            'pull the crew into retaliation, leverage, and breaking the deadlock.'
+    },
+    {
+        id: 'encroaching_pressure',
+        label: 'Encroaching Pressure',
+        guidance:
+            'An external or environmental threat (failing Imperial hardware, ' +
+            'rising menace, or resource squeeze) steadily escalates until containment breaks.'
+    },
+    {
+        id: 'expedition_heist',
+        label: 'The Expedition / Contest',
+        guidance:
+            'Locals and rivals are racing for access to a sealed or contested ' +
+            'regional prize; early chapters gather leverage/access before the final breach.'
+    },
+    {
+        id: 'rotten_core',
+        label: 'The Rotten Core',
+        guidance:
+            'A respected local authority or syndicate is leaning on residents; ' +
+            'ordinary work exposes cracks leading to open confrontation.'
+    }
+];
+
+function prewarmTargetZone(state) {
+    if (!state?.currentJourney) return null;
+
+    const nextZone = state.world?.zones?.[state.zone + 1];
+    if (!nextZone || nextZone.visited === true) return null;
+
+    const nextSettlement =
+        state.world?.settlements?.[nextZone.primarySettlementId];
+
+    if (
+        nextSettlement &&
+        state.currentJourney.destinationId === nextSettlement.locationId
+    ) {
+        return nextZone.number;
+    }
+
+    return null;
+}
+
+function resolveZoneSpine(test) {
+    assert(
+        test.state && typeof test.state === 'object',
+        'Zone spine requires saved state'
+    );
+
+    const state = clone(test.state);
+    const targetZone = test.zone;
+
+    assert(
+        Number.isInteger(targetZone) && state.world?.zones?.[targetZone],
+        `Unknown zone spine target: ${targetZone}`
+    );
+
+    const atCurrentSettlement =
+        targetZone === state.zone &&
+        !state.currentJourney &&
+        Object.values(state.world?.settlements || {}).some(entry =>
+            entry.locationId === state.currentLocationId &&
+            entry.zone === state.zone
+        );
+
+    const prewarmingOnward = prewarmTargetZone(state) === targetZone;
+
+    assert(
+        atCurrentSettlement || prewarmingOnward,
+        'Zone spine requires presence at its settlement or an active journey toward it'
+    );
+
+    const zoneRecord = state.world.zones[targetZone];
+
+    if (zoneRecord.spine?.established === true) {
+        return {
+            ok: true,
+            created: false,
+            action: 'apply',
+            zone: targetZone,
+            spine: clone(zoneRecord.spine),
+            state
+        };
+    }
+
+    const input = test.spine;
+    assert(
+        input && typeof input === 'object' && !Array.isArray(input),
+        'Zone spine requires a JSON object'
+    );
+
+    const textLimits = {
+        publicTension: [10, 280],
+        hiddenTruth: [10, 280],
+        bossConcept: [5, 180]
+    };
+
+    for (const [key, [minLen, maxLen]] of Object.entries(textLimits)) {
+        assert(
+            typeof input[key] === 'string' &&
+            input[key].trim().length >= minLen &&
+            input[key].trim().length <= maxLen &&
+            !/[<>\r\n]/.test(input[key]),
+            `Invalid zone spine field: ${key}`
+        );
+    }
+
+    const rawFactions = Array.isArray(input.keyFactions)
+        ? input.keyFactions
+        : typeof input.keyFactions === 'string'
+            ? input.keyFactions.split(/[,;]+/)
+            : [];
+
+    const keyFactions = rawFactions
+        .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter(entry => entry.length >= 2 && entry.length <= 80 && !/[<>\r\n]/.test(entry))
+        .slice(0, 4);
+
+    assert(
+        keyFactions.length >= 2,
+        'Zone spine requires at least 2 clean keyFactions'
+    );
+
+    const arcShape = worldChoice(
+        state.world,
+        `arc-shape:${targetZone}`,
+        ZONE_ARC_SHAPES
+    );
+    const chapterCount = 4 + (
+        worldHash(`${state.world.seed}:arc-length:${targetZone}`) % 4
+    );
+
+    zoneRecord.spine = {
+        established: true,
+        publicTension: input.publicTension.trim(),
+        hiddenTruth: input.hiddenTruth.trim(),
+        keyFactions,
+        bossConcept: input.bossConcept.trim(),
+        arcShape: arcShape.id,
+        chapterCount
+    };
+
+    return {
+        ok: true,
+        created: true,
+        action: 'apply',
+        zone: targetZone,
+        spine: clone(zoneRecord.spine),
+        state
+    };
+}
+
+function stockNamingEntries(state, targetZone = state.zone) {
     const worldEntries = [];
-    const zoneRecord = state.world?.zones?.[state.zone];
+    const zoneRecord = state.world?.zones?.[targetZone];
     const settlement = zoneRecord
         ? state.world?.settlements?.[zoneRecord.primarySettlementId]
         : null;
@@ -15304,7 +15488,7 @@ function stockNamingEntries(state) {
 
     const gear = resolveVendorAction({
         action: 'stock',
-        zone: state.zone,
+        zone: targetZone,
         state
     }).catalog.flatMap(entry =>
         entry.variants.map(option => ({
@@ -15317,7 +15501,7 @@ function stockNamingEntries(state) {
         }))
     );
 
-    const potions = herbalistStock(state.zone)
+    const potions = herbalistStock(targetZone)
         .filter(item => item.type === 'potion')
         .map(item => ({
             key: `potion:${item.id}`,
@@ -15352,29 +15536,33 @@ function resolveStockNames(test) {
     );
 
     const state = clone(test.state);
+    const targetZone = test.zone;
 
     assert(
-        test.zone === state.zone,
-        'Stock names belong to the current zone'
+        Number.isInteger(targetZone) && ZONES[targetZone],
+        `Unknown stock naming zone: ${targetZone}`
     );
 
-    const atSettlement = Object.values(
-        state.world?.settlements || {}
-    ).some(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
+    const atCurrentSettlement =
+        targetZone === state.zone &&
+        !state.currentJourney &&
+        Object.values(state.world?.settlements || {}).some(entry =>
+            entry.locationId === state.currentLocationId &&
+            entry.zone === state.zone
+        );
+
+    const prewarmingOnward = prewarmTargetZone(state) === targetZone;
 
     assert(
-        atSettlement && !state.currentJourney,
-        'Stock naming requires arrival at a settlement'
+        atCurrentSettlement || prewarmingOnward,
+        'Stock naming requires arrival at a settlement or an active journey toward it'
     );
 
     state.cosmeticStockNames ||= {};
 
-    const entries = stockNamingEntries(state);
+    const entries = stockNamingEntries(state, targetZone);
     const saved =
-        state.cosmeticStockNames[state.zone] || {};
+        state.cosmeticStockNames[targetZone] || {};
     const missingEntries = entries.filter(
         entry => typeof saved[entry.key] !== 'string'
     );
@@ -15388,7 +15576,7 @@ function resolveStockNames(test) {
             ok: true,
             created: false,
             action: 'apply',
-            zone: state.zone,
+            zone: targetZone,
             state
         };
     }
@@ -15412,7 +15600,7 @@ function resolveStockNames(test) {
         );
     }
 
-    state.cosmeticStockNames[state.zone] = {
+    state.cosmeticStockNames[targetZone] = {
         ...saved,
         ...Object.fromEntries(
             Object.entries(names).map(([key, value]) => [
@@ -15422,7 +15610,7 @@ function resolveStockNames(test) {
         )
     };
 
-    const zoneRecord = state.world?.zones?.[state.zone];
+    const zoneRecord = state.world?.zones?.[targetZone];
     const settlement = zoneRecord
         ? state.world?.settlements?.[zoneRecord.primarySettlementId]
         : null;
@@ -15445,13 +15633,16 @@ function resolveStockNames(test) {
         if (state.places?.[settlement.locationId]) {
             state.places[settlement.locationId].label = settlement.label;
         }
+        if (state.currentJourney?.destinationId === settlement.locationId) {
+            state.currentJourney.destinationLabel = settlement.label;
+        }
     }
 
     return {
         ok: true,
         created: true,
         action: 'apply',
-        zone: state.zone,
+        zone: targetZone,
         state
     };
 }
@@ -17352,6 +17543,9 @@ function resolveBatch(args) {
                 case 'stock_names':
                     result = resolveStockNames(test);
                     break;
+                case 'zone_spine':
+                    result = resolveZoneSpine(test);
+                    break;
 
                 case 'world':
                     result = resolveWorldAction(test);
@@ -19099,7 +19293,48 @@ function publicQuestFactLines(quest) {
         );
 }
 
-function questOfferNarrationPacket(quest) {
+function sidequestSpineGuidance(quest, state) {
+    if (!quest || quest.isMsq === true) return [];
+
+    const zone = quest.seed?.zone ?? state?.zone;
+    const spine = state?.world?.zones?.[zone]?.spine;
+
+    if (quest.seed?.channel === 'instance') {
+        return [
+            'INDEPENDENT RUIN LEAD: Keep this ancient site strictly ' +
+                'independent of current town politics. At most allow ambient ' +
+                'resonance (e.g. old salvage relevant to local needs), never ' +
+                'a convenient main-plot MacGuffin.'
+        ];
+    }
+
+    if (!spine?.established) return [];
+
+    if (quest.spineTieIn === 'fallout') {
+        return [
+            `ZONE SPINE TIE-IN (FALLOUT): Tie this contract into the region’s ` +
+                `open tension ("${spine.publicTension}") and active factions ` +
+                `(${spine.keyFactions.join(', ')}) — e.g. collateral fallout, ` +
+                'pressured workers, or local friction. Do NOT resolve the ' +
+                'region’s main conflict or expose hidden conspiracies.'
+        ];
+    }
+
+    if (quest.spineTieIn === 'ripple') {
+        return [
+            `ZONE SPINE TIE-IN (COLLATERAL RIPPLE): You may link this ` +
+                `wilderness lead as a loose side-effect of "${spine.publicTension}", ` +
+                'without turning it into a main-plot MacGuffin.'
+        ];
+    }
+
+    return [
+        'ORDINARY LIFE / WILDCARD: Keep this job grounded in everyday local ' +
+            'or frontier life, separate from the region’s main faction tension.'
+    ];
+}
+
+function questOfferNarrationPacket(quest, state = null) {
     const sourceText =
         quest.seed?.channel === 'instance'
             ? 'Examining the ruin clue revealed an old Pre-Calamity lead (no living town sponsor).'
@@ -19116,6 +19351,7 @@ function questOfferNarrationPacket(quest) {
         sourceText,
         `Concern: ${quest.pitch || quest.title}`,
         ...publicQuestFactLines(quest),
+        ...sidequestSpineGuidance(quest, state),
         `First objective: ${quest.currentGate.objective}`,
         'First portray the concern in-world (NPCs do not know about System ' +
             'rewards). Then display this exact System offer HTML card verbatim ' +
@@ -19123,8 +19359,6 @@ function questOfferNarrationPacket(quest) {
         contractOfferedCardHtml(quest)
     ].join('\n');
 }
-
-
 
 function inventoryActionNarrationPacket(result, action) {
     if (action === 'equip') {
@@ -20061,6 +20295,7 @@ async function runStoredMechanic(args) {
                 oneCase.kind === 'instance' ||
                 oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
+                oneCase.kind === 'zone_spine' ||
                 oneCase.kind === 'follow_breadcrumb' ||
                 oneCase.kind === 'quest_event' ||
                 oneCase.kind === 'quest_delivery' ||
@@ -20331,13 +20566,13 @@ async function runStoredMechanic(args) {
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
               caseResult.quest
-                ? questOfferNarrationPacket(caseResult.quest)
-            
+                ? questOfferNarrationPacket(caseResult.quest, nextState)
+
              : batch &&
               oneCase?.kind === 'debug_create_quest_offer' &&
               caseResult.created &&
               caseResult.quest
-                ? questOfferNarrationPacket(caseResult.quest)
+                ? questOfferNarrationPacket(caseResult.quest, nextState)
 
             : questDeliveryPacket
                 ? questDeliveryPacket
@@ -29205,6 +29440,25 @@ function extractAethermoorQuestEvents(text) {
             }
         }
 
+        const spinePattern =
+            /<AETHERMOOR:ZONE_SPINE\s+zone=["']?([1-9]\d*)["']?\s*>([\s\S]*?)<\/AETHERMOOR:ZONE_SPINE>/g;
+
+        for (const match of plan[1].matchAll(spinePattern)) {
+            try {
+                events.push({
+                    event: 'zone_spine',
+                    zone: Number(match[1]),
+                    spine: JSON.parse(match[2].trim())
+                });
+            } catch (error) {
+                reportAethermoorError(
+                    error,
+                    'Zone spine JSON rejected',
+                    `spine-json:${worldHash(text)}:${match.index}`
+                );
+            }
+        }
+
         const encounterRequestPattern =
             /<AETHERMOOR:REQUEST_ENCOUNTER\s+type=["']?(normal_pack|elite)["']?\s*\/?>/g;
 
@@ -29338,6 +29592,16 @@ async function processAethermoorAssistantEvents(data) {
                         action: 'apply',
                         zone: event.zone,
                         names: event.names
+                    }]
+                });
+            } else if (event.event === 'zone_spine') {
+                result = await runStoredMechanic({
+                    cases: [{
+                        name: 'assistant_zone_spine',
+                        kind: 'zone_spine',
+                        action: 'apply',
+                        zone: event.zone,
+                        spine: event.spine
                     }]
                 });
             } else if (event.event === 'follow_breadcrumb') {
@@ -29626,6 +29890,7 @@ function settlementWorkContextPacket(state, settlement) {
         `* **QUEST FOUND!** A quest from The System must appear in this reply.`,
         `Local concern: ${quest.pitch}`,
         ...publicQuestFactLines(quest),
+        ...sidequestSpineGuidance(quest, state),
         `CREATIVE FREEDOM: Treat the concern and facts above as a loose ` +
             `mechanical skeleton. Dress the sponsor, target, site, and motive ` +
             `using ${settlement.label}'s active NPCs, factions, tensions, and ` +
@@ -29660,6 +29925,70 @@ function settlementWorkContextPacket(state, settlement) {
             'party. Do not invent another objective, encounter, or reward.'
     ].join('\n');
 
+}
+
+function zoneSpineRequestPacket(state, targetZone) {
+    const zoneRecord = state.world?.zones?.[targetZone];
+    const flavor = zoneRecord?.flavor;
+    const isCurrentZone = targetZone === state.zone;
+
+    return [
+        'PRIVATE ZONE SPINE REQUEST — do not recite or discuss in prose.',
+        isCurrentZone
+            ? `Establish the compact regional story spine for ${zoneDisplayName(state, targetZone)} ` +
+              `(build naturally on any tensions, factions, or NPCs already established in chat).`
+            : `The crew is approaching a new region (${zoneRecord?.geography?.description || 'uncharted terrain'}). ` +
+              'Pre-generate its compact regional story spine before arrival.',
+        ...(flavor
+            ? [`Regional Flavor: ${flavor.label} — ${flavor.hook}`]
+            : []),
+        'Return ONE JSON object inside <plan> using this exact tag:',
+        `<AETHERMOOR:ZONE_SPINE zone=${targetZone}>{"publicTension":"One sentence describing the open local conflict or pressure locals talk about","hiddenTruth":"One sentence describing the deeper secret or real driver behind it (kept private until later chapters)","keyFactions":["Faction 1","Faction 2"],"bossConcept":"Short concept for the region's climactic Zone Boss (person, construct, or creature)"}</AETHERMOOR:ZONE_SPINE>`,
+        'Keep stakes grounded and regional (town-level prize, turf war, failing Imperial infrastructure, or local menace—not world-ending). ' +
+            'Do NOT reveal hiddenTruth or bossConcept in story prose yet.'
+    ].join('\n');
+}
+
+function stockNamingRequestPacket(state, targetZone, missingNamingEntries) {
+    const zoneRecord = state.world?.zones?.[targetZone];
+    const flavor = zoneRecord?.flavor;
+
+    return [
+        'PRIVATE COSMETIC STOCK NAMING REQUEST.',
+        `Region: ${zoneDisplayName(state, targetZone)}.`,
+        `Geography: ${zoneRecord.geography.description}.`,
+        ...(flavor
+            ? [
+                `Regional Flavor: ${flavor.label} — ${flavor.hook}`,
+                ...(flavor.splinterVariant
+                    ? [
+                        'SPLINTER VARIANT: This flavor appeared earlier' +
+                            (flavor.previousRegionName
+                                ? ` in ${flavor.previousRegionName}`
+                                : '') +
+                            '. Give the region, settlement, and gear a distinct splinter twist.'
+                    ]
+                    : [])
+            ]
+            : []),
+        'In this reply, return one JSON object containing ' +
+            'exactly these keys and fictional item names:',
+        ...missingNamingEntries.map(entry =>
+            `- ${entry.key}: ${entry.description}`
+        ),
+        'Put it inside this exact form in <plan>:',
+        `<AETHERMOOR:STOCK_NAMES zone=${targetZone}>{"key":"cosmetic name"}</AETHERMOOR:STOCK_NAMES>`,
+        'Replace the example JSON with ALL requested ' +
+            'keys. Use the keys exactly. Give each item ' +
+            'a distinct, evocative, locally grounded name ' +
+            '(vary materials, craft styles, and motifs—do ' +
+            'not repeat the same material prefix across ' +
+            'every item). Names are cosmetic only: no ' +
+            'numbers, HP, prices, tiers, stats, or ' +
+            'mechanical claims.',
+        'Do not recite this request or delay the ' +
+            'ordinary scene to discuss naming.'
+    ].join('\n');
 }
 
 
@@ -30271,8 +30600,24 @@ globalThis.aethermoorMechanicsInterceptor =
                     });
                 }
 
+                const currentZoneRecord =
+                    contextState.world?.zones?.[contextState.zone];
+                const currentSpine = currentZoneRecord?.spine;
+
+                if (currentSpine?.established === true) {
+                    entries.push({
+                        id: `zone-spine-ambient-${contextState.zone}`,
+                        type: 'zone_spine_context',
+                        packet: [
+                            `PRIVATE REGIONAL ATMOSPHERE — ${zoneDisplayName(contextState, contextState.zone)} (do not recite).`,
+                            `Open local tension: ${currentSpine.publicTension}`,
+                            `Active factions: ${currentSpine.keyFactions.join(', ')}.`
+                        ].join('\n')
+                    });
+                }
+
                 const namingEntries =
-                    stockNamingEntries(contextState);
+                    stockNamingEntries(contextState, contextState.zone);
 
                 const savedNames =
                     contextState.cosmeticStockNames?.[
@@ -30284,59 +30629,26 @@ globalThis.aethermoorMechanicsInterceptor =
                         typeof savedNames[entry.key] !== 'string'
                     );
 
-                if (
-                    !contextState.currentJourney &&
-                    missingNamingEntries.length > 0
-                ) {
-                    const currentZoneRecord =
-                        contextState.world.zones[contextState.zone];
-                    const flavor = currentZoneRecord?.flavor;
-
+                if (missingNamingEntries.length > 0) {
                     entries.push({
                         id: `stock-naming-zone-${contextState.zone}`,
                         type: 'cosmetic_naming',
-                        packet: [
-                            'PRIVATE COSMETIC STOCK NAMING REQUEST.',
-                            `Region: ${zoneDisplayName(contextState, contextState.zone)}.`,
-                            `Geography: ${currentZoneRecord.geography.description}.`,
-                            ...(flavor
-                                ? [
-                                    `Regional Flavor: ${flavor.label} — ${flavor.hook}`,
-                                    ...(flavor.splinterVariant
-                                        ? [
-                                            'SPLINTER VARIANT: This flavor appeared earlier' +
-                                                (flavor.previousRegionName
-                                                    ? ` in ${flavor.previousRegionName}`
-                                                    : '') +
-                                                '. Give the region, settlement, and gear a distinct splinter twist.'
-                                        ]
-                                        : [])
-                                ]
-                                : []),
-                            'In this reply, return one JSON object containing ' +
-                                'exactly these keys and fictional item names:',
-                            ...missingNamingEntries.map(entry =>
-                                `- ${entry.key}: ${entry.description}`
-                            ),
-                            'Put it inside this exact form in <plan>:',
-                            `<AETHERMOOR:STOCK_NAMES zone=${
-                                contextState.zone
-                            }>{"key":"cosmetic name"}</AETHERMOOR:STOCK_NAMES>`,
-                            'Replace the example JSON with ALL requested ' +
-                                'keys. Use the keys exactly. Give each item ' +
-                                'a distinct, evocative, locally grounded name ' +
-                                '(vary materials, craft styles, and motifs—do ' +
-                                'not repeat the same material prefix across ' +
-                                'every item). Names are cosmetic only: no ' +
-                                'numbers, HP, prices, tiers, stats, or ' +
-                                'mechanical claims.',
-                            'Do not recite this request or delay the ' +
-                                'ordinary scene to discuss naming.'
-                        ].join('\n')
+                        packet: stockNamingRequestPacket(
+                            contextState,
+                            contextState.zone,
+                            missingNamingEntries
+                        )
+                    });
+                } else if (currentSpine?.established !== true) {
+                    entries.push({
+                        id: `zone-spine-request-${contextState.zone}`,
+                        type: 'zone_spine_request',
+                        packet: zoneSpineRequestPacket(
+                            contextState,
+                            contextState.zone
+                        )
                     });
                 } else if (
-                    !contextState.currentJourney &&
-                    missingNamingEntries.length === 0 &&
                     !contextState.shopBriefedZones?.[contextState.zone]
                 ) {
                     entries.push({
@@ -30345,6 +30657,47 @@ globalThis.aethermoorMechanicsInterceptor =
                         packet: settlementShopBriefingPacket(
                             contextState,
                             settlement
+                        )
+                    });
+                }
+            }
+        }
+
+        /*
+         * Staggered 3-segment pre-warming on zone_transition journeys:
+         * Segment 1 requests ZONE_SPINE; Segment 2 requests STOCK_NAMES;
+         * Segment 3 arrival has both ready with zero JSON tax.
+         */
+        const prewarmZone = contextState &&
+            !['active', 'spotted'].includes(contextState.encounter?.status)
+            ? prewarmTargetZone(contextState)
+            : null;
+
+        if (prewarmZone) {
+            const nextZoneRecord = contextState.world?.zones?.[prewarmZone];
+            if (nextZoneRecord?.spine?.established !== true) {
+                entries.push({
+                    id: `zone-spine-request-${prewarmZone}`,
+                    type: 'zone_spine_request',
+                    packet: zoneSpineRequestPacket(contextState, prewarmZone)
+                });
+            } else {
+                const nextNamingEntries =
+                    stockNamingEntries(contextState, prewarmZone);
+                const nextSavedNames =
+                    contextState.cosmeticStockNames?.[prewarmZone] || {};
+                const nextMissing = nextNamingEntries.filter(
+                    entry => typeof nextSavedNames[entry.key] !== 'string'
+                );
+
+                if (nextMissing.length > 0) {
+                    entries.push({
+                        id: `stock-naming-zone-${prewarmZone}`,
+                        type: 'cosmetic_naming',
+                        packet: stockNamingRequestPacket(
+                            contextState,
+                            prewarmZone,
+                            nextMissing
                         )
                     });
                 }

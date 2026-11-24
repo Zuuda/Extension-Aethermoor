@@ -28269,7 +28269,12 @@ function makeChoiceGroup(
     return wrapper;
 }
 
-function estimateCombatDamageTag(state, qtikAction, tansyAction) {
+function combatActionLabel(group, value) {
+    const list = group === 'qtik' ? QTIK_COMBAT_OPTIONS : TANSY_COMBAT_OPTIONS;
+    return list.find(option => option.value === value)?.label || value;
+}
+
+function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
     const crew = state.crew;
     const encounter = state.encounter?.status === 'active'
         ? state.encounter
@@ -28300,11 +28305,20 @@ function estimateCombatDamageTag(state, qtikAction, tansyAction) {
             qtikBasePenalty
     );
 
+    const livingFoes = (encounter?.foes || []).filter(foe => foe.hp > 0);
+    const target = livingFoes.find(foe => foe.id === targetId) || livingFoes[0] || null;
+    const targetIndex = target
+        ? encounter.foes.indexOf(target)
+        : -1;
+    const targetLabel = target
+        ? combatFoeLabel(target, targetIndex)
+        : null;
+
     const hexPenalty = encounter
         ? Object.entries(encounter.hexStacks || {}).reduce(
             (total, [id, stacks]) => {
-                const hexer = (encounter.foes || []).find(
-                    foe => foe.hp > 0 && foe.id === id && foe.role === 'hexer'
+                const hexer = livingFoes.find(
+                    foe => foe.id === id && foe.role === 'hexer'
                 );
                 return total + (
                     hexer
@@ -28321,10 +28335,42 @@ function estimateCombatDamageTag(state, qtikAction, tansyAction) {
         unpenalizedAtk - hexPenalty - passivePenalty
     );
 
+    const buffer = encounter?.bufferId
+        ? livingFoes.find(
+            foe => foe.id === encounter.bufferId && foe.role === 'buffer'
+        )
+        : null;
+    const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
+
+    let targetDef = 0;
+    if (target) {
+        const telegraphBonus = Number(
+            telegraphEffects(target)?.defenseBonus || 0
+        );
+        const stunReduction = qtikAction === 'stun'
+            ? 4 * enemyTier(target.level)
+            : 0;
+        const fireShred = qtikAction === 'fire_melee'
+            ? Math.max(2, 2 * enemyTier(target.level))
+            : 0;
+        targetDef = Math.max(
+            0,
+            target.def + bufferBonus + telegraphBonus -
+            stunReduction - fireShred - shadows.hexStrip
+        );
+    }
+
     const fireDmg = qtikAction === 'fire_melee'
         ? Math.max(3, Math.floor(stats.atk / 5))
         : 0;
+    const vitalsBonus = tansyAction === 'vitals'
+        ? Math.min(targetDef, Math.floor((activeWeasels + shadows.slots) / 2))
+        : 0;
+    const exposed = Number(encounter?.exposed || 0);
+    const exposedNote = exposed > 0 ? ` · +${exposed} Exposed` : '';
 
+    const qLabel = combatActionLabel('qtik', qtikAction);
+    const tLabel = combatActionLabel('tansy', tansyAction);
     const isAoE = qtikAction === 'frost_stomp' || tansyAction === 'overrun';
 
     if (isAoE) {
@@ -28334,31 +28380,45 @@ function estimateCombatDamageTag(state, qtikAction, tansyAction) {
                 : tansyAction === 'overrun'
                     ? 0.6
                     : 0.5;
-        const baseAoE = Math.max(0, Math.floor(effectiveAtk * aoeFactor));
-        const minDmg = Math.max(1, baseAoE + 2);
-        const maxDmg = Math.max(1, baseAoE + 6);
-        return `${minDmg}–${maxDmg} raw dmg/foe`;
+        const baseAoE = Math.max(
+            0,
+            Math.floor((effectiveAtk - targetDef) * aoeFactor)
+        );
+        const primaryBonus = fireDmg + vitalsBonus;
+        const minEx = Math.max(1, baseAoE + 2 + primaryBonus);
+        const maxEx = Math.max(1, baseAoE + 6 + primaryBonus);
+        const turnMin = minEx * 3 + exposed;
+        const turnMax = maxEx * 3 + exposed;
+        const foeScope = livingFoes.length > 1
+            ? ` · AoE hits all ${livingFoes.length} foes`
+            : '';
+
+        return `Combo (${qLabel} + ${tLabel} vs ${targetLabel || 'target'}): ` +
+            `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3${foeScope}${exposedNote})`;
     }
 
     const normalMaxRoll = tansyAction === 'vitals' ? 4 : 5;
-    const minHit = Math.max(1, effectiveAtk + 2) + fireDmg;
-    const maxHit = Math.max(1, effectiveAtk + normalMaxRoll) + fireDmg;
+    const minEx = Math.max(1, effectiveAtk - targetDef + 2 + vitalsBonus) + fireDmg;
+    const maxEx = Math.max(1, effectiveAtk - targetDef + normalMaxRoll + vitalsBonus) + fireDmg;
+    const turnMin = minEx * 3 + exposed;
+    const turnMax = maxEx * 3 + exposed;
 
     const critMinRoll = tansyAction === 'vitals' ? 5 : 6;
     const critMin =
-        Math.round(Math.max(1, effectiveAtk + critMinRoll) * 1.5) +
+        Math.round(Math.max(1, effectiveAtk - targetDef + critMinRoll + vitalsBonus) * 1.5) +
         stats.luk + fireDmg;
     const critMax =
-        Math.round(Math.max(1, effectiveAtk + 6) * 1.5) +
+        Math.round(Math.max(1, effectiveAtk - targetDef + 6 + vitalsBonus) * 1.5) +
         stats.luk + fireDmg;
     const critText = critMin === critMax
-        ? `crit ${critMax}`
-        : `crit ${critMin}–${critMax}`;
+        ? `crit ${critMax}/exch`
+        : `crit ${critMin}–${critMax}/exch`;
 
-    return `${minHit}–${maxHit} raw dmg (${critText})`;
+    return `Combo (${qLabel} + ${tLabel} vs ${targetLabel || 'target'}): ` +
+        `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3 · ${critText}${exposedNote})`;
 }
 
-function updateCombatTooltips(host, state, { previewOnly = false } = {}) {
+function updateCombatTooltips(host, state) {
     const crew = state.crew;
     const stats = derived(crew);
     const shadows = shadowMechanics(crew);
@@ -28427,7 +28487,7 @@ function updateCombatTooltips(host, state, { previewOnly = false } = {}) {
                 'them from Carapace/Cleave destruction. Shadow-Archer ' +
                 'attack remains; Hexer/Warder attack does not contribute. ' +
                 'Q’tik still attacks and can take reflected damage.',
-            
+
             surge:
                 'Once per encounter. Immediately refills all available ' +
                 'loose-weasel slots before exchanges, preserving Shadows. ' +
@@ -28441,7 +28501,7 @@ function updateCombatTooltips(host, state, { previewOnly = false } = {}) {
             drink:
                 'Choose a stocked potion below. Four potions per ' +
                 'character per encounter, including cleansing tonics. ' +
-                'Uses this command instead of Visor/Vitals/Hamstring.'
+                'Uses this command instead of Visor/Vitals/Overrun.'
         }
     };
 
@@ -28454,28 +28514,12 @@ function updateCombatTooltips(host, state, { previewOnly = false } = {}) {
         const description = descriptions[group]?.[value];
         if (!description) continue;
 
-        const qtikAction = group === 'qtik'
-            ? value
-            : previewOnly
-                ? 'stun'
-                : combatSelections.qtik;
-        const tansyAction = group === 'tansy'
-            ? value
-            : previewOnly
-                ? 'visor'
-                : combatSelections.tansy;
-
-        const damageTag = estimateCombatDamageTag(
-            state,
-            qtikAction,
-            tansyAction
-        );
         const prefix =
             button.dataset.exhausted === 'true'
                 ? 'Unavailable: already used to its limit.\n\n'
                 : '';
 
-        button.title = `${prefix}${damageTag}\n${description}`;
+        button.title = `${prefix}${description}`;
     }
 
     for (const button of host.querySelectorAll(
@@ -28679,7 +28723,9 @@ function ensureAethermoorCombatChoiceStyles() {
         }
 
         .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-status {
+        .aethermoor-combat-status,
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-result {
             width: 100%;
             max-width: 100%;
             min-width: 0;
@@ -28688,6 +28734,33 @@ function ensureAethermoorCombatChoiceStyles() {
             overflow-wrap: anywhere;
         }
 
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-result {
+            max-height: 260px;
+            overflow-y: auto;
+            margin: 8px 0 0;
+            padding: 8px 10px;
+            background: #101419;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #ef4444;
+            border-radius: 2px;
+            font: 11px/1.45 Consolas, monospace;
+            color: #d0d7de;
+        }
+
+        .aethermoor-tab-view[data-tab="combat"]
+        .aethermoor-combat-forecast {
+            margin: 8px 0;
+            padding: 7px 10px;
+            background: #101419;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #ffd166;
+            border-radius: 2px;
+            font: 11px/1.45 Consolas, monospace;
+            color: #ffd166;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
 
         .aethermoor-tab-view[data-tab="combat"]
         .aethermoor-combat-choice-title,
@@ -28754,7 +28827,7 @@ function appendCombatCommandPreview(inlineHost, state) {
     const note = document.createElement('div');
     note.className = 'aethermoor-ui-text';
     note.textContent =
-        'Commands locked outside active combat — hover for live raw damage & details.';
+        'Commands locked outside active combat — hover for ability details.';
 
     const qtikGroup = makeChoiceGroup(
         `Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`,
@@ -29047,6 +29120,18 @@ async function openCombatPanel(inlineHost) {
 
     const currentStats = derived(state.crew);
 
+    const comboForecast = document.createElement('div');
+    comboForecast.className = 'aethermoor-combat-forecast';
+
+    function refreshComboForecast() {
+        comboForecast.textContent = formatCombatComboPreview(
+            state,
+            combatSelections.qtik,
+            combatSelections.tansy,
+            combatSelections.target
+        );
+    }
+
     const qtikGroup = makeChoiceGroup(
         `Q'tik (${state.crew.qtik.hp}/` +
             `${currentStats.qtikMaxHp} HP)`,
@@ -29056,7 +29141,7 @@ async function openCombatPanel(inlineHost) {
         value => {
             combatSelections.qtik = value;
             showSelectedPotionGroups();
-            updateCombatTooltips(inlineHost, state, { previewOnly: false });
+            refreshComboForecast();
         }
     );
 
@@ -29069,7 +29154,7 @@ async function openCombatPanel(inlineHost) {
         value => {
             combatSelections.tansy = value;
             showSelectedPotionGroups();
-            updateCombatTooltips(inlineHost, state, { previewOnly: false });
+            refreshComboForecast();
         }
     );
 
@@ -29104,6 +29189,7 @@ async function openCombatPanel(inlineHost) {
         combatSelections.target,
         value => {
             combatSelections.target = value;
+            refreshComboForecast();
         }
     );
 
@@ -29172,14 +29258,29 @@ async function openCombatPanel(inlineHost) {
                 result?.error || 'Combat turn failed'
             );
 
+            const resultFoes = result.summary?.encounter?.foes || [];
             const foeLabel = id => {
-                const foes = result.summary?.encounter?.foes || [];
-                const index = foes.findIndex(foe => foe.id === id);
-                return index >= 0 ? combatFoeLabel(foes[index], index) : id;
+                const index = resultFoes.findIndex(foe => foe.id === id);
+                return index >= 0 ? combatFoeLabel(resultFoes[index], index) : id;
+            };
+            const foeReplacements = resultFoes
+                .map((foe, index) => [foe.id, combatFoeLabel(foe, index)])
+                .sort((a, b) => b[0].length - a[0].length);
+            const cleanLogLine = text => {
+                let cleaned = String(text ?? '');
+                for (const [id, label] of foeReplacements) {
+                    if (id && cleaned.includes(id)) {
+                        cleaned = cleaned.replaceAll(id, label);
+                    }
+                }
+                return cleaned;
             };
 
+            const qActionName = combatActionLabel('qtik', actionsInput.qtik);
+            const tActionName = combatActionLabel('tansy', actionsInput.tansy);
+
             aethermoorLastCombatLog = [
-                `Turn ${result.turn} · ${actionsInput.qtik} / ${actionsInput.tansy}`,
+                `Turn ${result.turn} · ${qActionName} / ${tActionName}`,
                 ...(result.exchanges || []).map(exchange => {
                     const hits = (exchange.hits || [])
                         .filter(hit => hit.damage > 0)
@@ -29200,26 +29301,41 @@ async function openCombatPanel(inlineHost) {
                             : '  Enemy attack missed (Ice Patch).')
                         : null;
 
+                    const rawEffects = (exchange.effects || []).map(cleanLogLine);
+                    const hasIndividualInterrupts = rawEffects.some(line =>
+                        line.includes('was interrupted by Frost Stomp')
+                    );
+                    const cleanedEffects = rawEffects.filter(line =>
+                        !(
+                            hasIndividualInterrupts &&
+                            line === 'Frost Stomp interrupted ordinary specialists for Ex1'
+                        )
+                    );
+                    const tansyDamageAlreadyStated =
+                        exchange.backlineDamage > 0 &&
+                        cleanedEffects.some(line =>
+                            line.includes(`dealt ${exchange.backlineDamage} damage to Tansy`) ||
+                            line.includes(`dealt ${exchange.backlineDamage} splash to Tansy`)
+                        );
+
                     return [
                         `Exchange ${exchange.exchange} ${rollTag}: ` +
                             (hits.join('; ') || 'No damage dealt'),
                         ...(exchange.frontlineDamage > 0
                             ? [`  Q'tik took ${exchange.frontlineDamage} damage.`]
                             : []),
-                        ...(exchange.backlineDamage > 0
+                        ...(exchange.backlineDamage > 0 && !tansyDamageAlreadyStated
                             ? [`  Tansy took ${exchange.backlineDamage} damage.`]
                             : []),
                         ...(missNote ? [missNote] : []),
-                        ...(exchange.effects || []).map(effect =>
-                            `  ${effect}`
-                        )
+                        ...cleanedEffects.map(effect => `  ${effect}`)
                     ].join('\n');
 
                 }),
-                ...(result.turnEffects || []),
+                ...(result.turnEffects || []).map(cleanLogLine),
                 '',
                 `Remaining: ${
-                    (result.summary?.encounter?.foes || [])
+                    resultFoes
                         .filter(foe => foe.hp > 0)
                         .map(foe =>
                             `${foeLabel(foe.id)} ${foe.hp}/${foe.maxHp} HP`
@@ -29324,6 +29440,7 @@ async function openCombatPanel(inlineHost) {
         tansyGroup,
         tansyPotions,
         targetGroup,
+        comboForecast,
         actions,
         resultBox
     );
@@ -29334,6 +29451,7 @@ async function openCombatPanel(inlineHost) {
         state
     );
     showSelectedPotionGroups();
+    refreshComboForecast();
 
     // Tooltips and debuff display are auxiliary UI. They must never prevent
     // the actual combat controls from rendering.

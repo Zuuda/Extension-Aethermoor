@@ -26636,7 +26636,7 @@ async function renderInstanceTab(host) {
             atEntrance
                 ? 'Enter instance'
                 : journey?.completedSegments === journey?.totalSegments
-                    ? 'Arrive at instance'
+                    ? 'Journey to instance'
                     : journey
                         ? 'Continue to instance'
                         : 'Journey to instance',

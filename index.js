@@ -23272,6 +23272,23 @@ async function renderQuestTab(host) {
             }
         }
 
+        const hasLiveEncounter = ['active', 'spotted'].includes(
+            state.encounter?.status
+        );
+        const isQuestLinkedFight =
+            hasLiveEncounter &&
+            state.encounter?.questTerminal?.questId === quest.id;
+
+        if (isQuestLinkedFight) {
+            body.appendChild(
+                makeAethermoorAction(
+                    'Fight!',
+                    'combat',
+                    () => openAethermoorTab('combat')
+                )
+            );
+        }
+
         const destinationId =
             bringingPersonToSafety || returningWithCargo
                 ? quest.turnIn.locationId
@@ -23298,24 +23315,34 @@ async function renderQuestTab(host) {
                 body.appendChild(progress);
             }
 
-            const move = makeAethermoorAction(
-                journey?.completedSegments === journey?.totalSegments
-                    ? 'Finish journey to quest destination'
-                    : journey
-                        ? 'Continue to quest destination'
-                        : bringingPersonToSafety
-                            ? 'Bring person to safety'
-                            : returningWithCargo
-                                ? 'Return with quest cargo'
-                                : 'Travel to quest objective',
-                'quest',
-                () => copyAethermoorCommand(
-                    destinationCommand(destinationId)
-                )
-            );
+            if (journey?.status === 'paused' && hasLiveEncounter) {
+                body.appendChild(
+                    makeAethermoorAction(
+                        'Fight!',
+                        'combat',
+                        () => openAethermoorTab('combat')
+                    )
+                );
+            } else {
+                const move = makeAethermoorAction(
+                    journey?.completedSegments === journey?.totalSegments
+                        ? 'Finish journey to quest destination'
+                        : journey
+                            ? 'Continue to quest destination'
+                            : bringingPersonToSafety
+                                ? 'Bring person to safety'
+                                : returningWithCargo
+                                    ? 'Return with quest cargo'
+                                    : 'Travel to quest objective',
+                    'quest',
+                    () => copyAethermoorCommand(
+                        destinationCommand(destinationId)
+                    )
+                );
 
-            move.disabled = movementBlocked;
-            body.appendChild(move);
+                move.disabled = movementBlocked;
+                body.appendChild(move);
+            }
         }
 
         addQuestAction(body, quest, 'Cancel Quest', 'cancel');
@@ -26178,6 +26205,29 @@ function appendEncounterCard(host, state, originTab) {
         }
 
         host.appendChild(section);
+    } else if (encounter?.status === 'active') {
+        const section = makeAethermoorSection(
+            'ENCOUNTER ACTIVE',
+            encounter.foes
+                .filter(foe => foe.hp > 0)
+                .map((foe, index) =>
+                    `${combatFoeLabel(foe, index)} · ` +
+                    `${foe.hp}/${foe.maxHp} HP`
+                )
+                .join('\n') +
+                '\nCombat is in progress.',
+            'combat'
+        );
+
+        section.appendChild(
+            makeAethermoorAction(
+                'Fight!',
+                'combat',
+                () => openAethermoorTab('combat')
+            )
+        );
+
+        host.appendChild(section);
     }
 }
 
@@ -26632,19 +26682,28 @@ async function renderInstanceTab(host) {
             ? instanceCommand(instance.id, 'enter')
             : destinationCommand(instance.entranceId);
 
-        const button = makeAethermoorAction(
-            atEntrance
-                ? 'Enter instance'
-                : journey?.completedSegments === journey?.totalSegments
-                    ? 'Journey to instance'
-                    : journey
-                        ? 'Continue to instance'
-                        : 'Journey to instance',
-            'world',
-            () => copyAethermoorCommand(command)
-        );
+        const pausedByFight =
+            journey?.status === 'paused' && blocked;
 
-        button.disabled = blocked;
+        const button = pausedByFight
+            ? makeAethermoorAction(
+                'Fight!',
+                'combat',
+                () => openAethermoorTab('combat')
+            )
+            : makeAethermoorAction(
+                atEntrance
+                    ? 'Enter instance'
+                    : journey?.completedSegments === journey?.totalSegments
+                        ? 'Arrive at instance'
+                        : journey
+                            ? 'Continue to instance'
+                            : 'Journey to instance',
+                'world',
+                () => copyAethermoorCommand(command)
+            );
+
+        button.disabled = pausedByFight ? false : blocked;
         section.appendChild(button);
         host.appendChild(section);
     }

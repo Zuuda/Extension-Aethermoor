@@ -25941,67 +25941,6 @@ async function renderAchievementsTab(host) {
     }
 
     host.appendChild(earnedDrawer);
-
-    // Drawer 2: Unearned Achievements (Next Chaseable Tier)
-    const unearnedDrawer = document.createElement('details');
-    unearnedDrawer.className = 'aethermoor-knowledge';
-    unearnedDrawer.style.borderLeftColor = '#9caab8';
-
-    const unearnedSummary = document.createElement('summary');
-    unearnedSummary.className = 'aethermoor-ui-heading';
-    unearnedSummary.textContent = `UNEARNED (NEXT TIER) · ${unearned.length}`;
-    unearnedDrawer.appendChild(unearnedSummary);
-
-    const copyBtn = makeAethermoorAction(
-        'Copy Table for Chat',
-        'quest',
-        () => {
-            void copyAethermoorAchievementsTable(state).catch(error => {
-                toastr.error(
-                    error instanceof Error ? error.message : String(error),
-                    'Aethermoor'
-                );
-            });
-        }
-    );
-    copyBtn.style.marginTop = '8px';
-    copyBtn.title =
-        'Copies a styled HTML table of chaseable unearned achievements to paste into your reply when Tansy checks the tab.';
-    unearnedDrawer.appendChild(copyBtn);
-
-    if (unearned.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'aethermoor-ui-text';
-        empty.style.marginTop = '6px';
-        empty.textContent = 'Every milestone has been unlocked!';
-        unearnedDrawer.appendChild(empty);
-    } else {
-        for (const ach of unearned) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
-
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
-
-            const title = document.createElement('div');
-            title.className = 'aethermoor-vendor-name';
-            title.textContent = ach.title;
-
-            const req = document.createElement('div');
-            req.className = 'aethermoor-vendor-detail';
-            req.textContent = ach.requirement;
-
-            const reward = document.createElement('div');
-            reward.className = 'aethermoor-inventory-gain';
-            reward.textContent = formatAchievementBonus(ach.bonus);
-
-            main.append(title, req, reward);
-            row.appendChild(main);
-            unearnedDrawer.appendChild(row);
-        }
-    }
-
-    host.appendChild(unearnedDrawer);
 }
 
 function combatRecapPrompt(receipt) {

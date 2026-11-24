@@ -25420,18 +25420,26 @@ async function renderInstanceTab(host) {
             return aKnown - bKnown;
         });
 
-    if (zoneInstances.length === 0) {
+    const openInstances = zoneInstances.filter(
+        site => site.status !== 'exhausted'
+    );
+    const clearedInstances = zoneInstances.filter(
+        site => site.status === 'exhausted'
+    );
+
+    if (openInstances.length === 0) {
         host.appendChild(
             makeAethermoorSection(
                 'INSTANCE',
-                'No known instance in the current zone.',
+                clearedInstances.length > 0
+                    ? 'All discovered instances in this zone are cleared.'
+                    : 'No known instance in the current zone.',
                 'world'
             )
         );
-        return;
     }
 
-    for (const instance of zoneInstances) {
+    for (const instance of openInstances) {
         const atEntrance =
             state.currentLocationId === instance.entranceId &&
             !state.currentJourney;
@@ -25479,6 +25487,28 @@ async function renderInstanceTab(host) {
         button.disabled = blocked;
         section.appendChild(button);
         host.appendChild(section);
+    }
+
+    if (clearedInstances.length > 0) {
+        const drawer = document.createElement('details');
+        drawer.className = 'aethermoor-knowledge';
+
+        const summary = document.createElement('summary');
+        summary.className = 'aethermoor-ui-heading';
+        summary.textContent = `CLEARED SITES · ${clearedInstances.length}`;
+        drawer.appendChild(summary);
+
+        for (const instance of clearedInstances) {
+            const line = document.createElement('div');
+            line.className = 'aethermoor-ui-text';
+            line.style.marginTop = '6px';
+            line.textContent =
+                `${instance.label} · ` +
+                `${instance.kind === 'hidden' ? 'Hidden site' : 'Known site'} · Cleared`;
+            drawer.appendChild(line);
+        }
+
+        host.appendChild(drawer);
     }
 }
 
@@ -27770,6 +27800,19 @@ async function openCombatPanel(inlineHost) {
 
         if (receipt && receipt.encounterId === encounter.id) {
             appendVictoryReceipt(inlineHost, receipt);
+        }
+
+        if (
+            aethermoorLastCombatLog &&
+            aethermoorLastCombatLogKey === combatLogKey(state)
+        ) {
+            inlineHost.appendChild(
+                makeAethermoorSection(
+                    'FINAL TURN LOG',
+                    aethermoorLastCombatLog,
+                    'combat'
+                )
+            );
         }
 
         appendCombatCommandPreview(inlineHost, state);

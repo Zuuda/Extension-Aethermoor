@@ -12550,6 +12550,45 @@ function resolveQuestEvent(test) {
             ? findQuestById(state, test.questId)
             : findQuestByDiscoveryId(state, test.questItemId);
 
+    /*
+     * On-site contracts (field_job, sealed_cache) complete immediately on
+     * their decisive FOUND event and move into journal.completed. A
+     * duplicate render notification for the same assistant reply must
+     * return a no-op instead of rejecting as missing.
+     */
+    if (test.event === 'found') {
+        const completedOwner =
+            quest?.status === 'complete'
+                ? quest
+                : !quest && test.questId === undefined
+                    ? state.quests.completed.find(
+                        entry =>
+                            entry?.status === 'complete' &&
+                            entry.discoveries?.some(
+                                item => item.id === test.questItemId
+                            )
+                    )
+                    : null;
+
+        const completedDiscovery = completedOwner?.discoveries?.find(
+            item => item.id === test.questItemId
+        );
+
+        if (
+            completedDiscovery &&
+            ['acquired', 'delivered'].includes(completedDiscovery.state)
+        ) {
+            return {
+                ok: true,
+                created: false,
+                action: 'quest_event',
+                event: test.event,
+                discovery: clone(completedDiscovery),
+                state
+            };
+        }
+    }
+
     assert(
         quest?.status === 'in_progress',
         test.questId !== undefined
@@ -12563,7 +12602,6 @@ function resolveQuestEvent(test) {
         state
     });
 }
-
 
 function resolveSelectedQuestEvent(test) {
     assert(
@@ -13011,8 +13049,9 @@ function resolveQuestAction(test) {
                             (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
 
                         msq.pendingBeatDelay = hotLead
-                            ? 0
-                            : 1 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+                            ? 1
+                            : 2 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+
                     }
                 } else {
                     msq.status = 'declined';
@@ -13346,8 +13385,8 @@ function resolveQuestAction(test) {
                     (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
 
                 msq.pendingBeatDelay = hotLead
-                    ? 0
-                    : 1 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+                    ? 1
+                    : 2 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
             }
         }
     }
@@ -15848,15 +15887,15 @@ function resolveMsqAction(test) {
         };
     }
 
-    // Chapter 1 hooks the crew inside the settlement; later chapters can
-    // surface anywhere once Breathing Room finishes (or immediately on Hot Lead).
+    // MSQ chapters surface in the settlement so NPCs and local factions
+    // can deliver the hook naturally instead of firing on an empty site.
     const atSettlement = Object.values(state.world?.settlements || {}).some(
         entry =>
             entry.locationId === state.currentLocationId &&
             entry.zone === zone
     );
 
-    if (msq.chapter === 0 && !atSettlement) {
+    if (!atSettlement) {
         return {
             ok: true,
             created: false,

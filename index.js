@@ -27639,6 +27639,15 @@ function openAethermoorPanel() {
             aethermoorPanelOpen = false;
         });
 
+        const pause = document.createElement('button');
+        pause.id = 'aethermoor_pause_button';
+        pause.type = 'button';
+        pause.className = 'aethermoor-panel-close';
+        pause.textContent = 'Pause';
+        pause.addEventListener('click', () => {
+            setAethermoorHandoffsPaused(!aethermoorRoleplayHandoffsPaused);
+        });
+
         const debug = document.createElement('button');
         debug.id = 'aethermoor_debug_button';
         debug.type = 'button';
@@ -27649,7 +27658,7 @@ function openAethermoorPanel() {
 
         const headerActions = document.createElement('div');
         headerActions.className = 'aethermoor-shop-header-actions';
-        headerActions.append(debug, close);
+        headerActions.append(pause, debug, close);
 
         header.append(title, headerActions);
 
@@ -27706,7 +27715,7 @@ function openAethermoorPanel() {
         aethermoorPanelElement = panel;
     }
 
-    updateAethermoorDebugButton();
+    updateAethermoorPauseButton();
     updateAethermoorQueuedMoveBar();
     aethermoorPanelElement.hidden = false;
     aethermoorPanelOpen = true;
@@ -29567,30 +29576,6 @@ function openNarrationDebug() {
     status.className = 'aethermoor-ui-text';
     const controls = document.createElement('div');
     controls.className = 'aethermoor-ui-actions';
-
-    const roleplayHandoffs = makeAethermoorAction(
-        '',
-        'world',
-        () => {
-            setAethermoorHandoffsPaused(
-                !aethermoorRoleplayHandoffsPaused
-            );
-            updateRoleplayHandoffButton();
-        }
-    );
-
-    function updateRoleplayHandoffButton() {
-        roleplayHandoffs.textContent =
-            aethermoorRoleplayHandoffsPaused
-                ? 'Resume roleplay handoffs'
-                : 'Pause roleplay handoffs for debugging';
-        roleplayHandoffs.title =
-            'Pausing suppresses prompt injection, not saved campaign ' +
-            'state. Queued results remain for when handoffs resume.';
-    }
-
-    updateRoleplayHandoffButton();
-
     const output = document.createElement('div');
     output.className = 'aethermoor-debug-records';
 
@@ -29849,13 +29834,13 @@ function openNarrationDebug() {
     );
 
     controls.append(
-        roleplayHandoffs,
         toggle,
         refreshButton,
         clear,
         createTestRumor,
         resetCampaign
     );
+
     body.append(
         status,
         controls,
@@ -29909,22 +29894,20 @@ function setAethermoorHandoffsPaused(paused) {
         );
     }
 
-    updateAethermoorDebugButton();
+    updateAethermoorPauseButton();
 }
 
-function updateAethermoorDebugButton() {
-    const button = document.getElementById('aethermoor_debug_button');
+function updateAethermoorPauseButton() {
+    const button = document.getElementById('aethermoor_pause_button');
     if (!button) return;
 
-    button.textContent = aethermoorRoleplayHandoffsPaused
-        ? 'Debug (PAUSED)'
-        : 'Debug';
-    button.style.color = aethermoorRoleplayHandoffsPaused
-        ? '#ffd166'
-        : '';
-    button.style.borderColor = aethermoorRoleplayHandoffsPaused
-        ? '#ffd166'
-        : '';
+    const paused = aethermoorRoleplayHandoffsPaused;
+    button.setAttribute('aria-pressed', String(paused));
+    button.style.color = paused ? '#ffd166' : '';
+    button.style.borderColor = paused ? '#ffd166' : '';
+    button.title = paused
+        ? 'Roleplay handoffs are paused — click to resume.'
+        : 'Pause roleplay handoffs for debugging (queued results are kept).';
 }
 
 /*

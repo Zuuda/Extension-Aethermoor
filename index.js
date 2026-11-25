@@ -23322,7 +23322,7 @@ async function renderQuestTab(host) {
             } else {
                 const move = makeAethermoorAction(
                     journey?.completedSegments === journey?.totalSegments
-                        ? 'Finish journey to quest destination'
+                        ? 'Start journey to quest destination'
                         : journey
                             ? 'Continue to quest destination'
                             : bringingPersonToSafety

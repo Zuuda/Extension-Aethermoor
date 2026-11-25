@@ -18927,27 +18927,27 @@ function resolveBatch(args) {
 }
 
 /*
- * Between-fight recovery happens on the saved transition out of an active
- * encounter, not on travel steps or elapsed time. A newly spotted encounter
- * takes precedence, so a chained fight cannot grant recovery between threats.
+/*
+ * Between-fight recovery happens on the first overland travel step or
+ * instance room move after combat, not immediately at victory. Leaving
+ * Q'tik's post-fight HP visible lets the aftermath scene reflect the
+ * damage she took while her regeneration tops her off on the move.
  *
  * Tansy deliberately receives no out-of-combat healing yet. Revisit that
  * only after the level-20 Mender and its authored quest are both established;
  * then decide whether the Mender supports the same full-recovery rule.
  */
-function applyOutOfCombatRecovery(previousState, nextState) {
-    const previousStatus =
-        previousState?.encounter?.status;
-
-    const nextEncounterStatus =
-        nextState?.encounter?.status;
-
-    const encounterEnded =
-        ['active', 'spotted'].includes(previousStatus) &&
-        ['cleared', 'fled'].includes(nextEncounterStatus);
+function applyOutOfCombatRecovery(previousState, nextState, oneCase) {
+    const isMoveOperation =
+        oneCase?.kind === 'travel' ||
+        (
+            oneCase?.kind === 'instance' &&
+            ['enter', 'move', 'exit'].includes(oneCase.action)
+        );
 
     if (
-        !encounterEnded ||
+        !isMoveOperation ||
+        ['active', 'spotted'].includes(previousState?.encounter?.status) ||
         nextState.crew?.qtik?.hp <= 0 ||
         nextState.crew?.tansy?.hp <= 0
     ) {
@@ -18957,6 +18957,10 @@ function applyOutOfCombatRecovery(previousState, nextState) {
     const maxHp = derived(nextState.crew).qtikMaxHp;
     const beforeHp = nextState.crew.qtik.hp;
 
+    if (beforeHp >= maxHp) {
+        return null;
+    }
+
     nextState.crew.qtik.hp = maxHp;
 
     return {
@@ -18964,7 +18968,7 @@ function applyOutOfCombatRecovery(previousState, nextState) {
         beforeHp,
         afterHp: maxHp,
         recovered: maxHp - beforeHp,
-        reason: 'combat_ended_without_another_encounter'
+        reason: 'movement_out_of_combat'
     };
 }
 
@@ -20809,20 +20813,12 @@ async function runStoredMechanic(args) {
 
         const recovery = applyOutOfCombatRecovery(
             savedState,
-            nextState
+            nextState,
+            oneCase
         );
 
         if (recovery) {
             caseResult.outOfCombatRecovery = recovery;
-
-            if (
-                nextState.encounter?.victoryReceipt?.postFightHp &&
-                nextState.encounter.victoryReceipt.encounterId ===
-                    nextState.encounter.id
-            ) {
-                nextState.encounter.victoryReceipt.postFightHp.qtik =
-                    nextState.crew.qtik.hp;
-            }
         }
 
         const unlockedAchievements = evaluateAethermoorAchievements(

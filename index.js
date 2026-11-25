@@ -11016,6 +11016,7 @@ function ensureQuestJournal(state) {
         'offered',
         'accepted',
         'completed',
+        'failed',
         'declined',
         'abandoned',
         'cancelled'
@@ -11070,6 +11071,7 @@ function questJournalBucketForStatus(status) {
         offered: 'offered',
         in_progress: 'accepted',
         complete: 'completed',
+        failed: 'failed',
         declined: 'declined',
         abandoned: 'abandoned',
         cancelled: 'cancelled'
@@ -12776,6 +12778,7 @@ function resolveQuestAction(test) {
             'decline',
             'abandon',
             'cancel',
+            'fail',
             'clear_gate',
             'resolve_objective',
             'complete'
@@ -12896,19 +12899,22 @@ function resolveQuestAction(test) {
 
      if (
         test.action === 'abandon' ||
-        test.action === 'cancel'
+        test.action === 'cancel' ||
+        test.action === 'fail'
     ) {
         assert(
             !['active', 'spotted'].includes(
                 state.encounter?.status
             ),
-            'Resolve, avoid, or flee the encounter before cancelling the quest'
+            'Resolve, avoid, or flee the encounter before closing the quest'
         );
 
         quest.status =
             test.action === 'cancel'
                 ? 'cancelled'
-                : 'abandoned';
+                : test.action === 'fail'
+                    ? 'failed'
+                    : 'abandoned';
 
         quest.cancelledAtGate =
             test.action === 'cancel'
@@ -12917,6 +12923,11 @@ function resolveQuestAction(test) {
 
         quest.abandonedAtGate =
             test.action === 'abandon'
+                ? quest.currentGate?.step || null
+                : undefined;
+
+        quest.failedAtGate =
+            test.action === 'fail'
                 ? quest.currentGate?.step || null
                 : undefined;
 
@@ -12930,9 +12941,14 @@ function resolveQuestAction(test) {
                 ? test.reason || null
                 : undefined;
 
+        quest.failReason =
+            test.action === 'fail'
+                ? test.reason || null
+                : undefined;
+
         /*
-         * Dropping a quest also stops travel undertaken for its field
-         * objective. Preserve the actual position along the saved route.
+         * Dropping or failing a quest also stops travel undertaken for its
+         * field objective. Preserve the actual position along the saved route.
          * Shared settlement return travel remains independent, and another
          * accepted quest at the same destination may still justify the trip.
          */
@@ -12973,7 +12989,34 @@ function resolveQuestAction(test) {
             const msq = state.world?.zones?.[msqZone]?.msq;
             if (msq) {
                 msq.activeQuestId = null;
-                msq.status = 'declined';
+
+                if (test.action === 'fail') {
+                    /*
+                     * MSQ chapters fail forward: no rewards are paid, but the
+                     * regional arc stays active so the next chapter picks up
+                     * from the worse fallout instead of bricking the zone.
+                     */
+                    msq.completedChapters = Math.max(
+                        Number(msq.completedChapters || 0),
+                        Number(quest.msq?.chapter || 0)
+                    );
+
+                    if (quest.msq?.isFinale || msq.completedChapters >= msq.totalChapters) {
+                        msq.status = 'completed';
+                        msq.pendingBeatDelay = 0;
+                    } else {
+                        const nextChapter = msq.completedChapters + 1;
+                        const isNextFinale = nextChapter >= msq.totalChapters;
+                        const hotLead = isNextFinale ||
+                            (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
+
+                        msq.pendingBeatDelay = hotLead
+                            ? 0
+                            : 1 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+                    }
+                } else {
+                    msq.status = 'declined';
+                }
             }
         }
 
@@ -19088,6 +19131,7 @@ function createInitialCampaignState() {
             offered: [],
             accepted: [],
             completed: [],
+            failed: [],
             declined: [],
             abandoned: [],
             cancelled: []
@@ -19905,6 +19949,13 @@ function questDiscoveryContextPacket(quest, state) {
         quest.archetype?.id === 'herb_foraging' &&
         discovery.requiredAction === 'gather_herb';
 
+    const stageHasObstacleLock =
+        !isHerbHarvest &&
+        (
+            quest.currentGate?.decisive === true ||
+            quest.currentGate?.stage === 'find_access'
+        );
+
     const lines = [
         '* **QUEST OBJECTIVE HERE — portray this in the current scene.**',
         `* **This site belongs to quest:** ${quest.id}.`,
@@ -19937,6 +19988,32 @@ function questDiscoveryContextPacket(quest, state) {
             discovery.requiredAction || 'expose the object'
         }.`,
         `* **Significance once found:** ${discovery.significance}`,
+        ...(stageHasObstacleLock
+            ? [
+                '* **Lock the obstacle in <template> (once per gate):** ' +
+                    'If no <template> exists yet in chat locking this gate’s ' +
+                    'obstacle, write one now recording: (1) the concrete ' +
+                    'physical, mechanical, or social snag standing in the way, ' +
+                    '(2) the clear warning sign (telegraph) and what goes wrong ' +
+                    'if the crew rushes or uses an ill-suited method, and ' +
+                    '(3) what condition solves it (keep solutions open to any ' +
+                    'clever use of powers, gear, or mundane work—never require ' +
+                    'one secret password). If a <template> for this gate ' +
+                    'already exists, enforce it strictly; do not soften or rewrite it.',
+                '* **Goal vs. method:** If the player states a desired outcome ' +
+                    'without a workable method (e.g. "we clear it out of the way"), ' +
+                    'narrate them starting the attempt, hitting the locked snag, ' +
+                    'and stopping on that concrete resistance so they must decide how to tackle it.',
+                '* **Telegraph before break:** If the crew tries a risky or ' +
+                    'mismatched approach, show the clear warning sign once ' +
+                    '(e.g. metal groaning before shearing, footing slipping) and ' +
+                    'pause so they can back off or pivot. Only if they push past ' +
+                    'the warning, enforce the failure mode. If they then invent ' +
+                    'a genuinely clever way to improvise past the setback, let ' +
+                    'them try it; if the objective is ruined or abandoned, ' +
+                    'withhold <AETHERMOOR:FOUND>.'
+            ]
+            : []),
          '* **Report only what happens in the scene:** Do not emit a ' +
           'discovery tag merely because this context appeared or the ' +
           'player stated a desired outcome. Judge what their actions ' +
@@ -20169,6 +20246,17 @@ function questActionNarrationPacket(result, questAction) {
             'The quest was not completed and remains recorded in the quest history.'
         ].join('\n');
     }
+    if (questAction === 'fail') {
+        return [
+            `The crew failed the active quest: ${quest.title}.`,
+            'No quest rewards, salvage, or reputation were granted.',
+            quest.isMsq === true
+                ? 'This Main Story chapter failed forward—the regional story ' +
+                  'continues with the worse fallout from this setback.'
+                : 'The quest is closed as failed. The crew is free to pursue other plans.'
+        ].join('\n');
+    }
+
     if (questAction === 'complete') {
         const rewards = result.rewards;
 
@@ -20900,7 +20988,7 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-            ['accept', 'decline', 'abandon', 'cancel', 'complete']
+            ['accept', 'decline', 'abandon', 'cancel', 'fail', 'complete']
                 .includes(oneCase.action)
                 ? questActionNarrationPacket(
                     {
@@ -21638,6 +21726,11 @@ else if (quest.status === 'in_progress') {
             } else if (quest.status === 'cancelled') {
         lines.push(
             `Cancelled at gate ${quest.cancelledAtGate || 'unknown'}.`,
+            'No quest rewards or reputation were granted.'
+        );
+    } else if (quest.status === 'failed') {
+        lines.push(
+            `Failed at gate ${quest.failedAtGate || 'unknown'}.`,
             'No quest rewards or reputation were granted.'
         );
 
@@ -23092,7 +23185,12 @@ async function renderQuestTab(host) {
                             ? 'Quest accepted.'
                             : action === 'decline'
                                 ? 'Quest declined.'
-                                : 'Quest cancelled. No rewards were granted.'
+                                : action === 'fail'
+                                    ? (quest.isMsq
+                                        ? 'Main Story chapter failed forward. No rewards were granted.'
+                                        : 'Quest marked as failed. No rewards were granted.')
+                                    : 'Quest cancelled. No rewards were granted.'
+
                     );
                 } finally {
                     button.disabled = false;
@@ -23340,7 +23438,7 @@ async function renderQuestTab(host) {
                 body.appendChild(move);
             }
         }
-
+        addQuestAction(body, quest, 'Fail Quest', 'fail');
         addQuestAction(body, quest, 'Cancel Quest', 'cancel');
         host.appendChild(drawer);
     }
@@ -23383,19 +23481,24 @@ async function renderQuestTab(host) {
 
     const historyCounts = [
         ['Completed', journal.completed.length],
+        ['Failed', journal.failed.length],
         ['Declined', journal.declined.length],
         ['Abandoned', journal.abandoned.length],
         ['Cancelled', journal.cancelled.length]
     ];
 
-    const completedLines = journal.completed.length > 0
-        ? [...journal.completed]
-            .reverse()
-            .map(quest =>
-                `• ${quest.isMsq ? '[MSQ] ' : ''}${quest.title}`
-            )
-            .join('\n')
-        : 'No completed quests yet.';
+    const historyEntries = [
+        ...[...journal.completed].reverse().map(quest =>
+            `• [Done] ${quest.isMsq ? '[MSQ] ' : ''}${quest.title}`
+        ),
+        ...[...journal.failed].reverse().map(quest =>
+            `• [Failed] ${quest.isMsq ? '[MSQ] ' : ''}${quest.title}`
+        )
+    ];
+
+    const completedLines = historyEntries.length > 0
+        ? historyEntries.join('\n')
+        : 'No completed or failed quests yet.';
 
     const { drawer: historyDrawer } = makeQuestDrawer(
         `QUEST HISTORY · ${historyCounts.map(([l, c]) => `${l}: ${c}`).join(' · ')}`,

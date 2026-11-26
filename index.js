@@ -6241,29 +6241,6 @@ function createFoe({ id, level, role }) {
     };
 }
 
-function vendorStock(zone) {
-    const z = ZONES[zone];
-    assert(z, `Unknown zone ${zone}`);
-    return {
-        zone: z.name,
-        stat: z.base,
-        price: z.base * 8,
-        pawn: z.base * 2,
-        tansy: {
-            weaponAtk: z.base * 2,
-            glovesAtk: z.base,
-            chestOrTrousersHp: z.base * 5,
-            chestOrTrousersLuk: 1,
-            modularVitalityHp: z.base * 5,
-            modularLuckLuk: z.base
-        },
-        qtik: {
-            bulwarkDef: z.base * 2,
-            vitalityHp: z.base * 15
-        }
-    };
-}
-
 const NORMAL_BRACKETS = new Proxy({}, {
     get(_target, key) {
         const zone = zoneNumber(key);
@@ -9513,376 +9490,13 @@ function rollQuestTerminalThreat(state, rank, zone) {
 }
 
 /*
- * AETHERMOOR IMPLEMENTATION ROADMAP
- *
- * Working priority list for the current beta architecture.
- * Update statuses in the same edit as the implementation so this roadmap
- * and the live code stay synchronized.
- *
- * Status meanings:
- * - DONE: implemented and exercised in play.
- * - BETA PENDING: code path is wired; live verification continues in beta.
- * - NEXT (TIER 1): highest-priority upcoming work for Zones 1–2.
- * - MID-CAMPAIGN (TIER 2): build when combat difficulty or wealth spikes.
- * - DEFERRED (TIER 3): later-game, polish, or low-priority work.
- *
- * =========================================================================
- * COMPLETED FOUNDATIONS (DONE / BETA PENDING)
- * =========================================================================
- * - Persistent per-chat state in chat metadata with serialized queue,
- *   revisions, RNG state, locked results, and ordered GM handoffs.
- * - Deterministic saved world (seed, geography profiles, settlements,
- *   reputation, route edges, forward zone progression, fresh-chat init).
- * - Combat engine: 3- and 4-foe packs, declared rosters, Elites, Bosses,
- *   telegraphs, reinforcements, flee, death/respawn, out-of-combat Q'tik
- *   recovery, zone-graded potions with HP labels, and full-fight recaps.
- * - Quest Journal (V2): multiple offers and accepted quests addressed by
- *   stable questId; Recover Cargo, Herb Foraging, Ruin Clearance,
- *   Territorial Beast, and Missing Person; pack breadcrumbs; settlement
- *   work checks; and manual UI fallback buttons (Mark Found / Confirm
- *   Cargo Handover) alongside GM protocol tags.
- * - Direct-confirm settlement shops (Blacksmith, Herbalist, Inn Services)
- *   with silent UI commits and per-zone cosmetic stock naming (gear,
- *   potions, inn services, and curios).
- * - Inventory, Purse (− Spend / + Earn), Valuables & Curios (with hidden
- *   buyer-interest rolls), Bag Reserves, and Worn Gear.
- * - Overland travel & exploration: journeys, interruptions, arrival-driven
- *   rumors, Crew Knowledge, scenic POIs, Hidden Caches (rolls 58–65, 8%,
- *   weasel finds), and Rare Hidden One-Time Instances (rolls 98–100, 3%,
- *   3–5 rooms, 50/50 Elite Lair or Chest Vault with manual Open Chest UI).
- * - Known Local Instances (5–7 rooms, cosmetic theming, multi-instance UI).
- * - Narration Debug recorder, saved error log, handoff pause toggle, and
- *   per-chat campaign reset.
- *
- * =========================================================================
- * TIER 1 — NEXT UP (ZONES 1–2 PRIORITY)
- * =========================================================================
- * 1. NEXT — Gear rarity scaling
- *    - Replace flat +1 / +3 / +5 rarity bonuses in lootStatFromRarity()
- *      with percentage-based scaling (e.g., ~20–25% Uncommon, ~45–50%
- *      Rare, ~70% Epic) with minimum floors so Zone 1 stays intact and
- *      Uncommon/Rare drops remain meaningful past Zone 3.
- *    - Keep QUEST_REWARD_TABLES, spawnEncounter(), and validate() synced.
- *
- * 2. NEXT — Aether-Net (Trade-Stream) UI
- *    - Wire the existing resolveTradeAction() backend (list / settle,
- *      3-listing cap, 6 buyer archetypes, Skill Tome tradeStat=10) into
- *      an Inventory drawer so duplicate and off-class drops feed the
- *      zone-to-zone silver-sink loop.
- *    - Optional one-way GM handoff on settle for Twitch-like buyer banter.
- *    - Diegetic utility purchases (Stealth Tent, Canteen, etc.) stay in
- *      fiction + manual Purse (− Spend) + <template>.
- *
- * 3. NEXT — Passing Immortals in road encounters
- *    - Add a sub-roll on travel social_opportunity (Local vs. Passing
- *      Immortal) so wilderness travel preserves the "living NPCs + MMO
- *      tourists" feel outside taverns.
- *
- * 4. NEXT — Small UX polish pass
- *    - Keep the killing-turn combat log visible under Victory in Combat.
- *    - Suppress settlement check_work during active cargo handovers so
- *      QUEST FOUND! cannot photobomb a delivery scene.
- *    - Align Combat's uninitialized-chat message with the other tabs.
- *
- * =========================================================================
- * TIER 2 — MID-CAMPAIGN (WHEN DIFFICULTY OR WEALTH SPIKES)
- * =========================================================================
- * - Boss encounters & deeper instances: wire Boss rooms/destinations as a
- *   live source of Epic gear once normal/hidden instances are beta-tested.
- * - Food buffs (Elemental Titan passive): populate FOOD_BUFF_RECIPES when
- *   combat starts forcing potion use; implement Q'tik's 3 distinct food
- *   buffs and triple duration.
- * - Currency denominations: centralize silver formatting (100s = 1g) for
- *   display while keeping integer silver internally.
- * - Fate / Complication Die: lightweight UI button rolling Clean Success /
- *   Success with a Cost / Complication with a one-way GM handoff for
- *   non-combat checks (locks, chest obstacles, haggling).
- *
- * =========================================================================
- * TIER 3 — LATER / DEFERRED
- * =========================================================================
- * - Shadow Deck UI (fuse/unfuse toggles) & Tansy out-of-combat Mender
- *   recovery (revisit around Level 15–20).
- * - Code elegance cleanup (single-file): retire state.activeQuest pointer,
- *   centralize item display formatting, add a small DOM helper, and prune
- *   dead claimLockedLoot() / legacy one-off debug cases.
- * - Test-data cleanup & automated regression suite.
- * - Narrative lore continuity, larger rumor threads, and portable Crew
- *   Knowledge continuations across zones.
- *
- * =========================================================================
- * MAINTENANCE RULES
- * =========================================================================
- * - New mechanics must identify their saved state, stable IDs, RNG behavior,
- *   narrator handoff, migration needs, and duplicate-event behavior.
- * - Log live-testing bugs here until fixed and verified.
- * - Update this roadmap in the same edit as any status change.
- *
- * QUEST ARCHITECTURE — AGREED DIRECTION
- *
- * The extension exists because narrator LLMs have invented mechanics,
- * ignored supplied stats, and introduced unauthorized encounters.
- * Preserve the boundary below when extending the quest system.
- *
- * ENGINE RESPONSIBILITY
- * - Decide whether a quest exists, its rank, gate count, objective family,
- *   travel segments, rewards, target IDs, and completion requirements.
- * - Select a COMPLETE, compatible quest structure for that gate count.
- * - Every structure must include its decisive objective. Never shorten
- *   a quest by slicing off its final steps: a two-gate retrieval quest
- *   must still require retrieving its target.
- * - Own all encounters, stats, abilities, telegraphs, RNG, and payouts.
- * - Spawn quest-linked encounters from engine progression, not from
- *   narrator invention.
- * - Lock quest structure and mechanical facts when generated.
- *
- * NARRATOR RESPONSIBILITY
- * - Dress the current engine-established scene using the world context:
- *   creature appearance, architecture, dialogue, atmosphere, and action.
- * - Do not author additional mandatory gates, items, NPC requirements,
- *   encounters, abilities, rewards, or success conditions.
- * - Creature appearance is not a mechanical ability grant.
- * - Receive concise instructions for the CURRENT stage rather than an
- *   invitation to design the intermediate quest.
- *
- * LIMITED NARRATIVE HANDSHAKE
- * - The narrator may interpret natural-language actions and report an
- *   eligible authored discovery or delivery using exact protocol tags.
- * - The engine validates IDs, location, prerequisites, current gate, and
- *   state transitions. Tags do not supply numbers, rewards, or objectives.
- * - This is a deliberate, limited trust boundary, not proof that the LLM
- *   adjudicated the fiction correctly.
- * - Keep existing gameplay/debug mechanics available, but avoid exposing
- *   unrestricted state-mutating tools to the ordinary narrator when a
- *   UI/controller can perform those operations directly.
- *
- * VARIETY WITHOUT AN EXHAUSTIVE BIOME MATRIX
- * - Prefer reusable objective families and compatible stage structures:
- *   arrival, discovery, linked combat, and delivery.
- * - Let the narrator supply setting-appropriate presentation without
- *   requiring a catalog of every castle, cave, church, or floating city.
- * - Authored hidden objects and discovery conditions must still exist in
- *   engine data; the narrator must not invent mandatory puzzles mid-quest.
- *
- * IMPLEMENTATION STATUS
- * - New offers require complete V2 structures; legacy template slicing
- *   is not a fallback for newly generated quests.
- * - New-offer scenarios are geography-neutral premises; saved zone geography
- *   is presentation context. Mechanical special requirements belong in the
- *   authored V2 structure, not dormant legacy gate templates.
- * - Quest family defines the job; rank defines its stakes and reward;
- *   gate count defines its length. More gates alone do not mean harder work.
- * - Gate variants must fit the family and preserve its objective. A
- *   non-combat quest remains non-combat; do not add fights to simulate rank.
- * - Narration may invent names, scenery, and local dressing, but the engine
- *   owns rank, objective, gates, threats, encounters, and rewards.
- * - Non-combat mechanical difficulty is intentionally unresolved. Do not
- *   treat extra narration or a dramatic name as mechanical challenge.
- * - Existing saved quests retain their locked gates and progress.
- * - Discovery, linked-combat, and delivery paths use the V2 structures;
- *   full campaign-flow verification remains for beta.
- *
- * BETA POLICY
- * Use this division for now. During beta testing, tighten specific failure
- * points based on observed behavior instead of adding speculative protocol
- * complexity or handing quest design back to the narrator.
+ * QUEST BOUNDARY INVARIANTS
+ * - Engine owns rank, complete V2 gate structure, linked encounters, RNG,
+ *   target IDs, and payouts. Never slice off a decisive objective.
+ * - Narrator dresses scenes using zone flavor/spine and reports authored
+ *   discoveries/deliveries via validated protocol tags inside <plan>.
  */
-
 const QUEST_ARCHETYPES = [
-     /*
-     * New cargo offers use causal variants, not prewritten local geography.
-     * The selected premise and mechanical requirements are locked here.
-     * The narrator may name and dress the consignment, transport, and site
-     * to fit saved zone geography, but may not add a required encounter,
-     * gate, item, reward, or change the locked destination.
-     */
-    {
-        id: 'recover_cargo',
-        label: 'Recover Cargo',
-        scenarios: [
-            {
-                variantId: 'abandoned_transport',
-                ranks: ['F', 'E', 'D', 'C', 'B'],
-                pitch:
-                    'A shipment was left behind when its transport failed. ' +
-                    'The issuer wants the consignment recovered.',
-                truth:
-                    'The transport failed and its crew left the cargo at the ' +
-                    'last known stopping place.',
-                facts: {
-                    sponsor: 'the local shipping office',
-                    cargo: 'the missing consignment',
-                    place: 'the abandoned transport site',
-                    evidence: 'signs of the failed transport',
-                    obstacle: 'an obstructed route to the cargo'
-                }
-            },
-            {
-                variantId: 'diverted_shipment',
-                ranks: ['E', 'D', 'C', 'B'],
-                pitch:
-                    'A shipment was diverted from its intended route. ' +
-                    'The issuer wants the consignment recovered.',
-                truth:
-                    'The cargo was deliberately moved away from its ' +
-                    'scheduled transfer point.',
-                facts: {
-                    sponsor: 'the local shipping office',
-                    cargo: 'the missing consignment',
-                    place: 'the diversion site',
-                    evidence: 'a discrepancy in the shipment record',
-                    obstacle: 'the cargo is concealed from ordinary view'
-                }
-            },
-            {
-                variantId: 'stolen_shipment',
-                ranks: ['D', 'C', 'B'],
-                pitch:
-                    'A shipment was stolen in transit. The issuer wants ' +
-                    'the consignment recovered.',
-                truth:
-                    'The thieves concealed the cargo at a separate site.',
-                facts: {
-                    sponsor: 'the local shipping office',
-                    cargo: 'the missing consignment',
-                    place: 'the suspected hiding place',
-                    evidence: 'signs of the cargo’s removal',
-                    obstacle: 'the cargo is hidden within the site'
-                }
-            }
-        ]
-    },
-
-    {
-        id: 'ruin_clearance',
-        label: 'Ruin Clearance',
-         /*
-         * Premises identify why the site needs clearing. The engine locks
-         * the linked encounter; local architecture and appearance come
-         * from the saved zone context, not a biome-specific quest table.
-         */
-        scenarios: [
-            {
-                ranks: ['D', 'C', 'B'],
-                pitch:
-                    'A disused structure beside a working route has become ' +
-                    'unsafe. The route keepers need the threat removed.',
-                truth:
-                    'A hostile group has occupied the structure and is ' +
-                    'using it to control the nearby route.',
-                facts: {
-                    sponsor: 'the local route keepers',
-                    site: 'the disused route structure',
-                    threat: 'the occupying hostile group',
-                    evidence: 'fresh signs of occupation and repeated passage',
-                    obstacle: 'an approach watched from within the site'
-                }
-            },
-            {
-                ranks: ['E', 'D'],
-                pitch:
-                    'Workers can no longer use an old work site. Their ' +
-                    'sponsor needs its dangerous occupants cleared.',
-                truth:
-                    'A hostile group has made the site its shelter.',
-                facts: {
-                    sponsor: 'the local work crew',
-                    site: 'the disused work site',
-                    threat: 'the occupying hostile group',
-                    evidence: 'recent activity at the old entrance',
-                    obstacle: 'an approach exposed to the occupants'
-                }
-            },
-             {
-                ranks: ['F'],
-                pitch:
-                    'Small nuisance creatures have settled in an unused ' +
-                    'work area. The local crew wants the space cleared.',
-                truth:
-                    'A small group of nuisance creatures is occupying the area.',
-                facts: {
-                    sponsor: 'the local work crew',
-                    site: 'the unused work area',
-                    threat: 'the nuisance creatures',
-                    evidence: 'signs of a small group nesting there',
-                    obstacle: 'the creatures must be cleared from the work area'
-                }
-            },
-            {
-                ranks: ['C', 'B'],
-                pitch:
-                    'An essential passage through an old structure has ' +
-                    'become unsafe. The passage must be cleared.',
-                truth:
-                    'A territorial threat is holding the passage.',
-                facts: {
-                    sponsor: 'the local passage wardens',
-                    site: 'the old passage structure',
-                    threat: 'the territorial threat',
-                    evidence: 'fresh tracks through the passage',
-                    obstacle: 'a confined approach to the occupied section'
-                }
-            }
-        ]
-    },
-      /*
-     * Herb requests are selected by stakes, not biome. These are generic
-     * mechanical identities; the narrator may give the plant and site
-     * setting-appropriate names without changing the locked harvest or
-     * inventing a threat. Delivery remains outside the field gate count.
-     */
-    {
-        id: 'herb_foraging',
-        label: 'Herb Foraging',
-        scenarios: [
-            {
-                ranks: ['F'],
-                pitch: 'A supplier needs a small, ordinary plant harvest.',
-                truth: 'The requested plants are available at the identified gathering area.',
-                facts: {
-                    sponsor: 'the local supplier',
-                    herb: 'a bundle of common gathering plants',
-                    place: 'the nearby gathering area',
-                    need: 'routine supplies',
-                    stakes: 'common plants for ordinary stock',
-                    obstacle: 'ordinary care is needed to gather them intact'
-                }
-
-            },
-            {
-                ranks: ['E', 'D'],
-                pitch: 'A healer needs a medicinal plant for a patient.',
-                truth: 'A usable patch remains at the identified gathering area.',
-                facts: {
-                    sponsor: 'the local healer',
-                    herb: 'a usable medicinal plant harvest',
-                    place: 'the identified gathering area',
-                    need: 'treatment for a patient',
-                    stakes: 'a scarce remedy needed for a patient',
-                    obstacle: 'the usable plants must be identified and gathered intact'
-                }
-            },
-            {
-                ranks: ['C', 'B'],
-                pitch: 'A settlement healer needs an essential medicinal harvest before existing supplies run out.',
-                truth: 'The needed plants can be found at the identified gathering area, but the usable harvest requires careful collection.',
-                facts: {
-                    sponsor: 'the settlement healer',
-                    herb: 'the essential medicinal harvest',
-                    place: 'the identified gathering area',
-                    need: 'an essential local treatment',
-                    stakes: 'an urgent harvest for an essential local treatment',
-                    obstacle: 'the usable harvest must be gathered without spoiling it'
-                }
-            }
-        ]
-    },
-
-    /*
-     * Missing Person variants lock the situation and objective structure,
-     * not a particular road, landscape, or local culture. The narrator may
-     * supply names and setting details using the current zone context.
-     */
     {
         id: 'missing_person',
         label: 'Find & Escort',
@@ -9904,7 +9518,6 @@ const QUEST_ARCHETYPES = [
                     obstacle: 'the trail becomes difficult to follow'
                 }
             },
-
             {
                 variantId: 'abducted',
                 ranks: ['C', 'B'],
@@ -9924,134 +9537,6 @@ const QUEST_ARCHETYPES = [
         ],
         gates: []
     },
-
-      {
-        id: 'territorial_beast',
-        label: 'Territorial Beast Hunt',
-        /*
-         * These variants establish animal behavior and a linked threat,
-         * not a species or landscape. The narrator may describe the
-         * engine-created Elite to fit the zone without changing its stats.
-         */
-               scenarios: [
-            {
-                ranks: ['F'],
-                pitch:
-                    'A small nuisance animal has been disrupting a ' +
-                    'local work area.',
-                truth:
-                    'The animal has repeatedly returned to the work area.',
-                facts: {
-                    sponsor: 'the local work crew',
-                    beast: 'the nuisance animal',
-                    place: 'the affected work area',
-                    evidence: 'repeated signs of the animal’s visits',
-                    obstacle: 'the animal keeps returning to the work area'
-                }
-            },
-            {
-                ranks: ['D', 'C', 'B'],
-                pitch:
-                    'A territorial animal has driven people from a ' +
-                    'regularly used route.',
-                truth:
-                    'The animal has established a defended territory ' +
-                    'around a nearby shelter.',
-                facts: {
-                    sponsor: 'the local route warden',
-                    beast: 'the territorial animal',
-                    place: 'the affected route',
-                    evidence: 'repeated territorial signs along the route',
-                    obstacle: 'the animal’s defended approach'
-                }
-            },
-             {
-                ranks: ['E', 'D', 'C'],
-                pitch:
-                    'An animal is threatening a place local workers ' +
-                    'depend on.',
-                truth:
-                    'The animal has begun treating the area as its ' +
-                    'regular hunting ground.',
-                facts: {
-                    sponsor: 'the affected local workers',
-                    beast: 'the dangerous animal',
-                    place: 'the affected work area',
-                    evidence: 'fresh signs of repeated animal activity',
-                    obstacle: 'the animal’s established hunting path'
-                }
-            }
-        ]
-    },
-
-    /*
-     * Replaces Herb Foraging for Town/Overland non-combat contracts.
-     * Physical Pre-Calamity infrastructure checks give the crew tactile
-     * objects and mechanisms to interact with in text RP.
-     */
-    {
-        id: 'imperial_survey',
-        label: 'Imperial Survey',
-        scenarios: [
-            {
-                variantId: 'levee_gauge',
-                ranks: ['F', 'E', 'D'],
-                pitch:
-                    'Local wardens need a brass inspection plate pulled from ' +
-                    'an old Imperial gauge before seasonal wear ruins it.',
-                truth:
-                    'The old gauge housing is still intact, though jammed by ' +
-                    'mineral crust and overgrowth.',
-                facts: {
-                    sponsor: 'the local route wardens',
-                    sample: 'the Imperial gauge plate',
-                    place: 'the old Imperial gauge station',
-                    evidence: 'weathered Imperial survey markers',
-                    obstacle: 'a jammed housing overgrown with debris'
-                }
-            },
-            {
-                variantId: 'boundary_relay',
-                ranks: ['E', 'D', 'C'],
-                pitch:
-                    'Local artificers want an intact relay-core salvaged from ' +
-                    'a dead Pre-Calamity boundary pylon.',
-                truth:
-                    'The relay-core remains seated inside the corroded pylon ' +
-                    'casing, requiring careful extraction.',
-                facts: {
-                    sponsor: 'the local artificer guild',
-                    sample: 'the salvaged relay-core',
-                    place: 'the dead Imperial boundary pylon',
-                    evidence: 'corroded conduit lines leading to the pylon',
-                    obstacle: 'a seized bronze access hatch'
-                }
-            },
-            {
-                variantId: 'salvage_assay',
-                ranks: ['F', 'E', 'D', 'C'],
-                pitch:
-                    'A local smith wants a clean alloy sample chipped from an ' +
-                    'old Imperial structure to test if the site is worth salvaging.',
-                truth:
-                    'An uncorroded seam remains accessible inside the outer ' +
-                    'masonry of the site.',
-                facts: {
-                    sponsor: 'the local smithy',
-                    sample: 'the Imperial alloy assay sample',
-                    place: 'the weathered Imperial structure',
-                    evidence: 'stamped Imperial foundry markings',
-                    obstacle: 'crumbling masonry covering the intact seam'
-                }
-            }
-        ]
-    },
-
-    /*
-     * Sponsor-free Pre-Calamity stash leads for Instance & Overland
-     * breadcrumbs. Auto-pays on recovery; the System's locked salvage
-     * and silver represent the physical contents of the opened cache.
-     */
     {
         id: 'sealed_cache',
         label: 'Sealed Pre-Calamity Cache',
@@ -10106,12 +9591,6 @@ const QUEST_ARCHETYPES = [
             }
         ]
     },
-
-    /*
-     * Sponsor-free combat leads for Instance & Overland breadcrumbs.
-     * The clue is ancient; the threat is still-running Pre-Calamity
-     * hardware or a modern squatter that moved through a breached seal.
-     */
     {
         id: 'dormant_hazard',
         label: 'Dormant Imperial Hazard',
@@ -10166,13 +9645,6 @@ const QUEST_ARCHETYPES = [
             }
         ]
     },
-
-    /*
-     * Open, setting-agnostic sidequest skeletons for Town & Overland work.
-     * The engine locks the rank, gate count, threat/delivery rules, and
-     * rewards; the narrator freely dresses sponsor, motive, and opposition
-     * using the current settlement's active factions, NPCs, and zone flavor.
-     */
     {
         id: 'local_bounty',
         label: 'Clear Threat',
@@ -10194,7 +9666,6 @@ const QUEST_ARCHETYPES = [
             }
         ]
     },
-
     {
         id: 'field_job',
         label: 'Field Job',
@@ -10217,7 +9688,6 @@ const QUEST_ARCHETYPES = [
             }
         ]
     },
-
     {
         id: 'courier_recovery',
         label: 'Recovery & Handover',
@@ -10242,17 +9712,6 @@ const QUEST_ARCHETYPES = [
     }
 ];
 
-/*
- * Sunken Salvage and its fixed-site discoveries are retired from new
- * offers. Beta will start from reset state; remove their dormant catalog
- * and helper code after the remaining archetypes have been converted.
- */
-
-/*
- * Quest eligibility depends on stakes and supported mechanics, not biome.
- * Saved zone geography remains available to the narrator for scenery,
- * names, and gradual transitions; it does not exclude an objective.
- */
 const QUEST_ARCHETYPES_BY_CHANNEL = {
     social: new Set([
         'local_bounty',
@@ -10360,12 +9819,11 @@ function buildQuestFacts(
     let scenarios = eligibleScenarios;
 
     if ([
-        'recover_cargo',
         'missing_person',
-        'imperial_survey',
         'sealed_cache',
         'dormant_hazard'
     ].includes(archetype.id)) {
+
         const variants = [
             ...new Set(
                 eligibleScenarios.map(scenario => scenario.variantId)
@@ -10398,19 +9856,6 @@ function buildQuestFacts(
 
     const facts = clone(scenario.facts);
     const stakesByArchetype = {
-        recover_cargo: {
-            F: 'a misplaced crate of everyday goods left near town',
-            E: 'ordinary supplies needed for routine local work',
-            D: 'valuable property whose loss harms its local owner',
-            C: 'essential supplies needed by the community',
-            B: 'region-critical cargo whose loss disrupts several communities'
-        },
-        imperial_survey: {
-            F: 'a routine local inspection plate near town',
-            E: 'usable Imperial hardware needed by local craftspeople',
-            D: 'a scarce Pre-Calamity reading or component worth real silver',
-            C: 'an essential Imperial relay component for settlement upkeep'
-        },
         sealed_cache: {
             E: 'a minor unclaimed stash tucked inside old stonework',
             D: 'a sealed Pre-Calamity cache untouched since the fall',
@@ -10422,20 +9867,6 @@ function buildQuestFacts(
             D: 'an active construct or breached vault threatening nearby ground',
             C: 'a dangerous dormant security site encroaching on the region',
             B: 'a major Pre-Calamity threat holding a sealed inner site'
-        },
-        ruin_clearance: {
-            F: 'a nuisance disrupting one ordinary work area',
-            E: 'a limited danger disrupting one local worksite',
-            D: 'a threat preventing important local work or travel',
-            C: 'a danger disrupting an essential community route or service',
-            B: 'a major threat affecting routes or work across the region'
-        },
-        territorial_beast: {
-            F: 'a nuisance animal disrupting routine local work',
-            E: 'an animal nuisance affecting a limited local area',
-            D: 'a dangerous animal threatening regular local travel or work',
-            C: 'a threat disrupting an essential route or community activity',
-            B: 'a territorial threat affecting travel or work across the region'
         },
         missing_person: {
             F: 'a local contact who got stranded or pinned down near town',
@@ -10467,19 +9898,8 @@ function buildQuestFacts(
         }
     };
 
-
     const rankStakes = stakesByArchetype[archetype.id]?.[rank];
-
-    if (rankStakes) {
-        facts.stakes = rankStakes;
-    }
-
-    if (archetype.id === 'recover_cargo') {
-        assert(
-            rankStakes,
-            `Recover Cargo has no authored stakes for rank ${rank}`
-        );
-    }
+    if (rankStakes) facts.stakes = rankStakes;
 
     return {
         variantRoll,
@@ -11421,48 +10841,9 @@ function resolveQuestSeed(test) {
     );
 
     if (archetype.id === 'local_bounty') {
-        const isGroup = terminalThreat.kind === 'normal_pack';
-        authored.facts.threat = isGroup
+        authored.facts.threat = terminalThreat.kind === 'normal_pack'
             ? 'the hostile group'
             : 'the dangerous foe';
-    }
-
-    /*
-     * The threat type was locked above, before the quest structure is
-     * built. Its fictional target must agree with the encounter's
-     * cardinality: normal_pack has several foes; elite has one.
-     */
-    if (archetype.id === 'territorial_beast') {
-        const group = terminalThreat.kind === 'normal_pack';
-        const nuisance = rank === 'F';
-
-        authored.facts.beast = group
-            ? nuisance
-                ? 'the nuisance animals'
-                : 'the territorial animals'
-            : nuisance
-                ? 'the nuisance animal'
-                : 'the territorial animal';
-
-        authored.pitch = nuisance
-            ? group
-                ? 'A small group of nuisance animals has been disrupting a local work area.'
-                : 'A nuisance animal has been disrupting a local work area.'
-            : group
-                ? 'Territorial animals are threatening a regularly used local area.'
-                : 'A territorial animal is threatening a regularly used local area.';
-
-        authored.truth = group
-            ? 'Several animals have established themselves around the affected area.'
-            : 'One animal has established itself around the affected area.';
-
-        authored.facts.stakes = group
-            ? nuisance
-                ? 'nuisance animals disrupting routine local work'
-                : 'territorial animals threatening local travel or work'
-            : nuisance
-                ? 'a nuisance animal disrupting routine local work'
-                : 'a territorial animal threatening local travel or work';
     }
 
     const structureV2 = buildQuestV2PlanForOffer(
@@ -11647,11 +11028,7 @@ function resolveQuestSeed(test) {
      * change the compatibility selection or depend on activeQuest identity.
      * Defeat-elite discoveries are prepared after acceptance.
      */
-    prepareRecoverCargoDiscovery(quest);
-    prepareImperialSurveyDiscovery(quest);
-    prepareSealedCacheDiscovery(quest);
-    prepareOpenRetrievalDiscovery(quest);
-    prepareHerbForagingDiscovery(quest);
+    prepareRetrievalQuestDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
 
@@ -11729,532 +11106,143 @@ function validateRetrievalQuestDiscoveries(quest) {
     );
 }
 
-function prepareRecoverCargoDiscovery(quest) {
+function prepareRetrievalQuestDiscovery(quest) {
     if (
-        quest?.archetype?.id !== 'recover_cargo' ||
-        quest.structureV2?.family !== 'retrieve_item' ||
+        quest?.structureV2?.family !== 'retrieve_item' ||
         !quest.destinationId
     ) {
         return null;
     }
 
-    const variants = {
-        abandoned_transport: {
-            clue: 'Signs of the failed transport',
-            inner: 'Way through the transport obstruction',
-            access: 'Access to the abandoned load'
+    const type = quest.archetype?.id;
+    const place = quest.facts?.place || 'the target site';
+    const evidence = quest.facts?.evidence || 'signs at the site';
+    const obstacle = quest.facts?.obstacle || 'the site obstacle';
+
+    const specs = {
+        sealed_cache: {
+            subject: quest.facts?.cache,
+            clue: 'cache-clue',
+            approach: 'cache-approach',
+            access: 'cache-release',
+            final: 'sealed-cache',
+            action: 'open_sealed_cache',
+            cargo: false,
+            finalSig: 'Opening and claiming this stash completes the contract immediately.'
         },
-        diverted_shipment: {
-            clue: 'Shipment-route discrepancy',
-            inner: 'Way to the diverted consignment',
-            access: 'Access to the concealed load'
+        field_job: {
+            subject: quest.facts?.task,
+            clue: 'open-clue',
+            approach: 'open-approach',
+            access: 'open-access',
+            final: 'field-job-done',
+            action: 'complete_field_job',
+            cargo: false,
+            finalSig: 'Completing this on-site task finishes the contract immediately.'
         },
-        stolen_shipment: {
-            clue: 'Signs of the cargo’s removal',
-            inner: 'Way into the suspected hiding place',
-            access: 'Access to the hidden consignment'
+        courier_recovery: {
+            subject: quest.facts?.item,
+            clue: 'open-clue',
+            approach: 'open-approach',
+            access: 'open-access',
+            final: 'recovered-item',
+            action: 'recover_item',
+            cargo: true
+        },
+        recover_cargo: {
+            subject: quest.facts?.cargo,
+            clue: 'cargo-clue',
+            approach: 'inner-route',
+            access: 'cargo-access',
+            final: 'recovered-cargo',
+            action: 'recover_cargo',
+            cargo: true
+        },
+        herb_foraging: {
+            subject: quest.facts?.herb,
+            clue: 'growing-signs',
+            approach: 'safe-approach',
+            access: 'harvest-method',
+            final: 'harvested-herb',
+            action: 'gather_herb',
+            cargo: true
+        },
+        imperial_survey: {
+            subject: quest.facts?.sample,
+            clue: 'survey-markers',
+            approach: 'survey-approach',
+            access: 'survey-release',
+            final: 'survey-sample',
+            action: 'collect_survey_sample',
+            cargo: true
         }
     };
 
-    const variant = variants[quest.variant?.id];
+    const spec = specs[type];
+    if (!spec) return null;
 
-    assert(
-        variant,
-        `Recover Cargo has no authored variant: ${quest.variant?.id}`
-    );
-    assert(
-        quest.turnIn && typeof quest.turnIn === 'object',
-        'Recover Cargo has no locked turn-in'
-    );
-
+    const subject = spec.subject || 'the objective';
     quest.discoveries ||= [];
-
-    const definitions = {
-        locate: {
-            suffix: 'cargo-clue',
-            kind: 'evidence',
-            name: variant.clue,
-            hidingPlace:
-                `${quest.facts.evidence} at ${quest.facts.place}`,
-            significance:
-                `The clue identifies where ${quest.facts.cargo} can be found.`
-        },
-        reach_inner_site: {
-            suffix: 'inner-route',
-            kind: 'evidence',
-            name: variant.inner,
-            hidingPlace: `within ${quest.facts.place}`,
-            significance:
-                `The route gets past ${quest.facts.obstacle}.`
-        },
-        find_access: {
-            suffix: 'cargo-access',
-            kind: 'evidence',
-            name: variant.access,
-            hidingPlace:
-                `near the consignment at ${quest.facts.place}`,
-            significance:
-                `This gives access to ${quest.facts.cargo}.`
-        },
-        recover: {
-            suffix: 'recovered-cargo',
-            kind: 'quest_item',
-            name: quest.facts.cargo,
-            hidingPlace:
-                `at ${quest.facts.place}, beyond ${quest.facts.obstacle}`,
-            significance:
-                `This is the consignment owed to ${quest.turnIn.recipient}.`,
-            requiredAction: 'recover_cargo',
-            questCargo: true
-        }
-    };
-
-    for (const gate of quest.gatesData) {
-        if (gate.trigger !== 'discovery') continue;
-
-        const definition = definitions[gate.stage];
-        assert(
-            definition,
-            `Recover Cargo has no discovery for ${gate.stage}`
-        );
-
-        const id = `${quest.id}-${definition.suffix}`;
-        let discovery = quest.discoveries.find(
-            item => item.id === id
-        );
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind: definition.kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance,
-                ...(definition.requiredAction
-                    ? { requiredAction: definition.requiredAction }
-                    : {}),
-                ...(definition.questCargo
-                    ? { questCargo: true }
-                    : {})
-            };
-            quest.discoveries.push(discovery);
-        }
-
-        gate.requiredDiscoveryId = id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const cargoId = `${quest.id}-recovered-cargo`;
-    assert(
-        !quest.turnIn.discoveryId ||
-        quest.turnIn.discoveryId === cargoId,
-        'Recover Cargo turn-in points to another discovery'
-    );
-
-    quest.turnIn.discoveryId = cargoId;
-
-    return quest.discoveries.find(
-        item => item.id === cargoId
-    );
-}
-
-function prepareHerbForagingDiscovery(quest) {
-    if (
-        quest?.archetype?.id !== 'herb_foraging' ||
-        quest.structureV2?.family !== 'retrieve_item' ||
-        !quest.destinationId
-    ) {
-        return null;
-    }
-
-    assert(
-        quest.turnIn && typeof quest.turnIn === 'object',
-        'Herb Foraging has no locked turn-in record'
-    );
-
-    quest.discoveries ||= [];
-
-    const herbName = quest.facts.herb;
-    const place = quest.facts.place;
-    const obstacle = quest.facts.obstacle;
-
-    const definitions = {
-        locate: {
-            suffix: 'growing-signs',
-            kind: 'evidence',
-            name: `Growing signs of ${herbName}`,
-            hidingPlace: `among the growing signs at ${place}`,
-            significance:
-                `These signs identify where ${herbName} can be gathered.`
-        },
-        reach_inner_site: {
-            suffix: 'safe-approach',
-            kind: 'evidence',
-            name: 'Way to the usable plants',
-            hidingPlace: `within ${place}`,
-            significance:
-                `The approach accounts for ${obstacle} and reaches the harvest.`
-        },
-        find_access: {
-            suffix: 'harvest-method',
-            kind: 'evidence',
-            name: `Usable way to harvest ${herbName}`,
-            hidingPlace: `at the harvest within ${place}`,
-            significance:
-                `The plants can be gathered without ruining the harvest.`
-        },
-
-        recover: {
-            suffix: 'harvested-herb',
-            kind: 'quest_item',
-            name: herbName,
-            hidingPlace: place,
-            significance:
-                `The gathered herb is required by ${quest.turnIn.recipient}.`,
-            requiredAction: 'gather_herb',
-            questCargo: true
-        }
-    };
-
-    for (const gate of quest.gatesData) {
-        const definition = definitions[gate.stage];
-        if (!definition || gate.trigger !== 'discovery') continue;
-
-        const id = `${quest.id}-${definition.suffix}`;
-        let discovery = quest.discoveries.find(
-            item => item.id === id
-        );
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind: definition.kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance,
-                ...(definition.requiredAction
-                    ? { requiredAction: definition.requiredAction }
-                    : {}),
-                ...(definition.questCargo
-                    ? { questCargo: true }
-                    : {})
-            };
-            quest.discoveries.push(discovery);
-        }
-
-        gate.requiredDiscoveryId = id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const herbId = `${quest.id}-harvested-herb`;
-    assert(
-        quest.discoveries.some(item => item.id === herbId),
-        'Herb Foraging has no final harvest discovery'
-    );
-
-    assert(
-        !quest.turnIn.discoveryId ||
-        quest.turnIn.discoveryId === herbId,
-        'Herb Foraging turn-in points to a different discovery'
-    );
-
-    quest.turnIn.discoveryId = herbId;
-    return quest.discoveries.find(item => item.id === herbId);
-}
-
-function prepareImperialSurveyDiscovery(quest) {
-    if (
-        quest?.archetype?.id !== 'imperial_survey' ||
-        quest.structureV2?.family !== 'retrieve_item' ||
-        !quest.destinationId
-    ) {
-        return null;
-    }
-
-    assert(
-        quest.turnIn && typeof quest.turnIn === 'object',
-        'Imperial Survey has no locked turn-in record'
-    );
-
-    quest.discoveries ||= [];
-
-    const sample = quest.facts.sample;
-    const place = quest.facts.place;
-    const evidence = quest.facts.evidence;
-    const obstacle = quest.facts.obstacle;
-
-    const definitions = {
-        locate: {
-            suffix: 'survey-markers',
-            kind: 'evidence',
-            name: `Survey markings for ${sample}`,
-            hidingPlace: `${evidence} at ${place}`,
-            significance:
-                `The markings pinpoint where ${sample} is mounted.`
-        },
-        reach_inner_site: {
-            suffix: 'survey-approach',
-            kind: 'evidence',
-            name: `Way past ${obstacle}`,
-            hidingPlace: `within ${place}`,
-            significance:
-                `Clearing or bypassing ${obstacle} gives direct access to ${sample}.`
-        },
-        find_access: {
-            suffix: 'survey-release',
-            kind: 'evidence',
-            name: `Method to free ${sample}`,
-            hidingPlace: `on the fixture at ${place}`,
-            significance:
-                `This allows ${sample} to be removed intact.`
-        },
-        recover: {
-            suffix: 'survey-sample',
-            kind: 'quest_item',
-            name: sample,
-            hidingPlace: `at ${place}, beyond ${obstacle}`,
-            significance:
-                `This is the required survey item for ${quest.turnIn.recipient}.`,
-            requiredAction: 'collect_survey_sample',
-            questCargo: true
-        }
-    };
-
-    for (const gate of quest.gatesData) {
-        const definition = definitions[gate.stage];
-        if (!definition || gate.trigger !== 'discovery') continue;
-
-        const id = `${quest.id}-${definition.suffix}`;
-        let discovery = quest.discoveries.find(item => item.id === id);
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind: definition.kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance,
-                ...(definition.requiredAction
-                    ? { requiredAction: definition.requiredAction }
-                    : {}),
-                ...(definition.questCargo ? { questCargo: true } : {})
-            };
-            quest.discoveries.push(discovery);
-        }
-
-        gate.requiredDiscoveryId = id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const sampleId = `${quest.id}-survey-sample`;
-    assert(
-        quest.discoveries.some(item => item.id === sampleId),
-        'Imperial Survey has no final sample discovery'
-    );
-
-    quest.turnIn.discoveryId = sampleId;
-    return quest.discoveries.find(item => item.id === sampleId);
-}
-
-function prepareSealedCacheDiscovery(quest) {
-    if (
-        quest?.archetype?.id !== 'sealed_cache' ||
-        quest.structureV2?.family !== 'retrieve_item' ||
-        !quest.destinationId
-    ) {
-        return null;
-    }
-
-    quest.discoveries ||= [];
-
-    const cache = quest.facts.cache;
-    const place = quest.facts.place;
-    const evidence = quest.facts.evidence;
-    const obstacle = quest.facts.obstacle;
-
-    const definitions = {
-        locate: {
-            suffix: 'cache-clue',
-            kind: 'evidence',
-            name: `Markings leading to ${cache}`,
-            hidingPlace: `${evidence} at ${place}`,
-            significance:
-                `The markings identify where ${cache} is concealed.`
-        },
-        reach_inner_site: {
-            suffix: 'cache-approach',
-            kind: 'evidence',
-            name: `Way to ${cache}`,
-            hidingPlace: `within ${place}`,
-            significance:
-                `This leads past ${obstacle} to the concealed stash.`
-        },
-        find_access: {
-            suffix: 'cache-release',
-            kind: 'evidence',
-            name: `Latch or cipher for ${cache}`,
-            hidingPlace: `beside ${cache} at ${place}`,
-            significance:
-                `This opens ${cache} without destroying its contents.`
-        },
-        recover: {
-            suffix: 'sealed-cache',
-            kind: 'quest_item',
-            name: cache,
-            hidingPlace: `at ${place}, beyond ${obstacle}`,
-            significance:
-                'Opening and claiming this stash completes the contract immediately.',
-            requiredAction: 'open_sealed_cache',
-            questCargo: false
-        }
-    };
-
-    for (const gate of quest.gatesData) {
-        const definition = definitions[gate.stage];
-        if (!definition || gate.trigger !== 'discovery') continue;
-
-        const id = `${quest.id}-${definition.suffix}`;
-        let discovery = quest.discoveries.find(item => item.id === id);
-
-        if (!discovery) {
-            discovery = {
-                id,
-                kind: definition.kind,
-                name: definition.name,
-                locationId: quest.destinationId,
-                state: 'hidden',
-                acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance,
-                ...(definition.requiredAction
-                    ? { requiredAction: definition.requiredAction }
-                    : {})
-            };
-            quest.discoveries.push(discovery);
-        }
-
-        gate.requiredDiscoveryId = id;
-        gate.requiredDiscoveryState = 'acquired';
-
-        if (quest.currentGate?.step === gate.step) {
-            quest.currentGate.requiredDiscoveryId = id;
-            quest.currentGate.requiredDiscoveryState = 'acquired';
-        }
-    }
-
-    const cacheId = `${quest.id}-sealed-cache`;
-    assert(
-        quest.discoveries.some(item => item.id === cacheId),
-        'Sealed Cache has no final cache discovery'
-    );
-
     quest.turnIn ||= {
         locationId: quest.originLocationId,
         settlementId: quest.originSettlementId,
-        recipient: 'System'
+        recipient: spec.cargo ? (quest.facts?.sponsor || 'the sponsor') : 'System'
     };
-    quest.turnIn.discoveryId = cacheId;
-    return quest.discoveries.find(item => item.id === cacheId);
-}
-
-function prepareOpenRetrievalDiscovery(quest) {
-    const idType = quest?.archetype?.id;
-    if (
-        !['field_job', 'courier_recovery'].includes(idType) ||
-        quest.structureV2?.family !== 'retrieve_item' ||
-        !quest.destinationId
-    ) {
-        return null;
-    }
-
-    const isFieldJob = idType === 'field_job';
-    const subject = isFieldJob ? quest.facts.task : quest.facts.item;
-    const place = quest.facts.place;
-    const evidence = quest.facts.evidence;
-    const obstacle = quest.facts.obstacle;
-
-    quest.discoveries ||= [];
 
     const definitions = {
         locate: {
-            suffix: 'open-clue',
+            suffix: spec.clue,
             kind: 'evidence',
             name: `Lead pointing to ${subject}`,
             hidingPlace: `${evidence} at ${place}`,
             significance: `Pinpoints where ${subject} can be handled.`
         },
         reach_inner_site: {
-            suffix: 'open-approach',
+            suffix: spec.approach,
             kind: 'evidence',
             name: `Way past ${obstacle}`,
             hidingPlace: `within ${place}`,
             significance: `Clears or bypasses ${obstacle} to reach ${subject}.`
         },
         find_access: {
-            suffix: 'open-access',
+            suffix: spec.access,
             kind: 'evidence',
             name: `Means to access ${subject}`,
             hidingPlace: `at ${place}`,
             significance: `Gives direct access to complete or recover ${subject}.`
         },
         recover: {
-            suffix: isFieldJob ? 'field-job-done' : 'recovered-item',
+            suffix: spec.final,
             kind: 'quest_item',
             name: subject,
-            hidingPlace: `at ${place}, beyond ${obstacle}`,
-            significance: isFieldJob
-                ? 'Completing this on-site task finishes the contract immediately.'
-                : `Must be brought back to ${quest.turnIn?.recipient || 'the sponsor'}.`,
-            requiredAction: isFieldJob ? 'complete_field_job' : 'recover_item',
-            questCargo: !isFieldJob
+            hidingPlace: type === 'herb_foraging' ? place : `at ${place}, beyond ${obstacle}`,
+            significance:
+                spec.finalSig ||
+                `Must be brought back to ${quest.turnIn.recipient || 'the sponsor'}.`,
+            requiredAction: spec.action,
+            questCargo: spec.cargo
         }
     };
 
     for (const gate of quest.gatesData) {
-        const definition = definitions[gate.stage];
-        if (!definition || gate.trigger !== 'discovery') continue;
+        const def = definitions[gate.stage];
+        if (!def || gate.trigger !== 'discovery') continue;
 
-        const id = `${quest.id}-${definition.suffix}`;
+        const id = `${quest.id}-${def.suffix}`;
         let discovery = quest.discoveries.find(item => item.id === id);
 
         if (!discovery) {
             discovery = {
                 id,
-                kind: definition.kind,
-                name: definition.name,
+                kind: def.kind,
+                name: def.name,
                 locationId: quest.destinationId,
                 state: 'hidden',
                 acquisitionPolicy: 'auto_on_reveal',
-                hidingPlace: definition.hidingPlace,
-                significance: definition.significance,
-                ...(definition.requiredAction
-                    ? { requiredAction: definition.requiredAction }
-                    : {}),
-                ...(definition.questCargo ? { questCargo: true } : {})
+                hidingPlace: def.hidingPlace,
+                significance: def.significance,
+                ...(def.requiredAction ? { requiredAction: def.requiredAction } : {}),
+                ...(def.questCargo ? { questCargo: true } : {})
             };
             quest.discoveries.push(discovery);
         }
@@ -12268,17 +11256,12 @@ function prepareOpenRetrievalDiscovery(quest) {
         }
     }
 
-    const finalId = `${quest.id}-${isFieldJob ? 'field-job-done' : 'recovered-item'}`;
+    const finalId = `${quest.id}-${spec.final}`;
     assert(
         quest.discoveries.some(item => item.id === finalId),
-        `${idType} has no final discovery`
+        `${type} has no final discovery`
     );
 
-    quest.turnIn ||= {
-        locationId: quest.originLocationId,
-        settlementId: quest.originSettlementId,
-        recipient: isFieldJob ? 'System' : (quest.facts?.sponsor || 'the sponsor')
-    };
     quest.turnIn.discoveryId = finalId;
     return quest.discoveries.find(item => item.id === finalId);
 }
@@ -12636,8 +11619,8 @@ function resolveSelectedQuestEvent(test) {
      * idempotent preparation after selecting the owning quest so the
      * search action can be authorized and validated.
      */
-    if (quest.archetype?.id === 'recover_cargo') {
-        prepareRecoverCargoDiscovery(quest);
+    if (quest.structureV2?.family === 'retrieve_item') {
+        prepareRetrievalQuestDiscovery(quest);
     }
 
     const discovery = (quest.discoveries || []).find(
@@ -12863,11 +11846,7 @@ function resolveQuestAction(test) {
             state.activeQuest = quest;
         }
         if (quest.structureV2?.version === 2) {
-            prepareRecoverCargoDiscovery(quest);
-            prepareImperialSurveyDiscovery(quest);
-            prepareSealedCacheDiscovery(quest);
-            prepareOpenRetrievalDiscovery(quest);
-            prepareHerbForagingDiscovery(quest);
+            prepareRetrievalQuestDiscovery(quest);
             prepareV2QuestDiscoveries(quest);
 
             for (const gate of quest.gatesData) {
@@ -13487,219 +12466,6 @@ function resolveQuestAction(test) {
         payout.silver;
 
     return result;
-}
-
-function resolveGearGrant(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'Gear grant requires state'
-    );
-
-    const state = clone(test.state);
-
-    state.inventory ||= {};
-    state.inventory.bagReserves ||= [];
-    state.inventory.activeTradeListings ||= [];
-    state.gearGrantIds ||= {};
-
-    assert(
-        Array.isArray(state.inventory.bagReserves) &&
-        Array.isArray(state.inventory.activeTradeListings),
-        'Gear grant inventory is invalid'
-    );
-
-    assert(
-        state.gearGrantIds &&
-        typeof state.gearGrantIds === 'object' &&
-        !Array.isArray(state.gearGrantIds),
-        'state.gearGrantIds must be an object'
-    );
-
-    assert(
-        typeof test.grantId === 'string' &&
-        test.grantId.trim().length > 0,
-        'Gear grant requires grantId'
-    );
-
-    assert(
-        [
-            'npc_gift',
-            'exploration',
-            'migration',
-            'manual_correction'
-        ].includes(test.grantSource),
-        `Unsupported gear grant source: ${test.grantSource}`
-    );
-
-    assert(
-        test.grantSource === 'migration' ||
-        (
-            typeof test.sourceName === 'string' &&
-            test.sourceName.trim().length > 0
-        ),
-        'Non-migration gear grants require sourceName'
-    );
-
-    assert(
-        typeof test.reason === 'string' &&
-        test.reason.trim().length > 0,
-        'Gear grants require a reason'
-    );
-
-    const grantId = test.grantId.trim();
-
-    const alreadyGranted =
-        state.gearGrantIds[grantId] === true ||
-        state.inventory.bagReserves.some(
-            item => item.acquiredByGrantId === grantId
-        ) ||
-        state.inventory.activeTradeListings.some(
-            item => item.acquiredByGrantId === grantId
-        ) ||
-        Object.values(state.crew?.gear || {})
-            .some(ownerGear =>
-                Object.values(ownerGear || {})
-                    .some(item =>
-                        item?.acquiredByGrantId === grantId
-                    )
-            );
-
-    assert(
-        !alreadyGranted,
-        `Gear grant ${grantId} has already been applied`
-    );
-
-    const item = test.gearItem;
-
-    assert(
-        item &&
-        typeof item === 'object' &&
-        !Array.isArray(item),
-        'Gear grant requires gearItem'
-    );
-
-    assert(
-        typeof item.name === 'string' &&
-        item.name.trim().length > 0,
-        'Gear grant item requires a name'
-    );
-
-    assert(
-        Number.isInteger(item.rawStat) &&
-        item.rawStat > 0,
-        'Gear grant item requires a positive rawStat'
-    );
-
-    assert(
-        item.bound !== true,
-        'Gear grants enter Bag Reserves unbound; equip the item to bind it'
-    );
-
-    const usableOwners = ['tansy', 'qtik'];
-
-    if (item.classRestricted === true) {
-        assert(
-            item.owner === null ||
-            item.owner === undefined,
-            'Class-restricted gear cannot have a crew owner'
-        );
-
-        assert(
-            item.tradeStreamEligible !== true,
-            'Class-restricted gear cannot be Trade-Stream eligible'
-        );
-    } else {
-        assert(
-            usableOwners.includes(item.owner),
-            'Usable gear grant requires owner tansy or qtik'
-        );
-    }
-
-    if (item.owner === 'tansy') {
-        assert(
-            TANSY_SLOTS.includes(item.slot),
-            `Invalid Tansy gear slot: ${item.slot}`
-        );
-
-        if (MODULAR_TANSY.has(item.slot)) {
-            assert(
-                ['vitality', 'luck'].includes(item.variant),
-                `Tansy ${item.slot} requires vitality or luck variant`
-            );
-        } else {
-            assert(
-                item.variant === null ||
-                item.variant === undefined,
-                `Tansy ${item.slot} does not use a tuning variant`
-            );
-        }
-    }
-
-    if (item.owner === 'qtik') {
-        assert(
-            QTIK_SLOTS.includes(item.slot),
-            `Invalid Q'tik gear slot: ${item.slot}`
-        );
-
-        assert(
-            ['vitality', 'bulwark'].includes(item.variant),
-            `Q'tik ${item.slot} requires vitality or bulwark variant`
-        );
-    }
-
-    assert(
-        LOOT_RARITY_INFO[
-            String(item.rarity || '').toLowerCase()
-        ],
-        `Unsupported gear rarity: ${item.rarity}`
-    );
-
-    const normalizedRarity =
-        LOOT_RARITY_INFO[
-            String(item.rarity).toLowerCase()
-        ];
-
-    const classRestricted =
-        item.classRestricted === true;
-
-    const stored = {
-        name: item.name,
-        owner: classRestricted ? null : item.owner,
-        slot: item.slot || null,
-        variant: item.variant ?? null,
-        rarity: normalizedRarity.label,
-        rarityColor: normalizedRarity.color,
-        rawStat: item.rawStat,
-        bound: false,
-        classRestricted,
-        tradeStreamEligible: classRestricted
-            ? false
-            : item.tradeStreamEligible !== false,
-        sellValue: item.rawStat * 2,
-        bonus: lootBonus(
-            classRestricted ? null : item.owner,
-            classRestricted ? null : item.slot,
-            classRestricted ? null : item.variant,
-            item.rawStat
-        ),
-        acquiredFrom: test.grantSource,
-        acquiredFromName: test.sourceName || null,
-        acquiredByGrantId: grantId,
-        grantReason: test.reason
-    };
-
-    state.inventory.bagReserves.push(stored);
-    state.gearGrantIds[grantId] = true;
-
-    return {
-        ok: true,
-        action: 'grant',
-        grantId,
-        grantSource: test.grantSource,
-        item: stored,
-        state
-    };
 }
 
 function equipBagItem(stateInput, itemIndex) {
@@ -14851,63 +13617,6 @@ function resolveVendorAction(test) {
         state
     };
 }
-function resolveXpAction(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object' &&
-        test.state.crew,
-        'XP action requires state.crew'
-    );
-
-    assert(
-        ['grant', 'remove'].includes(test.action),
-        `Unsupported XP action: ${test.action}`
-    );
-
-    int(test.amount, 'XP amount', 1);
-
-    assert(
-        typeof test.reason === 'string' &&
-        test.reason.trim(),
-        'XP adjustment requires a reason'
-    );
-
-    const state = clone(test.state);
-    const crew = state.crew;
-    const levelBefore = int(crew.level, 'crew.level', 1);
-    const xpBefore = int(crew.xp, 'crew.xp');
-
-    assert(
-        xpBefore < nextXp(levelBefore),
-        'Current XP must be below the next-level threshold'
-    );
-
-    let levelUps = [];
-
-    if (test.action === 'grant') {
-        levelUps = applyXp(crew, test.amount);
-    } else {
-        assert(
-            test.amount <= crew.xp,
-            'Cannot remove more XP than remains in the current level; level-down correction is not implemented'
-        );
-
-        crew.xp -= test.amount;
-    }
-
-    return {
-        ok: true,
-        action: test.action,
-        amount: test.amount,
-        reason: test.reason,
-        levelBefore,
-        levelAfter: crew.level,
-        xpBefore,
-        xpAfter: crew.xp,
-        levelUps,
-        state
-    };
-}
 
 function resolveCurrencyAction(test) {
     assert(
@@ -15831,7 +14540,7 @@ function buildMsqChapterQuest(state, zone) {
     registerQuestDestination(state, quest);
     saveQuestToJournal(state, quest);
 
-    prepareOpenRetrievalDiscovery(quest);
+    prepareRetrievalQuestDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
 
@@ -16468,244 +15177,6 @@ function resolveConsumableAction(test) {
     )?.quantity || 0;
 
     return result;
-}
-
-/*
- * Food is intentionally modular and starts empty.
- * Ordinary meals, lodging, bribes, and travel costs use the generic
- * currency operation and do not require food records.
- */
-const FOOD_BUFF_RECIPES = {};
-
-function resolveFoodAction(test) {
-    assert(
-        ['list', 'apply'].includes(test.action),
-        `Unsupported food action: ${test.action}`
-    );
-
-    if (test.action === 'list') {
-        return {
-            ok: true,
-            action: 'list',
-            recipes: Object.values(FOOD_BUFF_RECIPES)
-        };
-    }
-
-    assert(
-        typeof test.recipeId === 'string',
-        'Food apply requires recipeId'
-    );
-
-    const recipe =
-        FOOD_BUFF_RECIPES[test.recipeId];
-
-    assert(
-        recipe,
-        `Unknown food recipe: ${test.recipeId}`
-    );
-
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'Food apply requires state'
-    );
-
-    const state = clone(test.state);
-
-    state.foodBuffs ||= [];
-
-    assert(
-        Array.isArray(state.foodBuffs),
-        'state.foodBuffs must be an array'
-    );
-
-    const existing =
-        state.foodBuffs.find(
-            buff => buff.recipeId === recipe.id
-        );
-
-    if (existing) {
-        assert(
-            recipe.stackable === true,
-            `Food recipe ${recipe.id} is not stackable`
-        );
-
-        existing.stacks =
-            Number(existing.stacks || 1) + 1;
-    } else {
-        state.foodBuffs.push({
-            recipeId: recipe.id,
-            name: recipe.name,
-            zone: recipe.zone,
-            duration: recipe.duration,
-            stacks: 1,
-            effects: clone(recipe.effects)
-        });
-    }
-
-    return {
-        ok: true,
-        action: 'apply',
-        recipe: clone(recipe),
-        state
-    };
-}
-
-function resolveBossGearCheck(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'boss_check requires state'
-    );
-
-    const state = clone(test.state);
-    const encounter = state.encounter;
-
-    assert(
-        encounter &&
-        ['active', 'cleared'].includes(encounter.status),
-        'boss_check requires an active encounter'
-    );
-
-    const boss = live(state).find(
-        foe => foe.role === 'boss'
-    );
-
-    assert(
-        boss,
-        'Encounter has no living Boss'
-    );
-
-    const crewStats = derived(state.crew);
-    const effectiveCrewAtk = crewStats.atk;
-
-    return {
-        ok: true,
-        encounterId: encounter.id,
-        boss: {
-            id: boss.id,
-            level: boss.level,
-            hp: boss.hp,
-            def: boss.def
-        },
-        effectiveCrewAtk,
-        gearCheckFailed: effectiveCrewAtk <= boss.def,
-        combatAllowed: effectiveCrewAtk > boss.def,
-        state
-    };
-}
-
-function resolveDeathPenalty(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'death penalty requires state'
-    );
-
-    const state = clone(test.state);
-        assert(
-        state.encounter?.status === 'active' &&
-        state.encounter.deathResolved !== true,
-        'Death requires an active, unresolved encounter'
-    );
-
-    assert(
-        state.crew?.qtik?.hp === 0 &&
-        state.crew?.tansy?.hp === 0,
-        'Direct death resolution requires both protagonists down; ' +
-            'a survivor must attempt Flee through combat'
-    );
-
-    assert(
-        state.crew &&
-        typeof state.crew === 'object',
-        'death penalty requires state.crew'
-    );
-
-    assert(
-        state.crew.qtik &&
-        state.crew.tansy,
-        'Death resolution requires both protagonists'
-    );
-
-    const level =
-        int(state.crew.level, 'crew.level', 1);
-
-    const xpBefore =
-        int(state.crew.xp, 'crew.xp');
-
-    const threshold =
-        nextXp(level);
-
-    assert(
-        xpBefore < threshold,
-        'crew.xp must be below the next-level threshold'
-    );
-
-    const requestedPenalty =
-        Math.floor(threshold / 10);
-
-    const xpLost =
-        Math.min(xpBefore, requestedPenalty);
-
-    state.crew.xp =
-        xpBefore - xpLost;
-
-    const stats =
-        derived(state.crew);
-
-    state.crew.qtik.hp =
-        stats.qtikMaxHp;
-
-    state.crew.tansy.hp =
-        stats.tansyMaxHp;
-
-    state.crew.qtik.maxHp =
-        stats.qtikMaxHp;
-
-    state.crew.qtik.def =
-        stats.def;
-
-    state.crew.qtik.regen =
-        stats.regen;
-
-    state.crew.tansy.maxHp =
-        stats.tansyMaxHp;
-
-    const encounter =
-        state.encounter || null;
-
-    if (encounter) {
-        encounter.status = 'dead';
-        encounter.deathResolved = true;
-        encounter.rewards ||= {
-            xp: 0,
-            silver: 0,
-            loot: []
-        };
-        encounter.rewards.resolved = true;
-    }
-
-    return {
-        ok: true,
-        action: 'death',
-        level,
-        nextXp: threshold,
-        xpBefore,
-        requestedPenalty,
-        xpLost,
-        xpAfter: state.crew.xp,
-        respawned: true,
-        respawnStone:
-            state.respawnStone || null,
-        encounterAbandoned: Boolean(encounter),
-        rewards: {
-            xp: 0,
-            silver: 0,
-            loot: []
-        },
-        state
-    };
 }
 
 function resolveShadowDeckAction(test) {
@@ -17846,139 +16317,6 @@ function resolveBatch(args) {
 
         return result;
     }
-
-    function getPath(root, path) {
-        const parts = path.split('.');
-        let value = root;
-
-        for (const part of parts) {
-            if (
-                value === null ||
-                value === undefined ||
-                !Object.prototype.hasOwnProperty.call(value, part)
-            ) {
-                return { exists: false, value: undefined };
-            }
-
-            value = value[part];
-        }
-
-        return { exists: true, value };
-    }
-
-    function deepEqual(a, b) {
-        if (Object.is(a, b)) return true;
-
-        if (
-            a === null ||
-            b === null ||
-            typeof a !== 'object' ||
-            typeof b !== 'object'
-        ) {
-            return false;
-        }
-
-        if (Array.isArray(a) !== Array.isArray(b)) {
-            return false;
-        }
-
-        if (Array.isArray(a)) {
-            return (
-                a.length === b.length &&
-                a.every((value, index) =>
-                    deepEqual(value, b[index])
-                )
-            );
-        }
-
-        const aKeys = Object.keys(a).sort();
-        const bKeys = Object.keys(b).sort();
-
-        return (
-            aKeys.length === bKeys.length &&
-            aKeys.every((key, index) =>
-                key === bKeys[index] &&
-                deepEqual(a[key], b[key])
-            )
-        );
-    }
-
-    function evaluateExpectations(result, expectations, name) {
-        assert(
-            Array.isArray(expectations),
-            `${name}: expect must be an array`
-        );
-
-        return expectations.map((check, index) => {
-            assert(
-                check &&
-                typeof check.path === 'string' &&
-                check.path.length > 0,
-                `${name}: expect[${index}] needs a path`
-            );
-
-            const actual = getPath(result, check.path);
-            const comparisons = [];
-
-            if (Object.prototype.hasOwnProperty.call(check, 'exists')) {
-                comparisons.push({
-                    description: `exists=${check.exists}`,
-                    passed: actual.exists === check.exists
-                });
-            }
-
-            if (Object.prototype.hasOwnProperty.call(check, 'equals')) {
-                comparisons.push({
-                    description: 'equals expected value',
-                    passed:
-                        actual.exists &&
-                        deepEqual(actual.value, check.equals)
-                });
-            }
-
-            if (Object.prototype.hasOwnProperty.call(check, 'notEquals')) {
-                comparisons.push({
-                    description: 'does not equal forbidden value',
-                    passed:
-                        actual.exists &&
-                        !deepEqual(actual.value, check.notEquals)
-                });
-            }
-
-            if (Object.prototype.hasOwnProperty.call(check, 'minimum')) {
-                comparisons.push({
-                    description: `>= ${check.minimum}`,
-                    passed:
-                        actual.exists &&
-                        typeof actual.value === 'number' &&
-                        actual.value >= check.minimum
-                });
-            }
-
-            if (Object.prototype.hasOwnProperty.call(check, 'maximum')) {
-                comparisons.push({
-                    description: `<= ${check.maximum}`,
-                    passed:
-                        actual.exists &&
-                        typeof actual.value === 'number' &&
-                        actual.value <= check.maximum
-                });
-            }
-
-            assert(
-                comparisons.length > 0,
-                `${name}: expect[${index}] needs exists, equals, notEquals, minimum, or maximum`
-            );
-
-            return {
-                path: check.path,
-                actual: actual.exists ? actual.value : '<missing>',
-                comparisons,
-                ok: comparisons.every(item => item.passed)
-            };
-        });
-    }
-
     assert(
         Array.isArray(args.cases) &&
         args.cases.length > 0,
@@ -18001,25 +16339,11 @@ function resolveBatch(args) {
 
             switch (test.kind) {
                 case 'gear':
-                    if (test.action === 'equip') {
-                        result = equipBagItem(
-                            test.state,
-                            test.itemIndex
-                        );
-                    } else if (test.action === 'grant') {
-                        result = resolveGearGrant(test);
-                    } else {
-                        throw new Error(
-                            `${name}: unsupported gear action '${test.action}'`
-                        );
-                    }
-                    break;
-
-                case 'death':
-                    result = resolveDeathPenalty(test);
-                    break;
-                case 'xp':
-                    result = resolveXpAction(test);
+                    assert(
+                        test.action === 'equip',
+                        `${name}: unsupported gear action '${test.action}'`
+                    );
+                    result = equipBagItem(test.state, test.itemIndex);
                     break;
                 case 'currency':
                     result = resolveCurrencyAction(test);
@@ -18048,56 +16372,26 @@ function resolveBatch(args) {
                 case 'world':
                     result = resolveWorldAction(test);
                     break;
-                case 'food':
-                    result = resolveFoodAction({
-                        ...test,
-                        action: test.action === 'list_food'
-                            ? 'list'
-                            : test.action
-                    });
-                    break;
-
                 case 'vendor':
                     result = test.action === 'commit'
                         ? resolveVendorTradeCommit(test)
                         : resolveVendorAction(test);
                     break;
-                    
                 case 'shadows':
                     result = resolveShadowDeckAction(test);
                     break;
-                
-                case 'boss_check':
-                    result = resolveBossGearCheck(test);
-                    break;
-
-                case 'flee':
-                    result = resolveTurn({
-                        state: test.state,
-                        actions: {
-                            flee: true
-                        },
-                        rolls: test.rolls
-                    });
-                    break;
-
-
                 case 'trade':
                     result = resolveTradeAction(test);
                     break;
-                    
                 case 'spawn':
                     result = spawnEncounter(test);
                     break;
-
                 case 'encounter_request':
                     result = resolveNarrativeEncounterRequest(test);
                     break;
-
                 case 'travel':
                     result = resolveTravelStep(test);
                     break;
-
                 case 'instance':
                     result = test.action === 'theme'
                         ? resolveInstanceTheme(test)
@@ -18105,97 +16399,32 @@ function resolveBatch(args) {
                             ? resolveInstanceChestOpen(test)
                             : resolveInstanceAction(test);
                     break;
-
-                case 'cleanup_test_data': {
-                    const state = clone(test.state);
-
-                    state.leads ||= {};
-                    state.places ||= {};
-
-                    const removedLeads = [];
-                    const removedPlaces = [];
-
-                    for (const [leadId, lead] of Object.entries(state.leads)) {
-                        if (lead?.testOnly === true) {
-                            removedLeads.push(leadId);
-                            delete state.leads[leadId];
-
-                            if (
-                                lead.targetId &&
-                                state.places[lead.targetId]?.testOnly === true
-                            ) {
-                                removedPlaces.push(lead.targetId);
-                                delete state.places[lead.targetId];
-                            }
-                        }
-                    }
-                    const retiredQuestId =
-                        'quest-travel-chat-message-171-1xp31t5-D-1';
-                    let retiredQuest = null;
-
-                    if (
-                        state.activeQuest?.id === retiredQuestId &&
-                        !Array.isArray(state.activeQuest.gatesData)
-                    ) {
-                        retiredQuest = state.activeQuest.id;
-                        state.activeQuest.status = 'retired_test';
-                        state.activeQuest.retiredReason =
-                            'Legacy test quest predating authored quest gates';
-                    }
-
-                    result = {
-                        ok: true,
-                        action: 'cleanup_test_data',
-                        retiredQuest,
-                        removedLeads,
-                        removedPlaces,
-                        state
-                    };
-                    break;
-                }
-
                 case 'quest_event':
                     result = resolveQuestEvent(test);
                     break;
-
                 case 'quest_reveal_terminal': {
                     const state = clone(test.state);
-
                     assert(
-                        typeof test.questId === 'string' &&
-                        test.questId.length > 0,
+                        typeof test.questId === 'string' && test.questId.length > 0,
                         'Quest threat reveal requires a questId'
                     );
-
                     const quest = findQuestById(state, test.questId);
-
+                    assert(quest?.status === 'in_progress', 'Quest threat requires an in-progress quest');
                     assert(
-                        quest?.status === 'in_progress',
-                        'Quest threat requires an in-progress quest'
-                    );
-
-                    assert(
-                        quest.currentGate?.mode ===
-                            'combat_twist_showdown',
+                        quest.currentGate?.mode === 'combat_twist_showdown',
                         'The current quest gate does not require a combat showdown'
                     );
-
                     assert(
-                        quest.terminalThreat &&
-                        quest.terminalThreat.resolved !== true,
+                        quest.terminalThreat && quest.terminalThreat.resolved !== true,
                         'Quest terminal threat is already resolved'
                     );
-
                     assert(
                         state.currentLocationId === quest.destinationId,
                         'The crew must reach the quest destination first'
                     );
-
                     assert(
                         !state.encounter ||
-                        ['cleared', 'fled', 'dead'].includes(
-                            state.encounter.status
-                        ),
+                        ['cleared', 'fled', 'dead'].includes(state.encounter.status),
                         'Resolve the current encounter before revealing the quest threat'
                     );
 
@@ -18205,32 +16434,21 @@ function resolveBatch(args) {
                         encounterType: 'quest_terminal',
                         encounterId: `quest-terminal-${quest.id}`
                     });
-
                     result.state.encounter.status = 'spotted';
-                    result.state.encounter.questTerminal.targetId =
-                        quest.targetId;
-
+                    result.state.encounter.questTerminal.targetId = quest.targetId;
                     result.action = 'quest_reveal_terminal';
                     result.questId = quest.id;
                     break;
                 }
-
-                    case 'debug_create_rumor': {
+                case 'debug_create_rumor': {
                     const state = clone(test.state);
+                    assert(state && typeof state === 'object', 'Debug rumor requires saved state');
                     assert(
-                        state && typeof state === 'object',
-                        'Debug rumor requires saved state'
-                    );
-                    assert(
-                        !['active', 'spotted'].includes(
-                            state.encounter?.status
-                        ),
+                        !['active', 'spotted'].includes(state.encounter?.status),
                         'Resolve or avoid the current encounter before creating a test rumor'
                     );
 
-                    const rumorId = test.inquiryId ||
-                        `debug-rumor-${Date.now()}`;
-
+                    const rumorId = test.inquiryId || `debug-rumor-${Date.now()}`;
                     const placeId = `debug-place-${rumorId}`;
                     const leadId = `debug-lead-${rumorId}`;
 
@@ -18238,11 +16456,7 @@ function resolveBatch(args) {
                     state.leads ||= {};
                     state.routeEdges ||= [];
 
-                    assert(
-                        !state.places[placeId] &&
-                        !state.leads[leadId],
-                        `Debug rumor already exists: ${rumorId}`
-                    );
+                    assert(!state.places[placeId] && !state.leads[leadId], `Debug rumor already exists: ${rumorId}`);
 
                     state.places[placeId] = {
                         id: placeId,
@@ -18253,13 +16467,11 @@ function resolveBatch(args) {
                         visited: false,
                         testOnly: true
                     };
-
                     state.leads[leadId] = {
                         id: leadId,
                         kind: 'rumor',
                         label: `Debug rumor: ${state.places[placeId].label}`,
-                        claim: test.completionEvidence ||
-                            'A test rumor points to this destination.',
+                        claim: test.completionEvidence || 'A test rumor points to this destination.',
                         sourceId: 'debug_test',
                         targetType: 'place',
                         targetId: placeId,
@@ -18268,77 +16480,33 @@ function resolveBatch(args) {
                         arrivalTest: true
                     };
 
-
-                    /*
-                     * The fixture establishes a test claim without inventing
-                     * a traveler encounter. Record it through the same knowledge
-                     * helper used by ordinary traveler rumors.
-                     *
-                     * Arrival records a separate observation; it must never
-                     * overwrite this testimony or make the original claim true.
-                     * Fixture creation consumes no RNG.
-                     */
                     recordCrewKnowledge(state, {
                         id: `knowledge-testimony-${leadId}`,
                         kind: 'testimony',
                         knowledgeType: 'testimony',
                         certainty: 'unverified_claim',
                         summary: state.leads[leadId].claim,
-                        source: {
-                            id: leadId,
-                            type: 'debug_rumor_fixture'
-                        },
+                        source: { id: leadId, type: 'debug_rumor_fixture' },
                         learnedAtLocationId: state.currentLocationId,
                         learnedAtZone: state.zone
                     });
 
-                    /*
-                     * Debug rumor sites are test fixtures, not a growing
-                     * campaign road network. Anchor them to the zone's
-                     * primary settlement so repeated fixtures cannot form
-                     * an increasingly long chain between old test sites.
-                     *
-                     * Backfill existing test places too. Their old neighbor
-                     * links remain intact, but shortestRoute can now use the
-                     * settlement shortcut. These test-only edges do not
-                     * alter ordinary world routes.
-                     */
-                    state.routeEdges ||= [];
-
-                    const anchorSettlement =
-                        savedPrimarySettlement(state, state.zone);
-
-                    const anchorId =
-                        anchorSettlement.locationId;
-
-                    const testPlaces = Object.values(state.places)
-                        .filter(place =>
-                            place?.testOnly === true &&
-                            Number(place.zone) === state.zone &&
-                            place.id !== anchorId
-                        );
-
-                    for (const testPlace of testPlaces) {
-                        const alreadyAnchored = state.routeEdges.some(edge =>
-                            (
-                                edge.fromId === anchorId &&
-                                edge.toId === testPlace.id
-                            ) ||
-                            (
-                                edge.fromId === testPlace.id &&
-                                edge.toId === anchorId
-                            )
-                        );
-
-                        if (alreadyAnchored) continue;
-
-                        state.routeEdges.push({
-                            fromId: anchorId,
-                            toId: testPlace.id,
-                            length: 1,
-                            kind: 'debug_rumor_anchor_access',
-                            testOnly: true
-                        });
+                    const anchorId = savedPrimarySettlement(state, state.zone).locationId;
+                    for (const testPlace of Object.values(state.places).filter(
+                        place => place?.testOnly === true && Number(place.zone) === state.zone && place.id !== anchorId
+                    )) {
+                        if (!state.routeEdges.some(e =>
+                            (e.fromId === anchorId && e.toId === testPlace.id) ||
+                            (e.fromId === testPlace.id && e.toId === anchorId)
+                        )) {
+                            state.routeEdges.push({
+                                fromId: anchorId,
+                                toId: testPlace.id,
+                                length: 1,
+                                kind: 'debug_rumor_anchor_access',
+                                testOnly: true
+                            });
+                        }
                     }
 
                     result = {
@@ -18352,177 +16520,32 @@ function resolveBatch(args) {
                     };
                     break;
                 }
-
-                                    case 'debug_create_settlement_lead': {
-                    const state = clone(test.state);
-                    const settlementId = test.settlementId;
-
-                    assert(
-                        typeof settlementId === 'string',
-                        'Settlement lead requires settlementId'
-                    );
-
-                    const settlement = Object.values(
-                        state.world?.settlements || {}
-                    ).find(item => item.id === settlementId);
-
-                    assert(
-                        settlement,
-                        `Unknown settlement: ${settlementId}`
-                    );
-
-                    assert(
-                        settlement.locationId !== state.currentLocationId,
-                        'Crew is already at that settlement'
-                    );
-
-                    const targetZone = state.world.zones?.[settlement.zone];
-
-                    assert(
-                        targetZone,
-                        `Settlement ${settlement.label} has no saved zone`
-                    );
-
-                    state.places ||= {};
-                    state.leads ||= {};
-
-                    state.places[settlement.locationId] ||= {
-                        id: settlement.locationId,
-                        label: settlement.label,
-                        zone: settlement.zone,
-                        settlementId: settlement.id,
-                        kind: 'settlement',
-                        visited: false
-                    };
-
-                    const leadId =
-                        `debug-destination-${settlement.id}`;
-
-                    state.leads[leadId] ||= {
-                        id: leadId,
-                        kind: 'destination',
-                        label: `Debug route: ${settlement.label}`,
-                        claim:
-                            `Test route to the primary settlement of ` +
-                            `${targetZone.name}.`,
-                        targetType: 'place',
-                        targetId: settlement.locationId,
-                        status: 'known',
-                        testOnly: true
-                    };
-
-                    result = {
-                        ok: true,
-                        action: 'debug_create_settlement_lead',
-                        leadId,
-                        settlementId: settlement.id,
-                        settlementLabel: settlement.label,
-                        zone: settlement.zone,
-                        state
-                    };
-                    break;
-                }
-
                 case 'journey':
                     result = resolveJourneyAction(test);
                     break;
                 case 'engage': {
                     const state = clone(test.state);
-                    assert(
-                        state.encounter?.status === 'spotted',
-                        'There is no spotted encounter to engage'
-                    );
+                    assert(state.encounter?.status === 'spotted', 'There is no spotted encounter to engage');
                     state.encounter.status = 'active';
-
-                    result = {
-                        ok: true,
-                        action: 'engage',
-                        encounterId: state.encounter.id,
-                        state
-                    };
+                    result = { ok: true, action: 'engage', encounterId: state.encounter.id, state };
                     break;
                 }
                 case 'avoid': {
                     const state = clone(test.state);
-                    assert(
-                        state.encounter?.status === 'spotted',
-                        'There is no spotted encounter to avoid'
-                    );
-
+                    assert(state.encounter?.status === 'spotted', 'There is no spotted encounter to avoid');
                     state.encounter.status = 'fled';
                     state.encounter.spottedDisposition = 'avoided';
-
-                    result = {
-                        ok: true,
-                        action: 'avoid',
-                        created: true,
-                        encounterId: state.encounter.id,
-                        state
-                    };
+                    result = { ok: true, action: 'avoid', created: true, encounterId: state.encounter.id, state };
                     break;
                 }
-                    
                 case 'turn':
-                    assert(
-                        test.state &&
-                        typeof test.state === 'object',
-                        `${name}: turn case requires state`
-                    );
-
-                    assert(
-                        test.actions &&
-                        typeof test.actions === 'object',
-                        `${name}: turn case requires actions`
-                    );
-
-                    if (test.actions.flee !== true) {
-                        assert(
-                            typeof test.actions.qtik === 'string',
-                            `${name}: actions.qtik is required`
-                        );
-
-                        assert(
-                            typeof test.actions.tansy === 'string',
-                            `${name}: actions.tansy is required`
-                        );
-
-                        assert(
-                            typeof test.actions.target === 'string',
-                            `${name}: actions.target is required`
-                        );
-                    }
-
-                    result = resolveTurn({
-                        state: test.state,
-                        actions: test.actions,
-                        rolls: test.rolls
-                    });
-
-                    break;
-
-                case 'reference':
-                    result = {
-                        ok: true,
-                        zone: test.zone
-                            ? vendorStock(test.zone)
-                            : undefined,
-                        mob: test.mob
-                            ? mobStats(test.mob.level, test.mob.role)
-                            : undefined,
-                        crew: test.crew
-                            ? derived(test.crew)
-                            : undefined,
-                        nextXp: test.crew
-                            ? nextXp(test.crew.level)
-                            : undefined
-                    };
+                    result = resolveTurn({ state: test.state, actions: test.actions, rolls: test.rolls });
                     break;
                 case 'world_seeds':
                     result = resolveWorldSeeds(test);
                     break;
                 case 'social':
-                    result = ['prepare_npc_seeds', 'claim_npc_seed']
-                        .includes(test.action)
+                    result = ['prepare_npc_seeds', 'claim_npc_seed'].includes(test.action)
                         ? resolvePreparedNpcSeeds(test)
                         : test.action === 'check_work'
                             ? resolveSocialWorkOpportunity(test)
@@ -18530,113 +16553,17 @@ function resolveBatch(args) {
                                 ? resolveSocialWorkReveal(test)
                                 : resolveSocialSeed(test);
                     break;
-
-                case 'loot':
-                    result = claimLockedLoot(test);
-                    break;
-
-                case 'debug_create_quest_breadcrumb': {
-                    const state = clone(test.state);
-                    const encounter = state.encounter;
-
-                    assert(
-                        encounter?.status === 'cleared',
-                        'Test breadcrumb requires a cleared encounter'
-                    );
-                    assert(
-                        encounter.type === 'normal_pack' ||
-                        (
-                            encounter.type === 'declared' &&
-                            encounter.foes.every(foe =>
-                                ['brute', 'archer', 'mender', 'hexer', 'buffer']
-                                    .includes(foe.role)
-                            ) &&
-                            !encounter.reinforcementLog?.length
-                        ),
-                        'Test breadcrumb requires a cleared ordinary pack'
-                    );
-                    assert(
-                        !encounter.questSeed,
-                        'This encounter already has a quest seed'
-                    );
-                    assert(
-                        !state.activeQuest ||
-                        !['offered', 'in_progress'].includes(
-                            state.activeQuest.status
-                        ),
-                        'Resolve the existing quest offer before testing another'
-                    );
-
-                    const breadcrumbId = `breadcrumb-${encounter.id}`;
-                    const issuer = questIssuerSettlement(state);
-
-                    state.breadcrumbs ||= {};
-                    assert(
-                        !state.breadcrumbs[breadcrumbId],
-                        `Breadcrumb ${breadcrumbId} already exists`
-                    );
-
-                    const questSeed = {
-                        source: 'pack_drop',
-                        roll: 10,
-                        result: 'diegetic_quest_breadcrumb',
-                        testOnly: true
-                    };
-
-                    state.breadcrumbs[breadcrumbId] = {
-                        id: breadcrumbId,
-                        encounterId: encounter.id,
-                        zone: encounter.zone,
-                        settlementId: issuer.id,
-                        locationId: state.currentLocationId,
-                        position: clone(
-                            state.currentPosition ||
-                            { nodeId: state.currentLocationId }
-                        ),
-                        questSeed: clone(questSeed),
-                        questSeedConsumed: false,
-                        questId: null
-                    };
-
-                    encounter.questSeed = clone(questSeed);
-                    encounter.questSeedConsumed = false;
-
-                    result = {
-                        ok: true,
-                        action: 'debug_create_quest_breadcrumb',
-                        created: true,
-                        breadcrumbId,
-                        encounterId: encounter.id,
-                        questSeed: clone(encounter.questSeed),
-                        state
-                    };
-                    break;
-                }
-
                 case 'follow_breadcrumb': {
                     const state = test.state;
-                    const breadcrumb = state?.breadcrumbs?.[
-                        test.breadcrumbId
-                    ];
-
+                    const breadcrumb = state?.breadcrumbs?.[test.breadcrumbId];
                     assert(
                         breadcrumb?.questSeed?.source === 'pack_drop' &&
-                        breadcrumb.questSeed.result ===
-                            'diegetic_quest_breadcrumb',
+                        breadcrumb.questSeed.result === 'diegetic_quest_breadcrumb',
                         'Unknown saved pack breadcrumb'
                     );
-
                     if (breadcrumb.questSeedConsumed) {
-                        const existing = findQuestById(
-                            state,
-                            breadcrumb.questId
-                        );
-
-                        assert(
-                            existing,
-                            'Consumed breadcrumb lost its quest offer'
-                        );
-
+                        const existing = findQuestById(state, breadcrumb.questId);
+                        assert(existing, 'Consumed breadcrumb lost its quest offer');
                         result = {
                             ok: true,
                             created: false,
@@ -18647,265 +16574,55 @@ function resolveBatch(args) {
                         };
                         break;
                     }
-
                     assert(
-                        !['active', 'spotted'].includes(
-                            state.encounter?.status
-                        ),
+                        !['active', 'spotted'].includes(state.encounter?.status),
                         'Resolve or avoid the encounter before following the clue'
                     );
-
                     assert(
-                        breadcrumb.locationId ===
-                            state.currentLocationId &&
+                        breadcrumb.locationId === state.currentLocationId &&
                         JSON.stringify(breadcrumb.position) ===
-                            JSON.stringify(
-                                state.currentPosition ||
-                                { nodeId: state.currentLocationId }
-                            ),
+                            JSON.stringify(state.currentPosition || { nodeId: state.currentLocationId }),
                         'Return to where this breadcrumb was found'
                     );
-
-                    const issuer = state.world?.settlements?.[
-                        breadcrumb.settlementId
-                    ];
-
-                    assert(
-                        issuer?.zone === breadcrumb.zone,
-                        'Breadcrumb has no saved local issuer'
-                    );
-
+                    const issuer = state.world?.settlements?.[breadcrumb.settlementId];
+                    assert(issuer?.zone === breadcrumb.zone, 'Breadcrumb has no saved local issuer');
                     result = resolveQuestSeed({
                         state,
                         breadcrumbId: breadcrumb.id,
                         zone: breadcrumb.zone,
                         settlementId: issuer.id
                     });
-
                     result.action = 'follow_breadcrumb';
                     result.breadcrumbId = breadcrumb.id;
                     break;
                 }
-
-                    case 'debug_reconcile_quest_terminal': {
-                    const state = clone(test.state);
-                    const quest = state.activeQuest;
-                    const gate = quest?.currentGate;
-                    const threat = quest?.terminalThreat;
-
-                    assert(
-                        quest?.status === 'in_progress' &&
-                        quest.seed?.testOnly === true,
-                        'Reconciliation only applies to an in-progress test quest'
-                    );
-
-                    assert(
-                        quest.structureV2?.family === 'defeat_elite' &&
-                        gate?.trigger === 'linked_combat' &&
-                        gate.linkedTargetId === quest.targetId,
-                        'Current gate is not linked to this quest target'
-                    );
-
-                    assert(
-                        threat?.revealed === true &&
-                        threat.resolved !== true &&
-                        threat.targetId === quest.targetId &&
-                        typeof threat.encounterId === 'string',
-                        'Quest does not have a matching revealed, unresolved threat'
-                    );
-
-                    assert(
-                        state.currentLocationId === quest.destinationId,
-                        'Crew must be at the quest destination to reconcile the test'
-                    );
-
-                    assert(
-                        state.encounter?.status === 'cleared' &&
-                        state.encounter.id !== threat.encounterId,
-                        'Expected a cleared encounter separate from the linked quest encounter'
-                    );
-
-                    assert(
-                        !quest.objectiveResolution,
-                        'Quest objective is already resolved'
-                    );
-
-                    assert(
-                        typeof test.completionEvidence === 'string' &&
-                        test.completionEvidence.trim().length > 0,
-                        'Reconciliation requires completionEvidence'
-                    );
-
-                    threat.resolved = true;
-                    quest.objectiveResolution = {
-                        route: 'combat',
-                        evidence: test.completionEvidence.trim()
-                    };
-
-                    result = {
-                        ok: true,
-                        action: 'debug_reconcile_quest_terminal',
-                        questId: quest.id,
-                        targetId: quest.targetId,
-                        linkedEncounterId: threat.encounterId,
-                        observedClearedEncounterId: state.encounter.id,
-                        objectiveResolution: quest.objectiveResolution,
-                        state
-                    };
-                    break;
-                }
-
-                    case 'debug_retire_test_quest': {
-                    const state = clone(test.state);
-                    const quest = state.activeQuest;
-
-                    assert(
-                        quest?.status === 'offered' &&
-                        quest.seed?.testOnly === true,
-                        'Debug retirement only applies to an offered test quest'
-                    );
-
-                    quest.status = 'retired_test';
-                    quest.retiredReason =
-                        'Debug quest retired before testing';
-                    quest.retiredAt = Date.now();
-
-                    result = {
-                        ok: true,
-                        action: 'debug_retire_test_quest',
-                        questId: quest.id,
-                        state
-                    };
-                    break;
-                }
-
-                case 'debug_create_quest_offer': {
-                    const state = clone(test.state);
-
-                    /*
-                     * A debug trigger may create an additional journal offer.
-                     * resolveQuestSeed preserves the selected quest, while
-                     * acceptance separately enforces the current limit of
-                     * one in-progress quest. Fixture creation must not require
-                     * declining an existing offer merely to test coexistence.
-                     */
-
-                    const issuer =
-                        questIssuerSettlement(state, test);
-
-                    const repTier =
-                        state.reputation?.[issuer.reputationKey]?.tier;
-
-                    assert(
-                        repTier,
-                        `No saved reputation tier for ` +
-                        `${issuer.label}`
-                    );
-
-                    state.inquiries ||= {};
-
-                    const inquiryId = test.inquiryId ||
-                        `debug-quest-${Date.now()}`;
-
-                    const inquiryKey = `rumor:${inquiryId}`;
-
-                    assert(
-                        !state.inquiries[inquiryKey],
-                        `Debug quest trigger already exists: ${inquiryId}`
-                    );
-
-                    state.inquiries[inquiryKey] = {
-                        id: inquiryId,
-                        type: 'rumor',
-                        zone: state.zone,
-                        roll: 5,
-                        result: 'genuine_unclaimed_quest_or_dungeon_hook',
-                        lootSeed: null,
-                        questSeed: {
-                            source: 'debug_test',
-                            roll: 5,
-                            result: 'genuine_unclaimed_quest_or_dungeon_hook',
-                            testOnly: true
-                        },
-                        questSeedConsumed: false
-                    };
-
-                    result = resolveQuestSeed({
-                        state,
-                        inquiryId,
-                        zone: state.zone,
-                        repTier,
-                        town: issuer.reputationKey,
-                        settlementId: issuer.id
-                    });
-
-                    if (result.quest) {
-                        result.quest.seed.testOnly = true;
-                        result.quest.seed.source = 'debug_test';
-                    }
-
-                    result.action = 'debug_create_quest_offer';
-                    break;
-                }
-
                 case 'quest_delivery': {
                     const state = clone(test.state);
                     const questId = test.questId;
-
-                    assert(
-                        typeof questId === 'string' &&
-                        questId.length > 0,
-                        'Quest delivery requires an explicit questId'
-                    );
-
+                    assert(typeof questId === 'string' && questId.length > 0, 'Quest delivery requires an explicit questId');
                     ensureQuestJournal(state);
-
                     const quest = findQuestById(state, questId);
 
-                    /*
-                     * A duplicate notification for an already-completed
-                     * retrieval quest must never pay a second time.
-                     */
-                    if (
-                        quest?.status === 'complete' &&
-                        quest.structureV2?.family === 'retrieve_item'
-                    ) {
-                        result = {
-                            ok: true,
-                            created: false,
-                            action: 'quest_delivery',
-                            questId,
-                            state
-                        };
+                    if (quest?.status === 'complete' && quest.structureV2?.family === 'retrieve_item') {
+                        result = { ok: true, created: false, action: 'quest_delivery', questId, state };
                         break;
                     }
 
                     assert(
-                        quest?.status === 'in_progress' &&
-                        quest.structureV2?.family === 'retrieve_item',
+                        quest?.status === 'in_progress' && quest.structureV2?.family === 'retrieve_item',
                         `No in-progress retrieval quest awaits ${questId}`
                     );
-
                     assert(
-                        quest.deliveryReady === true &&
-                        Boolean(quest.objectiveResolution),
+                        quest.deliveryReady === true && Boolean(quest.objectiveResolution),
                         'Quest cargo has not returned ready for delivery'
                     );
-
                     assert(
-                        state.currentLocationId ===
-                            quest.turnIn?.locationId &&
-                        !state.currentJourney,
+                        state.currentLocationId === quest.turnIn?.locationId && !state.currentJourney,
                         'The crew is not free at this quest turn-in location'
                     );
-
-                    const cargo = quest.discoveries?.find(
-                        item => item.id === quest.turnIn?.discoveryId
-                    );
-
+                    const cargo = quest.discoveries?.find(item => item.id === quest.turnIn?.discoveryId);
                     assert(
-                        cargo?.kind === 'quest_item' &&
-                        cargo.state === 'acquired',
+                        cargo?.kind === 'quest_item' && cargo.state === 'acquired',
                         'The locked quest cargo has not been recovered'
                     );
 
@@ -18915,90 +16632,33 @@ function resolveBatch(args) {
                         action: 'complete',
                         objectiveCompleted: true,
                         completionEvidence:
-                            `Delivered ${
-                                cargo.name ||
-                                quest.facts?.cargo ||
-                                'the quest cargo'
-                            } to ${quest.turnIn.recipient}.`
+                            `Delivered ${cargo.name || quest.facts?.cargo || 'the quest cargo'} to ${quest.turnIn.recipient}.`
                     });
-
                     result.action = 'quest_delivery';
-
                     break;
                 }
-
                 case 'quest':
-                    result = test.action
-                        ? resolveQuestAction(test)
-                        : resolveQuestSeed(test);
+                    result = test.action ? resolveQuestAction(test) : resolveQuestSeed(test);
                     break;
                 default:
                     throw new Error(`Unknown mechanics kind: ${test.kind}`);
             }
 
-            if (test.expectError) {
-                results.push({
-                    name,
-                    ok: false,
-                    error:
-                        `Expected error containing '${test.expectError}', ` +
-                        'but the operation succeeded',
-                    result
-                });
-                continue;
-            }
-
-            const checks = Array.isArray(test.expect)
-                ? evaluateExpectations(result, test.expect, name)
-                : [];
-
-            const explicitlyChecksStatus =
-                checks.some(check => check.path === 'ok');
-
-            const resultStatusOk =
-                result !== undefined &&
-                result !== null &&
-                (result.ok !== false || explicitlyChecksStatus);
-
-            const checksOk =
-                checks.every(check => check.ok);
-
             results.push({
                 name,
-                ok: resultStatusOk && checksOk,
-                checks,
+                ok: result != null && result.ok !== false,
                 result
             });
         } catch (error) {
-            const message = error instanceof Error
-                ? error.message
-                : String(error);
-
-            if (
-                typeof test.expectError === 'string' &&
-                message.toLowerCase().includes(
-                    test.expectError.toLowerCase()
-                )
-            ) {
-                results.push({
-                    name,
-                    ok: true,
-                    expectedError: test.expectError,
-                    actualError: message
-                });
-            } else {
-                results.push({
-                    name,
-                    ok: false,
-                    error: message
-                });
-            }
+            results.push({
+                name,
+                ok: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     }
 
-    const passed =
-        results.filter(item => item.ok).length;
-
+    const passed = results.filter(item => item.ok).length;
     return {
         ok: passed === results.length,
         total: results.length,
@@ -21176,25 +18836,17 @@ async function runStoredMechanic(args) {
               caseResult.quest
                 ? questOfferNarrationPacket(caseResult.quest, nextState)
 
-             : batch &&
+            : batch &&
               oneCase?.kind === 'msq' &&
               caseResult.created &&
               caseResult.quest
                 ? msqOfferNarrationPacket(caseResult.quest, nextState)
-
-             : batch &&
-              oneCase?.kind === 'debug_create_quest_offer' &&
-              caseResult.created &&
-              caseResult.quest
-                ? questOfferNarrationPacket(caseResult.quest, nextState)
-
 
             : questDeliveryPacket
                 ? questDeliveryPacket
 
             : questActionPacket
                 ? questActionPacket
-
 
             : batch &&
               oneCase?.kind === 'quest_event' &&
@@ -21540,80 +19192,6 @@ function rollLootFromState(
             rarityRoll
         }, state),
         rolls: { slotRoll, rarityRoll }
-    };
-}
-
-function claimLockedLoot(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Loot claim requires state'
-    );
-
-    const state = clone(test.state);
-    const encounter = state.encounter;
-    const inquiryRecord = test.inquiryId === undefined
-        ? null
-        : state.inquiries?.[`site:${test.inquiryId}`];
-
-    assert(
-        test.inquiryId === undefined || inquiryRecord,
-        'Unknown locked site inquiry'
-    );
-
-    const seed = inquiryRecord
-        ? inquiryRecord.lootSeed
-        : encounter?.lootSeed;
-
-    assert(seed, 'Loot claim requires a locked loot seed');
-    assert(seed.claimed !== true, 'This loot seed was already claimed');
-
-    const packDrop = seed.result === 'wild_equipment_drop';
-    const stash = seed.result === 'hidden_loot_stash';
-
-    assert(
-        packDrop || stash,
-        `Unsupported locked loot seed: ${seed.result}`
-    );
-
-    if (packDrop) {
-        assert(
-            encounter.status === 'cleared',
-            'Pack-drop loot requires a cleared encounter'
-        );
-    }
-
-    state.inventory ||= {};
-    state.inventory.bagReserves ||= [];
-
-    assert(
-        Array.isArray(state.inventory.bagReserves),
-        'inventory.bagReserves must be an array'
-    );
-
-        const generated = rollLootFromState(
-        state,
-        'wild',
-        inquiryRecord?.zone
-    );
-
-    const item = {
-        ...generated.item,
-        acquiredFrom: seed.source,
-        ...(inquiryRecord
-            ? { acquiredAtInquiry: inquiryRecord.id }
-            : { acquiredAtEncounter: encounter.id }),
-
-        bound: false
-    };
-
-    state.inventory.bagReserves.push(item);
-    seed.claimed = true;
-
-    return {
-        ok: true,
-        item,
-        rolls: generated.rolls,
-        state
     };
 }
 

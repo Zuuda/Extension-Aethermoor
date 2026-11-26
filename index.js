@@ -5878,74 +5878,31 @@ function instancePackComposition(state, zone, roomId) {
     return (fourFoes ? 7 : 1) + variant;
 }
 
-function spawnNormalPack({
-    zone,
-    bracket = 'mid',
-    composition = 2,
-    encounterId = `normal-pack-z${zone}`
-}) {
-    assert(
-        Number.isInteger(zone) &&
-        ZONES[zone],
-        `Unknown zone: ${zone}`
-    );
+function spawnNormalPack({ zone, bracket = 'mid', composition = 2, encounterId = `normal-pack-z${zone}` }) {
+    assert(Number.isInteger(zone) && ZONES[zone], `Unknown zone: ${zone}`);
+    assert(NORMAL_BRACKETS[zone]?.[bracket], `Invalid bracket for zone ${zone}: ${bracket}`);
+    assert(Number.isInteger(composition) && PACK_COMPOSITIONS[composition], 'Pack composition must identify a supported roster (1–12)');
 
-    assert(
-        NORMAL_BRACKETS[zone] &&
-        NORMAL_BRACKETS[zone][bracket],
-        `Invalid bracket for zone ${zone}: ${bracket}`
-    );
+    const zoneData = ZONES[zone];
+    const bracketData = NORMAL_BRACKETS[zone][bracket];
+    const roles = PACK_COMPOSITIONS[composition];
+    const foes = roles.map((role, index) => createFoe({
+        id: `${encounterId}-${role}-${index + 1}`,
+        level: bracketData.level,
+        role
+    }));
 
-    assert(
-        Number.isInteger(composition) &&
-        PACK_COMPOSITIONS[composition],
-        'Pack composition must identify a supported roster (1–12)'
-    );
-
-    const zoneData =
-        ZONES[zone];
-
-    const bracketData =
-        NORMAL_BRACKETS[zone][bracket];
-
-    const roles =
-        PACK_COMPOSITIONS[composition];
-
-    const foes =
-        roles.map((role, index) =>
-            createFoe({
-                id:
-                    `${encounterId}-${role}-${index + 1}`,
-                level: bracketData.level,
-                role
-            })
-        );
-
-    const pureFodder =
-        composition === 1;
-
-    const listedPackXp =
-        pureFodder
-            ? bracketData.xpSwarm
-            : bracketData.xpMixed;
-
-     const autoSalvage = foes.reduce(
-            (total, foe) => total + silverForKill(foe),
-        0
-    );
-
-
+    const pureFodder = composition === 1;
     const lockedRewards = {
         kind: 'normal_pack',
-        listedPackXp,
-        autoSalvage,
+        listedPackXp: pureFodder ? bracketData.xpSwarm : bracketData.xpMixed,
+        autoSalvage: foes.reduce((total, foe) => total + silverForKill(foe), 0),
         foeCount: foes.length,
         resolved: false
     };
 
     return {
         ok: true,
-
         encounter: {
             id: encounterId,
             status: 'active',
@@ -5954,38 +5911,19 @@ function spawnNormalPack({
             type: 'normal_pack',
             bracket,
             composition,
-            compositionName:
-                pureFodder
-                    ? 'Pure Fodder Swarm'
-                    : foes.length === 4
-                        ? 'Four-Foe Tactical Pack'
-                        : 'Mixed Tactical Squad',
-
+            compositionName: pureFodder ? 'Pure Fodder Swarm' : foes.length === 4 ? 'Four-Foe Tactical Pack' : 'Mixed Tactical Squad',
             enemyTier: zoneData.tier,
             foes,
-
-            /*
-             * These fields are deliberately null at spawn.
-             * They become locked only when the corresponding event
-             * actually occurs in the scene.
-             */
             packDropRoll: null,
             curiosityRoll: null,
             rumorRoll: null,
             lootSeed: null,
             questSeed: null,
-
             rewards: lockedRewards,
-
-            used: {
-                stun: false,
-                icePatch: false,
-                surge: false
-            },
+            used: { stun: false, icePatch: false, surge: false },
             hexStacks: {},
             exposed: 0
         },
-
         rewards: lockedRewards
     };
 }
@@ -6017,11 +5955,7 @@ const PASSIVES = {
 };
 
 function spawnEncounter(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'spawn requires state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'spawn requires state');
     const state = clone(test.state);
 
     assert(state.crew, 'spawn requires state.crew');
@@ -6030,421 +5964,158 @@ function spawnEncounter(test) {
     assert(state.crew.weasels, 'spawn requires state.crew.weasels');
     assert(state.crew.gear?.tansy, 'spawn requires state.crew.gear.tansy');
     assert(state.crew.gear?.qtik, 'spawn requires state.crew.gear.qtik');
-
     assert(
-        state.inventory &&
-        typeof state.inventory === 'object' &&
-        !Array.isArray(state.inventory),
+        state.inventory && typeof state.inventory === 'object' && !Array.isArray(state.inventory),
         'spawn requires top-level state.inventory; do not nest it inside state.crew'
     );
 
     state.inventory.bagReserves ??= [];
     state.inventory.activeTradeListings ??= [];
-
-    assert(
-        Array.isArray(state.inventory.bagReserves),
-        'spawn requires state.inventory.bagReserves to be an array'
-    );
-    assert(
-        Array.isArray(state.inventory.activeTradeListings),
-        'spawn requires state.inventory.activeTradeListings to be an array'
-    );
+    assert(Array.isArray(state.inventory.bagReserves), 'spawn requires state.inventory.bagReserves to be an array');
+    assert(Array.isArray(state.inventory.activeTradeListings), 'spawn requires state.inventory.activeTradeListings to be an array');
 
     // Spawn callers may provide the zone directly or rely on the saved state.
     const zone = test.zone ?? state.zone;
-
-    assert(
-        Number.isInteger(zone) && ZONES[zone],
-        `Unknown zone: ${zone}`
-    );
-
+    assert(Number.isInteger(zone) && ZONES[zone], `Unknown zone: ${zone}`);
     test = { ...test, zone };
 
     assert(
         !state.encounter ||
         state.encounter.status === 'fled' ||
-        (
-            ['cleared', 'dead'].includes(state.encounter.status) &&
-            state.encounter.rewards?.resolved === true
-        ),
+        (['cleared', 'dead'].includes(state.encounter.status) && state.encounter.rewards?.resolved === true),
         'Cannot spawn while an encounter is active or has unresolved rewards'
     );
 
-    const requestedKind =
-        test.encounterType ||
-        'normal_pack';
+    const requestedKind = test.encounterType || 'normal_pack';
+    let kind = requestedKind;
+    let encounterTypeRoll = null;
+    let questTerminal = null;
 
-    let kind =
-        requestedKind;
+    if (requestedKind === 'quest_terminal') {
+        assert(typeof test.questId === 'string' && test.questId.length > 0, 'Quest-terminal spawn requires a questId');
+        const activeQuest = findQuestById(state, test.questId);
+        assert(activeQuest?.status === 'in_progress', 'Quest-terminal spawn requires an in-progress quest');
+        assert(!activeQuest.objectiveResolution, 'Quest objective is already secured');
 
-    let encounterTypeRoll =
-        null;
+        const lockedThreat = activeQuest.seed?.terminalThreat;
+        assert(lockedThreat && ['normal_pack', 'elite', 'boss'].includes(lockedThreat.kind), 'Quest has no supported locked terminal threat');
+        assert(Number.isInteger(lockedThreat.zone) && ZONES[lockedThreat.zone], 'Quest terminal threat has an invalid zone');
+        assert(activeQuest.terminalThreat && activeQuest.terminalThreat.resolved !== true, 'Quest terminal threat has already been resolved');
+        assert(test.zone === undefined || test.zone === lockedThreat.zone, 'Quest-terminal spawn zone does not match locked threat zone');
 
-    let questTerminal =
-        null;
-
-       if (requestedKind === 'quest_terminal') {
-        assert(
-            typeof test.questId === 'string' &&
-            test.questId.length > 0,
-            'Quest-terminal spawn requires a questId'
-        );
-
-        const activeQuest = findQuestById(
-            state,
-            test.questId
-        );
-
-        assert(
-            activeQuest?.status === 'in_progress',
-            'Quest-terminal spawn requires an in-progress quest'
-        );
-
-        assert(
-            !activeQuest.objectiveResolution,
-            'Quest objective is already secured'
-        );
-
-        const lockedThreat =
-            activeQuest.seed?.terminalThreat;
-
-        assert(
-            lockedThreat &&
-            ['normal_pack', 'elite', 'boss'].includes(
-                lockedThreat.kind
-            ),
-            'Quest has no supported locked terminal threat'
-        );
-
-        assert(
-            Number.isInteger(lockedThreat.zone) &&
-            ZONES[lockedThreat.zone],
-            'Quest terminal threat has an invalid zone'
-        );
-
-        assert(
-            activeQuest.terminalThreat &&
-            activeQuest.terminalThreat.resolved !== true,
-            'Quest terminal threat has already been resolved'
-        );
-
-        assert(
-            test.zone === undefined ||
-            test.zone === lockedThreat.zone,
-            'Quest-terminal spawn zone does not match locked threat zone'
-        );
-
-        kind =
-            lockedThreat.kind;
-
-        /*
-         * The quest seed, not the caller, supplies the zone and
-         * encounter identity. A caller may provide a more specific
-         * encounter ID, but cannot change the threat type or zone.
-         */
-        test = {
-            ...test,
-            zone: lockedThreat.zone,
-            encounterId:
-                test.encounterId ||
-                `quest-terminal-${activeQuest.id}`
-        };
-
-        questTerminal = {
-            questId: activeQuest.id,
-            kind: lockedThreat.kind,
-            zone: lockedThreat.zone
-        };
+        kind = lockedThreat.kind;
+        test = { ...test, zone: lockedThreat.zone, encounterId: test.encounterId || `quest-terminal-${activeQuest.id}` };
+        questTerminal = { questId: activeQuest.id, kind: lockedThreat.kind, zone: lockedThreat.zone };
     }
+
     if (requestedKind === 'wild') {
-        assert(
-            Number.isInteger(test.zone) &&
-            ZONES[test.zone],
-            `Unknown zone: ${test.zone}`
-        );
+        assert(Number.isInteger(test.zone) && ZONES[test.zone], `Unknown zone: ${test.zone}`);
+        const siteAffinity = test.siteAffinity || 'ordinary';
+        assert(['ordinary', 'ruin', 'barrow', 'lair'].includes(siteAffinity), `Unsupported wild site affinity: ${siteAffinity}`);
 
-        const siteAffinity =
-            test.siteAffinity || 'ordinary';
-
-        assert(
-            ['ordinary', 'ruin', 'barrow', 'lair'].includes(siteAffinity),
-            `Unsupported wild site affinity: ${siteAffinity}`
-        );
-
-        encounterTypeRoll =
-            roll(state, 100);
-
-        const siteBonus =
-            siteAffinity === 'ordinary' ? 0 : 15;
-
-const eliteChance =
-    siteAffinity === 'ordinary'
-        ? Math.min(15, 10 + test.zone)
-        : Math.min(30, 10 + test.zone + siteBonus);
-
-
-        kind =
-            encounterTypeRoll <= eliteChance
-                ? 'elite'
-                : 'normal_pack';
+        encounterTypeRoll = roll(state, 100);
+        const eliteChance = siteAffinity === 'ordinary'
+            ? Math.min(15, 10 + test.zone)
+            : Math.min(30, 10 + test.zone + 15);
+        kind = encounterTypeRoll <= eliteChance ? 'elite' : 'normal_pack';
     }
 
-    const bracketNames = [
-
-        'low',
-        'mid',
-        'high'
-    ];
-
+    const bracketNames = ['low', 'mid', 'high'];
     let spawned;
 
     if (kind === 'declared') {
-        assert(
-            Number.isInteger(test.zone) && ZONES[test.zone],
-            `Unknown zone: ${test.zone}`
-        );
-        assert(
-            Array.isArray(test.foes) && test.foes.length > 0,
-            'Declared encounter needs at least one foe'
-        );
+        assert(Number.isInteger(test.zone) && ZONES[test.zone], `Unknown zone: ${test.zone}`);
+        assert(Array.isArray(test.foes) && test.foes.length > 0, 'Declared encounter needs at least one foe');
 
-        const allowed = new Set([
-            'brute',
-            'archer',
-            'mender',
-            'hexer',
-            'buffer',
-            'elite',
-            'boss'
-        ]);
-
+        const allowed = new Set(['brute', 'archer', 'mender', 'hexer', 'buffer', 'elite', 'boss']);
         const id = test.encounterId || `declared-z${test.zone}`;
-
         const foes = test.foes.map((entry, index) => {
-            assert(
-                entry && allowed.has(entry.role),
-                `Unsupported declared foe role at index ${index}`
-            );
+            assert(entry && allowed.has(entry.role), `Unsupported declared foe role at index ${index}`);
+            int(entry.level, `foes[${index}].level`, 1);
+            const foe = createFoe({ id: `${id}-${entry.role}-${index + 1}`, level: entry.level, role: entry.role });
 
-            int(
-                entry.level,
-                `foes[${index}].level`,
-                1
-            );
-
-            const foe = createFoe({
-                id: `${id}-${entry.role}-${index + 1}`,
-                level: entry.level,
-                role: entry.role
-            });
-
-            if (
-                entry.role === 'elite' ||
-                entry.role === 'boss'
-            ) {
+            if (entry.role === 'elite' || entry.role === 'boss') {
                 const passiveRoll = roll(state, 4);
-
                 foe.passive = PASSIVES[passiveRoll];
                 foe.passiveRoll = passiveRoll;
                 foe.passiveStacks = 0;
                 foe.nextTelegraph = null;
-
-                if (entry.role === 'boss') {
-                    foe.reinforcementsCalled = false;
-                }
+                if (entry.role === 'boss') foe.reinforcementsCalled = false;
             }
-
             return foe;
-
         });
 
         const rewards = {
             kind: 'declared',
             resolved: false,
             guaranteedGear: foes
-                .filter(foe =>
-                    foe.role === 'elite' ||
-                    foe.role === 'boss'
-                )
-                .map(foe => ({
-                    foeId: foe.id,
-                    source: foe.role,
-                    rawStat: lootStatFromRarity(
-                        test.zone,
-                        foe.role === 'elite' ? 'uncommon' : 'epic'
-                    ),
-                    pawnSilver:
-                        2 * lootStatFromRarity(
-                            test.zone,
-                            foe.role === 'elite' ? 'uncommon' : 'epic'
-                        )
-                }))
+                .filter(foe => foe.role === 'elite' || foe.role === 'boss')
+                .map(foe => {
+                    const rawStat = lootStatFromRarity(test.zone, foe.role === 'elite' ? 'uncommon' : 'epic');
+                    return { foeId: foe.id, source: foe.role, rawStat, pawnSilver: 2 * rawStat };
+                })
         };
 
         spawned = {
             ok: true,
             encounter: {
-                id,
-                status: 'active',
-                turn: 0,
-                zone: test.zone,
-                type: 'declared',
-                enemyTier: ZONES[test.zone].tier,
-                foes,
-                packDropRoll: null,
-                curiosityRoll: null,
-                rumorRoll: null,
-                lootSeed: null,
-                questSeed: null,
-                rewards,
-                used: { stun: false, icePatch: false, surge: false },
-                hexStacks: {},
-                exposed: 0
+                id, status: 'active', turn: 0, zone: test.zone, type: 'declared',
+                enemyTier: ZONES[test.zone].tier, foes,
+                packDropRoll: null, curiosityRoll: null, rumorRoll: null, lootSeed: null, questSeed: null,
+                rewards, used: { stun: false, icePatch: false, surge: false }, hexStacks: {}, exposed: 0
             },
             rewards
         };
     } else if (kind === 'normal_pack') {
-        /*
-         * Ordinary packs retain their random bracket and composition.
-         * An instance room may instead supply an engine-saved plan.
-         * In either case, the created roster is saved on first spawn.
-         */
-        assert(
-            test.bracket === undefined ||
-            bracketNames.includes(test.bracket),
-            'Invalid locked normal-pack bracket'
-        );
-
-        assert(
-            test.composition === undefined ||
-            PACK_COMPOSITIONS[test.composition],
-            'Invalid locked normal-pack composition'
-        );
+        assert(test.bracket === undefined || bracketNames.includes(test.bracket), 'Invalid locked normal-pack bracket');
+        assert(test.composition === undefined || PACK_COMPOSITIONS[test.composition], 'Invalid locked normal-pack composition');
 
         const bracketRoll = test.bracket === undefined
             ? roll(state, bracketNames.length)
             : bracketNames.indexOf(test.bracket) + 1;
-
-        /*
-         * A room-supplied composition is already locked and consumes no
-         * size or composition roll. Ordinary packs roll size first,
-         * then one of the six rosters of that size.
-         */
         const sizeRoll = test.composition === undefined
             ? roll(state, fourFoeChanceSides(test.zone))
             : null;
-
         const compositionRoll = test.composition === undefined
             ? (sizeRoll === 1 ? 7 : 1) + roll(state, 6) - 1
             : test.composition;
 
-        const bracket =
-            bracketNames[bracketRoll - 1];
-
-        const tactic =
-            test.tactic || 'none';
-
-        packTacticDefinition(tactic);
+        const tactic = test.tactic || 'none';
+        const tacticDef = packTacticDefinition(tactic);
 
         spawned = spawnNormalPack({
             zone: test.zone,
-            bracket,
+            bracket: bracketNames[bracketRoll - 1],
             composition: compositionRoll,
-            encounterId:
-                test.encounterId ||
-                `normal-pack-z${test.zone}`
+            encounterId: test.encounterId || `normal-pack-z${test.zone}`
         });
-
-        spawned.encounter.composition =
-            compositionRoll;
-        spawned.encounter.packTactic = {
-            id: tactic,
-            label: packTacticDefinition(tactic).label,
-            description: packTacticDefinition(tactic).description
-        };
-
-        spawned.encounter.spawnRolls = {
-            encounterTypeRoll,
-            bracketRoll,
-            sizeRoll,
-            compositionRoll,
-            tactic: spawned.encounter.packTactic.id
-        };
-
+        spawned.encounter.composition = compositionRoll;
+        spawned.encounter.packTactic = { id: tactic, label: tacticDef.label, description: tacticDef.description };
+        spawned.encounter.spawnRolls = { encounterTypeRoll, bracketRoll, sizeRoll, compositionRoll, tactic };
     } else {
-        assert(
-            ZONES[test.zone],
-            `Unknown zone: ${test.zone}`
-        );
+        assert(ZONES[test.zone], `Unknown zone: ${test.zone}`);
+        assert(kind === 'elite' || kind === 'boss', `Unsupported encounter type: ${kind}`);
 
-        assert(
-            kind === 'elite' ||
-            kind === 'boss',
-            `Unsupported encounter type: ${kind}`
-        );
-
-        const passiveRoll =
-            roll(state, 4);
-
-        const passive =
-            PASSIVES[passiveRoll];
-
-        let level;
-        let bracket = null;
-        let bracketRoll = null;
-
-        if (kind === 'elite') {
-            bracketRoll =
-                roll(state, 2);
-
-            bracket =
-                bracketRoll === 1
-                    ? 'mid'
-                    : 'high';
-
-            level =
-                ELITE_LEVELS[test.zone][bracket];
-        } else {
-            level =
-                BOSS_LEVELS[test.zone];
-        }
-
-        const id =
-            test.encounterId ||
-            `${kind}-z${test.zone}`;
+        const passiveRoll = roll(state, 4);
+        const passive = PASSIVES[passiveRoll];
+        const bracketRoll = kind === 'elite' ? roll(state, 2) : null;
+        const bracket = kind === 'elite' ? (bracketRoll === 1 ? 'mid' : 'high') : null;
+        const level = kind === 'elite' ? ELITE_LEVELS[test.zone][bracket] : BOSS_LEVELS[test.zone];
+        const id = test.encounterId || `${kind}-z${test.zone}`;
 
         const foe = {
-            ...createFoe({
-                id: `${id}-${kind}`,
-                level,
-                role: kind
-            }),
-            passive,
-            passiveStacks: 0,
-            nextTelegraph: null,
-            reinforcementsCalled:
-                kind === 'boss'
-                    ? false
-                    : undefined
+            ...createFoe({ id: `${id}-${kind}`, level, role: kind }),
+            passive, passiveStacks: 0, nextTelegraph: null,
+            reinforcementsCalled: kind === 'boss' ? false : undefined
         };
 
-        const rawStat = lootStatFromRarity(
-            test.zone,
-            kind === 'elite' ? 'uncommon' : 'epic'
-        );
-
-        const baseKillXp =
-            mobStats(level, kind).xpBase;
-
+        const rawStat = lootStatFromRarity(test.zone, kind === 'elite' ? 'uncommon' : 'epic');
         const encounterRewards = {
             kind,
-            baseKillXp,
+            baseKillXp: mobStats(level, kind).xpBase,
             xpOnKillDependsOnCrewLevel: true,
             guaranteedGear: {
-                rarity:
-                    kind === 'elite'
-                        ? 'uncommon'
-                        : 'epic',
+                rarity: kind === 'elite' ? 'uncommon' : 'epic',
                 rawStat,
                 pawnSilver: 2 * rawStat,
                 slotPending: true
@@ -6455,83 +6126,38 @@ const eliteChance =
         spawned = {
             ok: true,
             encounter: {
-                id,
-                status: 'active',
-                turn: 0,
-                zone: test.zone,
-                type: kind,
-                bracket,
-                enemyTier: enemyTier(level),
-                foes: [foe],
-
-                packDropRoll: null,
-                curiosityRoll: null,
-                rumorRoll: null,
-                lootSeed: null,
-                questSeed: null,
-
+                id, status: 'active', turn: 0, zone: test.zone, type: kind, bracket,
+                enemyTier: enemyTier(level), foes: [foe],
+                packDropRoll: null, curiosityRoll: null, rumorRoll: null, lootSeed: null, questSeed: null,
                 rewards: encounterRewards,
-
-                used: {
-                    stun: false,
-                    icePatch: false,
-                    surge: false
-                },
-                hexStacks: {},
-                exposed: 0,
-
-                spawnRolls: {
-                    encounterTypeRoll,
-                    passiveRoll,
-                    bracketRoll
-                }
-
+                used: { stun: false, icePatch: false, surge: false }, hexStacks: {}, exposed: 0,
+                spawnRolls: { encounterTypeRoll, passiveRoll, bracketRoll }
             },
             rewards: encounterRewards
         };
     }
 
-        if (questTerminal) {
-        const linkedQuest = findQuestById(
-            state,
-            questTerminal.questId
-        );
-
-        assert(
-            linkedQuest?.status === 'in_progress',
-            'Spawn lost its linked quest'
-        );
-
-        const encounterId =
-            spawned.encounter.id;
-
+    if (questTerminal) {
+        const linkedQuest = findQuestById(state, questTerminal.questId);
+        assert(linkedQuest?.status === 'in_progress', 'Spawn lost its linked quest');
         linkedQuest.terminalThreat.revealed = true;
         linkedQuest.terminalThreat.resolved = false;
-        linkedQuest.terminalThreat.encounterId =
-            encounterId;
-
-        linkedQuest.seed.terminalThreat.encounterId =
-            encounterId;
-
+        linkedQuest.terminalThreat.encounterId = spawned.encounter.id;
+        linkedQuest.seed.terminalThreat.encounterId = spawned.encounter.id;
         spawned.encounter.questTerminal = {
             questId: questTerminal.questId,
             kind: questTerminal.kind,
             zone: questTerminal.zone
         };
     }
-    // Ordinary spawns are discoveries first. The player chooses when
-    // to engage after the discovery has been narrated.
-if (!questTerminal) {
-    spawned.encounter.status = 'spotted';
-}
+
+    // Ordinary spawns are discoveries first; the player chooses when to engage.
+    if (!questTerminal) spawned.encounter.status = 'spotted';
+
     state.zone = test.zone;
     state.encounter = spawned.encounter;
     validate(state);
-    return {
-        ...spawned,
-        rngState: state.rngState,
-        state
-    };
+    return { ...spawned, rngState: state.rngState, state };
 }
 
 /*

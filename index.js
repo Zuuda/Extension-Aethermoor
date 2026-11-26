@@ -1465,90 +1465,40 @@ function gearBonus(owner, slot, item) {
      * Empty slot objects are treated as empty gear. This allows compact
      * test fixtures such as gear: { tansy: {}, qtik: {} }.
      */
-    if (
-        item === null ||
-        item === undefined ||
-        Object.keys(item).length === 0
-    ) {
-        return {
-            atk: 0,
-            def: 0,
-            hp: 0,
-            luk: 0
-        };
+    if (item === null || item === undefined || Object.keys(item).length === 0) {
+        return { atk: 0, def: 0, hp: 0, luk: 0 };
     }
 
-    const stat = int(
-        item.stat,
-        `${owner}.${slot}.stat`
-    );
-
+    const stat = int(item.stat, `${owner}.${slot}.stat`);
     const variant = item.variant;
-
-    const result = {
-        atk: 0,
-        def: 0,
-        hp: 0,
-        luk: 0
-    };
+    const result = { atk: 0, def: 0, hp: 0, luk: 0 };
 
     if (owner === 'tansy') {
-        assert(
-            TANSY_SLOTS.includes(slot),
-            `Invalid Tansy slot: ${slot}`
-        );
-
+        assert(TANSY_SLOTS.includes(slot), `Invalid Tansy slot: ${slot}`);
         if (slot === 'weapon') {
             result.atk = 2 * stat;
         } else if (slot === 'gloves') {
             result.atk = stat;
-        } else if (
-            slot === 'chest' ||
-            slot === 'trousers'
-        ) {
+        } else if (slot === 'chest' || slot === 'trousers') {
             result.hp = 5 * stat;
             result.luk = stat > 0 ? 1 : 0;
         } else {
-            assert(
-                MODULAR_TANSY.has(slot),
-                `Invalid Tansy slot: ${slot}`
-            );
-
+            assert(MODULAR_TANSY.has(slot), `Invalid Tansy slot: ${slot}`);
             if (stat > 0) {
-                assert(
-                    ['vitality', 'luck'].includes(variant),
-                    `${slot} needs exactly one tuning variant`
-                );
-
-                if (variant === 'vitality') {
-                    result.hp = 5 * stat;
-                } else {
-                    result.luk = stat;
-                }
+                assert(['vitality', 'luck'].includes(variant), `${slot} needs exactly one tuning variant`);
+                if (variant === 'vitality') result.hp = 5 * stat;
+                else result.luk = stat;
             }
         }
     } else if (owner === 'qtik') {
-        assert(
-            QTIK_SLOTS.includes(slot),
-            `Invalid Q'tik slot: ${slot}`
-        );
-
+        assert(QTIK_SLOTS.includes(slot), `Invalid Q'tik slot: ${slot}`);
         if (stat > 0) {
-            assert(
-                ['vitality', 'bulwark'].includes(variant),
-                `${slot} needs exactly one tuning variant`
-            );
-
-            if (variant === 'vitality') {
-                result.hp = 15 * stat;
-            } else {
-                result.def = 2 * stat;
-            }
+            assert(['vitality', 'bulwark'].includes(variant), `${slot} needs exactly one tuning variant`);
+            if (variant === 'vitality') result.hp = 15 * stat;
+            else result.def = 2 * stat;
         }
     } else {
-        throw new Error(
-            `Unknown gear owner: ${owner}`
-        );
+        throw new Error(`Unknown gear owner: ${owner}`);
     }
 
     return result;
@@ -2244,377 +2194,102 @@ function derived(crew) {
 }
 
 function validate(state) {
-    assert(
-        state &&
-        typeof state === 'object',
-        'State object is required'
-    );
-
-    assert(
-        ZONES[state.zone],
-        `Unknown zone: ${state.zone}`
-    );
-
-    assert(
-        state.crew &&
-        state.encounter,
-        'Need crew and encounter'
-    );
+    assert(state && typeof state === 'object', 'State object is required');
+    assert(ZONES[state.zone], `Unknown zone: ${state.zone}`);
+    assert(state.crew && state.encounter, 'Need crew and encounter');
 
     const c = state.crew;
     const encounter = state.encounter;
 
-    assert(
-        c.qtik &&
-        typeof c.qtik === 'object',
-        "Q'tik state is required"
-    );
-
-    assert(
-        c.tansy &&
-        typeof c.tansy === 'object',
-        "Tansy state is required"
-    );
-
-    assert(
-        c.weasels &&
-        typeof c.weasels === 'object',
-        'Weasel state is required'
-    );
-
-    assert(
-        c.gear &&
-        typeof c.gear === 'object',
-        'Crew gear state is required'
-    );
-
-    /*
-     * derived() accepts missing slot entries and compact empty gear
-     * containers, but the two owner containers must exist.
-     */
-    assert(
-        c.gear.tansy &&
-        typeof c.gear.tansy === 'object',
-        "Tansy's gear container is required"
-    );
-
-    assert(
-        c.gear.qtik &&
-        typeof c.gear.qtik === 'object',
-        "Q'tik's gear container is required"
-    );
+    assert(c.qtik && typeof c.qtik === 'object', "Q'tik state is required");
+    assert(c.tansy && typeof c.tansy === 'object', "Tansy state is required");
+    assert(c.weasels && typeof c.weasels === 'object', 'Weasel state is required');
+    assert(c.gear && typeof c.gear === 'object', 'Crew gear state is required');
+    assert(c.gear.tansy && typeof c.gear.tansy === 'object', "Tansy's gear container is required");
+    assert(c.gear.qtik && typeof c.gear.qtik === 'object', "Q'tik's gear container is required");
 
     const d = derived(c);
-
     int(c.xp, 'crew.xp');
     int(c.purse, 'crew.purse');
     int(c.qtik.hp, 'qtik.hp');
     int(c.tansy.hp, 'tansy.hp');
-
-    assert(
-        c.qtik.hp <= d.qtikMaxHp,
-        "Q'tik HP exceeds derived maximum"
-    );
-
-    assert(
-        c.tansy.hp <= d.tansyMaxHp,
-        'Tansy HP exceeds derived maximum'
-    );
+    assert(c.qtik.hp <= d.qtikMaxHp, "Q'tik HP exceeds derived maximum");
+    assert(c.tansy.hp <= d.tansyMaxHp, 'Tansy HP exceeds derived maximum');
 
     state.inventory ||= {};
     normalizeConsumableInventory(state.inventory);
     normalizeEncounterPotionUses(encounter);
-    assert(
-        typeof encounter.id === 'string' &&
-        encounter.id.length > 0,
-        'Encounter needs a non-empty ID'
-    );
 
-    assert(
-        [
-            'spotted',
-            'active',
-            'cleared',
-            'fled',
-            'dead'
-        ].includes(encounter.status),
-        `Unsupported encounter status: ${encounter.status}`
-    );
-
-    assert(
-        [
-            'normal_pack',
-            'declared',
-            'elite',
-            'boss'
-        ].includes(encounter.type),
-        `Unsupported encounter type: ${encounter.type}`
-    );
-
-    assert(
-        Number.isInteger(encounter.turn) &&
-        encounter.turn >= 0,
-        'Encounter turn must be a non-negative integer'
-    );
-
-    assert(
-        Array.isArray(encounter.foes),
-        'Encounter needs a foes array'
-    );
-
-    assert(
-        encounter.foes.length > 0,
-        'Encounter needs at least one foe'
-    );
+    assert(typeof encounter.id === 'string' && encounter.id.length > 0, 'Encounter needs a non-empty ID');
+    assert(['spotted', 'active', 'cleared', 'fled', 'dead'].includes(encounter.status), `Unsupported encounter status: ${encounter.status}`);
+    assert(['normal_pack', 'declared', 'elite', 'boss'].includes(encounter.type), `Unsupported encounter type: ${encounter.type}`);
+    assert(Number.isInteger(encounter.turn) && encounter.turn >= 0, 'Encounter turn must be a non-negative integer');
+    assert(Array.isArray(encounter.foes), 'Encounter needs a foes array');
+    assert(encounter.foes.length > 0, 'Encounter needs at least one foe');
 
     const ids = new Set();
-
     for (const foe of encounter.foes) {
-        assert(
-            foe &&
-            typeof foe === 'object',
-            'Each foe must be an object'
-        );
-
-        assert(
-            typeof foe.id === 'string' &&
-            foe.id.length > 0 &&
-            !ids.has(foe.id),
-            'Each foe needs a unique non-empty string ID'
-        );
-
+        assert(foe && typeof foe === 'object', 'Each foe must be an object');
+        assert(typeof foe.id === 'string' && foe.id.length > 0 && !ids.has(foe.id), 'Each foe needs a unique non-empty string ID');
         ids.add(foe.id);
 
-        const expected =
-            mobStats(
-                foe.level,
-                foe.role
-            );
+        const expected = mobStats(foe.level, foe.role);
+        int(foe.level, `${foe.id}.level`, 1);
+        int(foe.hp, `${foe.id}.hp`);
+        int(foe.maxHp, `${foe.id}.maxHp`);
+        int(foe.atk, `${foe.id}.atk`);
+        int(foe.def, `${foe.id}.def`);
 
-        int(
-            foe.level,
-            `${foe.id}.level`,
-            1
-        );
-
-        int(
-            foe.hp,
-            `${foe.id}.hp`
-        );
-
-        int(
-            foe.maxHp,
-            `${foe.id}.maxHp`
-        );
-
-        int(
-            foe.atk,
-            `${foe.id}.atk`
-        );
-
-        int(
-            foe.def,
-            `${foe.id}.def`
-        );
-
-        assert(
-            foe.maxHp === expected.maxHp,
-            `${foe.id} maxHp does not match ` +
-            `${foe.role} formula`
-        );
-
-        assert(
-            foe.atk === expected.atk,
-            `${foe.id} atk does not match ` +
-            `${foe.role} formula`
-        );
-
-        assert(
-            foe.def === expected.def,
-            `${foe.id} def does not match ` +
-            `${foe.role} formula`
-        );
-
-        assert(
-            foe.hp <= foe.maxHp,
-            `${foe.id} HP exceeds maximum`
-        );
+        assert(foe.maxHp === expected.maxHp, `${foe.id} maxHp does not match ${foe.role} formula`);
+        assert(foe.atk === expected.atk, `${foe.id} atk does not match ${foe.role} formula`);
+        assert(foe.def === expected.def, `${foe.id} def does not match ${foe.role} formula`);
+        assert(foe.hp <= foe.maxHp, `${foe.id} HP exceeds maximum`);
     }
 
     if (encounter.type === 'declared') {
-        const declaredRoles = [
-            'brute',
-            'archer',
-            'mender',
-            'hexer',
-            'buffer',
-            'elite',
-            'boss'
-        ];
+        const declaredRoles = ['brute', 'archer', 'mender', 'hexer', 'buffer', 'elite', 'boss'];
+        assert(encounter.foes.every(foe => declaredRoles.includes(foe.role)), 'Declared encounter contains an unsupported role');
+        assert(encounter.rewards?.kind === 'declared', 'Declared encounter reward metadata is required');
 
-        assert(
-            encounter.foes.every(foe =>
-                declaredRoles.includes(foe.role)
-            ),
-            'Declared encounter contains an unsupported role'
-        );
-
-        assert(
-            encounter.rewards?.kind === 'declared',
-            'Declared encounter reward metadata is required'
-        );
-
-        const expectedGear =
-            encounter.foes.filter(
-                foe =>
-                    foe.role === 'elite' ||
-                    foe.role === 'boss'
-            );
-
-        assert(
-            Array.isArray(
-                encounter.rewards.guaranteedGear
-            ),
-            'Declared guaranteedGear must be an array'
-        );
-
-        assert(
-            encounter.rewards.guaranteedGear.length ===
-            expectedGear.length,
-            'Declared guaranteedGear does not match elite/boss roster'
-        );
+        const expectedGear = encounter.foes.filter(foe => foe.role === 'elite' || foe.role === 'boss');
+        assert(Array.isArray(encounter.rewards.guaranteedGear), 'Declared guaranteedGear must be an array');
+        assert(encounter.rewards.guaranteedGear.length === expectedGear.length, 'Declared guaranteedGear does not match elite/boss roster');
 
         for (const foe of expectedGear) {
-            const gear =
-                encounter.rewards.guaranteedGear.find(
-                    entry => entry.foeId === foe.id
-                );
-
-            assert(
-                gear,
-                `Missing guaranteed gear for ${foe.id}`
-            );
-
-            const expectedRawStat = lootStatFromRarity(
-                encounter.zone,
-                foe.role === 'elite' ? 'uncommon' : 'epic'
-            );
-
-            assert(
-                gear.rawStat === expectedRawStat,
-                `${foe.id} guaranteed gear stat is invalid`
-            );
-
-            assert(
-                gear.pawnSilver === 2 * gear.rawStat,
-                `${foe.id} guaranteed gear pawn value is invalid`
-            );
+            const gear = encounter.rewards.guaranteedGear.find(entry => entry.foeId === foe.id);
+            assert(gear, `Missing guaranteed gear for ${foe.id}`);
+            const expectedRawStat = lootStatFromRarity(encounter.zone, foe.role === 'elite' ? 'uncommon' : 'epic');
+            assert(gear.rawStat === expectedRawStat, `${foe.id} guaranteed gear stat is invalid`);
+            assert(gear.pawnSilver === 2 * gear.rawStat, `${foe.id} guaranteed gear pawn value is invalid`);
         }
     }
 
     if (encounter.type === 'normal_pack') {
         const roles = PACK_COMPOSITIONS[encounter.composition];
+        assert(Array.isArray(roles), 'Normal pack composition must identify a saved roster');
+        assert(encounter.foes.length === roles.length, 'Normal pack size does not match its composition');
 
-        assert(
-            Array.isArray(roles),
-            'Normal pack composition must identify a saved roster'
-        );
-
-        assert(
-            encounter.foes.length === roles.length,
-            'Normal pack size does not match its composition'
-        );
-
-        /*
-         * Compare role counts, not foe order. Existing three-foe
-         * encounters retain their original composition identities.
-         */
         const expectedRoles = [...roles].sort();
-        const actualRoles = encounter.foes
-            .map(foe => foe.role)
-            .sort();
-
-        assert(
-            JSON.stringify(actualRoles) ===
-                JSON.stringify(expectedRoles),
-            'Normal pack roles do not match its composition'
-        );
-
-        assert(
-            encounter.rewards &&
-            encounter.rewards.kind === 'normal_pack',
-            'Normal pack reward metadata is required'
-        );
-
-        assert(
-            encounter.rewards.foeCount === encounter.foes.length,
-            'Normal pack reward foeCount does not match its roster'
-        );
-
-        int(
-            encounter.rewards.listedPackXp,
-            'normal pack listedPackXp'
-        );
-
-        int(
-            encounter.rewards.autoSalvage,
-            'normal pack autoSalvage'
-        );
+        const actualRoles = encounter.foes.map(foe => foe.role).sort();
+        assert(JSON.stringify(actualRoles) === JSON.stringify(expectedRoles), 'Normal pack roles do not match its composition');
+        assert(encounter.rewards?.kind === 'normal_pack', 'Normal pack reward metadata is required');
+        assert(encounter.rewards.foeCount === encounter.foes.length, 'Normal pack reward foeCount does not match its roster');
+        int(encounter.rewards.listedPackXp, 'normal pack listedPackXp');
+        int(encounter.rewards.autoSalvage, 'normal pack autoSalvage');
     }
 
-    if (
-        encounter.type === 'elite' ||
-        encounter.type === 'boss'
-    ) {
-        assert(
-            encounter.foes.length === 1,
-            'Elite and Boss encounters must contain one foe'
-        );
+    if (encounter.type === 'elite' || encounter.type === 'boss') {
+        assert(encounter.foes.length === 1, 'Elite and Boss encounters must contain one foe');
+        assert(encounter.foes[0].role === encounter.type, `${encounter.type} encounter needs a ${encounter.type} foe`);
+        assert(encounter.rewards?.kind === encounter.type, `${encounter.type} reward metadata is required`);
+        int(encounter.rewards.baseKillXp, `${encounter.type} baseKillXp`);
 
-        assert(
-            encounter.foes[0].role === encounter.type,
-            `${encounter.type} encounter needs a ` +
-            `${encounter.type} foe`
-        );
-
-        assert(
-            encounter.rewards &&
-            encounter.rewards.kind === encounter.type,
-            `${encounter.type} reward metadata is required`
-        );
-
-        int(
-            encounter.rewards.baseKillXp,
-            `${encounter.type} baseKillXp`
-        );
-
-        const gear =
-            encounter.rewards.guaranteedGear;
-
-        assert(
-            gear &&
-            Number.isInteger(gear.rawStat) &&
-            Number.isInteger(gear.pawnSilver),
-            `${encounter.type} guaranteed gear metadata is required`
-        );
-
-        const expectedRawStat = lootStatFromRarity(
-            encounter.zone,
-            encounter.type === 'elite' ? 'uncommon' : 'epic'
-        );
-
-        assert(
-            gear.rawStat === expectedRawStat,
-            `${encounter.type} guaranteed gear stat does not ` +
-            'match zone'
-        );
-
-        assert(
-            gear.pawnSilver === 2 * gear.rawStat,
-            `${encounter.type} guaranteed gear pawn value ` +
-            'does not match raw stat'
-        );
-     }
+        const gear = encounter.rewards.guaranteedGear;
+        assert(gear && Number.isInteger(gear.rawStat) && Number.isInteger(gear.pawnSilver), `${encounter.type} guaranteed gear metadata is required`);
+        const expectedRawStat = lootStatFromRarity(encounter.zone, encounter.type === 'elite' ? 'uncommon' : 'epic');
+        assert(gear.rawStat === expectedRawStat, `${encounter.type} guaranteed gear stat does not match zone`);
+        assert(gear.pawnSilver === 2 * gear.rawStat, `${encounter.type} guaranteed gear pawn value does not match raw stat`);
+    }
 
     return d;
 }
@@ -3602,15 +3277,10 @@ function finalizeEncounterRewards(state, slainIds) {
     const encounter = state.encounter;
     const crew = state.crew;
 
-    assert(
-        encounter && encounter.rewards,
-        'Encounter has no locked reward data'
-    );
-
+    assert(encounter?.rewards, 'Encounter has no locked reward data');
     state.inventory ||= {};
     state.inventory.bagReserves ||= [];
     state.inventory.activeTradeListings ||= [];
-
     assert(
         Array.isArray(state.inventory.bagReserves) &&
         Array.isArray(state.inventory.activeTradeListings),
@@ -3618,292 +3288,138 @@ function finalizeEncounterRewards(state, slainIds) {
     );
 
     if (live(state).length > 0) {
-        return {
-            xp: 0, silver: 0, resolved: false,
-            encounterCleared: false, loot: [], trophies: []
-        };
+        return { xp: 0, silver: 0, resolved: false, encounterCleared: false, loot: [], trophies: [] };
     }
 
-    assert(
-        encounter.rewards.resolved !== true,
-        'Encounter rewards have already been resolved'
-    );
+    assert(encounter.rewards.resolved !== true, 'Encounter rewards have already been resolved');
 
     let xp = 0;
     let silver = 0;
     const loot = [];
 
-    if (encounter.type === 'normal_pack') {
-        /*
-         * Normal-pack XP follows the same level-gap rules as every
-         * other foe. The old listedPackXp remains locked metadata
-         * for reference, but is no longer the payout authority.
-         */
-        xp = encounter.foes.reduce(
-            (total, foe) =>
-                total + xpForKill(crew.level, foe),
-            0
-        );
+    if (encounter.type === 'normal_pack' || encounter.type === 'declared') {
+        xp = encounter.foes.reduce((total, foe) => total + xpForKill(crew.level, foe), 0);
+        silver = encounter.foes.reduce((total, foe) => total + silverForKill(foe), 0);
 
-        silver = encounter.foes.reduce(
-                (total, foe) => total + silverForKill(foe),
-            0
-        );
+        if (encounter.type === 'declared') {
+            for (const foe of encounter.foes) {
+                if (foe.role !== 'elite' && foe.role !== 'boss') continue;
+                const guaranteedGear = encounter.rewards.guaranteedGear.find(entry => entry.foeId === foe.id);
+                assert(guaranteedGear, `Missing guaranteed gear for ${foe.id}`);
 
+                const generated = rollLootFromState(state, foe.role);
+                assert(generated.item.rawStat === guaranteedGear.rawStat, `${foe.id} generated gear stat does not match locked reward`);
 
-    } else if (encounter.type === 'declared') {
-/*
- * A declared roster pays level-gap XP and level-based silver
- * for every slain foe. Elite/Boss members receive their
- * appropriate silver multiplier and guaranteed gear drop.
- */
-
-        xp = encounter.foes.reduce(
-            (total, foe) =>
-                total + xpForKill(crew.level, foe),
-            0
-        );
-
-        silver = encounter.foes.reduce(
-                (total, foe) => total + silverForKill(foe),
-            0
-        );
-
-        for (const foe of encounter.foes) {
-            if (
-                foe.role !== 'elite' &&
-                foe.role !== 'boss'
-            ) {
-                continue;
+                const item = {
+                    ...generated.item,
+                    acquiredFrom: foe.role,
+                    acquiredAtEncounter: encounter.id,
+                    acquiredFromFoe: foe.id,
+                    bound: false
+                };
+                state.inventory.bagReserves.push(item);
+                loot.push(item);
             }
-
-            const guaranteedGear =
-                encounter.rewards.guaranteedGear.find(
-                    entry => entry.foeId === foe.id
-                );
-
-            assert(
-                guaranteedGear,
-                `Missing guaranteed gear for ${foe.id}`
-            );
-
-            const generated =
-                rollLootFromState(
-                    state,
-                    foe.role
-                );
-
-            assert(
-                generated.item.rawStat ===
-                guaranteedGear.rawStat,
-                `${foe.id} generated gear stat does not ` +
-                'match locked reward'
-            );
-
-            const item = {
-                ...generated.item,
-                acquiredFrom: foe.role,
-                acquiredAtEncounter: encounter.id,
-                acquiredFromFoe: foe.id,
-                bound: false
-            };
-
-            state.inventory.bagReserves.push(item);
-            loot.push(item);
         }
-
-    } else if (
-        encounter.type === 'elite' ||
-        encounter.type === 'boss'
-    ) {
-        const slain = new Set(slainIds);
+    } else if (encounter.type === 'elite' || encounter.type === 'boss') {
         const foe = encounter.foes[0];
-
-        assert(
-            slain.has(foe.id),
-            'Elite/Boss clear requires its slain foe'
-        );
+        assert(new Set(slainIds).has(foe.id), 'Elite/Boss clear requires its slain foe');
 
         xp = xpForKill(crew.level, foe);
         silver = silverForKill(foe);
 
-        const guaranteedGear =
-            encounter.rewards.guaranteedGear;
+        const guaranteedGear = encounter.rewards.guaranteedGear;
+        assert(guaranteedGear && Number.isInteger(guaranteedGear.rawStat), 'Elite/Boss guaranteed gear is missing');
 
-        assert(
-            guaranteedGear &&
-            Number.isInteger(guaranteedGear.rawStat),
-            'Elite/Boss guaranteed gear is missing'
-        );
-
-        const generated = rollLootFromState(
-            state,
-            encounter.type
-        );
+        const generated = rollLootFromState(state, encounter.type);
         const item = {
             ...generated.item,
             acquiredFrom: encounter.type,
             acquiredAtEncounter: encounter.id,
             bound: false
         };
-
-        assert(
-            item.rawStat === guaranteedGear.rawStat,
-            'Generated Elite/Boss gear stat does not match locked reward'
-        );
+        assert(item.rawStat === guaranteedGear.rawStat, 'Generated Elite/Boss gear stat does not match locked reward');
 
         state.inventory.bagReserves.push(item);
         loot.push(item);
     } else {
-        throw new Error(
-            `Unsupported encounter reward type: ${encounter.type}`
-        );
+        throw new Error(`Unsupported encounter reward type: ${encounter.type}`);
     }
+
     const packDrop = resolveClearedPackDrop(state);
     if (packDrop?.item) loot.push(packDrop.item);
 
     encounter.status = 'cleared';
     encounter.rewards.resolved = true;
 
-
     if (encounter.questTerminal) {
-        const linkedQuest = findQuestById(
-            state,
-            encounter.questTerminal.questId
-        );
-
+        const linkedQuest = findQuestById(state, encounter.questTerminal.questId);
         assert(
-            linkedQuest?.status === 'in_progress' &&
-            linkedQuest.targetId ===
-                encounter.questTerminal.targetId,
+            linkedQuest?.status === 'in_progress' && linkedQuest.targetId === encounter.questTerminal.targetId,
             'Quest-terminal encounter has no matching in-progress quest'
         );
-
-        assert(
-            linkedQuest.terminalThreat?.encounterId === encounter.id,
-            'Linked quest threat does not match this encounter'
-        );
-
+        assert(linkedQuest.terminalThreat?.encounterId === encounter.id, 'Linked quest threat does not match this encounter');
         linkedQuest.terminalThreat.resolved = true;
     }
 
-    return {
-
-        xp,
-        silver,
-        resolved: true,
-        encounterCleared: true,
-        loot,
-        packDrop,
-        trophies: []
-    };
+    return { xp, silver, resolved: true, encounterCleared: true, loot, packDrop, trophies: [] };
 }
 
 function applyConsumableItem(state, item, recipient) {
     const crew = state.crew;
     const encounter = state.encounter;
 
-    assert(
-        recipient === 'qtik' || recipient === 'tansy',
-        `Invalid potion recipient: ${recipient}`
-    );
+    assert(recipient === 'qtik' || recipient === 'tansy', `Invalid potion recipient: ${recipient}`);
     const definition = consumableDefinition(item);
-    assert(
-        definition,
-        `Unsupported consumable: ${item}`
-    );
+    assert(definition, `Unsupported consumable: ${item}`);
 
     normalizeConsumableInventory(state.inventory);
+    const potionUses = normalizeEncounterPotionUses(encounter);
+    assert(potionUses[recipient] < 4, `${recipient} has already used four potions this encounter`);
 
-    const potionUses =
-        normalizeEncounterPotionUses(encounter);
-
-    assert(
-        potionUses[recipient] < 4,
-        `${recipient} has already used four potions this encounter`
-    );
-
-    const entry = state.inventory.consumables.find(
-        entry => entry.id === item
-    );
-    assert(
-        entry && entry.quantity > 0,
-        `No ${item} remains in shared stock`
-    );
+    const entry = state.inventory.consumables.find(e => e.id === item);
+    assert(entry && entry.quantity > 0, `No ${item} remains in shared stock`);
 
     const itemName = entry.name || definition.name;
-
     entry.quantity -= 1;
     if (entry.quantity === 0) {
-        state.inventory.consumables =
-            state.inventory.consumables.filter(
-                entry => entry.id !== item
-            );
+        state.inventory.consumables = state.inventory.consumables.filter(e => e.id !== item);
     }
     potionUses[recipient] += 1;
-    encounter.potionsUsed =
-        potionUses.qtik + potionUses.tansy;
-
+    encounter.potionsUsed = potionUses.qtik + potionUses.tansy;
 
     if (definition.type === 'potion') {
         const amount = definition.heal;
         const character = crew[recipient];
         const stats = derived(crew);
-        const maxHp = recipient === 'qtik'
-            ? stats.qtikMaxHp
-            : stats.tansyMaxHp;
+        const maxHp = recipient === 'qtik' ? stats.qtikMaxHp : stats.tansyMaxHp;
         const beforeHp = character.hp;
-
         character.hp = Math.min(maxHp, character.hp + amount);
 
         return {
-            item,
-            itemName,
-            recipient,
-            effect: 'heal',
-            requested: amount,
-            healed: character.hp - beforeHp,
-            hp: character.hp,
-            maxHp,
+            item, itemName, recipient, effect: 'heal', requested: amount,
+            healed: character.hp - beforeHp, hp: character.hp, maxHp,
             potionsUsed: encounter.potionsUsed
         };
     }
 
-    /*
-     * Stacking debuffs currently affect shared Crew mechanics rather
-     * than separate character status lists. Either protagonist can
-     * cleanse them, spending their own potion allowance.
-     *
-     * Stamp immunity with the current encounter turn instead of a
-     * decrementing duration. This covers all three exchanges and expires
-     * automatically when resolveTurn increments encounter.turn again.
-     * Repeated UI reads cannot extend the protection.
-     */
+    // Stamp immunity with the current turn so it covers all three exchanges
+    // and expires automatically on the next resolveTurn increment.
     let stacksRemoved = Object.values(encounter.hexStacks || {})
         .reduce((total, stacks) => total + Number(stacks), 0);
-
     encounter.hexStacks = {};
 
     for (const foe of encounter.foes) {
         if (!['elite', 'boss'].includes(foe.role)) continue;
-
         stacksRemoved += Number(foe.passiveStacks || 0);
         foe.passiveStacks = 0;
     }
-
     encounter.debuffImmunityTurn = encounter.turn;
 
     return {
-        item,
-        itemName,
-        recipient,
-        effect: 'cleanse',
-        scope: 'crew',
-        stacksRemoved,
-        immunityTurn: encounter.turn,
-        note:
-            'All Hex and Elite/Boss passive stacks cleared; ' +
-            'new applications blocked for this turn.',
+        item, itemName, recipient, effect: 'cleanse', scope: 'crew',
+        stacksRemoved, immunityTurn: encounter.turn,
+        note: 'All Hex and Elite/Boss passive stacks cleared; new applications blocked for this turn.',
         potionsUsed: encounter.potionsUsed
     };
 }

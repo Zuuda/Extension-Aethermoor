@@ -2243,10 +2243,6 @@ function derived(crew) {
     return totals;
 }
 
-function migrateEncounterPotionUsage(encounter) {
-    normalizeEncounterPotionUses(encounter);
-}
-
 function validate(state) {
     assert(
         state &&
@@ -2327,7 +2323,7 @@ function validate(state) {
 
     state.inventory ||= {};
     normalizeConsumableInventory(state.inventory);
-    migrateEncounterPotionUsage(encounter);
+    normalizeEncounterPotionUses(encounter);
     assert(
         typeof encounter.id === 'string' &&
         encounter.id.length > 0,
@@ -3267,12 +3263,6 @@ function evaluateAethermoorAchievements(
     }
     if (oneCase?.kind === 'herbalist' && oneCase.action === 'commit') {
         stats.shopSilver += Number(caseResult?.receipt?.proceeds || 0);
-    }
-    if (oneCase?.kind === 'consumable' && oneCase.action === 'sell') {
-        stats.shopSilver += Number(caseResult?.proceeds || 0);
-    }
-    if (oneCase?.kind === 'trade' && oneCase.action === 'pawn') {
-        stats.shopSilver += Number(caseResult?.silverGained || 0);
     }
     if (
         oneCase?.kind === 'trade' &&
@@ -4357,7 +4347,6 @@ function combatNarrativeTurn(
     const actionLabels = {
         fire_melee: 'Fire Melee',
         bodyguard: 'Bodyguard',
-        ice_melee: 'Ice Melee',
         stun: 'Stun',
         ice_patch: 'Ice Patch',
         frost_stomp: 'Frost Stomp',
@@ -4365,7 +4354,6 @@ function combatNarrativeTurn(
         visor: 'Visor',
         vitals: 'Vitals',
         overrun: 'Overrun',
-        hamstring: 'Hamstring',
         recall: 'Recall',
         surge: 'Surge',
         raise_shadow: 'Raise Shadow'
@@ -7365,32 +7353,46 @@ function resolveArrivedRumors(stateInput) {
 
         if (!arrival) {
             const issuer = questIssuerSettlement(state);
-            const checked = resolveBatch({
-                cases: [{
-                    name: 'resolve_arrived_rumor_inquiry',
-                    kind: 'world_seeds',
-                    state,
-                    inquiryId: leadId,
-                    investigatedRumor: true
-                }]
-            });
+            state.inquiries ||= {};
+            const key = `rumor:${leadId}`;
+            let record = state.inquiries[key];
 
-            const inquiryResult = checked.results?.[0]?.result;
+            if (record) {
+                assert(
+                    record.type === 'rumor' &&
+                    record.zone === state.zone &&
+                    Number.isInteger(record.roll) &&
+                    record.roll >= 1 &&
+                    record.roll <= 5,
+                    `Invalid locked inquiry: ${key}`
+                );
+            } else {
+                const value = roll(state, 5);
+                const result =
+                    value <= 3 ? 'travelogue_flub_benign_oddity' :
+                    value === 4 ? 'already_cleared_by_other_immortals' :
+                    'genuine_unclaimed_quest_or_dungeon_hook';
 
-            assert(
-                checked.ok === true && inquiryResult?.state,
-                checked.results?.[0]?.error ||
-                    'Could not resolve the arrived rumor'
-            );
-
-            state = inquiryResult.state;
-            lead = state.leads[leadId];
+                record = {
+                    id: leadId,
+                    type: 'rumor',
+                    zone: state.zone,
+                    roll: value,
+                    result,
+                    lootSeed: null,
+                    questSeed: result === 'genuine_unclaimed_quest_or_dungeon_hook'
+                        ? { source: 'rumor', roll: value, result }
+                        : null,
+                    questSeedConsumed: false
+                };
+                state.inquiries[key] = record;
+            }
 
             arrival = {
                 locationId: place.id,
                 zone: state.zone,
                 settlementId: issuer.id,
-                finding: inquiryResult.findings.rumor,
+                finding: record.result,
                 announced: false
             };
 
@@ -8439,12 +8441,7 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
 
     const eligibleArrival =
         gate.trigger === 'arrival' ||
-        gate.trigger === 'arrival_with_evidence' ||
-        (
-            gate.trigger === undefined &&
-            gate.step === 1 &&
-            quest.archetype?.id === 'ruin_clearance'
-        );
+        gate.trigger === 'arrival_with_evidence';
 
     if (!eligibleArrival) {
         return nextState;
@@ -9733,16 +9730,7 @@ const QUEST_ARCHETYPES_BY_CHANNEL = {
     ])
 };
 
-function eligibleQuestScenarios(
-    _state,
-    archetype,
-    _zone,
-    rank,
-    channel = 'overland'
-) {
-    // Retired from new offers; existing saved Herb Foraging quests remain valid.
-    if (archetype.id === 'herb_foraging') return [];
-
+function eligibleQuestScenarios(_state, archetype, _zone, rank, channel = 'overland') {
     const allowedForChannel =
         QUEST_ARCHETYPES_BY_CHANNEL[channel] ||
         QUEST_ARCHETYPES_BY_CHANNEL.overland;
@@ -10221,89 +10209,30 @@ function buildQuestV2Structure(family, gateCount, facts) {
     });
 }
 
-function buildQuestV2PlanForOffer(
-    state,
-    archetype,
-    gateCount,
-    facts,
-    variantId = null
-) {
-    /*
-     * Recover Cargo is the canonical V2 family. Keep the legacy IDs as
-     * compatibility aliases until existing saved quests are migrated.
-     * Variant identity remains separate from the mechanical family.
-     */
+function buildQuestV2PlanForOffer(state, archetype, gateCount, facts, variantId = null) {
     const familyByArchetype = {
-        recover_cargo: 'retrieve_item',
-        imperial_survey: 'retrieve_item',
         sealed_cache: 'retrieve_item',
         field_job: 'retrieve_item',
         courier_recovery: 'retrieve_item',
-        territorial_beast: 'defeat_elite',
-        ruin_clearance: 'defeat_elite',
+        missing_person: 'rescue_person',
         dormant_hazard: 'defeat_elite',
         local_bounty: 'defeat_elite'
     };
 
-    const family =
-        archetype.id === 'herb_foraging'
-            ? 'retrieve_item'
-            : archetype.id === 'missing_person'
-                ? 'rescue_person'
-                : familyByArchetype[archetype.id];
-
+    const family = familyByArchetype[archetype.id];
     if (!family) return null;
-    let v2Facts;
 
-    if (archetype.id === 'recover_cargo') {
-        v2Facts = {
-            item: facts.cargo,
-            destination: facts.place
-        };
-    } else if (archetype.id === 'imperial_survey') {
-        v2Facts = {
-            item: facts.sample,
-            destination: facts.place
-        };
-    } else if (archetype.id === 'sealed_cache') {
-        v2Facts = {
-            item: facts.cache,
-            destination: facts.place
-        };
+    let v2Facts;
+    if (archetype.id === 'sealed_cache') {
+        v2Facts = { item: facts.cache, destination: facts.place };
     } else if (archetype.id === 'field_job') {
-        v2Facts = {
-            item: facts.task,
-            destination: facts.place
-        };
+        v2Facts = { item: facts.task, destination: facts.place };
     } else if (archetype.id === 'courier_recovery') {
-        v2Facts = {
-            item: facts.item,
-            destination: facts.place
-        };
-    } else if (archetype.id === 'herb_foraging') {
-        v2Facts = {
-            item: facts.herb,
-            destination: facts.place
-        };
+        v2Facts = { item: facts.item, destination: facts.place };
     } else if (archetype.id === 'missing_person') {
-        v2Facts = {
-            person: facts.person,
-            place: facts.place,
-            evidence: facts.evidence,
-            variantId
-        };
-    } else if (archetype.id === 'territorial_beast') {
-        v2Facts = {
-            target: facts.beast,
-            territory: facts.place,
-            lair: facts.place
-        };
+        v2Facts = { person: facts.person, place: facts.place, evidence: facts.evidence, variantId };
     } else {
-        v2Facts = {
-            target: facts.threat,
-            territory: facts.site,
-            lair: facts.site
-        };
+        v2Facts = { target: facts.threat, territory: facts.site, lair: facts.site };
     }
 
     const structureFacts =
@@ -11148,33 +11077,6 @@ function prepareRetrievalQuestDiscovery(quest) {
             final: 'recovered-item',
             action: 'recover_item',
             cargo: true
-        },
-        recover_cargo: {
-            subject: quest.facts?.cargo,
-            clue: 'cargo-clue',
-            approach: 'inner-route',
-            access: 'cargo-access',
-            final: 'recovered-cargo',
-            action: 'recover_cargo',
-            cargo: true
-        },
-        herb_foraging: {
-            subject: quest.facts?.herb,
-            clue: 'growing-signs',
-            approach: 'safe-approach',
-            access: 'harvest-method',
-            final: 'harvested-herb',
-            action: 'gather_herb',
-            cargo: true
-        },
-        imperial_survey: {
-            subject: quest.facts?.sample,
-            clue: 'survey-markers',
-            approach: 'survey-approach',
-            access: 'survey-release',
-            final: 'survey-sample',
-            action: 'collect_survey_sample',
-            cargo: true
         }
     };
 
@@ -11215,7 +11117,7 @@ function prepareRetrievalQuestDiscovery(quest) {
             suffix: spec.final,
             kind: 'quest_item',
             name: subject,
-            hidingPlace: type === 'herb_foraging' ? place : `at ${place}, beyond ${obstacle}`,
+            hidingPlace: `at ${place}, beyond ${obstacle}`,
             significance:
                 spec.finalSig ||
                 `Must be brought back to ${quest.turnIn.recipient || 'the sponsor'}.`,
@@ -11794,17 +11696,7 @@ function resolveQuestAction(test) {
      */
 
     assert(
-        [
-            'accept',
-            'decline',
-            'abandon',
-            'cancel',
-            'fail',
-            'clear_gate',
-            'resolve_objective',
-            'complete'
-        ].includes(test.action),
-
+        ['accept', 'decline', 'cancel', 'fail', 'clear_gate', 'resolve_objective', 'complete'].includes(test.action),
         `Unsupported quest action: ${test.action}`
     );
 
@@ -11914,54 +11806,17 @@ function resolveQuestAction(test) {
         `Quest action requires an in-progress quest, got ${quest.status}`
     );
 
-     if (
-        test.action === 'abandon' ||
-        test.action === 'cancel' ||
-        test.action === 'fail'
-    ) {
+    if (test.action === 'cancel' || test.action === 'fail') {
         assert(
-            !['active', 'spotted'].includes(
-                state.encounter?.status
-            ),
+            !['active', 'spotted'].includes(state.encounter?.status),
             'Resolve, avoid, or flee the encounter before closing the quest'
         );
 
-        quest.status =
-            test.action === 'cancel'
-                ? 'cancelled'
-                : test.action === 'fail'
-                    ? 'failed'
-                    : 'abandoned';
-
-        quest.cancelledAtGate =
-            test.action === 'cancel'
-                ? quest.currentGate?.step || null
-                : undefined;
-
-        quest.abandonedAtGate =
-            test.action === 'abandon'
-                ? quest.currentGate?.step || null
-                : undefined;
-
-        quest.failedAtGate =
-            test.action === 'fail'
-                ? quest.currentGate?.step || null
-                : undefined;
-
-        quest.abandonReason =
-            test.action === 'abandon'
-                ? test.reason || null
-                : undefined;
-
-        quest.cancelReason =
-            test.action === 'cancel'
-                ? test.reason || null
-                : undefined;
-
-        quest.failReason =
-            test.action === 'fail'
-                ? test.reason || null
-                : undefined;
+        quest.status = test.action === 'cancel' ? 'cancelled' : 'failed';
+        quest.cancelledAtGate = test.action === 'cancel' ? quest.currentGate?.step || null : undefined;
+        quest.failedAtGate = test.action === 'fail' ? quest.currentGate?.step || null : undefined;
+        quest.cancelReason = test.action === 'cancel' ? test.reason || null : undefined;
+        quest.failReason = test.action === 'fail' ? test.reason || null : undefined;
 
         /*
          * Dropping or failing a quest also stops travel undertaken for its
@@ -12669,7 +12524,7 @@ function resolveTradeAction(test) {
     );
 
     assert(
-        ['pawn', 'list', 'withdraw', 'settle', 'settle_all'].includes(test.action),
+        ['list', 'withdraw', 'settle', 'settle_all'].includes(test.action),
         `Unsupported trade action: ${test.action}`
     );
 
@@ -12680,40 +12535,6 @@ function resolveTradeAction(test) {
         item: null,
         state
     };
-
-    if (test.action === 'pawn') {
-        int(test.itemIndex, 'itemIndex', 0);
-
-        assert(
-            test.itemIndex < state.inventory.bagReserves.length,
-            `No bag item at index ${test.itemIndex}`
-        );
-
-        const item =
-            state.inventory.bagReserves[test.itemIndex];
-
-        assert(
-            item &&
-            Number.isInteger(item.rawStat) &&
-            item.rawStat > 0,
-            'Bag item has no pawnable rawStat'
-        );
-
-        const pawnValue = item.rawStat * 2;
-
-        state.inventory.bagReserves.splice(
-            test.itemIndex,
-            1
-        );
-
-        state.crew.purse += pawnValue;
-
-        result.silverGained = pawnValue;
-        result.pawnValue = pawnValue;
-        result.item = item;
-
-        return result;
-    }
 
     if (test.action === 'list') {
         int(test.itemIndex, 'itemIndex', 0);
@@ -14869,314 +14690,65 @@ function potionCosmeticStockKey(id) {
 }
 
 function resolveConsumableAction(test) {
-    const allowedActions = [
-        'stock',
-        'buy',
-        'sell',
-        'use',
-        'grant',
-        'remove'
-    ];
-
-    assert(
-        allowedActions.includes(test.action),
-        `Unsupported consumable action: ${test.action}`
-    );
-
-    if (test.action === 'stock') {
-
-        const zone = test.zone ?? test.state?.zone;
-
-        assert(
-            Number.isSafeInteger(zone) && ZONES[zone],
-            'Herbalist stock requires a valid zone'
-        );
-
-        return {
-            ok: true,
-            action: 'stock',
-            zone,
-            catalog: herbalistStock(zone)
-        };
-    }
-
-    assert(
-        test.state &&
-
-        typeof test.state === 'object',
-        'Consumable action requires state'
-    );
+    assert(test.action === 'use', `Unsupported consumable action: ${test.action}`);
+    assert(test.state && typeof test.state === 'object', 'Consumable action requires state');
 
     const state = clone(test.state);
-
     state.crew ||= {};
     state.inventory ||= {};
     state.inventory.bagReserves ||= [];
     state.inventory.activeTradeListings ||= [];
-
     normalizeConsumableInventory(state.inventory);
 
     const definition = consumableDefinition(test.item);
-
+    assert(definition, `Unknown consumable item: ${test.item}`);
     assert(
-        definition,
-        `Unknown consumable item: ${test.item}`
+        state.encounter?.status !== 'active',
+        'Outside-combat use is unavailable during an active fight; use a combat drink action'
     );
 
-    if (test.action === 'buy') {
-        assert(
-            herbalistStock(state.zone).some(
-                entry => entry.id === test.item
-            ),
-            'This potion grade is not sold in the current zone'
-        );
+    const quantity = test.quantity === undefined ? 1 : int(test.quantity, 'quantity', 1);
+    const entry = state.inventory.consumables.find(e => e.id === test.item);
+    assert(entry && entry.quantity >= quantity, `Not enough ${test.item} in shared stock`);
+
+    const itemName = entry.name || definition.name;
+    const recipient = test.recipient || null;
+    assert(
+        recipient === null || recipient === 'qtik' || recipient === 'tansy',
+        'Recipient must be qtik, tansy, or omitted for someone outside the crew'
+    );
+
+    let healing = 0;
+    if (recipient) {
+        assert(state.crew[recipient] && Number.isInteger(state.crew[recipient].hp), `Missing ${recipient} HP`);
+        if (definition.heal) {
+            const stats = derived(state.crew);
+            const maxHp = recipient === 'qtik' ? stats.qtikMaxHp : stats.tansyMaxHp;
+            const beforeHp = state.crew[recipient].hp;
+            assert(beforeHp < maxHp, `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP`);
+            state.crew[recipient].hp = Math.min(maxHp, beforeHp + definition.heal * quantity);
+            healing = state.crew[recipient].hp - beforeHp;
+        }
     }
 
-    const result = {
+    entry.quantity -= quantity;
+    if (entry.quantity === 0) {
+        state.inventory.consumables = state.inventory.consumables.filter(other => other.id !== test.item);
+    }
+
+    return {
         ok: true,
-        action: test.action,
+        action: 'use',
         item: test.item,
-        quantity: 0,
+        quantity,
         silverChanged: 0,
+        itemName,
+        recipient,
+        healing,
+        reason: test.reason || null,
+        stockAfter: state.inventory.consumables.find(other => other.id === test.item)?.quantity || 0,
         state
     };
-
-    if (test.action === 'buy') {
-        const quantity =
-            test.quantity === undefined
-                ? 1
-                : int(test.quantity, 'quantity', 1);
-
-        const total =
-            definition.buyPrice * quantity;
-
-        state.crew.purse =
-            Number(state.crew.purse || 0);
-
-        assert(
-            Number.isInteger(state.crew.purse) &&
-            state.crew.purse >= total,
-            `Insufficient silver: purchase costs ${total}s`
-        );
-
-        let entry =
-            state.inventory.consumables.find(
-                item => item.id === test.item
-            );
-
-        if (!entry) {
-            entry = {
-                id: test.item,
-                name: cosmeticStockName(
-                    state,
-                    potionCosmeticStockKey(test.item),
-                    definition.name
-                ),
-                type: definition.type,
-                quantity: 0,
-                recipient: null
-            };
-
-            state.inventory.consumables.push(entry);
-        }
-
-        entry.quantity += quantity;
-        state.crew.purse -= total;
-
-        result.quantity = quantity;
-        result.silverChanged = -total;
-        result.totalCost = total;
-        result.itemName =
-            state.inventory.consumables.find(
-                entry => entry.id === test.item
-            )?.name || definition.name;
-
-        return result;
-    }
-
-    if (test.action === 'sell') {
-        const quantity =
-            test.quantity === undefined
-                ? 1
-                : int(test.quantity, 'quantity', 1);
-
-        const entry =
-            state.inventory.consumables.find(
-                item => item.id === test.item
-            );
-
-        assert(
-            entry && entry.quantity >= quantity,
-            `Not enough ${test.item} in consumables inventory`
-        );
-
-        entry.quantity -= quantity;
-
-        if (entry.quantity === 0) {
-            state.inventory.consumables =
-                state.inventory.consumables.filter(
-                    item => item.id !== test.item
-                );
-        }
-
-        const proceeds =
-            definition.sellPrice * quantity;
-
-        state.crew.purse =
-            Number(state.crew.purse || 0) +
-            proceeds;
-
-        result.quantity = quantity;
-        result.silverChanged = proceeds;
-        result.proceeds = proceeds;
-        result.itemName =
-            state.inventory.consumables.find(
-                entry => entry.id === test.item
-            )?.name || definition.name;
-
-        return result;
-    }
-    if (test.action === 'use') {
-        assert(
-            state.encounter?.status !== 'active',
-            'Outside-combat use is unavailable during an active fight; use a combat drink action'
-        );
-
-        const quantity = test.quantity === undefined
-            ? 1
-            : int(test.quantity, 'quantity', 1);
-
-        const entry = state.inventory.consumables.find(
-            entry => entry.id === test.item
-        );
-
-        assert(
-            entry && entry.quantity >= quantity,
-            `Not enough ${test.item} in shared stock`
-        );
-
-        const itemName = entry.name || definition.name;
-        const recipient = test.recipient || null;
-
-        assert(
-            recipient === null ||
-            recipient === 'qtik' ||
-            recipient === 'tansy',
-            'Recipient must be qtik, tansy, or omitted for someone outside the crew'
-        );
-
-        let healing = 0;
-
-        if (recipient) {
-            assert(
-                state.crew[recipient] &&
-                Number.isInteger(state.crew[recipient].hp),
-                `Missing ${recipient} HP`
-            );
-
-            if (definition.heal) {
-                const stats = derived(state.crew);
-                const maxHp = recipient === 'qtik'
-                    ? stats.qtikMaxHp
-                    : stats.tansyMaxHp;
-                const beforeHp = state.crew[recipient].hp;
-
-                assert(
-                    beforeHp < maxHp,
-                    `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP`
-                );
-
-                state.crew[recipient].hp = Math.min(
-                    maxHp,
-                    beforeHp + definition.heal * quantity
-                );
-
-                healing = state.crew[recipient].hp - beforeHp;
-            }
-        }
-
-        entry.quantity -= quantity;
-
-        if (entry.quantity === 0) {
-            state.inventory.consumables =
-                state.inventory.consumables.filter(
-                    other => other.id !== test.item
-                );
-        }
-        result.quantity = quantity;
-        result.itemName = itemName;
-        result.recipient = recipient;
-        result.healing = healing;
-        result.reason = test.reason || null;
-        result.stockAfter =
-            state.inventory.consumables.find(
-                other => other.id === test.item
-            )?.quantity || 0;
-
-        return result;
-    }
-
-     const quantity = test.quantity === undefined
-        ? 1
-        : int(test.quantity, 'quantity', 1);
-
-    if (test.action === 'grant') {
-        assert(
-            typeof test.reason === 'string' && test.reason.trim(),
-            'Grant requires a reason'
-        );
-
-        let entry = state.inventory.consumables.find(
-            entry => entry.id === test.item
-        );
-
-        if (!entry) {
-            entry = {
-                id: test.item,
-                name: cosmeticStockName(
-                    state,
-                    potionCosmeticStockKey(test.item),
-                    definition.name
-                ),
-                type: definition.type,
-                quantity: 0,
-                recipient: null
-            };
-            state.inventory.consumables.push(entry);
-        }
-
-        entry.quantity += quantity;
-    } else {
-        assert(
-            typeof test.reason === 'string' && test.reason.trim(),
-            'Removal requires a reason'
-        );
-
-        const entry = state.inventory.consumables.find(
-            entry => entry.id === test.item
-        );
-        assert(
-            entry && entry.quantity >= quantity,
-            `Not enough ${test.item} in shared stock`
-        );
-
-        entry.quantity -= quantity;
-        if (entry.quantity === 0) {
-            state.inventory.consumables =
-                state.inventory.consumables.filter(
-                    other => other.id !== test.item
-                );
-        }
-    }
-
-    result.quantity = quantity;
-    result.reason = test.reason;
-    result.itemName = definition.name;
-    result.stockAfter = state.inventory.consumables.find(
-        entry => entry.id === test.item
-    )?.quantity || 0;
-
-    return result;
 }
 
 function resolveShadowDeckAction(test) {
@@ -15762,26 +15334,13 @@ function resolveSocialSeed(test) {
     const existing = state.socialSeeds[id];
 
     if (existing) {
-        const oldSeed =
-            Number.isInteger(existing.sincerityRoll) &&
-            existing.sincerityRoll >= 1 &&
-            existing.sincerityRoll <= 10 &&
-            Number.isInteger(existing.demeanorRoll) &&
-            existing.demeanorRoll >= 1 &&
-            existing.demeanorRoll <= 10;
-
-        const newSeed =
-            Number.isInteger(existing.surfaceRoll) &&
-            existing.surfaceRoll >= 1 &&
-            existing.surfaceRoll <= 10 &&
-            Number.isInteger(existing.inclinationRoll) &&
-            existing.inclinationRoll >= 1 &&
-            existing.inclinationRoll <= 100 &&
-            typeof existing.demeanor === 'string' &&
-            typeof existing.inclination === 'string';
-
         assert(
-            oldSeed || newSeed,
+            Number.isInteger(existing.surfaceRoll) &&
+            existing.surfaceRoll >= 1 && existing.surfaceRoll <= 10 &&
+            Number.isInteger(existing.inclinationRoll) &&
+            existing.inclinationRoll >= 1 && existing.inclinationRoll <= 100 &&
+            typeof existing.demeanor === 'string' &&
+            typeof existing.inclination === 'string',
             `Invalid locked social seed: ${id}`
         );
 
@@ -16052,271 +15611,6 @@ function resolveNarrativeEncounterRequest(test) {
 }
 
 function resolveBatch(args) {
-    function resolveWorldSeeds(test) {
-        assert(
-            test.state &&
-            typeof test.state === 'object',
-            'world_seeds requires state to lock results'
-        );
-        const state = clone(test.state);
-        const encounter = state.encounter;
-
-        state.inquiries ||= {};
-
-        assert(
-            state.inquiries &&
-            typeof state.inquiries === 'object' &&
-            !Array.isArray(state.inquiries),
-            'state.inquiries must be an object'
-        );
-
-        if (test.packLooted === true) {
-            assert(
-                encounter &&
-                typeof encounter === 'object',
-                'packLooted requires state.encounter'
-            );
-        }
-
-        if (
-            test.newWildernessSite === true ||
-            test.investigatedRumor === true
-        ) {
-            assert(
-                typeof test.inquiryId === 'string' &&
-                test.inquiryId.trim().length > 0,
-                'Site and rumor checks require inquiryId'
-            );
-            assert(
-                ZONES[state.zone],
-                'Site and rumor checks require a valid state.zone'
-            );
-        }
-
-         if (encounter) {
-            for (const field of [
-                'packDropRoll',
-                'curiosityRoll',
-                'rumorRoll',
-                'lootSeed',
-                'questSeed'
-            ]) {
-                if (!Object.prototype.hasOwnProperty.call(encounter, field)) {
-                    encounter[field] = null;
-                }
-            }
-        }
-
-        const result = {
-            ok: true,
-            applicable: {},
-            findings: {},
-            locked: {},
-            state
-        };
-
-        /*
-         * Reuse a result already locked on this encounter.
-         * Otherwise generate it using the extension's saved RNG.
-         */
-        function lockedOrRolled(field, sides) {
-            const existing = encounter[field];
-
-            if (existing !== null && existing !== undefined) {
-                assert(
-                    Number.isInteger(existing) &&
-                    existing >= 1 &&
-                    existing <= sides,
-                    `${field} must be 1-${sides}`
-                );
-
-                result.locked[field] = false;
-                return existing;
-            }
-
-            const value = roll(state, sides);
-            encounter[field] = value;
-            result.locked[field] = true;
-            return value;
-        }
-
-        /*
-         * Each encounter stores at most one loot seed and one quest
-         * seed. If another eligible result hits, keep the first seed;
-         * never overwrite an outcome that was already locked.
-         */
-        function lockSeed(field, value) {
-            const existing = encounter[field];
-
-            if (existing !== null && existing !== undefined) {
-                result.locked[field] = false;
-                return existing;
-            }
-
-            encounter[field] = clone(value);
-            result.locked[field] = true;
-            return encounter[field];
-        }
-
-        function inquiry(type, sides, outcome) {
-            const key = `${type}:${test.inquiryId}`;
-            let record = state.inquiries[key];
-
-            if (record) {
-                assert(
-                    record.type === type &&
-                    record.zone === state.zone &&
-                    Number.isInteger(record.roll) &&
-                    record.roll >= 1 &&
-                    record.roll <= sides,
-                    `Invalid locked inquiry: ${key}`
-                );
-            } else {
-                const value = roll(state, sides);
-                record = {
-                    id: test.inquiryId,
-                    type,
-                    zone: state.zone,
-                    roll: value,
-                    result: outcome(value),
-                    lootSeed: null,
-                    questSeed: null,
-                    questSeedConsumed: false
-                };
-                state.inquiries[key] = record;
-            }
-
-            return record;
-        }
-
-        if (test.newWildernessSite === true) {
-            const key = `site:${test.inquiryId}`;
-            const existed = Object.prototype.hasOwnProperty.call(
-                state.inquiries, key
-            );
-            const site = inquiry('site', 10, value =>
-                value <= 7 ? 'nothing_hidden' :
-                value === 8 ? 'hidden_lore_or_shortcut' :
-                value === 9 ? 'trap_or_ambush_hazard' :
-                'hidden_loot_stash'
-            );
-
-            result.locked.curiosityRoll = !existed;
-            result.applicable.curiosity = true;
-            result.findings.curiosity = site.result;
-
-            if (site.result === 'hidden_loot_stash' && !site.lootSeed) {
-                site.lootSeed = {
-                    source: 'curiosity',
-                    roll: site.roll,
-                    result: site.result,
-                    claimed: false
-                };
-            }
-        }
-
-        if (test.investigatedRumor === true) {
-            const key = `rumor:${test.inquiryId}`;
-            const existed = Object.prototype.hasOwnProperty.call(
-                state.inquiries, key
-            );
-            const rumor = inquiry('rumor', 5, value =>
-                value <= 3 ? 'travelogue_flub_benign_oddity' :
-                value === 4 ? 'already_cleared_by_other_immortals' :
-                'genuine_unclaimed_quest_or_dungeon_hook'
-            );
-
-            result.locked.rumorRoll = !existed;
-            result.applicable.rumor = true;
-            result.findings.rumor = rumor.result;
-
-            if (
-                rumor.result ===
-                'genuine_unclaimed_quest_or_dungeon_hook' &&
-                !rumor.questSeed
-            ) {
-                rumor.questSeed = {
-                    source: 'rumor',
-                    roll: rumor.roll,
-                    result: rumor.result
-                };
-            }
-        }
-
-             if (test.packLooted === true) {
-            assert(
-                encounter.status === 'cleared',
-                'Cannot loot a pack before it is cleared'
-            );
-            assert(
-                encounter.type === 'normal_pack' ||
-                (
-                    encounter.type === 'declared' &&
-                    encounter.foes.every(foe =>
-                        ['brute', 'archer', 'mender', 'hexer', 'buffer']
-                            .includes(foe.role)
-                    ) &&
-                    !encounter.reinforcementLog?.length
-                ),
-                'Only an ordinary cleared pack can roll a pack drop'
-            );
-
-            result.applicable.packDrop = true;
-
-            const packDropRoll =
-                lockedOrRolled('packDropRoll', 10);
-
-            const packResult =
-                packDropRoll <= 8
-                    ? 'auto_salvage_only'
-                    : packDropRoll === 9
-                        ? 'wild_equipment_drop'
-                        : 'diegetic_quest_breadcrumb';
-
-            result.findings.packDrop =
-                packResult;
-
-            if (packResult === 'wild_equipment_drop') {
-                lockSeed('lootSeed', {
-                    source: 'pack_drop',
-                    roll: packDropRoll,
-                    result: packResult
-                });
-            }
-
-            if (packResult === 'diegetic_quest_breadcrumb') {
-                lockSeed('questSeed', {
-                    source: 'pack_drop',
-                    roll: packDropRoll,
-                    result: packResult
-                });
-            }
-        }
-
-        const site = test.newWildernessSite
-            ? state.inquiries[`site:${test.inquiryId}`]
-            : null;
-        const rumor = test.investigatedRumor
-            ? state.inquiries[`rumor:${test.inquiryId}`]
-            : null;
-
-        result.unlocks = {
-            loot: Boolean(
-                (site?.lootSeed && site.lootSeed.claimed !== true) ||
-                (encounter?.lootSeed &&
-                    encounter.lootSeed.claimed !== true)
-            ),
-            quest: Boolean(
-                (rumor?.questSeed &&
-                    rumor.questSeedConsumed !== true) ||
-                (encounter?.questSeed &&
-                    encounter.questSeedConsumed !== true)
-            )
-        };
-
-
-        return result;
-    }
     assert(
         Array.isArray(args.cases) &&
         args.cases.length > 0,
@@ -16324,7 +15618,6 @@ function resolveBatch(args) {
     );
 
     const results = [];
-
     for (let index = 0; index < args.cases.length; index++) {
         const test = args.cases[index];
         const name = test.name || `case_${index + 1}`;
@@ -16540,9 +15833,6 @@ function resolveBatch(args) {
                 }
                 case 'turn':
                     result = resolveTurn({ state: test.state, actions: test.actions, rolls: test.rolls });
-                    break;
-                case 'world_seeds':
-                    result = resolveWorldSeeds(test);
                     break;
                 case 'social':
                     result = ['prepare_npc_seeds', 'claim_npc_seed'].includes(test.action)
@@ -17433,14 +16723,9 @@ function discoveryNarrationPacket(encounter, state = null) {
     ].join('\n');
 }
 const PUBLIC_QUEST_FACT_KEYS = {
-    recover_cargo: ['sponsor', 'cargo', 'place', 'stakes'],
-    imperial_survey: ['sponsor', 'sample', 'place', 'stakes'],
     sealed_cache: ['cache', 'place', 'stakes'],
     dormant_hazard: ['site', 'threat', 'stakes'],
-    ruin_clearance: ['sponsor', 'site', 'stakes'],
-    herb_foraging: ['sponsor', 'herb', 'place', 'need', 'stakes'],
     missing_person: ['sponsor', 'person', 'place', 'stakes'],
-    territorial_beast: ['sponsor', 'beast', 'place', 'stakes'],
     local_bounty: ['sponsor', 'site', 'threat', 'stakes'],
     field_job: ['sponsor', 'task', 'place', 'stakes'],
     courier_recovery: ['sponsor', 'item', 'place', 'stakes']
@@ -17644,16 +16929,9 @@ function questDiscoveryContextPacket(quest, state) {
             other.destinationId !== quest.destinationId
         );
 
-    const isHerbHarvest =
-        quest.archetype?.id === 'herb_foraging' &&
-        discovery.requiredAction === 'gather_herb';
-
     const stageHasObstacleLock =
-        !isHerbHarvest &&
-        (
-            quest.currentGate?.decisive === true ||
-            quest.currentGate?.stage === 'find_access'
-        );
+        quest.currentGate?.decisive === true ||
+        quest.currentGate?.stage === 'find_access';
 
     const lines = [
         '* **QUEST OBJECTIVE HERE — portray this in the current scene.**',
@@ -17671,15 +16949,9 @@ function questDiscoveryContextPacket(quest, state) {
                     'quest’s discovery ID here.'
             ]
             : []),
-
-        isHerbHarvest
-            ? '* **Do now:** Describe the gathering area and give the crew ' +
-              'a clear, in-world opportunity to identify and pick the ' +
-              'requested plants. The plants are available here; do not ' +
-              'hide this routine harvest behind another lead.'
-            : '* **Do now:** Describe the current site and give the crew ' +
-              'a clear, in-world opportunity to interact with the ' +
-              'established subject at its authored location.',
+        '* **Do now:** Describe the current site and give the crew ' +
+            'a clear, in-world opportunity to interact with the ' +
+            'established subject at its authored location.',
         '* **Stop before success:** Arrival alone does not perform the ' +
           'required action, acquire the object, complete the gate, or ' +
           'award rewards. Leave the next action to the player.',
@@ -17947,14 +17219,7 @@ function questActionNarrationPacket(result, questAction) {
         ].join('\n');
     }
 
-        if (questAction === 'abandon') {
-        return [
-            `The crew abandoned the active quest: ${quest.title}.`,
-            'No quest rewards or reputation were granted.',
-            'The quest was not completed. The crew is free to pursue other plans.'
-        ].join('\n');
-    }
-        if (questAction === 'cancel') {
+    if (questAction === 'cancel') {
         return [
             `The crew cancelled the active quest: ${quest.title}.`,
             'No quest rewards or reputation were granted.',
@@ -18221,32 +17486,7 @@ function combatNarrationPacket(result, actions) {
 }
 
 function migrateAethermoorHandoffs(stored) {
-    if (Array.isArray(stored?.handoffQueue)) {
-        return clone(stored.handoffQueue);
-    }
-
-    // Older saves had two slots. Their original creation order was not
-    // recorded; combat before the subsequently opened quest lead is
-    // the safest ordering for this workflow.
-    const queue = [];
-
-    if (stored?.pendingNarration?.packet) {
-        queue.push({
-            id: 'legacy-combat',
-            type: 'combat',
-            packet: stored.pendingNarration.packet
-        });
-    }
-
-    if (stored?.pendingDiscovery?.packet) {
-        queue.push({
-            id: 'legacy-discovery',
-            type: 'discovery',
-            packet: stored.pendingDiscovery.packet
-        });
-    }
-
-    return queue;
+    return Array.isArray(stored?.handoffQueue) ? clone(stored.handoffQueue) : [];
 }
 
 function appendAethermoorHandoff(queue, entry, revision) {
@@ -18452,52 +17692,18 @@ async function runStoredMechanic(args) {
         const oneCase = batch ? args.cases[0] : null;
 
         if (oneCase?.kind === 'state') {
-            if (oneCase.action === 'status') {
-                assert(stored?.state,
-                    'No saved Aethermoor state; import it first');
-                return {
-                    ok: true,
-                    summary: stateSummary(stored.state, stored.revision)
-                };
-            }
-
             if (oneCase.action === 'export') {
-                assert(stored?.state,
-                    'No saved Aethermoor state; import it first');
-                return {
-                    ok: true,
-                    revision: stored.revision,
-                    state: clone(stored.state)
-                };
+                assert(stored?.state, 'No saved Aethermoor state; initialize it first');
+                return { ok: true, revision: stored.revision, state: clone(stored.state) };
             }
 
-            assert(
-                oneCase.action === 'import' ||
-                oneCase.action === 'initialize',
-                'State action must be initialize, import, status, or export'
-            );
-            assert(
-                !stored,
-                'This chat already has saved state; initialization will not overwrite it'
-            );
+            assert(oneCase.action === 'initialize', 'State action must be initialize or export');
+            assert(!stored, 'This chat already has saved state; initialization will not overwrite it');
 
-            const imported = oneCase.action === 'initialize'
-                ? createInitialCampaignState()
-                : clone(oneCase.state);
+            const initial = createInitialCampaignState();
+            assert(getContext().chatMetadata === metadata, 'Chat changed during initialization; nothing was saved');
 
-            if (oneCase.action === 'import') {
-                ensureWorldRecords(imported);
-                checkImportedState(imported);
-            }
-
-            assert(getContext().chatMetadata === metadata,
-                'Chat changed during import; nothing was saved');
-
-            metadata[AETHERMOOR_METADATA_KEY] = {
-                revision: 1,
-                state: imported
-            };
-
+            metadata[AETHERMOOR_METADATA_KEY] = { revision: 1, state: initial };
             try {
                 await context.saveMetadata();
             } catch (error) {
@@ -18505,12 +17711,7 @@ async function runStoredMechanic(args) {
                 throw error;
             }
 
-            return {
-                ok: true,
-                initialized: oneCase.action === 'initialize',
-                imported: oneCase.action === 'import',
-                summary: stateSummary(imported, 1)
-            };
+            return { ok: true, initialized: true, summary: stateSummary(initial, 1) };
         }
 
         assert(stored?.state,
@@ -18703,7 +17904,7 @@ async function runStoredMechanic(args) {
         const questActionPacket =
             batch &&
             oneCase?.kind === 'quest' &&
-            ['accept', 'decline', 'abandon', 'cancel', 'fail', 'complete']
+            ['accept', 'decline', 'cancel', 'fail', 'complete']
                 .includes(oneCase.action)
                 ? questActionNarrationPacket(
                     {
@@ -19298,12 +18499,6 @@ function formatQuestStatus(quest) {
     }
 
     const variantLabels = {
-        abandoned_transport: 'Abandoned Transport',
-        diverted_shipment: 'Diverted Shipment',
-        stolen_shipment: 'Stolen Shipment',
-        levee_gauge: 'Imperial Levee Gauge',
-        boundary_relay: 'Boundary Relay Core',
-        salvage_assay: 'Imperial Alloy Assay',
         paymaster_strongbox: 'Paymaster Strongbox',
         cipher_compartment: 'Cipher Compartment',
         scout_dead_drop: 'Scout Dead-Drop',
@@ -19404,51 +18599,6 @@ function openAethermoorTab(tab) {
         openAethermoorPanel();
     }
 }
-
-
-/*
- * AETHERMOOR UI DESIGN TEMPLATE
- *
- * The future unified panel should preserve this visual language:
- *
- * <section class="aethermoor-panel">
- *   <header class="aethermoor-panel-header">
- *     <b>AETHERMOOR</b>
- *     <button title="Close">×</button>
- *   </header>
- *
- *   <nav class="aethermoor-tabs">
- *     <button class="active">Combat</button>
- *     <button>Quests</button>
- *     <button>World</button>
- *   </nav>
- *
- *   <main class="aethermoor-panel-content">
- *     <section class="aethermoor-section">
- *       <header class="aethermoor-section-header">
- *         <b>System Log // Combat Telemetry</b>
- *       </header>
- *       <div class="aethermoor-section-body"></div>
- *     </section>
- *   </main>
- * </section>
- *
- * Palette:
- * - Panel background: #12161c
- * - Panel border: #2b3542
- * - Inner divider: #1f2730
- * - Primary text: #d0d7de
- * - Muted text: #9caab8
- * - Combat: #ef4444
- * - Quest: #d99b26
- * - Discovery / World: #4da6ff
- * - Success: #4ade80
- * - Rare / diagnostics: #c084fc
- * - Attention / telegraph: #ffd166
- *
- * Keep page surfaces unframed. Use framed sections only for the actual
- * tool surface, repeated logs, and modal-like interaction areas.
- */
 
 let aethermoorPanelElement = null;
 let aethermoorPanelOpen = false;
@@ -28078,25 +27228,11 @@ function findLatestUserMovement(chat) {
         }
 
         if (AETHERMOOR_EXPLORE_COMMAND.test(prose)) {
-            return {
-                index,
-                text: prose,
-                destinationId: null,
-                explicit: true
-            };
-        }
-
-        // Preserve old chats using [moved].
-        if (/\[\s*moved\s*\]/i.test(prose)) {
-            return {
-                index,
-                text: prose,
-                destinationId: null,
-                explicit: false
-            };
+            return { index, text: prose, destinationId: null, explicit: true };
         }
 
         return null;
+
     }
 
     return null;
@@ -29140,14 +28276,6 @@ async function consumeAethermoorHandoff(injected) {
         stored.handoffQueue = queue.filter(
             entry => !consumedIds.has(entry.id)
         );
-
-        if (consumedIds.has('legacy-combat')) {
-            delete stored.pendingNarration;
-        }
-
-        if (consumedIds.has('legacy-discovery')) {
-            delete stored.pendingDiscovery;
-        }
 
         for (const id of consumedIds) {
             const match = /^shop-briefing-zone-([1-9]\d*)$/.exec(id);

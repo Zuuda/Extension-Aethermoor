@@ -28,74 +28,23 @@ const WORLD_FLAVOR_COOLDOWN = 6;
  * gradually along `next` edges without immediately backtracking.
  */
 const WORLD_GEOGRAPHY = {
-    valley: {
-        label: 'river valley',
-        next: ['marsh_edge', 'rising_hills']
-    },
-    marsh_edge: {
-        label: 'marsh outskirts',
-        next: ['marsh', 'valley']
-    },
-    marsh: {
-        label: 'deep marsh',
-        next: ['karst', 'marsh_edge']
-    },
-    karst: {
-        label: 'karst caverns',
-        next: ['hills']
-    },
-    hills: {
-        label: 'open hills',
-        next: ['rising_hills', 'valley', 'coastal_uplands']
-    },
-    rising_hills: {
-        label: 'rising uplands',
-        next: ['mountain']
-    },
-    mountain: {
-        label: 'mountain slopes below the snowline',
-        next: ['snowline']
-    },
-    snowline: {
-        label: 'mountain snowline',
-        next: ['high_mountain', 'descending_mountain']
-    },
-    high_mountain: {
-        label: 'high snowy mountains',
-        next: ['descending_mountain']
-    },
-    descending_mountain: {
-        label: 'descending mountain valleys',
-        next: ['coastal_uplands', 'valley']
-    },
-    coastal_uplands: {
-        label: 'uplands overlooking the coast',
-        next: ['coast']
-    },
-    coast: {
-        label: 'coastal shores and tidal inlets',
-        next: ['ocean', 'coastal_uplands']
-    },
-    ocean: {
-        label: 'ocean crossings and inhabited sea routes',
-        next: ['floating_city', 'archipelago']
-    },
-    floating_city: {
-        label: 'floating-city waters',
-        next: ['archipelago', 'underwater']
-    },
-    underwater: {
-        label: 'inhabited underwater passages',
-        next: ['archipelago']
-    },
-    archipelago: {
-        label: 'island chains',
-        next: ['far_coast', 'ocean']
-    },
-    far_coast: {
-        label: 'shores of another landmass',
-        next: ['valley', 'hills', 'marsh_edge']
-    }
+    valley: { label: 'river valley', next: ['marsh_edge', 'rising_hills'] },
+    marsh_edge: { label: 'marsh outskirts', next: ['marsh', 'valley'] },
+    marsh: { label: 'deep marsh', next: ['karst', 'marsh_edge'] },
+    karst: { label: 'karst caverns', next: ['hills'] },
+    hills: { label: 'open hills', next: ['rising_hills', 'valley', 'coastal_uplands'] },
+    rising_hills: { label: 'rising uplands', next: ['mountain'] },
+    mountain: { label: 'mountain slopes below the snowline', next: ['snowline'] },
+    snowline: { label: 'mountain snowline', next: ['high_mountain', 'descending_mountain'] },
+    high_mountain: { label: 'high snowy mountains', next: ['descending_mountain'] },
+    descending_mountain: { label: 'descending mountain valleys', next: ['coastal_uplands', 'valley'] },
+    coastal_uplands: { label: 'uplands overlooking the coast', next: ['coast'] },
+    coast: { label: 'coastal shores and tidal inlets', next: ['ocean', 'coastal_uplands'] },
+    ocean: { label: 'ocean crossings and inhabited sea routes', next: ['floating_city', 'archipelago'] },
+    floating_city: { label: 'floating-city waters', next: ['archipelago', 'underwater'] },
+    underwater: { label: 'inhabited underwater passages', next: ['archipelago'] },
+    archipelago: { label: 'island chains', next: ['far_coast', 'ocean'] },
+    far_coast: { label: 'shores of another landmass', next: ['valley', 'hills', 'marsh_edge'] }
 };
 
 /*
@@ -1568,552 +1517,94 @@ function shadowMechanics(crew) {
  * Tiered entries share a `chain` key so the Unearned drawer & chat table
  * only display the next chaseable rung.
  */
+const achDef = (id, title, requirement, blurb, bonus, chain) =>
+    ({ id, ...(chain ? { chain } : {}), title, requirement, blurb, bonus });
+
 const AETHERMOOR_ACHIEVEMENTS = [
-    // --- Combat & Escalation ---
-    {
-        id: 'first_blood',
-        chain: 'kills',
-        title: 'First Blood',
-        requirement: 'Defeat your first foe.',
-        blurb: 'Every legend starts with somebody swinging first. Mostly you.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'kills_10',
-        chain: 'kills',
-        title: 'Field Clearing',
-        requirement: 'Defeat 10 foes.',
-        blurb: 'Ten down and the local wildlife is already rethinking its life choices.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'kills_50',
-        chain: 'kills',
-        title: 'Seasoned Blades',
-        requirement: 'Defeat 50 foes.',
-        blurb: 'Fifty fights later, you have stopped counting bruises and started counting silver.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'kills_100',
-        chain: 'kills',
-        title: 'Centurion',
-        requirement: 'Defeat 100 foes.',
-        blurb: 'One hundred hostiles cleared. The regional ecology sends its regards.',
-        bonus: { atk: 2 }
-    },
-    {
-        id: 'elite_1',
-        chain: 'elites',
-        title: 'Apex Hunter',
-        requirement: 'Defeat your first Elite.',
-        blurb: 'Bigger, meaner, and still folded in half.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'elite_5',
-        chain: 'elites',
-        title: 'Giant Killer',
-        requirement: 'Defeat 5 Elites.',
-        blurb: 'Regional terrors are starting to look like walking loot bags.',
-        bonus: { hp: 10, atk: 1 }
-    },
-    {
-        id: 'sovereign_down',
-        title: 'Sovereign Down',
-        requirement: 'Defeat your first Zone Boss.',
-        blurb: 'You knocked the biggest piece off the board and kept walking.',
-        bonus: { hp: 15, atk: 2 }
-    },
-    {
-        id: 'untouchable',
-        title: 'Untouchable',
-        requirement: 'Win a fight taking 0 total HP damage.',
-        blurb: 'Not a scratch, not a scuff, not even a dry-cleaning bill.',
-        bonus: { def: 1 }
-    },
-    {
-        id: 'punching_up',
-        chain: 'punch_up',
-        title: 'Punching Up',
-        requirement: 'Defeat a foe 5+ levels above your crew level.',
-        blurb: 'Recommended level brackets are more of a polite suggestion.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'severe_disparity',
-        chain: 'punch_up',
-        title: 'Severe Disparity',
-        requirement: 'Defeat a foe 10+ levels above your crew level.',
-        blurb: 'The System flagged this fight as ill-advised. You won anyway.',
-        bonus: { atk: 2, luk: 1 }
-    },
+    // Combat & Escalation
+    achDef('first_blood', 'First Blood', 'Defeat your first foe.', 'Every legend starts with somebody swinging first. Mostly you.', { hp: 5 }, 'kills'),
+    achDef('kills_10', 'Field Clearing', 'Defeat 10 foes.', 'Ten down and the local wildlife is already rethinking its life choices.', { atk: 1 }, 'kills'),
+    achDef('kills_50', 'Seasoned Blades', 'Defeat 50 foes.', 'Fifty fights later, you have stopped counting bruises and started counting silver.', { hp: 10 }, 'kills'),
+    achDef('kills_100', 'Centurion', 'Defeat 100 foes.', 'One hundred hostiles cleared. The regional ecology sends its regards.', { atk: 2 }, 'kills'),
+    achDef('elite_1', 'Apex Hunter', 'Defeat your first Elite.', 'Bigger, meaner, and still folded in half.', { atk: 1 }, 'elites'),
+    achDef('elite_5', 'Giant Killer', 'Defeat 5 Elites.', 'Regional terrors are starting to look like walking loot bags.', { hp: 10, atk: 1 }, 'elites'),
+    achDef('sovereign_down', 'Sovereign Down', 'Defeat your first Zone Boss.', 'You knocked the biggest piece off the board and kept walking.', { hp: 15, atk: 2 }),
+    achDef('untouchable', 'Untouchable', 'Win a fight taking 0 total HP damage.', 'Not a scratch, not a scuff, not even a dry-cleaning bill.', { def: 1 }),
+    achDef('punching_up', 'Punching Up', 'Defeat a foe 5+ levels above your crew level.', 'Recommended level brackets are more of a polite suggestion.', { atk: 1 }, 'punch_up'),
+    achDef('severe_disparity', 'Severe Disparity', 'Defeat a foe 10+ levels above your crew level.', 'The System flagged this fight as ill-advised. You won anyway.', { atk: 2, luk: 1 }, 'punch_up'),
 
-    // --- Daredevil / Risky ---
-    {
-        id: 'by_a_hair',
-        title: 'By a Hair',
-        requirement: 'Win a fight with Q’tik or Tansy surviving at 15% HP or less.',
-        blurb: 'Walked away on fumes, stubbornness, and pure spite.',
-        bonus: { hp: 15, luk: 1 }
-    },
-    {
-        id: 'dry_powder',
-        title: 'Dry Powder',
-        requirement: 'Defeat an Elite or Boss without using any potions or tonics.',
-        blurb: 'Saved the good bottles for a real emergency. Again.',
-        bonus: { hp: 10, def: 1 }
-    },
-    {
-        id: 'no_one_left_behind',
-        title: 'No One Left Behind',
-        requirement: 'Win a fight on the same exchange a companion hits 0 HP.',
-        blurb: 'Cut it so close the Respawn Stone barely had time to warm up.',
-        bonus: { hp: 15 }
-    },
-    {
-        id: 'iron_stomach',
-        title: 'Iron Stomach',
-        requirement: 'Use 4 potions on one character in a single fight and win.',
-        blurb: 'At this point you are more river-reed tonic than person.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'tactical_withdrawal',
-        title: 'Tactical Withdrawal',
-        requirement: 'Successfully flee from an encounter.',
-        blurb: 'Running away is just advancing in a more survivable direction.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'clean_getaway',
-        title: 'Clean Getaway',
-        requirement: 'Successfully flee after a companion hits 0 HP.',
-        blurb: 'Live to argue about whose fault that was.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'stonebound',
-        title: 'Stonebound',
-        requirement: 'Experience your first Respawn Stone return.',
-        blurb: 'Welcome to immortality. The gravel tastes terrible.',
-        bonus: { hp: 10 }
-    },
+    // Daredevil / Risky
+    achDef('by_a_hair', 'By a Hair', 'Win a fight with Q’tik or Tansy surviving at 15% HP or less.', 'Walked away on fumes, stubbornness, and pure spite.', { hp: 15, luk: 1 }),
+    achDef('dry_powder', 'Dry Powder', 'Defeat an Elite or Boss without using any potions or tonics.', 'Saved the good bottles for a real emergency. Again.', { hp: 10, def: 1 }),
+    achDef('no_one_left_behind', 'No One Left Behind', 'Win a fight on the same exchange a companion hits 0 HP.', 'Cut it so close the Respawn Stone barely had time to warm up.', { hp: 15 }),
+    achDef('iron_stomach', 'Iron Stomach', 'Use 4 potions on one character in a single fight and win.', 'At this point you are more river-reed tonic than person.', { hp: 10 }),
+    achDef('tactical_withdrawal', 'Tactical Withdrawal', 'Successfully flee from an encounter.', 'Running away is just advancing in a more survivable direction.', { luk: 1 }),
+    achDef('clean_getaway', 'Clean Getaway', 'Successfully flee after a companion hits 0 HP.', 'Live to argue about whose fault that was.', { luk: 1 }),
+    achDef('stonebound', 'Stonebound', 'Experience your first Respawn Stone return.', 'Welcome to immortality. The gravel tastes terrible.', { hp: 10 }),
 
-    // --- Levels (10 through 100) ---
-    ...[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(lvl => ({
-        id: `level_${lvl}`,
-        chain: 'level',
-        title: `Tier Mark: Level ${lvl}`,
-        requirement: `Reach Level ${lvl}.`,
-        blurb: `Level ${lvl} reached. The frontier is starting to look a little smaller.`,
-        bonus: { hp: 5, atk: 1 }
-    })),
+    // Levels (10 through 100)
+    ...[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(lvl =>
+        achDef(`level_${lvl}`, `Tier Mark: Level ${lvl}`, `Reach Level ${lvl}.`, `Level ${lvl} reached. The frontier is starting to look a little smaller.`, { hp: 5, atk: 1 }, 'level')
+    ),
 
-    // --- Exploration, Caches, Chests, Instances, Rumors ---
-    {
-        id: 'zone_2',
-        chain: 'zone',
-        title: 'Beyond the Palisade',
-        requirement: 'Cross into a new region beyond Thornhaven.',
-        blurb: 'Out of the cradle and onto the real road.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'zone_5',
-        chain: 'zone',
-        title: 'Long Road',
-        requirement: 'Reach a Zone 5 region.',
-        blurb: 'Five regions deep and your boots are still holding together.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'zone_10',
-        chain: 'zone',
-        title: 'Deep Frontier',
-        requirement: 'Reach a Zone 10 region.',
-        blurb: 'Far past the starter corridors where the tourists turn back.',
-        bonus: { hp: 15, def: 1 }
-    },
-    {
-        id: 'cache_1',
-        chain: 'caches',
-        title: 'Sharp Nose',
-        requirement: 'Find your first Hidden Cache.',
-        blurb: 'Somebody hid that well. Just not well enough.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'cache_10',
-        chain: 'caches',
-        title: 'Scavenger’s Eye',
-        requirement: 'Find 10 Hidden Caches.',
-        blurb: 'Ten hidden stashes liberated from ditches, stumps, and loose stones.',
-        bonus: { hp: 5, luk: 1 }
-    },
-    {
-        id: 'cache_50',
-        chain: 'caches',
-        title: 'Stashed Away',
-        requirement: 'Find 50 Hidden Caches.',
-        blurb: 'At this point the continent is basically your personal pantry.',
-        bonus: { hp: 10, luk: 1 }
-    },
-    {
-        id: 'cache_100',
-        chain: 'caches',
-        title: 'Nothing Stays Hidden',
-        requirement: 'Find 100 Hidden Caches.',
-        blurb: 'A hundred secret caches found. Nothing stays buried for long around you.',
-        bonus: { hp: 15, luk: 2 }
-    },
-    {
-        id: 'chest_1',
-        chain: 'chests',
-        title: 'First Latch',
-        requirement: 'Open your first Instance Chest.',
-        blurb: 'Nothing beats the sound of a rusty lid finally giving way.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'chest_10',
-        chain: 'chests',
-        title: 'Vault Cracker',
-        requirement: 'Open 10 Instance Chests.',
-        blurb: 'Ten sealed vaults cracked open and emptied to the floorboards.',
-        bonus: { hp: 5, luk: 1 }
-    },
-    {
-        id: 'chest_50',
-        chain: 'chests',
-        title: 'Hoard Breaker',
-        requirement: 'Open 50 Instance Chests.',
-        blurb: 'Pre-Calamity locks are practically popping open out of politeness.',
-        bonus: { hp: 10, luk: 1 }
-    },
-    {
-        id: 'chest_100',
-        chain: 'chests',
-        title: 'Master of Locks',
-        requirement: 'Open 100 Instance Chests.',
-        blurb: 'One hundred chests looted. If it has a hinge, it belongs to you.',
-        bonus: { hp: 15, luk: 2 }
-    },
-    {
-        id: 'instance_1',
-        chain: 'instances',
-        title: 'Into the Dark',
-        requirement: 'Enter your first Instance.',
-        blurb: 'Wet stone, bad smells, and terrible lighting—must be loot inside.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'instance_10',
-        chain: 'instances',
-        title: 'Delver',
-        requirement: 'Enter 10 distinct Instances.',
-        blurb: 'Ten basements, vaults, and ruins explored without losing your nerve.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'instance_50',
-        chain: 'instances',
-        title: 'Dungeon Regular',
-        requirement: 'Enter 50 distinct Instances.',
-        blurb: 'You spend more time under hills than most moles.',
-        bonus: { hp: 10, def: 1 }
-    },
-    {
-        id: 'instance_100',
-        chain: 'instances',
-        title: 'Underworld Tourist',
-        requirement: 'Enter 100 distinct Instances.',
-        blurb: 'A hundred ruined doors kicked open across the continent.',
-        bonus: { hp: 15, def: 2 }
-    },
-    {
-        id: 'site_cleared',
-        title: 'Site Cleared',
-        requirement: 'Completely exhaust your first Instance.',
-        blurb: 'Every corner checked, every threat down, nothing left breathing.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'off_the_charts',
-        title: 'Off the Charts',
-        requirement: 'Discover a rare Hidden Instance.',
-        blurb: 'Not on any road map, and all the better for it.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'rumor_1',
-        chain: 'rumors',
-        title: 'Chasing Whispers',
-        requirement: 'Investigate your first traveler rumor.',
-        blurb: 'Could be treasure, could be nonsense. Only one way to find out.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'rumor_10',
-        chain: 'rumors',
-        title: 'Rumor Mill',
-        requirement: 'Investigate 10 traveler rumors.',
-        blurb: 'Ten roadside tips followed to the bitter—or shiny—end.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'rumor_50',
-        chain: 'rumors',
-        title: 'Trail Hound',
-        requirement: 'Investigate 50 traveler rumors.',
-        blurb: 'If somebody whispers about lights in a ditch, you are already walking.',
-        bonus: { hp: 10, luk: 1 }
-    },
-    {
-        id: 'rumor_100',
-        chain: 'rumors',
-        title: 'Every Tavern’s Story',
-        requirement: 'Investigate 100 traveler rumors.',
-        blurb: 'A hundred rumors chased down. Half the gossip is about you now.',
-        bonus: { hp: 15, luk: 2 }
-    },
+    // Exploration, Caches, Chests, Instances, Rumors
+    achDef('zone_2', 'Beyond the Palisade', 'Cross into a new region beyond Thornhaven.', 'Out of the cradle and onto the real road.', { hp: 5 }, 'zone'),
+    achDef('zone_5', 'Long Road', 'Reach a Zone 5 region.', 'Five regions deep and your boots are still holding together.', { hp: 10 }, 'zone'),
+    achDef('zone_10', 'Deep Frontier', 'Reach a Zone 10 region.', 'Far past the starter corridors where the tourists turn back.', { hp: 15, def: 1 }, 'zone'),
+    achDef('cache_1', 'Sharp Nose', 'Find your first Hidden Cache.', 'Somebody hid that well. Just not well enough.', { luk: 1 }, 'caches'),
+    achDef('cache_10', 'Scavenger’s Eye', 'Find 10 Hidden Caches.', 'Ten hidden stashes liberated from ditches, stumps, and loose stones.', { hp: 5, luk: 1 }, 'caches'),
+    achDef('cache_50', 'Stashed Away', 'Find 50 Hidden Caches.', 'At this point the continent is basically your personal pantry.', { hp: 10, luk: 1 }, 'caches'),
+    achDef('cache_100', 'Nothing Stays Hidden', 'Find 100 Hidden Caches.', 'A hundred secret caches found. Nothing stays buried for long around you.', { hp: 15, luk: 2 }, 'caches'),
+    achDef('chest_1', 'First Latch', 'Open your first Instance Chest.', 'Nothing beats the sound of a rusty lid finally giving way.', { luk: 1 }, 'chests'),
+    achDef('chest_10', 'Vault Cracker', 'Open 10 Instance Chests.', 'Ten sealed vaults cracked open and emptied to the floorboards.', { hp: 5, luk: 1 }, 'chests'),
+    achDef('chest_50', 'Hoard Breaker', 'Open 50 Instance Chests.', 'Pre-Calamity locks are practically popping open out of politeness.', { hp: 10, luk: 1 }, 'chests'),
+    achDef('chest_100', 'Master of Locks', 'Open 100 Instance Chests.', 'One hundred chests looted. If it has a hinge, it belongs to you.', { hp: 15, luk: 2 }, 'chests'),
+    achDef('instance_1', 'Into the Dark', 'Enter your first Instance.', 'Wet stone, bad smells, and terrible lighting—must be loot inside.', { hp: 5 }, 'instances'),
+    achDef('instance_10', 'Delver', 'Enter 10 distinct Instances.', 'Ten basements, vaults, and ruins explored without losing your nerve.', { hp: 10 }, 'instances'),
+    achDef('instance_50', 'Dungeon Regular', 'Enter 50 distinct Instances.', 'You spend more time under hills than most moles.', { hp: 10, def: 1 }, 'instances'),
+    achDef('instance_100', 'Underworld Tourist', 'Enter 100 distinct Instances.', 'A hundred ruined doors kicked open across the continent.', { hp: 15, def: 2 }, 'instances'),
+    achDef('site_cleared', 'Site Cleared', 'Completely exhaust your first Instance.', 'Every corner checked, every threat down, nothing left breathing.', { hp: 10 }),
+    achDef('off_the_charts', 'Off the Charts', 'Discover a rare Hidden Instance.', 'Not on any road map, and all the better for it.', { luk: 1 }),
+    achDef('rumor_1', 'Chasing Whispers', 'Investigate your first traveler rumor.', 'Could be treasure, could be nonsense. Only one way to find out.', { hp: 5 }, 'rumors'),
+    achDef('rumor_10', 'Rumor Mill', 'Investigate 10 traveler rumors.', 'Ten roadside tips followed to the bitter—or shiny—end.', { luk: 1 }, 'rumors'),
+    achDef('rumor_50', 'Trail Hound', 'Investigate 50 traveler rumors.', 'If somebody whispers about lights in a ditch, you are already walking.', { hp: 10, luk: 1 }, 'rumors'),
+    achDef('rumor_100', 'Every Tavern’s Story', 'Investigate 100 traveler rumors.', 'A hundred rumors chased down. Half the gossip is about you now.', { hp: 15, luk: 2 }, 'rumors'),
 
-    // --- Contracts & Standing ---
-    {
-        id: 'humble_start',
-        chain: 'quest_rank',
-        title: 'Humble Start',
-        requirement: 'Complete your first Rank F contract.',
-        blurb: 'Everyone starts with somebody’s chores. Silver still spends.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'rank_d',
-        chain: 'quest_rank',
-        title: 'Moving Up',
-        requirement: 'Complete a Rank D contract.',
-        blurb: 'Past the errand work and into jobs with actual teeth.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'rank_c',
-        chain: 'quest_rank',
-        title: 'Serious Work',
-        requirement: 'Complete a Rank C contract.',
-        blurb: 'When a town has a real problem, they stop calling rookies.',
-        bonus: { hp: 10, atk: 1 }
-    },
-    {
-        id: 'rank_b',
-        chain: 'quest_rank',
-        title: 'High Priority',
-        requirement: 'Complete a Rank B contract.',
-        blurb: 'Region-scale trouble handled without breaking stride.',
-        bonus: { hp: 15, atk: 2 }
-    },
-    {
-        id: 'quest_1',
-        chain: 'quests',
-        title: 'First Contract',
-        requirement: 'Complete your first contract.',
-        blurb: 'Congratulations! You fulfilled your first contract—here is to a hundred more!',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'quest_5',
-        chain: 'quests',
-        title: 'Reliable Hands',
-        requirement: 'Complete 5 contracts.',
-        blurb: 'Five jobs done right. Word travels fast in small towns.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'quest_20',
-        chain: 'quests',
-        title: 'Veteran Contractors',
-        requirement: 'Complete 20 contracts.',
-        blurb: 'You have left a trail of people who know your name—and owe you a drink.',
-        bonus: { atk: 1, luk: 1 }
-    },
-    {
-        id: 'rep_known',
-        chain: 'reputation',
-        title: 'Familiar Faces',
-        requirement: 'Reach Known standing in any settlement.',
-        blurb: 'The innkeeper remembers your order before you sit down.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'rep_respected',
-        chain: 'reputation',
-        title: 'Well Regarded',
-        requirement: 'Reach Well Respected standing in any settlement.',
-        blurb: 'Doors open faster when locals trust your boots.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'rep_renowned',
-        chain: 'reputation',
-        title: 'Local Legend',
-        requirement: 'Reach Renowned standing in any settlement.',
-        blurb: 'Your names are going to outlive the tavern roof.',
-        bonus: { hp: 15, luk: 1 }
-    },
+    // Contracts & Standing
+    achDef('humble_start', 'Humble Start', 'Complete your first Rank F contract.', 'Everyone starts with somebody’s chores. Silver still spends.', { hp: 5 }, 'quest_rank'),
+    achDef('rank_d', 'Moving Up', 'Complete a Rank D contract.', 'Past the errand work and into jobs with actual teeth.', { atk: 1 }, 'quest_rank'),
+    achDef('rank_c', 'Serious Work', 'Complete a Rank C contract.', 'When a town has a real problem, they stop calling rookies.', { hp: 10, atk: 1 }, 'quest_rank'),
+    achDef('rank_b', 'High Priority', 'Complete a Rank B contract.', 'Region-scale trouble handled without breaking stride.', { hp: 15, atk: 2 }, 'quest_rank'),
+    achDef('quest_1', 'First Contract', 'Complete your first contract.', 'Congratulations! You fulfilled your first contract—here is to a hundred more!', { hp: 5 }, 'quests'),
+    achDef('quest_5', 'Reliable Hands', 'Complete 5 contracts.', 'Five jobs done right. Word travels fast in small towns.', { hp: 10 }, 'quests'),
+    achDef('quest_20', 'Veteran Contractors', 'Complete 20 contracts.', 'You have left a trail of people who know your name—and owe you a drink.', { atk: 1, luk: 1 }, 'quests'),
+    achDef('rep_known', 'Familiar Faces', 'Reach Known standing in any settlement.', 'The innkeeper remembers your order before you sit down.', { hp: 5 }, 'reputation'),
+    achDef('rep_respected', 'Well Regarded', 'Reach Well Respected standing in any settlement.', 'Doors open faster when locals trust your boots.', { hp: 10 }, 'reputation'),
+    achDef('rep_renowned', 'Local Legend', 'Reach Renowned standing in any settlement.', 'Your names are going to outlive the tavern roof.', { hp: 15, luk: 1 }, 'reputation'),
 
-    // --- Gear & Economy ---
-    {
-        id: 'proper_kit',
-        chain: 'gear_rarity',
-        title: 'Proper Kit',
-        requirement: 'Equip your first Uncommon item.',
-        blurb: 'Goodbye starter scraps, hello real metalwork.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'fine_workmanship',
-        chain: 'gear_rarity',
-        title: 'Fine Workmanship',
-        requirement: 'Equip your first Rare item.',
-        blurb: 'Blue-grade steel with the weight to prove it.',
-        bonus: { hp: 10, atk: 1 }
-    },
-    {
-        id: 'relic_grade',
-        chain: 'gear_rarity',
-        title: 'Relic-Grade',
-        requirement: 'Equip your first Epic item.',
-        blurb: 'The kind of salvage that makes Immortals stare in the tavern.',
-        bonus: { hp: 15, atk: 2 }
-    },
-    {
-        id: 'full_kit_tansy',
-        title: 'Dressed for Trouble',
-        requirement: 'Equip gear in all 9 of Tansy’s slots.',
-        blurb: 'Not a single bare slot left—pocketed, laced, and ready to stab.',
-        bonus: { tansyHp: 10, luk: 1 }
-    },
-    {
-        id: 'full_kit_qtik',
-        title: 'Decked Out',
-        requirement: 'Equip gear in all 4 of Q’tik’s accessory slots.',
-        blurb: 'Rings, cuffs, and amulet all humming in sync.',
-        bonus: { qtikHp: 10, def: 1 }
-    },
-    {
-        id: 'full_kit_crew',
-        title: 'Fully Outfitted',
-        requirement: 'Equip gear in every slot across both Tansy and Q’tik.',
-        blurb: 'Thirteen slots filled. You finally look like proper adventurers.',
-        bonus: { hp: 15, atk: 1, def: 1 }
-    },
-    {
-        id: 'all_common_gear',
-        title: 'Humble Uniform',
-        requirement: 'Fill all 13 crew gear slots wearing only Common items.',
-        blurb: 'Nothing flashy, just honest iron from head to toe.',
-        bonus: { hp: 10, luk: 1 }
-    },
-    {
-        id: 'all_uncommon_gear',
-        title: 'Green Machine',
-        requirement: 'Fill all 13 crew gear slots wearing only Uncommon items.',
-        blurb: 'Every single slot gleaming Uncommon—pure dedication to the grind.',
-        bonus: { hp: 15, atk: 1, def: 1 }
-    },
-    {
-        id: 'field_medicine',
-        title: 'Field Medicine',
-        requirement: 'Use your first healing potion or tonic.',
-        blurb: 'Turns out medicine works better when you actually drink it.',
-        bonus: { hp: 5 }
-    },
-    {
-        id: 'curio_broker',
-        title: 'Curio Broker',
-        requirement: 'Sell 5 salvaged curios.',
-        blurb: 'One dead empire’s trash is your smoked-trout budget.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'whale_bait',
-        title: 'Whale Bait',
-        requirement: 'Trigger a Whale Collector Buyout on the Aether-Net.',
-        blurb: 'Somewhere out there, a rich Immortal just overpaid wildly.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'mob_silver_100',
-        chain: 'mob_silver',
-        title: 'Coin From Carnage',
-        requirement: 'Earn 100 cumulative silver from defeating mobs.',
-        blurb: 'A hundred silver pried straight off hostile hides.',
-        bonus: { atk: 1 }
-    },
-    {
-        id: 'mob_silver_500',
-        chain: 'mob_silver',
-        title: 'Blood Money',
-        requirement: 'Earn 500 cumulative silver from defeating mobs.',
-        blurb: 'Five hundred silver earned the loud, violent way.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'mob_silver_1000',
-        chain: 'mob_silver',
-        title: 'Monster Payroll',
-        requirement: 'Earn 1,000 cumulative silver from defeating mobs.',
-        blurb: 'A thousand silver in combat salvage. The wilderness is paying your rent.',
-        bonus: { hp: 15, atk: 1 }
-    },
-    {
-        id: 'shop_silver_100',
-        chain: 'shop_silver',
-        title: 'Counter Regular',
-        requirement: 'Earn 100 cumulative silver selling items at shops.',
-        blurb: 'The local pawnbroker already has the scales ready when you walk in.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'shop_silver_500',
-        chain: 'shop_silver',
-        title: 'Pawn Baron',
-        requirement: 'Earn 500 cumulative silver selling items at shops.',
-        blurb: 'Five hundred silver across the counter without blinking.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'shop_silver_1000',
-        chain: 'shop_silver',
-        title: 'Liquidator',
-        requirement: 'Earn 1,000 cumulative silver selling items at shops.',
-        blurb: 'A thousand silver moved in local trade. Every merchant knows your pockets.',
-        bonus: { hp: 10, luk: 1 }
-    },
-    {
-        id: 'trade_silver_100',
-        chain: 'trade_silver',
-        title: 'Aether-Net Debut',
-        requirement: 'Earn 100 cumulative silver from the Aether-Net Trade-Stream.',
-        blurb: 'First hundred silver off the market board. Welcome to the hustle.',
-        bonus: { luk: 1 }
-    },
-    {
-        id: 'trade_silver_500',
-        chain: 'trade_silver',
-        title: 'Stream Hustler',
-        requirement: 'Earn 500 cumulative silver from the Aether-Net Trade-Stream.',
-        blurb: 'Five hundred silver from Immortals who hate farming their own gear.',
-        bonus: { hp: 10 }
-    },
-    {
-        id: 'trade_silver_1000',
-        chain: 'trade_silver',
-        title: 'Market Shark',
-        requirement: 'Earn 1,000 cumulative silver from the Aether-Net Trade-Stream.',
-        blurb: 'A thousand silver off the Trade-Stream. Certified loot tycoons.',
-        bonus: { hp: 10, luk: 2 }
-    }
+    // Gear & Economy
+    achDef('proper_kit', 'Proper Kit', 'Equip your first Uncommon item.', 'Goodbye starter scraps, hello real metalwork.', { atk: 1 }, 'gear_rarity'),
+    achDef('fine_workmanship', 'Fine Workmanship', 'Equip your first Rare item.', 'Blue-grade steel with the weight to prove it.', { hp: 10, atk: 1 }, 'gear_rarity'),
+    achDef('relic_grade', 'Relic-Grade', 'Equip your first Epic item.', 'The kind of salvage that makes Immortals stare in the tavern.', { hp: 15, atk: 2 }, 'gear_rarity'),
+    achDef('full_kit_tansy', 'Dressed for Trouble', 'Equip gear in all 9 of Tansy’s slots.', 'Not a single bare slot left—pocketed, laced, and ready to stab.', { tansyHp: 10, luk: 1 }),
+    achDef('full_kit_qtik', 'Decked Out', 'Equip gear in all 4 of Q’tik’s accessory slots.', 'Rings, cuffs, and amulet all humming in sync.', { qtikHp: 10, def: 1 }),
+    achDef('full_kit_crew', 'Fully Outfitted', 'Equip gear in every slot across both Tansy and Q’tik.', 'Thirteen slots filled. You finally look like proper adventurers.', { hp: 15, atk: 1, def: 1 }),
+    achDef('all_common_gear', 'Humble Uniform', 'Fill all 13 crew gear slots wearing only Common items.', 'Nothing flashy, just honest iron from head to toe.', { hp: 10, luk: 1 }),
+    achDef('all_uncommon_gear', 'Green Machine', 'Fill all 13 crew gear slots wearing only Uncommon items.', 'Every single slot gleaming Uncommon—pure dedication to the grind.', { hp: 15, atk: 1, def: 1 }),
+    achDef('field_medicine', 'Field Medicine', 'Use your first healing potion or tonic.', 'Turns out medicine works better when you actually drink it.', { hp: 5 }),
+    achDef('curio_broker', 'Curio Broker', 'Sell 5 salvaged curios.', 'One dead empire’s trash is your smoked-trout budget.', { luk: 1 }),
+    achDef('whale_bait', 'Whale Bait', 'Trigger a Whale Collector Buyout on the Aether-Net.', 'Somewhere out there, a rich Immortal just overpaid wildly.', { luk: 1 }),
+    achDef('mob_silver_100', 'Coin From Carnage', 'Earn 100 cumulative silver from defeating mobs.', 'A hundred silver pried straight off hostile hides.', { atk: 1 }, 'mob_silver'),
+    achDef('mob_silver_500', 'Blood Money', 'Earn 500 cumulative silver from defeating mobs.', 'Five hundred silver earned the loud, violent way.', { hp: 10 }, 'mob_silver'),
+    achDef('mob_silver_1000', 'Monster Payroll', 'Earn 1,000 cumulative silver from defeating mobs.', 'A thousand silver in combat salvage. The wilderness is paying your rent.', { hp: 15, atk: 1 }, 'mob_silver'),
+    achDef('shop_silver_100', 'Counter Regular', 'Earn 100 cumulative silver selling items at shops.', 'The local pawnbroker already has the scales ready when you walk in.', { luk: 1 }, 'shop_silver'),
+    achDef('shop_silver_500', 'Pawn Baron', 'Earn 500 cumulative silver selling items at shops.', 'Five hundred silver across the counter without blinking.', { hp: 10 }, 'shop_silver'),
+    achDef('shop_silver_1000', 'Liquidator', 'Earn 1,000 cumulative silver selling items at shops.', 'A thousand silver moved in local trade. Every merchant knows your pockets.', { hp: 10, luk: 1 }, 'shop_silver'),
+    achDef('trade_silver_100', 'Aether-Net Debut', 'Earn 100 cumulative silver from the Aether-Net Trade-Stream.', 'First hundred silver off the market board. Welcome to the hustle.', { luk: 1 }, 'trade_silver'),
+    achDef('trade_silver_500', 'Stream Hustler', 'Earn 500 cumulative silver from the Aether-Net Trade-Stream.', 'Five hundred silver from Immortals who hate farming their own gear.', { hp: 10 }, 'trade_silver'),
+    achDef('trade_silver_1000', 'Market Shark', 'Earn 1,000 cumulative silver from the Aether-Net Trade-Stream.', 'A thousand silver off the Trade-Stream. Certified loot tycoons.', { hp: 10, luk: 2 }, 'trade_silver')
 ];
+
 
 function achievementBonuses(crew) {
     const unlocked = new Set(
@@ -7782,15 +7273,8 @@ const QUEST_V2_STRUCTURES = {
         2: ['approach', 'recover'],
         3: ['approach', 'locate', 'recover'],
         4: ['approach', 'locate', 'reach_inner_site', 'recover'],
-        5: [
-            'approach',
-            'locate',
-            'reach_inner_site',
-            'find_access',
-            'recover'
-        ]
+        5: ['approach', 'locate', 'reach_inner_site', 'find_access', 'recover']
     },
-
     rescue_person: {
         lost: {
             1: ['find_person'],
@@ -7803,102 +7287,36 @@ const QUEST_V2_STRUCTURES = {
             5: ['approach', 'track', 'reach_lair', 'find_person', 'defeat']
         }
     },
-
     defeat_elite: {
         1: ['defeat'],
         2: ['approach', 'defeat'],
         3: ['approach', 'track', 'defeat'],
-
         4: ['approach', 'track', 'reach_lair', 'defeat'],
         5: ['approach', 'track', 'reach_lair', 'find_target', 'defeat']
     }
 };
 
 const QUEST_V2_STAGES = {
-     retrieve_item: {
-        approach: {
-            mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Reach the designated recovery site.'
-        },
-        locate: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Find the authored clue identifying where the item is held.'
-        },
-        reach_inner_site: {
-            mode: 'traversal_discovery',
-            trigger: 'discovery',
-            objective: 'Find the authored way into the inner recovery area.'
-        },
-        find_access: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Find the authored means of accessing the item.'
-        },
-        recover: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Locate and recover the required item.',
-            decisive: true
-        }
+    retrieve_item: {
+        approach:         { mode: 'traversal_discovery', trigger: 'arrival' },
+        locate:           { mode: 'brain_social_heist',  trigger: 'discovery' },
+        reach_inner_site: { mode: 'traversal_discovery', trigger: 'discovery' },
+        find_access:      { mode: 'brain_social_heist',  trigger: 'discovery' },
+        recover:          { mode: 'brain_social_heist',  trigger: 'discovery', decisive: true }
     },
-        rescue_person: {
-        approach: {
-            mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Reach the person’s last known location.'
-        },
-        track: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Follow the authored evidence of the missing person’s route.'
-        },
-        reach_lair: {
-            mode: 'traversal_discovery',
-            trigger: 'discovery',
-            objective: 'Find the authored way to the abductors’ location.'
-        },
-        find_person: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Find the missing person and establish their situation.'
-        },
-        defeat: {
-            mode: 'combat_twist_showdown',
-            trigger: 'linked_combat',
-            objective: 'Defeat the threat holding the missing person.',
-            decisive: true
-        }
+    rescue_person: {
+        approach:         { mode: 'traversal_discovery',   trigger: 'arrival' },
+        track:            { mode: 'brain_social_heist',    trigger: 'discovery' },
+        reach_lair:       { mode: 'traversal_discovery',   trigger: 'discovery' },
+        find_person:      { mode: 'brain_social_heist',    trigger: 'discovery' },
+        defeat:           { mode: 'combat_twist_showdown', trigger: 'linked_combat', decisive: true }
     },
-
     defeat_elite: {
-        approach: {
-            mode: 'traversal_discovery',
-            trigger: 'arrival',
-            objective: 'Reach the target’s reported territory.'
-        },
-        track: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Find the authored evidence of the target’s route.'
-        },
-        reach_lair: {
-            mode: 'traversal_discovery',
-            trigger: 'discovery',
-            objective: 'Find the authored route to the target’s lair.'
-        },
-        find_target: {
-            mode: 'brain_social_heist',
-            trigger: 'discovery',
-            objective: 'Locate the target using the authored signs at its lair.'
-        },
-        defeat: {
-            mode: 'combat_twist_showdown',
-            trigger: 'linked_combat',
-            objective: 'Defeat the quest’s linked threat.',
-            decisive: true
-        }
+        approach:         { mode: 'traversal_discovery',   trigger: 'arrival' },
+        track:            { mode: 'brain_social_heist',    trigger: 'discovery' },
+        reach_lair:       { mode: 'traversal_discovery',   trigger: 'discovery' },
+        find_target:      { mode: 'brain_social_heist',    trigger: 'discovery' },
+        defeat:           { mode: 'combat_twist_showdown', trigger: 'linked_combat', decisive: true }
     }
 };
 

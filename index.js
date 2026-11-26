@@ -23569,10 +23569,7 @@ async function copyAethermoorStatus() {
 function updateAethermoorStatusStrip(state) {
     updateAethermoorQueuedMoveBar();
 
-    const strip = aethermoorPanelElement?.querySelector(
-        '.aethermoor-status-strip'
-    );
-
+    const strip = aethermoorPanelElement?.querySelector('.aethermoor-status-strip');
     if (!strip) return;
 
     if (!state?.crew) {
@@ -23581,51 +23578,36 @@ function updateAethermoorStatusStrip(state) {
         return;
     }
 
-    const readouts = aethermoorStatusReadouts(state);
-
-    const items = readouts.map(readout => {
-        const item = document.createElement('span');
-        item.dataset.stat = readout.key;
-        item.textContent = readout.text;
-        return item;
-    });
-
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'aethermoor-status-copy';
-    copy.textContent = 'Copy';
-    copy.title = 'Copy level, XP, HP, and silver';
-    copy.addEventListener('click', () => {
-        void copyAethermoorStatus().catch(error => {
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
-        });
+    const items = aethermoorStatusReadouts(state).map(r =>
+        el('span', { dataset: { stat: r.key }, text: r.text })
+    );
+    const copy = el('button', {
+        type: 'button',
+        className: 'aethermoor-status-copy',
+        text: 'Copy',
+        title: 'Copy level, XP, HP, and silver',
+        onClick: () => {
+            void copyAethermoorStatus().catch(error => {
+                toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+            });
+        }
     });
 
     strip.replaceChildren(...items, copy);
     strip.hidden = false;
 
-    const shopsTab = aethermoorPanelElement?.querySelector(
-        '.aethermoor-tab[data-tab="shops"]'
-    );
-
+    const shopsTab = aethermoorPanelElement?.querySelector('.aethermoor-tab[data-tab="shops"]');
     if (shopsTab) {
         const shopsAvailable = Boolean(
             !state.currentJourney &&
             !state.activeInstanceId &&
             !['active', 'spotted'].includes(state.encounter?.status) &&
             Object.values(state.world?.settlements || {}).some(entry =>
-                entry.locationId === state.currentLocationId &&
-                entry.zone === state.zone
+                entry.locationId === state.currentLocationId && entry.zone === state.zone
             )
         );
-
         shopsTab.disabled = !shopsAvailable;
-        shopsTab.title = shopsAvailable
-            ? 'Open settlement shops'
-            : 'Shops are available at a free settlement';
+        shopsTab.title = shopsAvailable ? 'Open settlement shops' : 'Shops are available at a free settlement';
     }
 }
 
@@ -23708,7 +23690,6 @@ function ensurePotionSelection(owner, state) {
 
     return options;
 }
-
 function makePotionChoiceGroup(owner, state) {
     const isQtik = owner === 'qtik';
     const key = isQtik ? 'qtikItem' : 'tansyItem';
@@ -23716,23 +23697,16 @@ function makePotionChoiceGroup(owner, state) {
     const options = ensurePotionSelection(owner, state);
 
     const group = makeChoiceGroup(
-        `${isQtik ? "Q'tik" : 'Tansy'} potion ` +
-            `(${4 - uses[owner]} uses left)`,
+        `${isQtik ? "Q'tik" : 'Tansy'} potion (${4 - uses[owner]} uses left)`,
         key,
         options,
         combatSelections[key],
-        value => {
-            combatSelections[key] = value;
-        }
+        value => { combatSelections[key] = value; }
     );
 
     if (options.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'aethermoor-combat-choice-detail';
-        empty.textContent = 'No potions available.';
-        group.appendChild(empty);
+        group.appendChild(el('div', { className: 'aethermoor-combat-choice-detail', text: 'No potions available.' }));
     }
-
     return group;
 }
 
@@ -23906,78 +23880,34 @@ function registerAethermoorCampaignAutoRefresh() {
     }, 500);
 }
 
-function makeChoiceGroup(
-    label,
-    groupName,
-    options,
-    selectedValue,
-    onSelect
-) {
-    const wrapper = document.createElement('fieldset');
-    wrapper.className = 'aethermoor-combat-choice-group';
-
-    const legend = document.createElement('legend');
-    legend.textContent = label;
-    wrapper.appendChild(legend);
-
-    const choices = document.createElement('div');
-    choices.className = 'aethermoor-combat-choices';
+function makeChoiceGroup(label, groupName, options, selectedValue, onSelect) {
+    const choices = el('div', { className: 'aethermoor-combat-choices' });
 
     for (const option of options) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'aethermoor-combat-choice';
-        button.dataset.group = groupName;
-        button.dataset.value = option.value;
-        button.setAttribute(
-            'aria-pressed',
-            String(option.value === selectedValue)
+        const button = el('button', {
+            type: 'button',
+            className: 'aethermoor-combat-choice',
+            dataset: { group: groupName, value: option.value },
+            attrs: { 'aria-pressed': String(option.value === selectedValue) },
+            onClick: () => {
+                if (button.getAttribute('aria-disabled') === 'true') return;
+                onSelect(option.value);
+                for (const sibling of choices.querySelectorAll('button')) {
+                    sibling.setAttribute('aria-pressed', String(sibling === button));
+                }
+            }
+        },
+            el('span', { className: 'aethermoor-combat-choice-title', text: option.label }),
+            option.detail && el('span', { className: 'aethermoor-combat-choice-detail', text: option.detail }),
+            option.telegraph && el('span', { className: 'aethermoor-combat-choice-telegraph', text: `[${option.telegraph}]` })
         );
-
-        const title = document.createElement('span');
-        title.className = 'aethermoor-combat-choice-title';
-        title.textContent = option.label;
-        button.appendChild(title);
-
-        if (option.detail) {
-            const detail = document.createElement('span');
-            detail.className =
-                'aethermoor-combat-choice-detail';
-            detail.textContent = option.detail;
-            button.appendChild(detail);
-        }
-
-        if (option.telegraph) {
-            const telegraph = document.createElement('span');
-            telegraph.className =
-                'aethermoor-combat-choice-telegraph';
-            telegraph.textContent =
-                `[${option.telegraph}]`;
-            button.appendChild(telegraph);
-        }
-
-        button.addEventListener('click', () => {
-            if (button.getAttribute('aria-disabled') === 'true') {
-                return;
-            }
-
-            onSelect(option.value);
-
-            for (const sibling of choices.querySelectorAll(
-                'button'
-            )) {
-                sibling.setAttribute(
-                    'aria-pressed',
-                    String(sibling === button)
-                );
-            }
-        });
-
         choices.appendChild(button);
     }
 
-    wrapper.appendChild(choices);
-    return wrapper;
+    return el('fieldset', { className: 'aethermoor-combat-choice-group' },
+        el('legend', { text: label }),
+        choices
+    );
 }
 
 function combatActionLabel(group, value) {
@@ -24287,24 +24217,19 @@ function decorateAethermoorCombatControls(host, state) {
         }
     ];
 
-    const status = document.createElement('div');
-    status.className = 'aethermoor-ui-text';
-    status.textContent = 'Active debuffs — Q’tik / Crew: ';
-
+    const status = el('div', { className: 'aethermoor-ui-text', text: 'Active debuffs — Q’tik / Crew: ' });
     let found = false;
 
     function appendCounter(label, stacks, description) {
         if (found) status.append(' · ');
-
-        const counter = document.createElement('span');
-        counter.textContent = `${label} ×${stacks}`;
-        counter.title = description +
-            '\nApplied on eligible successful enemy responses: ' +
-            'normally 1 stack, 2 on enemy roll 6, plus any Wind-Up bonus. ' +
-            'Source-linked effects cease when their source dies.';
-        counter.style.color = '#ffd166';
-
-        status.appendChild(counter);
+        status.appendChild(el('span', {
+            text: `${label} ×${stacks}`,
+            style: { color: '#ffd166' },
+            title: description +
+                '\nApplied on eligible successful enemy responses: ' +
+                'normally 1 stack, 2 on enemy roll 6, plus any Wind-Up bonus. ' +
+                'Source-linked effects cease when their source dies.'
+        }));
         found = true;
     }
 
@@ -24532,37 +24457,16 @@ const TANSY_COMBAT_OPTIONS = [
 
 function appendCombatCommandPreview(inlineHost, state) {
     const currentStats = derived(state.crew);
-    const controls = document.createElement('div');
-    controls.className = 'aethermoor-combat-controls';
-
-    const note = document.createElement('div');
-    note.className = 'aethermoor-ui-text';
-    note.textContent =
-        'Commands locked outside active combat — hover for ability details.';
-
-    const qtikGroup = makeChoiceGroup(
-        `Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`,
-        'qtik',
-        QTIK_COMBAT_OPTIONS,
-        null,
-        () => {}
+    const controls = el('div', { className: 'aethermoor-combat-controls' },
+        el('div', { className: 'aethermoor-ui-text', text: 'Commands locked outside active combat — hover for ability details.' }),
+        makeChoiceGroup(`Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`, 'qtik', QTIK_COMBAT_OPTIONS, null, () => {}),
+        makeChoiceGroup(`Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`, 'tansy', TANSY_COMBAT_OPTIONS, null, () => {})
     );
-
-    const tansyGroup = makeChoiceGroup(
-        `Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`,
-        'tansy',
-        TANSY_COMBAT_OPTIONS,
-        null,
-        () => {}
-    );
-
-    controls.append(note, qtikGroup, tansyGroup);
 
     for (const button of controls.querySelectorAll('.aethermoor-combat-choice')) {
         button.setAttribute('aria-disabled', 'true');
         button.setAttribute('aria-pressed', 'false');
     }
-
     inlineHost.appendChild(controls);
 
     try {
@@ -24574,32 +24478,19 @@ function appendCombatCommandPreview(inlineHost, state) {
 
 async function openCombatPanel(inlineHost) {
     ensureAethermoorCombatChoiceStyles();
-
-    assert(
-
-        inlineHost instanceof HTMLElement,
-        'Combat must render inside the Aethermoor Combat tab'
-    );
+    assert(inlineHost instanceof HTMLElement, 'Combat must render inside the Aethermoor Combat tab');
 
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        inlineHost.replaceChildren();
-
-        inlineHost.appendChild(
-            makeAethermoorSection(
-                'COMBAT',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
-                'combat'
-            )
-        );
-
+        inlineHost.replaceChildren(makeAethermoorSection(
+            'COMBAT',
+            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                ? 'No campaign yet. Open World to start one.'
+                : error instanceof Error ? error.message : String(error),
+            'combat'
+        ));
         return;
     }
 
@@ -24612,175 +24503,91 @@ async function openCombatPanel(inlineHost) {
      * button between pointer-down and click.
      */
     markCombatViewRendered(snapshot);
-
     inlineHost.replaceChildren();
 
-        if (encounter?.status === 'spotted') {
-        const foes = encounter.foes
-            .map((foe, index) => ({
-                foe,
-                index
-            }))
-            .filter(({ foe }) => foe.hp > 0);
+    const attemptFlee = async button => {
+        if (aethermoorCombatBusy) return;
+        aethermoorCombatBusy = true;
+        button.disabled = true;
+        try {
+            const result = await runStoredMechanic({ actions: { flee: true } });
+            assert(result?.ok === true, result?.error || 'Flee failed to resolve');
+            if (result.flee?.success || result.death?.totalDefeat) {
+                openAethermoorTab(state.activeInstanceId && !result.death?.totalDefeat ? 'instances' : 'world');
+            } else {
+                await openCombatPanel(inlineHost);
+            }
+        } catch (error) {
+            button.disabled = false;
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+        } finally {
+            aethermoorCombatBusy = false;
+        }
+    };
 
+    if (encounter?.status === 'spotted') {
+        const foes = encounter.foes.map((foe, index) => ({ foe, index })).filter(({ foe }) => foe.hp > 0);
         const roster = foes.length
-            ? foes.map(({ foe, index }) =>
-                `${combatFoeLabel(foe, index)} ` +
-                `(${foe.hp}/${foe.maxHp} HP)`
-            ).join('\n')
+            ? foes.map(({ foe, index }) => `${combatFoeLabel(foe, index)} (${foe.hp}/${foe.maxHp} HP)`).join('\n')
             : 'No living foes recorded.';
         const journey = state.currentJourney;
         const journeyText = journey
-            ? `\n\nJourney paused toward ${journey.destinationLabel}: ` +
-              `${journey.completedSegments}/${journey.totalSegments} segments. ` +
+            ? `\n\nJourney paused toward ${journey.destinationLabel}: ${journey.completedSegments}/${journey.totalSegments} segments. ` +
               'Resolve or avoid this encounter before attempting another move.'
             : '';
 
         const section = makeAethermoorSection(
             'ENCOUNTER SPOTTED',
-            `${encounter.id}\n${roster}\n\n` +
-            'The enemies have been spotted. Combat has not begun.' +
-            journeyText,
+            `${encounter.id}\n${roster}\n\nThe enemies have been spotted. Combat has not begun.${journeyText}`,
             'combat'
         );
 
-        const actions = document.createElement('div');
-        actions.className = 'aethermoor-ui-actions';
-
+        const actions = el('div', { className: 'aethermoor-ui-actions' });
         const decide = async disposition => {
             const buttons = actions.querySelectorAll('button');
-            buttons.forEach(button => {
-                button.disabled = true;
-            });
-
+            buttons.forEach(b => { b.disabled = true; });
             try {
-                const output = await runStoredMechanic({
-                    cases: [{
-                        name: `${disposition}_spotted_encounter`,
-                        kind: disposition
-                    }]
-                });
-
+                const output = await runStoredMechanic({ cases: [{ name: `${disposition}_spotted_encounter`, kind: disposition }] });
                 assert(
-                    output?.ok === true &&
-                    output.results?.[0]?.ok !== false,
-                    output?.results?.[0]?.error ||
-                        `Could not ${disposition} encounter`
+                    output?.ok === true && output.results?.[0]?.ok !== false,
+                    output?.results?.[0]?.error || `Could not ${disposition} encounter`
                 );
-
                 await renderAethermoorTab('combat');
             } catch (error) {
-                toastr.error(
-                    error instanceof Error
-                        ? error.message
-                        : String(error),
-                    'Aethermoor'
-                );
-
-                buttons.forEach(button => {
-                    button.disabled = false;
-                });
+                toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+                buttons.forEach(b => { b.disabled = false; });
             }
         };
 
         actions.append(
-            makeAethermoorAction(
-                'Engage',
-                'combat',
-                () => decide('engage')
-            ),
-            makeAethermoorAction(
-                'Avoid',
-                'world',
-                () => decide('avoid')
-            )
+            makeAethermoorAction('Engage', 'combat', () => decide('engage')),
+            makeAethermoorAction('Avoid', 'world', () => decide('avoid'))
         );
-
         section.appendChild(actions);
         inlineHost.appendChild(section);
         appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
-    if (
-        encounter?.status === 'active' &&
-        (
-            state.crew.qtik.hp === 0 ||
-            state.crew.tansy.hp === 0
-        )
-    ) {
-        const survivor = state.crew.qtik.hp > 0
-            ? "Q'tik"
-            : 'Tansy';
-
+    if (encounter?.status === 'active' && (state.crew.qtik.hp === 0 || state.crew.tansy.hp === 0)) {
+        const survivor = state.crew.qtik.hp > 0 ? "Q'tik" : 'Tansy';
         const section = makeAethermoorSection(
             'COMPANION DOWN',
-            `${state.crew.qtik.hp === 0 ? "Q'tik" : 'Tansy'} ` +
-                'is at 0 HP. Their commands are unavailable.\n' +
-                `${survivor} can attempt to flee. A failed escape ` +
-                'allows one enemy response. The death XP penalty ' +
-                'has already been applied once.',
+            `${state.crew.qtik.hp === 0 ? "Q'tik" : 'Tansy'} is at 0 HP. Their commands are unavailable.\n` +
+                `${survivor} can attempt to flee. A failed escape allows one enemy response. ` +
+                'The death XP penalty has already been applied once.',
             'combat'
         );
-
-        const flee = makeAethermoorAction(
-            `${survivor}: Attempt Flee`,
-            'combat',
-            async () => {
-                if (aethermoorCombatBusy) return;
-                aethermoorCombatBusy = true;
-                flee.disabled = true;
-
-                try {
-                    const result = await runStoredMechanic({
-                        actions: { flee: true }
-                    });
-
-                    assert(result?.ok === true,
-                        result?.error || 'Flee failed to resolve');
-
-                    if (
-                        result.flee?.success ||
-                        result.death?.totalDefeat
-                    ) {
-                        openAethermoorTab(
-                            state.activeInstanceId &&
-                            !result.death?.totalDefeat
-                                ? 'instances'
-                                : 'world'
-                        );
-                    } else {
-                        await openCombatPanel(inlineHost);
-                    }
-                } catch (error) {
-                    flee.disabled = false;
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor'
-                    );
-                } finally {
-                    aethermoorCombatBusy = false;
-                }
-            }
-        );
-
+        const flee = makeAethermoorAction(`${survivor}: Attempt Flee`, 'combat', () => attemptFlee(flee));
         section.appendChild(flee);
         inlineHost.appendChild(section);
         appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
-    if (
-        !encounter ||
-        encounter.status !== 'active' ||
-        state.crew.qtik.hp <= 0 ||
-        state.crew.tansy.hp <= 0
-    ) {
+    if (!encounter || encounter.status !== 'active' || state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0) {
         const message =
-            state.crew.qtik.hp <= 0 ||
-            state.crew.tansy.hp <= 0
+            state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0
                 ? 'A crew member has fallen. Resolve death or respawn before continuing.'
                 : encounter?.status === 'cleared'
                     ? 'This encounter is cleared.'
@@ -24788,155 +24595,77 @@ async function openCombatPanel(inlineHost) {
                         ? 'Encounter spotted. Engage or avoid it first.'
                         : 'There is no active encounter.';
 
-        inlineHost.appendChild(
-            makeAethermoorSection(
-                'COMBAT',
-                combatStatusText(state) +
-                    `\n\n${message}`,
-                'combat'
-            )
-        );
+        inlineHost.appendChild(makeAethermoorSection('COMBAT', `${combatStatusText(state)}\n\n${message}`, 'combat'));
 
-        const receipt = encounter?.status === 'cleared'
-            ? encounter.victoryReceipt
-            : null;
+        const receipt = encounter?.status === 'cleared' ? encounter.victoryReceipt : null;
+        if (receipt && receipt.encounterId === encounter.id) appendVictoryReceipt(inlineHost, receipt);
 
-        if (receipt && receipt.encounterId === encounter.id) {
-            appendVictoryReceipt(inlineHost, receipt);
+        if (aethermoorLastCombatLog && aethermoorLastCombatLogKey === combatLogKey(state)) {
+            inlineHost.appendChild(makeAethermoorSection('FINAL TURN LOG', aethermoorLastCombatLog, 'combat'));
         }
-
-        if (
-            aethermoorLastCombatLog &&
-            aethermoorLastCombatLogKey === combatLogKey(state)
-        ) {
-            inlineHost.appendChild(
-                makeAethermoorSection(
-                    'FINAL TURN LOG',
-                    aethermoorLastCombatLog,
-                    'combat'
-                )
-            );
-        }
-
         appendCombatCommandPreview(inlineHost, state);
         return;
     }
 
-    const status = document.createElement('pre');
-    status.className = 'aethermoor-combat-status';
-    status.textContent = combatStatusText(state);
-
-    const controls = document.createElement('div');
-    controls.className = 'aethermoor-combat-controls';
-
     const currentStats = derived(state.crew);
-
-    const comboForecast = document.createElement('div');
-    comboForecast.className = 'aethermoor-combat-forecast';
-
-    function refreshComboForecast() {
+    const comboForecast = el('div', { className: 'aethermoor-combat-forecast' });
+    const refreshComboForecast = () => {
         comboForecast.textContent = formatCombatComboPreview(
-            state,
-            combatSelections.qtik,
-            combatSelections.tansy,
-            combatSelections.target
+            state, combatSelections.qtik, combatSelections.tansy, combatSelections.target
         );
-    }
+    };
+
+    const qtikPotions = makePotionChoiceGroup('qtik', state);
+    const tansyPotions = makePotionChoiceGroup('tansy', state);
+    const showSelectedPotionGroups = () => {
+        qtikPotions.hidden = combatSelections.qtik !== 'drink';
+        tansyPotions.hidden = combatSelections.tansy !== 'drink';
+    };
 
     const qtikGroup = makeChoiceGroup(
-        `Q'tik (${state.crew.qtik.hp}/` +
-            `${currentStats.qtikMaxHp} HP)`,
+        `Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`,
         'qtik',
         QTIK_COMBAT_OPTIONS,
         combatSelections.qtik,
-        value => {
-            combatSelections.qtik = value;
-            showSelectedPotionGroups();
-            refreshComboForecast();
-        }
+        value => { combatSelections.qtik = value; showSelectedPotionGroups(); refreshComboForecast(); }
     );
-
     const tansyGroup = makeChoiceGroup(
-        `Tansy (${state.crew.tansy.hp}/` +
-            `${currentStats.tansyMaxHp} HP)`,
+        `Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`,
         'tansy',
         TANSY_COMBAT_OPTIONS,
         combatSelections.tansy,
-        value => {
-            combatSelections.tansy = value;
-            showSelectedPotionGroups();
-            refreshComboForecast();
-        }
+        value => { combatSelections.tansy = value; showSelectedPotionGroups(); refreshComboForecast(); }
     );
 
-    const target = encounter.foes.find(
-        foe => foe.id === combatSelections.target &&
-            foe.hp > 0
-    );
-
-    if (!target) {
-        combatSelections.target =
-            encounter.foes.find(foe => foe.hp > 0)?.id ||
-            null;
+    if (!encounter.foes.some(foe => foe.id === combatSelections.target && foe.hp > 0)) {
+        combatSelections.target = encounter.foes.find(foe => foe.hp > 0)?.id || null;
     }
 
     const targetGroup = makeChoiceGroup(
         'Target',
         'target',
         encounter.foes
-            .map((foe, index) => ({
-                foe,
-                index
-            }))
+            .map((foe, index) => ({ foe, index }))
             .filter(({ foe }) => foe.hp > 0)
             .map(({ foe, index }) => ({
                 value: foe.id,
                 label: combatFoeLabel(foe, index),
                 detail: `(${foe.hp}/${foe.maxHp} HP)`,
-                telegraph: foe.nextTelegraph
-                    ? telegraphLabel(foe.nextTelegraph)
-                    : null
+                telegraph: foe.nextTelegraph ? telegraphLabel(foe.nextTelegraph) : null
             })),
         combatSelections.target,
-        value => {
-            combatSelections.target = value;
-            refreshComboForecast();
-        }
+        value => { combatSelections.target = value; refreshComboForecast(); }
     );
 
-    const qtikPotions = makePotionChoiceGroup('qtik', state);
-    const tansyPotions = makePotionChoiceGroup('tansy', state);
+    const hasSavedLog = Boolean(aethermoorLastCombatLog && aethermoorLastCombatLogKey === combatLogKey(state));
+    const resultBox = el('pre', {
+        className: 'aethermoor-combat-result',
+        text: hasSavedLog ? aethermoorLastCombatLog : '',
+        hidden: !hasSavedLog
+    });
 
-    function showSelectedPotionGroups() {
-        qtikPotions.hidden = combatSelections.qtik !== 'drink';
-        tansyPotions.hidden = combatSelections.tansy !== 'drink';
-    }
-
-    showSelectedPotionGroups();
-    const actions = document.createElement('div');
-    actions.className = 'aethermoor-combat-actions';
-
-    const resolveButton = document.createElement('button');
-    resolveButton.type = 'button';
-    resolveButton.className = 'aethermoor-ui-action';
-    resolveButton.dataset.accent = 'combat';
-    resolveButton.textContent = 'Resolve Turn';
-
-    const resultBox = document.createElement('pre');
-    resultBox.className = 'aethermoor-combat-result';
-
-    if (
-        aethermoorLastCombatLog &&
-        aethermoorLastCombatLogKey === combatLogKey(state)
-    ) {
-        resultBox.textContent = aethermoorLastCombatLog;
-    } else {
-        resultBox.hidden = true;
-    }
-
-    resolveButton.addEventListener('click', async () => {
+    const resolveButton = makeAethermoorAction('Resolve Turn', 'combat', async () => {
         if (aethermoorCombatBusy) return;
-
         aethermoorCombatBusy = true;
         resolveButton.disabled = true;
         resolveButton.textContent = 'Resolving...';
@@ -24947,27 +24676,12 @@ async function openCombatPanel(inlineHost) {
             const actionsInput = {
                 qtik: combatSelections.qtik,
                 tansy: combatSelections.tansy,
-                target: combatSelections.target
+                target: combatSelections.target,
+                ...(combatSelections.qtik === 'drink' ? { qtikItem: combatSelections.qtikItem } : {}),
+                ...(combatSelections.tansy === 'drink' ? { tansyItem: combatSelections.tansyItem } : {})
             };
-
-            if (actionsInput.qtik === 'drink') {
-                actionsInput.qtikItem =
-                    combatSelections.qtikItem;
-            }
-
-            if (actionsInput.tansy === 'drink') {
-                actionsInput.tansyItem =
-                    combatSelections.tansyItem;
-            }
-
-            const result = await runStoredMechanic({
-                actions: actionsInput
-            });
-
-            assert(
-                result?.ok === true,
-                result?.error || 'Combat turn failed'
-            );
+            const result = await runStoredMechanic({ actions: actionsInput });
+            assert(result?.ok === true, result?.error || 'Combat turn failed');
 
             const resultFoes = result.summary?.encounter?.foes || [];
             const foeLabel = id => {
@@ -24980,114 +24694,62 @@ async function openCombatPanel(inlineHost) {
             const cleanLogLine = text => {
                 let cleaned = String(text ?? '');
                 for (const [id, label] of foeReplacements) {
-                    if (id && cleaned.includes(id)) {
-                        cleaned = cleaned.replaceAll(id, label);
-                    }
+                    if (id && cleaned.includes(id)) cleaned = cleaned.replaceAll(id, label);
                 }
                 return cleaned;
             };
 
-            const qActionName = combatActionLabel('qtik', actionsInput.qtik);
-            const tActionName = combatActionLabel('tansy', actionsInput.tansy);
-
             aethermoorLastCombatLog = [
-                `Turn ${result.turn} · ${qActionName} / ${tActionName}`,
+                `Turn ${result.turn} · ${combatActionLabel('qtik', actionsInput.qtik)} / ${combatActionLabel('tansy', actionsInput.tansy)}`,
                 ...(result.exchanges || []).map(exchange => {
                     const hits = (exchange.hits || [])
                         .filter(hit => hit.damage > 0)
-                        .map(hit =>
-                            `${foeLabel(hit.id)} −${hit.damage} HP ` +
-                            `(${hit.hp} left)`
-                        );
-
-                    const rollTag =
-                        `[P:${exchange.playerRoll}` +
-                        (exchange.enemyRoll != null
-                            ? `/E:${exchange.enemyRoll}`
-                            : '') +
-                        `]`;
+                        .map(hit => `${foeLabel(hit.id)} −${hit.damage} HP (${hit.hp} left)`);
+                    const rollTag = `[P:${exchange.playerRoll}${exchange.enemyRoll != null ? `/E:${exchange.enemyRoll}` : ''}]`;
                     const missNote = exchange.enemyMiss
-                        ? (exchange.enemyRoll === 1
-                            ? '  Enemy attack missed (rolled 1).'
-                            : '  Enemy attack missed (Ice Patch).')
+                        ? (exchange.enemyRoll === 1 ? '  Enemy attack missed (rolled 1).' : '  Enemy attack missed (Ice Patch).')
                         : null;
-
                     const rawEffects = (exchange.effects || []).map(cleanLogLine);
-                    const hasIndividualInterrupts = rawEffects.some(line =>
-                        line.includes('was interrupted by Frost Stomp')
-                    );
+                    const hasIndividualInterrupts = rawEffects.some(line => line.includes('was interrupted by Frost Stomp'));
                     const cleanedEffects = rawEffects.filter(line =>
-                        !(
-                            hasIndividualInterrupts &&
-                            line === 'Frost Stomp interrupted ordinary specialists for Ex1'
-                        )
+                        !(hasIndividualInterrupts && line === 'Frost Stomp interrupted ordinary specialists for Ex1')
                     );
-                    const tansyDamageAlreadyStated =
-                        exchange.backlineDamage > 0 &&
-                        cleanedEffects.some(line =>
-                            line.includes(`dealt ${exchange.backlineDamage} damage to Tansy`) ||
-                            line.includes(`dealt ${exchange.backlineDamage} splash to Tansy`)
-                        );
+                    const tansyDamageAlreadyStated = exchange.backlineDamage > 0 && cleanedEffects.some(line =>
+                        line.includes(`dealt ${exchange.backlineDamage} damage to Tansy`) ||
+                        line.includes(`dealt ${exchange.backlineDamage} splash to Tansy`)
+                    );
 
                     return [
-                        `Exchange ${exchange.exchange} ${rollTag}: ` +
-                            (hits.join('; ') || 'No damage dealt'),
-                        ...(exchange.frontlineDamage > 0
-                            ? [`  Q'tik took ${exchange.frontlineDamage} damage.`]
-                            : []),
-                        ...(exchange.backlineDamage > 0 && !tansyDamageAlreadyStated
-                            ? [`  Tansy took ${exchange.backlineDamage} damage.`]
-                            : []),
+                        `Exchange ${exchange.exchange} ${rollTag}: ${hits.join('; ') || 'No damage dealt'}`,
+                        ...(exchange.frontlineDamage > 0 ? [`  Q'tik took ${exchange.frontlineDamage} damage.`] : []),
+                        ...(exchange.backlineDamage > 0 && !tansyDamageAlreadyStated ? [`  Tansy took ${exchange.backlineDamage} damage.`] : []),
                         ...(missNote ? [missNote] : []),
                         ...cleanedEffects.map(effect => `  ${effect}`)
                     ].join('\n');
-
                 }),
                 ...(result.turnEffects || []).map(cleanLogLine),
                 '',
-                `Remaining: ${
-                    resultFoes
-                        .filter(foe => foe.hp > 0)
-                        .map(foe =>
-                            `${foeLabel(foe.id)} ${foe.hp}/${foe.maxHp} HP`
-                        ).join('; ') || 'none'
-                }`,
+                `Remaining: ${resultFoes.filter(f => f.hp > 0).map(f => `${foeLabel(f.id)} ${f.hp}/${f.maxHp} HP`).join('; ') || 'none'}`,
                 `Q'tik: ${result.summary.qtikHp}/${result.summary.qtikMaxHp} HP`,
                 `Tansy: ${result.summary.tansyHp}/${result.summary.tansyMaxHp} HP`,
-                result.rewards?.applied
-                    ? `Rewards: +${result.rewards.xp} XP, ` +
-                      `+${result.rewards.silver} silver`
-                    : 'No victory rewards yet.'
+                result.rewards?.applied ? `Rewards: +${result.rewards.xp} XP, +${result.rewards.silver} silver` : 'No victory rewards yet.'
             ].join('\n');
 
-            aethermoorLastCombatLogKey =
-                `${result.summary.encounter.id}:${result.turn}`;
-
-            resultBox.textContent =
-                aethermoorLastCombatLog;
+            aethermoorLastCombatLogKey = `${result.summary.encounter.id}:${result.turn}`;
+            resultBox.textContent = aethermoorLastCombatLog;
             resultBox.scrollTop = 0;
 
             const statusAfter = result.summary?.encounter?.status;
-
             if (statusAfter === 'fled' || statusAfter === 'dead') {
-                const destination =
-                    state.activeInstanceId &&
-                    !result.death?.totalDefeat
-                        ? 'instances'
-                        : 'world';
-
+                const destination = state.activeInstanceId && !result.death?.totalDefeat ? 'instances' : 'world';
                 aethermoorActiveTab = destination;
                 renderAethermoorTab(destination);
             } else {
                 renderAethermoorTab('combat');
             }
-
         } catch (error) {
             resultBox.hidden = false;
-            resultBox.textContent =
-                `Turn was not resolved: ${
-                    error instanceof Error ? error.message : String(error)
-                }`;
+            resultBox.textContent = `Turn was not resolved: ${error instanceof Error ? error.message : String(error)}`;
             reportAethermoorError(error, 'Combat turn failed');
         } finally {
             aethermoorCombatBusy = false;
@@ -25096,71 +24758,15 @@ async function openCombatPanel(inlineHost) {
         }
     });
 
-    actions.appendChild(resolveButton);
-
-    const fleeButton = makeAethermoorAction(
-        'Attempt Flee',
-        'combat',
-        async () => {
-            if (aethermoorCombatBusy) return;
-            aethermoorCombatBusy = true;
-            fleeButton.disabled = true;
-
-            try {
-                const result = await runStoredMechanic({
-                    actions: { flee: true }
-                });
-
-                assert(
-                    result?.ok === true,
-                    result?.error || 'Flee failed to resolve'
-                );
-
-                if (
-                    result.flee?.success ||
-                    result.death?.totalDefeat
-                ) {
-                    openAethermoorTab(
-                        state.activeInstanceId &&
-                        !result.death?.totalDefeat
-                            ? 'instances'
-                            : 'world'
-                    );
-                } else {
-                    await openCombatPanel(inlineHost);
-                }
-            } catch (error) {
-                fleeButton.disabled = false;
-                toastr.error(
-                    error instanceof Error
-                        ? error.message
-                        : String(error),
-                    'Aethermoor'
-                );
-            } finally {
-                aethermoorCombatBusy = false;
-            }
-        }
-    );
-
-    actions.appendChild(fleeButton);
-    controls.append(
-        status,
-        qtikGroup,
-        qtikPotions,
-        tansyGroup,
-        tansyPotions,
-        targetGroup,
-        comboForecast,
-        actions,
+    const fleeButton = makeAethermoorAction('Attempt Flee', 'combat', () => attemptFlee(fleeButton));
+    inlineHost.appendChild(el('div', { className: 'aethermoor-combat-controls' },
+        el('pre', { className: 'aethermoor-combat-status', text: combatStatusText(state) }),
+        qtikGroup, qtikPotions, tansyGroup, tansyPotions, targetGroup, comboForecast,
+        el('div', { className: 'aethermoor-combat-actions' }, resolveButton, fleeButton),
         resultBox
-    );
-    inlineHost.appendChild(controls);
+    ));
 
-    updateCombatAbilityButtons(
-        inlineHost,
-        state
-    );
+    updateCombatAbilityButtons(inlineHost, state);
     showSelectedPotionGroups();
     refreshComboForecast();
 
@@ -25169,10 +24775,7 @@ async function openCombatPanel(inlineHost) {
     try {
         decorateAethermoorCombatControls(inlineHost, state);
     } catch (error) {
-        console.warn(
-            '[Aethermoor] Combat tooltip decoration failed',
-            error
-        );
+        console.warn('[Aethermoor] Combat tooltip decoration failed', error);
     }
 }
 

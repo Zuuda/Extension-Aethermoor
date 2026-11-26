@@ -1468,6 +1468,145 @@ function gearBonus(owner, slot, item) {
     return result;
 }
 
+/*
+ * KEYSTONE TRINKET & LUK SCALING MATH
+ *
+ * Random crits (1-in-6 normally, 1-in-3 with Vitals, adding 0.5x baseHit + LUK)
+ * were removed to eliminate feast-or-famine RNG. Their average per-turn damage
+ * budget across a 3-exchange turn was:
+ *   Normal: 0.25 * baseHit + 0.5 * LUK
+ *   Vitals: 0.50 * baseHit + 1.0 * LUK
+ *
+ * That exact budget is redistributed into once-per-turn Keystone Trinkets on
+ * Tansy's `neck` slot and reactive frontline Keystones on Q'tik's `amulet` slot.
+ * Trinkets KEEP their normal modular slot stats (HP/LUK or HP/DEF) so Q'tik
+ * never loses one of her 4 stat slots.
+ *
+ * Tansy Trinket Power Formula:
+ *   baseBudget     = trinketStat * 2
+ *   lukMultiplier  = 1 + LUK / (LUK + 10 + 2 * level)
+ *   vitalsBoost    = 1.5 when Tansy uses Vitals, else 1.0
+ *   power          = round(baseBudget * lukMultiplier * vitalsBoost)
+ *
+ * Diminishing-returns LUK curve:
+ *   - No hard cap needed; smoothly approaches 2.0x asymptotically.
+ *   - Because (2 * level) rises on every level-up, old LUK gear gradually loses
+ *     potency until upgraded.
+ *   - Reference check (Zone 2, Lv 6, Uncommon stat 5, LUK 13):
+ *     10 * (1 + 13 / 35) = 13.7 (~14 dmg/turn vs ~14.5 old crit average).
+ *
+ * When adding new trinkets:
+ *   - Tansy (`neck`) effects fire once per turn on Exchange 1 and scale from
+ *     `power` (100% for single-target, ~55% for AoE, ~50% dmg + 25% heal for
+ *     siphon, ~35% dmg + 30% DEF shred for sunder).
+ *   - Q'tik (`amulet`) effects are reactive (1/turn) and scale from trinket
+ *     `stat` and/or frontline DEF, never Crew ATK or LUK.
+ */
+const KEYSTONE_TRINKETS = {
+    tansy: [
+        {
+            id: 'keen_edge',
+            name: 'Executioner’s Fang',
+            summary: 'Ex1: bonus single-target strike (spills overkill)'
+        },
+        {
+            id: 'ember_burst',
+            name: 'Ember Burst Charm',
+            summary: 'Ex1: AoE fire blast hitting all living foes'
+        },
+        {
+            id: 'siphon_fang',
+            name: 'Siphon Fang',
+            summary: 'Ex1: bonus strike + heals Tansy'
+        },
+        {
+            id: 'sundering_charm',
+            name: 'Sundering Charm',
+            summary: 'Ex1: light strike + shreds target DEF for the turn'
+        }
+    ],
+    qtik: [
+        {
+            id: 'thorns_ward',
+            name: 'Thorns Ward',
+            summary: '1/turn: reflects DEF-scaled damage on first frontline hit'
+        },
+        {
+            id: 'bastion_seal',
+            name: 'Bastion Seal',
+            summary: '1/turn: absorbs flat damage from first frontline hit'
+        },
+        {
+            id: 'rime_pulse',
+            name: 'Rime Pulse',
+            summary: '1/turn: chills all living foes when an enemy misses'
+        }
+    ]
+};
+
+function lukTrinketMultiplier(luk, level) {
+    const safeLuk = Math.max(0, Number(luk || 0));
+    const safeLevel = Math.max(1, Number(level || 1));
+    return 1 + safeLuk / (safeLuk + 10 + 2 * safeLevel);
+}
+
+function equippedTrinket(crew, owner) {
+    const slot = owner === 'tansy' ? 'neck' : 'amulet';
+    const item = crew?.gear?.[owner]?.[slot];
+    const stat = Number(item?.stat ?? item?.rawStat ?? 0);
+    return item?.trinket?.id && stat > 0 ? item : null;
+}
+
+function trinketBudget(item, luk, level, vitalsActive = false) {
+    const stat = Number(item?.stat ?? item?.rawStat ?? 0);
+    if (!item?.trinket?.id || stat <= 0) return 0;
+    const base = stat * 2;
+    const scaled = base * lukTrinketMultiplier(luk, level) * (vitalsActive ? 1.5 : 1);
+    return Math.max(1, Math.round(scaled));
+}
+
+function rollTrinketFromState(
+    state,
+    zone,
+    rarity = 'uncommon',
+    source = 'instance',
+    sourceId = null
+) {
+    assert(ZONES[zone], `Unknown trinket zone: ${zone}`);
+    const owner = roll(state, 2) === 1 ? 'tansy' : 'qtik';
+    const slot = owner === 'tansy' ? 'neck' : 'amulet';
+    const pool = KEYSTONE_TRINKETS[owner];
+    const def = pool[roll(state, pool.length) - 1];
+    const variant = owner === 'tansy'
+        ? (roll(state, 2) === 1 ? 'luck' : 'vitality')
+        : (roll(state, 2) === 1 ? 'bulwark' : 'vitality');
+    const rarityInfo = LOOT_RARITY_INFO[rarity];
+    assert(rarityInfo, `Unsupported trinket rarity: ${rarity}`);
+    const rawStat = lootStatFromRarity(zone, rarity);
+
+    return {
+        name: `${ZONE_LOOT_MATERIALS[zone]} ${def.name}`,
+        owner,
+        slot,
+        variant,
+        rarity: rarityInfo.label,
+        rarityColor: rarityInfo.color,
+        rawStat,
+        sellValue: rawStat * 2,
+        bound: false,
+        classRestricted: false,
+        tradeStreamEligible: true,
+        bonus: lootBonus(owner, slot, variant, rawStat),
+        trinket: {
+            id: def.id,
+            name: def.name,
+            summary: def.summary
+        },
+        acquiredFrom: source,
+        ...(sourceId ? { acquiredAtSource: sourceId } : {})
+    };
+}
+
 function shadowMechanics(crew) {
     const active = crew.shadows?.active || [];
     const deck = crew.shadows?.deck || [];
@@ -2094,9 +2233,14 @@ function formatAcquiredBonusHtml(item) {
         .filter(([, value]) => Number(value) > 0)
         .map(([key, value]) => `+${value} ${labels[key] || key}`);
 
-    return parts.length
+    const statHtml = parts.length
         ? `<b style="color:#4ade80;">${escapeSystemLogHtml(parts.join(', '))}</b>`
         : `<span style="color:#9caab8;">Stat ${item.rawStat ?? item.stat ?? 0}</span>`;
+    const trinketHtml = item.trinket?.name
+        ? `<div style="color:#ffd166;">★ ${escapeSystemLogHtml(item.trinket.name)} — ${escapeSystemLogHtml(item.trinket.summary || '')}</div>`
+        : '';
+
+    return statHtml + trinketHtml;
 }
 
 function acquiredItemsCardHtml(entries) {
@@ -2825,6 +2969,18 @@ function finalizeEncounterRewards(state, slainIds) {
                 };
                 state.inventory.bagReserves.push(item);
                 loot.push(item);
+
+                if (foe.role === 'boss' || encounter.instanceId) {
+                    const trinket = rollTrinketFromState(
+                        state,
+                        encounter.zone,
+                        foe.role === 'boss' ? 'epic' : 'uncommon',
+                        foe.role === 'boss' ? 'boss' : 'instance_elite',
+                        encounter.id
+                    );
+                    state.inventory.bagReserves.push(trinket);
+                    loot.push(trinket);
+                }
             }
         }
     } else if (encounter.type === 'elite' || encounter.type === 'boss') {
@@ -2848,6 +3004,18 @@ function finalizeEncounterRewards(state, slainIds) {
 
         state.inventory.bagReserves.push(item);
         loot.push(item);
+
+        if (encounter.type === 'boss' || encounter.instanceId) {
+            const trinket = rollTrinketFromState(
+                state,
+                encounter.zone,
+                encounter.type === 'boss' ? 'epic' : 'uncommon',
+                encounter.type === 'boss' ? 'boss' : 'instance_elite',
+                encounter.id
+            );
+            state.inventory.bagReserves.push(trinket);
+            loot.push(trinket);
+        }
     } else {
         throw new Error(`Unsupported encounter reward type: ${encounter.type}`);
     }
@@ -3756,6 +3924,16 @@ function resolveTurn({ state, actions, rolls }) {
         return total + (hexer ? 2 * enemyTier(hexer.level) * Number(stacks) : 0);
     }, 0);
 
+    const tansyTrinketItem = equippedTrinket(c, 'tansy');
+    const qtikTrinketItem = equippedTrinket(c, 'qtik');
+    const tansyTrinketId = tansyTrinketItem?.trinket?.id || null;
+    const qtikTrinketId = qtikTrinketItem?.trinket?.id || null;
+    const tansyTrinketPower = tansyTrinketItem
+        ? trinketBudget(tansyTrinketItem, crewStats.luk, c.level, actions.tansy === 'vitals')
+        : 0;
+    const qtikTrinketStat = Number(qtikTrinketItem?.stat ?? qtikTrinketItem?.rawStat ?? 0);
+    let qtikTrinketTriggered = false;
+
     let visorGuaranteedExchange = null;
     function visorDisrupts(foe, enemyRoll, ex = 1) {
         if (actions.tansy !== 'visor' || !foe || foe.id !== actions.target) return false;
@@ -3772,7 +3950,10 @@ function resolveTurn({ state, actions, rolls }) {
         const telegraphBonus = Number(activeTelegraphs.find(e => e.foe.id === foe.id)?.effect?.defenseBonus || 0);
         const stunReduction = actions.qtik === 'stun' && foe.id === stunTargetId ? 4 * enemyTier(foe.level) : 0;
         const fireShred = actions.qtik === 'fire_melee' && isFireTarget ? Math.max(2, 2 * enemyTier(foe.level)) : 0;
-        return Math.max(0, foe.def + bufferBonus + telegraphBonus - stunReduction - fireShred - shadowMechanics(c).hexStrip);
+        const sunderShred = tansyTrinketId === 'sundering_charm' && isFireTarget && !fleeing
+            ? Math.max(2, Math.round(tansyTrinketPower * 0.3))
+            : 0;
+        return Math.max(0, foe.def + bufferBonus + telegraphBonus - stunReduction - fireShred - sunderShred - shadowMechanics(c).hexStrip);
     }
 
     function destroyWeasel(effects, cause) {
@@ -3842,7 +4023,6 @@ function resolveTurn({ state, actions, rolls }) {
 
         // Fire bonus ignores ATK debuffs.
         const fireDamage = actions.qtik === 'fire_melee' ? Math.max(3, Math.floor(derived(c).atk / 5)) : 0;
-        const isCritical = p === 6 || (actions.tansy === 'vitals' && p === 5);
         const targetDefense = enemyDefense(target, true);
 
         const qtikPhysicalDamage = bodyguardActive ? 0 : p === 1 ? 1 : Math.max(1, 2 * c.level - targetDefense + p);
@@ -3875,7 +4055,7 @@ function resolveTurn({ state, actions, rolls }) {
                 const baseAoE = Math.max(0, Math.floor((effectiveAttack - enemyDefense(primaryTarget, isPrimary)) * aoeFactor));
                 let attempted = p === 1 ? Math.max(1, Math.floor(baseAoE / 2)) : baseAoE + p;
                 if (isPrimary && p !== 1) {
-                    attempted += (isCritical ? crewStats.luk : vitalsBonus) + exposedBonus + fireDamage;
+                    attempted += vitalsBonus + exposedBonus + fireDamage;
                 }
                 attempted = Math.max(1, Number(attempted));
                 assert(Number.isFinite(attempted), `Frost Stomp damage is invalid against ${primaryTarget.id}`);
@@ -3912,10 +4092,52 @@ function resolveTurn({ state, actions, rolls }) {
             assert(Number.isFinite(totalApplied), 'Frost Stomp applied damage is not finite');
         } else if (!fleeing) {
             const baseHit = Math.max(1, effectiveAttack - targetDefense + p + vitalsBonus);
-            const physicalDamage = p === 1 ? 1 : isCritical ? Math.round(baseHit * 1.5) + crewStats.luk : baseHit;
+            const physicalDamage = p === 1 ? 1 : baseHit;
             damage = physicalDamage + fireDamage + exposedBonus;
             assert(Number.isFinite(damage), 'Player damage is not finite');
             hits = dealDamage(s, target, damage, kills);
+        }
+
+        // Tansy's Keystone Trinket fires once per turn on Exchange 1 (zero-RNG).
+        if (ex === 0 && !fleeing && tansyTrinketId) {
+            const procTarget = target.hp > 0 ? target : lowestHpFoe();
+            if (tansyTrinketId === 'keen_edge' && procTarget) {
+                const procHits = dealDamage(s, procTarget, tansyTrinketPower, kills);
+                hits.push(...procHits);
+                damage += tansyTrinketPower;
+                effects.push(`Executioner’s Fang struck for ${tansyTrinketPower} bonus damage`);
+            } else if (tansyTrinketId === 'ember_burst' && live(s).length > 0) {
+                const burstDmg = Math.max(1, Math.round(tansyTrinketPower * 0.55));
+                const burstTargets = [...live(s)];
+                for (const foe of burstTargets) {
+                    const applied = Math.min(foe.hp, burstDmg);
+                    foe.hp -= applied;
+                    hits.push({ id: foe.id, damage: applied, hp: foe.hp, overkillAfterHit: 0 });
+                    if (foe.hp === 0) kills.push({ id: foe.id, level: foe.level, role: foe.role });
+                }
+                damage += burstDmg * burstTargets.length;
+                effects.push(`Ember Burst hit all ${burstTargets.length} foe(s) for ${burstDmg} fire damage`);
+            } else if (tansyTrinketId === 'siphon_fang') {
+                const drainDmg = Math.max(1, Math.round(tansyTrinketPower * 0.5));
+                if (procTarget) {
+                    const procHits = dealDamage(s, procTarget, drainDmg, kills);
+                    hits.push(...procHits);
+                    damage += drainDmg;
+                }
+                const healReq = Math.max(1, Math.round(tansyTrinketPower * 0.25));
+                const healed = c.tansy.hp > 0 ? Math.min(crewStats.tansyMaxHp - c.tansy.hp, healReq) : 0;
+                if (healed > 0) c.tansy.hp += healed;
+                effects.push(`Siphon Fang dealt ${procTarget ? drainDmg : 0} damage and healed Tansy for ${healed} HP`);
+            } else if (tansyTrinketId === 'sundering_charm') {
+                const chipDmg = Math.max(1, Math.round(tansyTrinketPower * 0.35));
+                const shredAmt = Math.max(2, Math.round(tansyTrinketPower * 0.3));
+                if (procTarget) {
+                    const procHits = dealDamage(s, procTarget, chipDmg, kills);
+                    hits.push(...procHits);
+                    damage += chipDmg;
+                }
+                effects.push(`Sundering Charm dealt ${procTarget ? chipDmg : 0} damage and shredded ${shredAmt} DEF`);
+            }
         }
 
         // Spiked Carapace reflects Q'tik's personal damage only (never summons).
@@ -3929,7 +4151,7 @@ function resolveTurn({ state, actions, rolls }) {
 
         if (live(s).length === 0) {
             logs.push({
-                exchange: ex + 1, playerRoll: p, enemyRoll: null, target: target.id, crit: isCritical,
+                exchange: ex + 1, playerRoll: p, enemyRoll: null, target: target.id, crit: false,
                 damage, hits, enemyMiss: null, enemyAttackAbsorbed: false,
                 frontlineDamage: 0, backlineDamage: 0,
                 effects: [...effects, ' foe slain before enemy response'],
@@ -4075,6 +4297,18 @@ function resolveTurn({ state, actions, rolls }) {
                     effects.push(`${foe.id} Aether-Drain restored ${healed} HP`);
                 }
             }
+        } else if (qtikTrinketId === 'rime_pulse' && !qtikTrinketTriggered && live(s).length > 0) {
+            const pulseDmg = Math.max(2, Math.round(qtikTrinketStat * 1.4));
+            const pulseTargets = [...live(s)];
+            for (const foe of pulseTargets) {
+                const applied = Math.min(foe.hp, pulseDmg);
+                foe.hp -= applied;
+                hits.push({ id: foe.id, damage: applied, hp: foe.hp, overkillAfterHit: 0 });
+                if (foe.hp === 0) kills.push({ id: foe.id, level: foe.level, role: foe.role });
+            }
+            damage += pulseDmg * pulseTargets.length;
+            qtikTrinketTriggered = true;
+            effects.push(`Rime Pulse chilled all ${pulseTargets.length} foe(s) for ${pulseDmg} damage`);
         }
 
         // During a survivor's failed escape, redirect all incoming damage to the survivor.
@@ -4086,8 +4320,27 @@ function resolveTurn({ state, actions, rolls }) {
             backlineDamage = 0;
         }
 
+        if (qtikTrinketId === 'bastion_seal' && !qtikTrinketTriggered && frontlineDamage > 0) {
+            const absorb = Math.min(frontlineDamage, Math.max(2, Math.round(qtikTrinketStat * 1.2)));
+            frontlineDamage -= absorb;
+            qtikTrinketTriggered = true;
+            effects.push(`Bastion Seal absorbed ${absorb} frontline damage`);
+        }
+
         if (frontlineDamage > 0 || backlineDamage > 0) encounter.crewTookDamage = true;
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
+
+        if (qtikTrinketId === 'thorns_ward' && !qtikTrinketTriggered && frontlineDamage > 0 && live(s).length > 0) {
+            const thornsDmg = Math.max(2, Math.round(qtikTrinketStat * 1.5 + effectiveDefense * 0.5));
+            const thornsTarget = frontliners.find(foe => foe.hp > 0) || lowestHpFoe();
+            if (thornsTarget) {
+                const thornsHits = dealDamage(s, thornsTarget, thornsDmg, kills);
+                hits.push(...thornsHits);
+                damage += thornsDmg;
+                qtikTrinketTriggered = true;
+                effects.push(`Thorns Ward reflected ${thornsDmg} damage to ${thornsTarget.id}`);
+            }
+        }
 
         // Once per fight, an active Shadow-Warder sacrifices itself to prevent a lethal hit on Tansy.
         if (backlineDamage > 0 && c.tansy.hp > 0 && c.tansy.hp - backlineDamage <= 0) {
@@ -4131,7 +4384,7 @@ function resolveTurn({ state, actions, rolls }) {
         }
 
         logs.push({
-            exchange: ex + 1, playerRoll: p, enemyRoll: e, target: target.id, crit: isCritical,
+            exchange: ex + 1, playerRoll: p, enemyRoll: e, target: target.id, crit: false,
             damage, hits, enemyMiss, enemyAttackAbsorbed: shadowWarderSavedTansy,
             frontlineDamage, backlineDamage, effectiveRegen, effects,
             qtikHp: c.qtik.hp, tansyHp: c.tansy.hp,
@@ -5718,8 +5971,19 @@ function resolveInstanceChestOpen(test) {
         'instance_chest'
     );
 
+    const trinket = rollTrinketFromState(
+        state,
+        instance.zone,
+        'uncommon',
+        'instance_chest',
+        room.chest.id
+    );
+    state.inventory.bagReserves.push(trinket);
+    loot.trinket = trinket;
+
     room.chest.opened = true;
     room.chest.loot = clone(loot);
+
     refreshInstanceStatus(instance);
 
     return {
@@ -12469,6 +12733,15 @@ function chestLootNarrationLines(cache) {
 }
 
 function instanceChestNarrationPacket(result) {
+    const trinketLines = result.loot?.trinket
+        ? [
+            `Found (Keystone Trinket): ${result.loot.trinket.name} (${result.loot.trinket.rarity}, ` +
+                `Stat ${result.loot.trinket.rawStat} · ${result.loot.trinket.trinket?.summary || ''}) — placed in Bag Reserves, NOT equipped.`,
+            'Display this exact System HTML card verbatim (visible to Q’tik and Tansy):',
+            acquiredItemsCardHtml([{ kind: 'gear', item: result.loot.trinket }])
+        ]
+        : [];
+
     return [
         '* **INSTANCE CHEST OPENED!**',
         `Location: ${result.instanceLabel} — ${result.roomLabel}.`,
@@ -12476,6 +12749,7 @@ function instanceChestNarrationPacket(result) {
             'contents below. The contents are ALREADY added to saved state. ' +
             'Do not add extra coin, gear, traps, or combat.',
         ...chestLootNarrationLines(result.loot),
+        ...trinketLines,
         ...(result.status === 'exhausted'
             ? ['All threats and chests in this instance are cleared. The instance is now exhausted.']
             : [])
@@ -16529,6 +16803,7 @@ async function renderInventoryTab(host) {
             el('div', { className: 'aethermoor-inventory-item-main' },
                 el('div', { className: `aethermoor-vendor-name ${rarityClass(item)}`, text: formatGearLabel(item) }),
                 el('div', { className: 'aethermoor-vendor-detail', text: [gearSlotLabel(item), item.bound ? 'Bound' : 'Unbound'].filter(Boolean).join(' · ') }),
+                item.trinket?.name ? el('div', { style: { color: '#ffd166', fontSize: '11px' }, text: `★ ${item.trinket.name} — ${item.trinket.summary}` }) : null,
                 comparison ? el('div', { className: comparison.className, text: comparison.text }) : null
             ),
             el('div', { className: 'aethermoor-inventory-item-actions' }, equipBtn)
@@ -16601,9 +16876,10 @@ async function openAethermoorCharacterSheetWindow() {
             tooltip: `FRONTLINE DEFENSE (${stats.def})\n• Base (Lv ${level}): +${level}\n• Q'tik Bulwark Gear: +${gearDef}\n• Achievements: +${ach.def}\n\nEFFECTS:\n• Reduces enemy frontline Base Bleed: max(1, round((Lead Enemy ATK − Effective DEF) / 10))\n• Bodyguard Stance: Adds +${bodyguardDef} DEF (max(2, floor(DEF / 3))) and reduces Base Bleed by 1.`
         },
         {
-            label: 'Crew LUK', value: String(stats.luk), sub: `Crit/Exposed: +${stats.luk} · Flee: +${fleeBonus}`, accent: '#ffd166',
-            tooltip: `CREW LUCK (${stats.luk})\n• Base (floor(Lv ${level} / 2)): +${Math.floor(level / 2)}\n• Tansy Gear: +${gearLuk}\n• Achievements: +${ach.luk}\n\nEFFECTS:\n• Critical Hits: Adds +${stats.luk} flat damage on player roll 6 (or rolls 5–6 with Vitals) on top of 1.5× base hit.\n• Visor Exposed: When an enemy rolls 1 while Tansy uses Visor, the next hit deals +${stats.luk} bonus damage.\n• Flee Roll Bonus: +${fleeBonus} to 1d6 escape rolls (floor(LUK / 5), max +3; need 6+ to flee).`
+            label: 'Crew LUK', value: String(stats.luk), sub: `Trinket: ×${lukTrinketMultiplier(stats.luk, level).toFixed(2)} · Flee: +${fleeBonus}`, accent: '#ffd166',
+            tooltip: `CREW LUCK (${stats.luk})\n• Base (floor(Lv ${level} / 2)): +${Math.floor(level / 2)}\n• Tansy Gear: +${gearLuk}\n• Achievements: +${ach.luk}\n\nEFFECTS:\n• Keystone Trinket Scaling: ×${lukTrinketMultiplier(stats.luk, level).toFixed(2)} (1 + LUK / (LUK + 10 + 2 × Lv ${level})).\n• Visor Exposed: When an enemy rolls 1 while Tansy uses Visor, the next hit deals +${stats.luk} bonus damage.\n• Flee Roll Bonus: +${fleeBonus} to 1d6 escape rolls (floor(LUK / 5), max +3; need 6+ to flee).`
         },
+
         {
             label: "Q'tik Vitality", value: `${crew.qtik.hp} / ${stats.qtikMaxHp}`, sub: `Regen: +${stats.regen} HP/exch`, accent: '#38bdf8',
             tooltip: `Q'TIK VITALITY (${crew.qtik.hp}/${stats.qtikMaxHp} HP)\n• Base (125 + 25 × Lv ${level}): ${125 + 25 * level} HP\n• Q'tik Vitality Gear: +${gearQtikHp} HP\n• Achievements: +${ach.qtikHp} HP\n\nEFFECTS:\n• Combat Regeneration: Restores +${stats.regen} HP at the end of every exchange (round(MaxHP / 100)).\n• Out-of-Combat Recovery: Automatically restores Q'tik to full HP on your next travel or room move.`
@@ -16656,18 +16932,20 @@ async function openAethermoorCharacterSheetWindow() {
             .filter(([k]) => Number(bonus[k]) > 0)
             .map(([k, lbl]) => `+${bonus[k]} ${lbl}`);
 
+        const trinketTip = raw.trinket?.name ? `\nKeystone: ★ ${raw.trinket.name} — ${raw.trinket.summary}` : '';
         return el('div', {
             className: 'aethermoor-doll-slot',
             dataset: { empty: 'false' },
             style: { borderLeft: `3px solid ${rarityColor}` },
-            title: `${formatGearLabel({ ...raw, stat })}\nSlot: ${slotLabel} (${raw.rarity || 'Common'})\nBonus: ${parts.join(', ') || 'None'}\nPawn Value: ${raw.sellValue ?? stat * 2}s`
+            title: `${formatGearLabel({ ...raw, stat })}\nSlot: ${slotLabel} (${raw.rarity || 'Common'})\nBonus: ${parts.join(', ') || 'None'}${trinketTip}\nPawn Value: ${raw.sellValue ?? stat * 2}s`
         },
             el('div', { className: 'aethermoor-doll-slot-header' },
                 el('span', { text: slotLabel }),
                 el('span', { style: { color: '#9caab8' }, text: `S${stat}` })
             ),
             el('div', { className: 'aethermoor-doll-slot-name', style: { color: rarityColor }, text: raw.name || slotLabel }),
-            el('div', { className: 'aethermoor-doll-slot-bonus', text: parts.join(' · ') || `Stat ${stat}` })
+            el('div', { className: 'aethermoor-doll-slot-bonus', text: parts.join(' · ') || `Stat ${stat}` }),
+            raw.trinket?.name ? el('div', { style: { color: '#ffd166', fontSize: '10px', marginTop: '2px' }, text: `★ ${raw.trinket.name}` }) : null
         );
     }
 
@@ -19199,6 +19477,15 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         : null;
     const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
 
+    const tansyTrinket = equippedTrinket(crew, 'tansy');
+    const trinketId = tansyTrinket?.trinket?.id || null;
+    const trinketPower = tansyTrinket
+        ? trinketBudget(tansyTrinket, stats.luk, crew.level, tansyAction === 'vitals')
+        : 0;
+    const sunderShred = trinketId === 'sundering_charm'
+        ? Math.max(2, Math.round(trinketPower * 0.3))
+        : 0;
+
     let targetDef = 0;
     if (target) {
         const telegraphBonus = Number(
@@ -19213,7 +19500,7 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         targetDef = Math.max(
             0,
             target.def + bufferBonus + telegraphBonus -
-            stunReduction - fireShred - shadows.hexStrip
+            stunReduction - fireShred - sunderShred - shadows.hexStrip
         );
     }
 
@@ -19225,6 +19512,26 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         : 0;
     const exposed = Number(encounter?.exposed || 0);
     const exposedNote = exposed > 0 ? ` · +${exposed} Exposed` : '';
+
+    let trinketTurnBonus = 0;
+    let trinketNote = '';
+    if (trinketId === 'keen_edge') {
+        trinketTurnBonus = trinketPower;
+        trinketNote = ` · Fang +${trinketPower}`;
+    } else if (trinketId === 'ember_burst') {
+        const burst = Math.max(1, Math.round(trinketPower * 0.55));
+        trinketTurnBonus = burst;
+        trinketNote = ` · Ember +${burst} AoE`;
+    } else if (trinketId === 'siphon_fang') {
+        const drain = Math.max(1, Math.round(trinketPower * 0.5));
+        const heal = Math.max(1, Math.round(trinketPower * 0.25));
+        trinketTurnBonus = drain;
+        trinketNote = ` · Siphon +${drain} (+${heal} HP)`;
+    } else if (trinketId === 'sundering_charm') {
+        const chip = Math.max(1, Math.round(trinketPower * 0.35));
+        trinketTurnBonus = chip;
+        trinketNote = ` · Sunder +${chip} (−${sunderShred} DEF)`;
+    }
 
     const qLabel = combatActionLabel('qtik', qtikAction);
     const tLabel = combatActionLabel('tansy', tansyAction);
@@ -19244,14 +19551,23 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         const primaryBonus = fireDmg + vitalsBonus;
         const minEx = Math.max(1, baseAoE + 2 + primaryBonus);
         const maxEx = Math.max(1, baseAoE + 6 + primaryBonus);
-        const turnMin = minEx * 3 + exposed;
-        const turnMax = maxEx * 3 + exposed;
+        const turnMin = minEx * 3 + exposed + trinketTurnBonus;
+        const turnMax = maxEx * 3 + exposed + trinketTurnBonus;
         const foeScope = livingFoes.length > 1
             ? ` · AoE hits all ${livingFoes.length} foes`
             : '';
 
         return `Combo (${qLabel} + ${tLabel} vs ${targetLabel || 'target'}): ` +
-            `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3${foeScope}${exposedNote})`;
+            `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3${foeScope}${trinketNote}${exposedNote})`;
+    }
+
+    const minEx = Math.max(1, effectiveAtk - targetDef + 2 + vitalsBonus) + fireDmg;
+    const maxEx = Math.max(1, effectiveAtk - targetDef + 6 + vitalsBonus) + fireDmg;
+    const turnMin = minEx * 3 + exposed + trinketTurnBonus;
+    const turnMax = maxEx * 3 + exposed + trinketTurnBonus;
+
+    return `Combo (${qLabel} + ${tLabel} vs ${targetLabel || 'target'}): ` +
+        `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3${trinketNote}${exposedNote})`;
     }
 
     const normalMaxRoll = tansyAction === 'vitals' ? 4 : 5;
@@ -19331,7 +19647,7 @@ function updateCombatTooltips(host, state) {
 
             vitals:
                 'Doubles loose-weasel and Shadow-Archer attack contributions. ' +
-                'Criticals on player rolls 5–6 (1.5× physical + LUK). On rolls 2–6, ' +
+                'Boosts Tansy’s equipped Keystone Trinket by 1.5×. On rolls 2–6, ' +
                 `pierces up to ${vitalsPierce} target DEF based on current summons.`,
 
             overrun:

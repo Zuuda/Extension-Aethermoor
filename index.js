@@ -22277,22 +22277,21 @@ async function renderInstanceTab(host) {
         const pad = 24;
         const svgWidth = Math.max(120, (maxX - minX) * step + pad * 2);
         const svgHeight = Math.max(72, (maxY - minY) * step + pad * 2);
-        const svgNS = 'http://www.w3.org/2000/svg';
+        const svgEl = (tag, attrs = {}, text = null) => {
+            const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+            for (const [k, v] of Object.entries(attrs)) {
+                if (v !== undefined && v !== null && v !== false) node.setAttribute(k, String(v));
+            }
+            if (text !== null) node.textContent = text;
+            return node;
+        };
 
-        const svg = document.createElementNS(svgNS, 'svg');
-        svg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
-        svg.setAttribute('width', String(svgWidth));
-        svg.setAttribute('height', String(svgHeight));
-        svg.style.display = 'block';
-        svg.style.maxWidth = '100%';
-        svg.style.height = 'auto';
-        svg.style.margin = '4px auto 2px';
+        const svg = svgEl('svg', { viewBox: `0 0 ${svgWidth} ${svgHeight}`, width: svgWidth, height: svgHeight });
+        Object.assign(svg.style, { display: 'block', maxWidth: '100%', height: 'auto', margin: '4px auto 2px' });
 
         const toPx = id => ({
-            cx: pad + (pos[id].x - minX) * step +
-                (svgWidth - ((maxX - minX) * step + pad * 2)) / 2,
-            cy: pad + (pos[id].y - minY) * step +
-                (svgHeight - ((maxY - minY) * step + pad * 2)) / 2
+            cx: pad + (pos[id].x - minX) * step + (svgWidth - ((maxX - minX) * step + pad * 2)) / 2,
+            cy: pad + (pos[id].y - minY) * step + (svgHeight - ((maxY - minY) * step + pad * 2)) / 2
         });
 
         const drawnEdges = new Set();
@@ -22305,26 +22304,21 @@ async function renderInstanceTab(host) {
 
                 const p1 = toPx(entry.id);
                 const p2 = toPx(exitId);
-                const target = instance.rooms[exitId];
-                const isBlocked = (target?.requiresCleared || []).some(
+                const isBlocked = (instance.rooms[exitId]?.requiresCleared || []).some(
                     reqId => instance.rooms[reqId]?.threatStatus !== 'cleared'
                 );
 
-                const line = document.createElementNS(svgNS, 'line');
-                line.setAttribute('x1', String(p1.cx));
-                line.setAttribute('y1', String(p1.cy));
-                line.setAttribute('x2', String(p2.cx));
-                line.setAttribute('y2', String(p2.cy));
-                line.setAttribute('stroke', isBlocked ? '#6e7f91' : '#3b4a5e');
-                line.setAttribute('stroke-width', '2');
-                if (isBlocked) line.setAttribute('stroke-dasharray', '3 3');
-                svg.appendChild(line);
+                svg.appendChild(svgEl('line', {
+                    x1: p1.cx, y1: p1.cy, x2: p2.cx, y2: p2.cy,
+                    stroke: isBlocked ? '#6e7f91' : '#3b4a5e',
+                    'stroke-width': 2,
+                    'stroke-dasharray': isBlocked ? '3 3' : null
+                }));
             }
         }
 
         const activeQueuedRoomId =
-            aethermoorQueuedMove &&
-            aethermoorQueuedMove.metadata === getContext().chatMetadata &&
+            aethermoorQueuedMove?.metadata === getContext().chatMetadata &&
             aethermoorQueuedMove.parsed?.kind === 'instance' &&
             aethermoorQueuedMove.parsed.instanceId === instance.id &&
             aethermoorQueuedMove.parsed.action === 'move'
@@ -22341,162 +22335,73 @@ async function renderInstanceTab(host) {
             const isSide = Boolean(entry.feature);
             const cleared = entry.threatStatus === 'cleared';
             const unmet = (entry.requiresCleared || []).filter(
-                requiredId =>
-                    instance.rooms[requiredId]?.threatStatus !== 'cleared'
+                requiredId => instance.rooms[requiredId]?.threatStatus !== 'cleared'
             );
-            const path = !isCurrent && !blocked
-                ? findInstancePath(instance, room.id, entry.id)
-                : null;
+            const path = !isCurrent && !blocked ? findInstancePath(instance, room.id, entry.id) : null;
             const canMoveHere = Boolean(path);
-            const group = document.createElementNS(svgNS, 'g');
-            const fill = isCurrent
-                ? '#2d1b4e'
-                : isQueued
-                    ? '#2a2312'
-                    : unvisited
-                        ? '#12161c'
-                        : hasThreat
-                            ? '#2b181c'
-                            : hasChest
-                                ? '#2a2312'
-                                : isSide
-                                    ? '#132433'
-                                    : '#181d23';
+            const fill = isCurrent ? '#2d1b4e' : isQueued ? '#2a2312' : unvisited ? '#12161c'
+                : hasThreat ? '#2b181c' : hasChest ? '#2a2312' : isSide ? '#132433' : '#181d23';
+            const stroke = isCurrent ? '#c084fc' : isQueued ? '#ffd166' : unvisited ? '#6e7f91'
+                : hasThreat ? '#ef4444' : hasChest ? '#ffd166' : isSide ? '#38bdf8' : cleared ? '#4ade80' : '#4da6ff';
+            const glyph = unvisited ? '?' : hasThreat ? '⚔' : hasChest ? '✦'
+                : isSide ? '✧' : isCurrent ? '●' : cleared ? '✓' : '·';
 
-            const stroke = isCurrent
-                ? '#c084fc'
-                : isQueued
-                    ? '#ffd166'
-                    : unvisited
-                        ? '#6e7f91'
-                        : hasThreat
-                            ? '#ef4444'
-                            : hasChest
-                                ? '#ffd166'
-                                : isSide
-                                    ? '#38bdf8'
-                                    : cleared
-                                        ? '#4ade80'
-                                        : '#4da6ff';
-
+            const group = svgEl('g', canMoveHere ? { class: 'aethermoor-map-node-clickable' } : {});
             if (canMoveHere) {
-                group.setAttribute('class', 'aethermoor-map-node-clickable');
-
-                const hitbox = document.createElementNS(svgNS, 'circle');
-                hitbox.setAttribute('cx', String(cx));
-                hitbox.setAttribute('cy', String(cy));
-                hitbox.setAttribute('r', '16');
-                hitbox.setAttribute('fill', 'transparent');
-                group.appendChild(hitbox);
-
-                const halo = document.createElementNS(svgNS, 'circle');
-                halo.setAttribute('cx', String(cx));
-                halo.setAttribute('cy', String(cy));
-                halo.setAttribute('r', isQueued ? '14.5' : '13.5');
-                halo.setAttribute('fill', 'none');
-                halo.setAttribute('stroke', isQueued ? '#ffd166' : '#4da6ff');
-                halo.setAttribute('stroke-opacity', isQueued ? '0.95' : '0.45');
-                halo.setAttribute('stroke-width', isQueued ? '2' : '1');
-                group.appendChild(halo);
-
-                group.addEventListener('click', () => {
-                    copyAethermoorCommand(
-                        instanceCommand(instance.id, 'move', entry.id)
-                    );
-                });
+                group.append(
+                    svgEl('circle', { cx, cy, r: 16, fill: 'transparent' }),
+                    svgEl('circle', {
+                        cx, cy, r: isQueued ? 14.5 : 13.5, fill: 'none',
+                        stroke: isQueued ? '#ffd166' : '#4da6ff',
+                        'stroke-opacity': isQueued ? 0.95 : 0.45,
+                        'stroke-width': isQueued ? 2 : 1
+                    })
+                );
+                group.addEventListener('click', () => copyAethermoorCommand(instanceCommand(instance.id, 'move', entry.id)));
             }
 
-            const circle = document.createElementNS(svgNS, 'circle');
-            circle.setAttribute('class', 'aethermoor-map-node-main');
-            circle.setAttribute('cx', String(cx));
-            circle.setAttribute('cy', String(cy));
-            circle.setAttribute('r', isCurrent ? '12' : '10');
-            circle.setAttribute('fill', fill);
-            circle.setAttribute('stroke', stroke);
-            circle.setAttribute(
-                'stroke-width',
-                isCurrent || isQueued ? '2.5' : '1.5'
-            );
-            if (unvisited && !isQueued) {
-                circle.setAttribute('stroke-dasharray', '3 2');
-            }
-            group.appendChild(circle);
-
-            const glyph = unvisited
-                ? '?'
-                : hasThreat
-                    ? '⚔'
-                    : hasChest
-                        ? '✦'
-                        : isSide
-                            ? '✧'
-                            : isCurrent
-                                ? '●'
-                                : cleared
-                                    ? '✓'
-                                    : '·';
-
-            const labelEl = document.createElementNS(svgNS, 'text');
-            labelEl.setAttribute('x', String(cx));
-            labelEl.setAttribute('y', String(cy + 3.5));
-            labelEl.setAttribute('text-anchor', 'middle');
-            labelEl.setAttribute('fill', stroke);
-            labelEl.setAttribute('font-size', '10');
-            labelEl.setAttribute('font-family', 'Consolas, monospace');
+            const labelEl = svgEl('text', {
+                x: cx, y: cy + 3.5, 'text-anchor': 'middle', fill: stroke,
+                'font-size': 10, 'font-family': 'Consolas, monospace'
+            }, glyph);
             labelEl.style.pointerEvents = 'none';
-            labelEl.textContent = glyph;
-            group.appendChild(labelEl);
 
-            const tactic =
-                entry.threat?.tactic && entry.threat.tactic !== 'none'
-                    ? ` · ${packTacticDefinition(entry.threat.tactic).label}`
-                    : '';
-            const statusText = unvisited
-                ? 'Unvisited exit'
-                : hasThreat
-                    ? `Threat unresolved${tactic}`
-                    : hasChest
-                        ? 'Unopened chest'
-                        : isSide
-                            ? `${entry.feature === 'lore' ? 'Lore' : 'Scenic'} alcove`
-                            : cleared
-                                ? 'Cleared'
-                                : 'Visited';
+            const tactic = entry.threat?.tactic && entry.threat.tactic !== 'none'
+                ? ` · ${packTacticDefinition(entry.threat.tactic).label}`
+                : '';
+            const statusText = unvisited ? 'Unvisited exit'
+                : hasThreat ? `Threat unresolved${tactic}`
+                : hasChest ? 'Unopened chest'
+                : isSide ? `${entry.feature === 'lore' ? 'Lore' : 'Scenic'} alcove`
+                : cleared ? 'Cleared' : 'Visited';
             const moveHint = canMoveHere
-                ? (path.length > 2
-                    ? '\nClick to retrace steps and move here'
-                    : '\nClick to move here')
+                ? (path.length > 2 ? '\nClick to retrace steps and move here' : '\nClick to move here')
                 : !isCurrent && unmet.length > 0
-                    ? `\nBlocked — clear ${
-                        unmet.map(id => instance.rooms[id]?.label || id)
-                            .join(', ')
-                    } first`
-                    : !isCurrent && blocked
-                        ? '\nResolve or avoid the encounter first'
-                        : '';
+                    ? `\nBlocked — clear ${unmet.map(id => instance.rooms[id]?.label || id).join(', ')} first`
+                    : !isCurrent && blocked ? '\nResolve or avoid the encounter first' : '';
 
-            const titleEl = document.createElementNS(svgNS, 'title');
-            titleEl.textContent =
-                `${entry.label}${isCurrent ? ' (Here)' : ''}\n${statusText}${moveHint}`;
-            group.appendChild(titleEl);
+            group.append(
+                svgEl('circle', {
+                    class: 'aethermoor-map-node-main', cx, cy, r: isCurrent ? 12 : 10, fill, stroke,
+                    'stroke-width': isCurrent || isQueued ? 2.5 : 1.5,
+                    'stroke-dasharray': unvisited && !isQueued ? '3 2' : null
+                }),
+                labelEl,
+                svgEl('title', {}, `${entry.label}${isCurrent ? ' (Here)' : ''}\n${statusText}${moveHint}`)
+            );
             svg.appendChild(group);
         }
 
-        const mapWrap = document.createElement('div');
-        mapWrap.style.padding = '6px';
-        mapWrap.style.background = '#101419';
-        mapWrap.style.border = '1px solid #1f2730';
-        mapWrap.style.borderRadius = '2px';
-        mapWrap.appendChild(svg);
-
-        const legend = document.createElement('div');
-        legend.className = 'aethermoor-vendor-detail';
-        legend.style.fontSize = '10px';
-        legend.style.textAlign = 'center';
-        legend.style.marginTop = '4px';
-        legend.textContent =
-            '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited · Click any reachable room to move';
-        mapWrap.appendChild(legend);
+        const mapWrap = el('div', {
+            style: { padding: '6px', background: '#101419', border: '1px solid #1f2730', borderRadius: '2px' }
+        },
+            svg,
+            el('div', {
+                className: 'aethermoor-vendor-detail',
+                style: { fontSize: '10px', textAlign: 'center', marginTop: '4px' },
+                text: '● You · ⚔ Threat · ✦ Chest · ✧ Lore/Scenic · ✓ Cleared · ? Unvisited · Click any reachable room to move'
+            })
+        );
 
         const section = makeAethermoorSection(
             `INSTANCE · ${instance.label}`,
@@ -22661,25 +22566,14 @@ async function renderInstanceTab(host) {
     }
 
     if (clearedInstances.length > 0) {
-        const drawer = document.createElement('details');
-        drawer.className = 'aethermoor-knowledge';
-
-        const summary = document.createElement('summary');
-        summary.className = 'aethermoor-ui-heading';
-        summary.textContent = `CLEARED SITES · ${clearedInstances.length}`;
-        drawer.appendChild(summary);
-
-        for (const instance of clearedInstances) {
-            const line = document.createElement('div');
-            line.className = 'aethermoor-ui-text';
-            line.style.marginTop = '6px';
-            line.textContent =
-                `${instance.label} · ` +
-                `${instance.kind === 'hidden' ? 'Hidden site' : 'Known site'} · Cleared`;
-            drawer.appendChild(line);
-        }
-
-        host.appendChild(drawer);
+        host.appendChild(el('details', { className: 'aethermoor-knowledge' },
+            el('summary', { className: 'aethermoor-ui-heading', text: `CLEARED SITES · ${clearedInstances.length}` }),
+            clearedInstances.map(instance => el('div', {
+                className: 'aethermoor-ui-text',
+                style: { marginTop: '6px' },
+                text: `${instance.label} · ${instance.kind === 'hidden' ? 'Hidden site' : 'Known site'} · Cleared`
+            }))
+        ));
     }
 }
 
@@ -22949,63 +22843,42 @@ async function renderWorldTab(host) {
 
     for (const lead of rumors) {
         const place = state.places[lead.targetId];
-        const entry = document.createElement('div');
-        entry.className = 'aethermoor-ui-text';
-        entry.textContent =
-            `${place.label}\n${lead.claim || lead.label || lead.id}`;
-        rumorSection.appendChild(entry);
+        rumorSection.appendChild(el('div', {
+            className: 'aethermoor-ui-text',
+            text: `${place.label}\n${lead.claim || lead.label || lead.id}`
+        }));
 
         if (lead.targetId === currentLocationId) {
-            const status = document.createElement('div');
-            status.className = 'aethermoor-ui-text';
-            status.textContent =
-                'The crew is here. A confirmed arrival resolves this rumor; ' +
-                'check its saved result or any resulting quest offer.';
-            rumorSection.appendChild(status);
+            rumorSection.appendChild(el('div', {
+                className: 'aethermoor-ui-text',
+                text: 'The crew is here. A confirmed arrival resolves this rumor; check its saved result or any resulting quest offer.'
+            }));
         } else {
-            addTravelAction(
-                rumorSection,
-                `Travel to ${place.label}`,
-                lead.targetId
-            );
+            addTravelAction(rumorSection, `Travel to ${place.label}`, lead.targetId);
         }
     }
 
     host.appendChild(rumorSection);
 
-    const olderRumors = Object.values(state.leads || {})
-        .filter(lead => {
-            const place = state.places?.[lead?.targetId];
-            return lead?.kind === 'rumor' &&
-                lead.testOnly !== true &&
-                place &&
-                Number.isInteger(Number(place.zone)) &&
-                Number(place.zone) < state.zone;
-        });
+    const olderRumors = Object.values(state.leads || {}).filter(lead => {
+        const place = state.places?.[lead?.targetId];
+        return lead?.kind === 'rumor' && lead.testOnly !== true && place &&
+            Number.isInteger(Number(place.zone)) && Number(place.zone) < state.zone;
+    });
 
     if (olderRumors.length > 0) {
-        const history = document.createElement('details');
-        history.className = 'aethermoor-knowledge';
-
-        const heading = document.createElement('summary');
-        heading.className = 'aethermoor-ui-heading';
-        heading.textContent =
-            `EARLIER-ZONE RUMORS · ${olderRumors.length}`;
-        history.appendChild(heading);
-
-        for (const lead of olderRumors) {
-            const place = state.places[lead.targetId];
-            const entry = document.createElement('div');
-            entry.className = 'aethermoor-ui-text';
-            entry.style.marginTop = '8px';
-            entry.textContent =
-                `${zoneDisplayName(state, place.zone)} (z${place.zone}) · ${place.label} · ` +
-                `${lead.status === 'known' ? 'Unresolved' : 'Investigated'}\n` +
-                `${lead.claim || lead.label || lead.id}`;
-            history.appendChild(entry);
-        }
-
-        host.appendChild(history);
+        host.appendChild(el('details', { className: 'aethermoor-knowledge' },
+            el('summary', { className: 'aethermoor-ui-heading', text: `EARLIER-ZONE RUMORS · ${olderRumors.length}` }),
+            olderRumors.map(lead => {
+                const place = state.places[lead.targetId];
+                return el('div', {
+                    className: 'aethermoor-ui-text',
+                    style: { marginTop: '8px' },
+                    text: `${zoneDisplayName(state, place.zone)} (z${place.zone}) · ${place.label} · ` +
+                        `${lead.status === 'known' ? 'Unresolved' : 'Investigated'}\n${lead.claim || lead.label || lead.id}`
+                });
+            })
+        ));
     }
 
     /*
@@ -23108,207 +22981,129 @@ async function renderWorldTab(host) {
 
     if (nextSettlement?.locationId && nextZone) {
         const currentZone = world.zones?.[state.zone];
-        const onwardOptions = Array.isArray(currentZone?.onwardOptions)
-            ? currentZone.onwardOptions
-            : [];
-        const canChangeRoads =
-            nextZone.visited !== true &&
-            !movementBlocked &&
-            !journey;
+        const onwardOptions = Array.isArray(currentZone?.onwardOptions) ? currentZone.onwardOptions : [];
+        const canChangeRoads = nextZone.visited !== true && !movementBlocked && !journey;
 
-        const onwardDrawer = document.createElement('details');
-        onwardDrawer.className = 'aethermoor-knowledge';
-        onwardDrawer.open = Boolean(renderWorldTab.onwardOpen);
-        onwardDrawer.addEventListener('toggle', () => {
-            renderWorldTab.onwardOpen = onwardDrawer.open;
-        });
-
-        const onwardSummary = document.createElement('summary');
-        onwardSummary.className = 'aethermoor-ui-heading';
-        onwardSummary.textContent = `ONWARD CROSSROADS (z${nextZone.number})`;
-        onwardDrawer.appendChild(onwardSummary);
-
-        const onward = document.createElement('div');
-        onward.style.display = 'grid';
-        onward.style.gap = '7px';
-        onward.style.marginTop = '8px';
-
-        const onwardIntro = document.createElement('div');
-        onwardIntro.className = 'aethermoor-ui-text';
-        onwardIntro.textContent =
-            nextZone.visited === true
-                ? `Visited region: ${nextZone.name} (${nextZone.geography?.description || 'unknown'}).`
-                : 'Choose one of the 3 onward roads before departing. Unchosen flavors return to the deck.';
-        onward.appendChild(onwardIntro);
-        onwardDrawer.appendChild(onward);
+        const onward = el('div', { style: { display: 'grid', gap: '7px', marginTop: '8px' } },
+            el('div', {
+                className: 'aethermoor-ui-text',
+                text: nextZone.visited === true
+                    ? `Visited region: ${nextZone.name} (${nextZone.geography?.description || 'unknown'}).`
+                    : 'Choose one of the 3 onward roads before departing. Unchosen flavors return to the deck.'
+            })
+        );
 
         if (nextZone.visited !== true && onwardOptions.length > 0) {
-            const activeId =
-                currentZone.chosenOnwardId || onwardOptions[0].id;
+            const activeId = currentZone.chosenOnwardId || onwardOptions[0].id;
+            const history = world.flavorHistory || {};
 
             for (const option of onwardOptions) {
                 const isSelected = option.id === activeId;
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'aethermoor-trade-option';
-                button.setAttribute('aria-pressed', String(isSelected));
-                button.disabled = !canChangeRoads;
-
-                const heading = document.createElement('div');
-                heading.className = 'aethermoor-vendor-name';
-                heading.textContent =
-                    `${option.direction} Road · ${option.flavorLabel}` +
-                    (isSelected ? ' [SELECTED]' : '') +
-                    (option.swerved ? ' · SWERVED' : '');
-
-                const detail = document.createElement('div');
-                detail.className = 'aethermoor-vendor-detail';
-                detail.textContent =
-                    `Terrain: ${option.geographyLabel}` +
-                    (option.transitBridge
-                        ? ` · Via ${option.transitBridge}`
-                        : '');
-
-                const rumorLine = document.createElement('div');
-                rumorLine.className = 'aethermoor-ui-text';
-                rumorLine.style.marginTop = '3px';
-                rumorLine.textContent = option.rumor || option.flavorHook || '';
-
-                button.append(heading, detail, rumorLine);
-                button.addEventListener('click', async () => {
-                    if (isSelected) return;
-                    button.disabled = true;
-                    await runAethermoorPanelCase(
-                        host,
-                        'world',
-                        {
-                            name: 'select_onward_road',
-                            kind: 'world',
-                            action: 'select_onward',
-                            optionId: option.id
-                        },
-                        `Selected ${option.direction} Road (${option.flavorLabel}).`
-                    );
-                });
-
-                onward.appendChild(button);
+                onward.appendChild(el('button', {
+                    type: 'button',
+                    className: 'aethermoor-trade-option',
+                    attrs: { 'aria-pressed': String(isSelected) },
+                    disabled: !canChangeRoads,
+                    onClick: async e => {
+                        if (isSelected) return;
+                        e.currentTarget.disabled = true;
+                        await runAethermoorPanelCase(
+                            host,
+                            'world',
+                            { name: 'select_onward_road', kind: 'world', action: 'select_onward', optionId: option.id },
+                            `Selected ${option.direction} Road (${option.flavorLabel}).`
+                        );
+                    }
+                },
+                    el('div', {
+                        className: 'aethermoor-vendor-name',
+                        text: `${option.direction} Road · ${option.flavorLabel}${isSelected ? ' [SELECTED]' : ''}${option.swerved ? ' · SWERVED' : ''}`
+                    }),
+                    el('div', {
+                        className: 'aethermoor-vendor-detail',
+                        text: `Terrain: ${option.geographyLabel}${option.transitBridge ? ` · Via ${option.transitBridge}` : ''}`
+                    }),
+                    el('div', {
+                        className: 'aethermoor-ui-text',
+                        style: { marginTop: '3px' },
+                        text: option.rumor || option.flavorHook || ''
+                    })
+                ));
             }
 
-            const activeOption =
-                onwardOptions.find(entry => entry.id === activeId) ||
-                onwardOptions[0];
-
+            const activeOption = onwardOptions.find(entry => entry.id === activeId) || onwardOptions[0];
             addTravelAction(
                 onward,
                 `Travel ${activeOption.direction} · ${activeOption.flavorLabel} (z${nextZone.number})`,
                 nextSettlement.locationId
             );
 
-            // Collapsible Swerve Override drawer
-            const swerveBox = document.createElement('details');
-            swerveBox.className = 'aethermoor-knowledge';
-            swerveBox.style.marginTop = '6px';
-
-            const swerveSummary = document.createElement('summary');
-            swerveSummary.className = 'aethermoor-ui-heading';
-            swerveSummary.textContent = 'SWERVE ROAD (OVERRIDE DICE)';
-            swerveBox.appendChild(swerveSummary);
-
-            const slotSelect = document.createElement('select');
-            slotSelect.className = 'text_pole';
-            slotSelect.style.marginTop = '6px';
-            for (const option of onwardOptions) {
-                const opt = document.createElement('option');
-                opt.value = option.id;
-                opt.textContent =
-                    `${option.direction} Road (${option.flavorLabel})`;
-                if (option.id === activeId) opt.selected = true;
-                slotSelect.appendChild(opt);
-            }
-
-            const flavorSelect = document.createElement('select');
-            flavorSelect.className = 'text_pole';
-            flavorSelect.style.marginTop = '6px';
-            const history = world.flavorHistory || {};
-            for (const card of Object.values(WORLD_FLAVORS)) {
-                const opt = document.createElement('option');
-                opt.value = card.id;
-                const seen = history[card.id]?.usedCount > 0;
-                opt.textContent =
-                    `${card.label}${seen ? ' (visited · splinter)' : ''}`;
-                flavorSelect.appendChild(opt);
-            }
-
-            const terrainSelect = document.createElement('select');
-            terrainSelect.className = 'text_pole';
-            terrainSelect.style.marginTop = '6px';
-            const autoOpt = document.createElement('option');
-            autoOpt.value = '';
-            autoOpt.textContent = 'Terrain: Auto (match flavor)';
-            terrainSelect.appendChild(autoOpt);
-            for (const [key, geo] of Object.entries(WORLD_GEOGRAPHY)) {
-                const opt = document.createElement('option');
-                opt.value = key;
-                opt.textContent = `Terrain: ${geo.label}`;
-                terrainSelect.appendChild(opt);
-            }
-
-            const pitchInput = document.createElement('input');
-            pitchInput.type = 'text';
-            pitchInput.className = 'text_pole';
-            pitchInput.style.marginTop = '6px';
-            pitchInput.placeholder =
-                'Optional 1-line custom pitch (overrides default hook)';
-
-            const applySwerve = makeAethermoorAction(
-                'Apply Swerve',
-                'quest',
-                async () => {
-                    applySwerve.disabled = true;
-                    try {
-                        await runAethermoorPanelCase(
-                            host,
-                            'world',
-                            {
-                                name: 'swerve_onward_road',
-                                kind: 'world',
-                                action: 'swerve_onward',
-                                optionId: slotSelect.value,
-                                flavorId: flavorSelect.value,
-                                ...(terrainSelect.value
-                                    ? { profile: terrainSelect.value }
-                                    : {}),
-                                ...(pitchInput.value.trim()
-                                    ? { customPitch: pitchInput.value.trim() }
-                                    : {})
-                            },
-                            'Onward road swerved.'
-                        );
-                    } finally {
-                        applySwerve.disabled = false;
-                    }
-                }
+            const slotSelect = el('select', { className: 'text_pole', style: { marginTop: '6px' } },
+                onwardOptions.map(o => el('option', {
+                    value: o.id,
+                    text: `${o.direction} Road (${o.flavorLabel})`,
+                    selected: o.id === activeId
+                }))
             );
+            const flavorSelect = el('select', { className: 'text_pole', style: { marginTop: '6px' } },
+                Object.values(WORLD_FLAVORS).map(card => el('option', {
+                    value: card.id,
+                    text: `${card.label}${history[card.id]?.usedCount > 0 ? ' (visited · splinter)' : ''}`
+                }))
+            );
+            const terrainSelect = el('select', { className: 'text_pole', style: { marginTop: '6px' } },
+                el('option', { value: '', text: 'Terrain: Auto (match flavor)' }),
+                Object.entries(WORLD_GEOGRAPHY).map(([key, geo]) => el('option', {
+                    value: key,
+                    text: `Terrain: ${geo.label}`
+                }))
+            );
+            const pitchInput = el('input', {
+                type: 'text',
+                className: 'text_pole',
+                style: { marginTop: '6px' },
+                placeholder: 'Optional 1-line custom pitch (overrides default hook)'
+            });
+            const applySwerve = makeAethermoorAction('Apply Swerve', 'quest', async () => {
+                applySwerve.disabled = true;
+                try {
+                    await runAethermoorPanelCase(
+                        host,
+                        'world',
+                        {
+                            name: 'swerve_onward_road',
+                            kind: 'world',
+                            action: 'swerve_onward',
+                            optionId: slotSelect.value,
+                            flavorId: flavorSelect.value,
+                            ...(terrainSelect.value ? { profile: terrainSelect.value } : {}),
+                            ...(pitchInput.value.trim() ? { customPitch: pitchInput.value.trim() } : {})
+                        },
+                        'Onward road swerved.'
+                    );
+                } finally {
+                    applySwerve.disabled = false;
+                }
+            });
             applySwerve.disabled = !canChangeRoads;
             applySwerve.style.marginTop = '6px';
 
-            swerveBox.append(
-                slotSelect,
-                flavorSelect,
-                terrainSelect,
-                pitchInput,
-                applySwerve
-            );
-            onward.appendChild(swerveBox);
+            onward.appendChild(el('details', { className: 'aethermoor-knowledge', style: { marginTop: '6px' } },
+                el('summary', { className: 'aethermoor-ui-heading', text: 'SWERVE ROAD (OVERRIDE DICE)' }),
+                slotSelect, flavorSelect, terrainSelect, pitchInput, applySwerve
+            ));
         } else {
-            addTravelAction(
-                onward,
-                `Travel onward to ${nextZone.name} (z${nextZone.number})`,
-                nextSettlement.locationId
-            );
+            addTravelAction(onward, `Travel onward to ${nextZone.name} (z${nextZone.number})`, nextSettlement.locationId);
         }
 
-        host.appendChild(onwardDrawer);
+        host.appendChild(el('details', {
+            className: 'aethermoor-knowledge',
+            open: Boolean(renderWorldTab.onwardOpen),
+            onToggle: e => { renderWorldTab.onwardOpen = e.currentTarget.open; }
+        },
+            el('summary', { className: 'aethermoor-ui-heading', text: `ONWARD CROSSROADS (z${nextZone.number})` }),
+            onward
+        ));
     }
 }
 
@@ -23587,90 +23382,62 @@ function openAethermoorPanel() {
     }
 
     if (!aethermoorPanelElement) {
-        const panel = document.createElement('section');
-        panel.className = 'aethermoor-panel';
-        panel.setAttribute('role', 'dialog');
-        panel.setAttribute('aria-label', 'Aethermoor');
+        const header = el('header', { className: 'aethermoor-panel-header' },
+            el('div', { className: 'aethermoor-panel-title', text: 'AETHERMOOR' }),
+            el('div', { className: 'aethermoor-shop-header-actions' },
+                el('button', {
+                    id: 'aethermoor_pause_button',
+                    type: 'button',
+                    className: 'aethermoor-panel-close',
+                    text: 'Pause',
+                    onClick: () => setAethermoorHandoffsPaused(!aethermoorRoleplayHandoffsPaused)
+                }),
+                el('button', {
+                    id: 'aethermoor_debug_button',
+                    type: 'button',
+                    className: 'aethermoor-panel-close',
+                    text: 'Debug',
+                    title: 'Open Aethermoor diagnostics and campaign reset',
+                    onClick: openNarrationDebug
+                }),
+                el('button', {
+                    type: 'button',
+                    className: 'aethermoor-panel-close',
+                    text: 'Close',
+                    onClick: () => {
+                        aethermoorPanelElement.hidden = true;
+                        aethermoorPanelOpen = false;
+                    }
+                })
+            )
+        );
 
-        const header = document.createElement('header');
-        header.className = 'aethermoor-panel-header';
+        const panel = el('section', {
+            className: 'aethermoor-panel',
+            attrs: { role: 'dialog', 'aria-label': 'Aethermoor' }
+        },
+            header,
+            el('div', { className: 'aethermoor-status-strip', attrs: { 'aria-label': 'Crew status' }, hidden: true }),
+            el('div', { className: 'aethermoor-queued-move', attrs: { 'aria-label': 'Queued movement' }, hidden: true }),
+            el('nav', { className: 'aethermoor-tabs' },
+                [
+                    ['combat', 'Combat'], ['quests', 'Quests'], ['world', 'World'], ['instances', 'Instance'],
+                    ['inventory', 'Inventory'], ['shops', 'Shops'], ['achievements', 'Achievements'], ['aethernet', 'Aether-Net']
+                ].map(([tab, label]) => el('button', {
+                    type: 'button',
+                    className: 'aethermoor-tab',
+                    dataset: { tab },
+                    text: label,
+                    onClick: () => {
+                        aethermoorActiveTab = tab;
+                        renderAethermoorTab(tab);
+                    }
+                }))
+            ),
+            el('main', { className: 'aethermoor-panel-content' })
+        );
 
-        const title = document.createElement('div');
-        title.className = 'aethermoor-panel-title';
-        title.textContent = 'AETHERMOOR';
-
-        const close = document.createElement('button');
-        close.type = 'button';
-        close.className = 'aethermoor-panel-close';
-        close.textContent = 'Close';
-        close.addEventListener('click', () => {
-            panel.hidden = true;
-            aethermoorPanelOpen = false;
-        });
-
-        const pause = document.createElement('button');
-        pause.id = 'aethermoor_pause_button';
-        pause.type = 'button';
-        pause.className = 'aethermoor-panel-close';
-        pause.textContent = 'Pause';
-        pause.addEventListener('click', () => {
-            setAethermoorHandoffsPaused(!aethermoorRoleplayHandoffsPaused);
-        });
-
-        const debug = document.createElement('button');
-        debug.id = 'aethermoor_debug_button';
-        debug.type = 'button';
-        debug.className = 'aethermoor-panel-close';
-        debug.textContent = 'Debug';
-        debug.title = 'Open Aethermoor diagnostics and campaign reset';
-        debug.addEventListener('click', openNarrationDebug);
-
-        const headerActions = document.createElement('div');
-        headerActions.className = 'aethermoor-shop-header-actions';
-        headerActions.append(pause, debug, close);
-
-        header.append(title, headerActions);
-
-        const statusStrip = document.createElement('div');
-        statusStrip.className = 'aethermoor-status-strip';
-        statusStrip.setAttribute('aria-label', 'Crew status');
-        statusStrip.hidden = true;
-
-        const queuedMoveBar = document.createElement('div');
-        queuedMoveBar.className = 'aethermoor-queued-move';
-        queuedMoveBar.setAttribute('aria-label', 'Queued movement');
-        queuedMoveBar.hidden = true;
-
-        const tabs = document.createElement('nav');
-        tabs.className = 'aethermoor-tabs';
-
-        for (const [tab, label] of [
-            ['combat', 'Combat'],
-            ['quests', 'Quests'],
-            ['world', 'World'],
-            ['instances', 'Instance'],
-            ['inventory', 'Inventory'],
-            ['shops', 'Shops'],
-            ['achievements', 'Achievements'],
-            ['aethernet', 'Aether-Net']
-        ]) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'aethermoor-tab';
-            button.dataset.tab = tab;
-            button.textContent = label;
-            button.addEventListener('click', () => {
-                aethermoorActiveTab = tab;
-                renderAethermoorTab(tab);
-            });
-            tabs.appendChild(button);
-        }
-
-        const content = document.createElement('main');
-        content.className = 'aethermoor-panel-content';
-        panel.append(header, statusStrip, queuedMoveBar, tabs, content);
         document.body.appendChild(panel);
-
         attachAethermoorWindowGeometry(panel, header);
         aethermoorPanelElement = panel;
     }
@@ -23686,20 +23453,18 @@ function createAethermoorController() {
     if (document.getElementById('aethermoor_main_button')) return;
     const composer = document.querySelector('#send_form');
     if (!composer) {
-        console.warn(
-            'Aethermoor: chat composer not found; main button not added'
-        );
+        console.warn('Aethermoor: chat composer not found; main button not added');
         return;
     }
 
-    const button = document.createElement('button');
-    button.id = 'aethermoor_main_button';
-    button.type = 'button';
-    button.className = 'menu_button';
-    button.textContent = 'Aethermoor';
-    button.title = 'Open Aethermoor controls';
-    button.addEventListener('click', openAethermoorPanel);
-    composer.insertBefore(button, composer.firstChild);
+    composer.insertBefore(el('button', {
+        id: 'aethermoor_main_button',
+        type: 'button',
+        className: 'menu_button',
+        text: 'Aethermoor',
+        title: 'Open Aethermoor controls',
+        onClick: openAethermoorPanel
+    }), composer.firstChild);
 }
 
 async function readStoredCombatState() {
@@ -25481,55 +25246,101 @@ function recordNarrationDebug(type, details) {
 }
 
 function openNarrationDebug() {
-    const context = getContext();
-    const metadata = context.chatMetadata;
+    const metadata = getContext().chatMetadata;
     assert(metadata, 'Open a chat before viewing narration diagnostics');
-
     document.getElementById('aethermoor_narration_debug')?.remove();
 
-    const panel = document.createElement('section');
-    panel.id = 'aethermoor_narration_debug';
-    panel.className = 'aethermoor-panel';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Narration Debug');
-
-    panel.style.zIndex = '10002';
-
-    const header = document.createElement('header');
-    header.className = 'aethermoor-panel-header';
-    const title = document.createElement('b');
-    title.className = 'aethermoor-panel-title';
-    title.textContent = 'NARRATION DEBUG';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close';
-    close.addEventListener('click', () => panel.remove());
-    header.append(title, close);
-
-    const body = document.createElement('main');
-    body.className = 'aethermoor-panel-content';
-    const status = document.createElement('div');
-    status.className = 'aethermoor-ui-text';
-    const controls = document.createElement('div');
-    controls.className = 'aethermoor-ui-actions';
-    const output = document.createElement('div');
-    output.className = 'aethermoor-debug-records';
+    const status = el('div', { className: 'aethermoor-ui-text' });
+    const output = el('div', { className: 'aethermoor-debug-records' });
 
     async function copyDebugText(text, label) {
         await copyTextToClipboard(text);
         toastr.info(`${label} copied to clipboard.`, 'Narration Debug');
     }
 
-    function recordCopyText(entry) {
-        const details = entry.details || {};
-
-        if (typeof details.text === 'string') {
-            return details.text;
+    async function changeDebug(change) {
+        try {
+            assert(getContext().chatMetadata === metadata, 'Chat changed; reopen Narration Debug in the current chat');
+            await saveNarrationDebugChange(metadata, change);
+            refresh();
+        } catch (error) {
+            toastr.error(error.message || String(error), 'Narration Debug');
         }
-
-        return JSON.stringify(details, null, 2);
     }
+
+    const toggle = makeAethermoorAction('Enable recording', 'world', () => {
+        void changeDebug(debug => { debug.enabled = !debug.enabled; });
+    });
+    const refreshButton = makeAethermoorAction('Refresh records', 'world', refresh);
+    const clear = makeAethermoorAction('Clear records', 'world', () => {
+        void changeDebug(debug => { debug.entries = []; debug.errors = []; });
+    });
+    const createTestRumor = makeAethermoorAction('Create test rumor', 'world', async () => {
+        try {
+            const result = await runStoredMechanic({
+                cases: [{
+                    name: 'debug_create_rumor',
+                    kind: 'debug_create_rumor',
+                    inquiryId: `watchtower-test-${Date.now()}`,
+                    reason: 'Test Rumor Site',
+                    completionEvidence: 'A debug rumor points to a test destination.'
+                }]
+            });
+            assert(
+                result?.ok === true && result.results?.[0]?.ok !== false,
+                result?.results?.[0]?.error || 'Could not create test rumor'
+            );
+            toastr.info('Test rumor created.', 'Aethermoor Debug');
+        } catch (error) {
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor Debug');
+        }
+    });
+    const resetCampaign = makeAethermoorAction('Reset This Chat’s Campaign', 'world', async () => {
+        if (window.prompt('This permanently replaces this chat’s Aethermoor campaign state. The chat messages will remain. Type RESET to continue.') !== 'RESET') {
+            return;
+        }
+        resetCampaign.disabled = true;
+        try {
+            await resetAethermoorCampaign();
+            clearAethermoorContractNotifications();
+            for (const id of [
+                'aethermoor_shop_window', 'aethermoor_herbalist_window',
+                'aethermoor_inn_window', 'aethermoor_charsheet_window'
+            ]) {
+                document.getElementById(id)?.remove();
+            }
+            clearAethermoorQueuedMove();
+            clearAethermoorQueuedInn();
+            aethermoorLastCombatLog = '';
+            aethermoorLastCombatLogKey = null;
+            combatSelections.target = null;
+            aethermoorActiveTab = 'world';
+            if (aethermoorPanelOpen) renderAethermoorTab('world');
+            panel.remove();
+            toastr.success('This chat’s campaign reset to its level-1 start. Earlier chat messages were not deleted.', 'Aethermoor');
+        } catch (error) {
+            resetCampaign.disabled = false;
+            reportAethermoorError(error, 'Campaign reset failed');
+        }
+    });
+
+    const header = el('header', { className: 'aethermoor-panel-header' },
+        el('b', { className: 'aethermoor-panel-title', text: 'NARRATION DEBUG' }),
+        el('button', { type: 'button', className: 'aethermoor-panel-close', text: 'Close', onClick: () => panel.remove() })
+    );
+    const panel = el('section', {
+        id: 'aethermoor_narration_debug',
+        className: 'aethermoor-panel',
+        style: { zIndex: '10002' },
+        attrs: { role: 'dialog', 'aria-label': 'Narration Debug' }
+    },
+        header,
+        el('main', { className: 'aethermoor-panel-content' },
+            status,
+            el('div', { className: 'aethermoor-ui-actions' }, toggle, refreshButton, clear, createTestRumor, resetCampaign),
+            output
+        )
+    );
 
     function refresh() {
         const debug = metadata[AETHERMOOR_DEBUG_KEY];
@@ -25542,238 +25353,46 @@ function openNarrationDebug() {
             `${errors.length}/${AETHERMOOR_DEBUG_LIMIT} errors\n` +
             'Errors are saved even when narration recording is OFF.\n' +
             'Private diagnostic context may contain hidden quest information.';
-        toggle.textContent = debug?.enabled
-            ? 'Disable recording'
-            : 'Enable recording';
+        toggle.textContent = debug?.enabled ? 'Disable recording' : 'Enable recording';
 
-        output.replaceChildren();
+        output.replaceChildren(
+            el('div', { className: 'aethermoor-ui-heading', text: `SAVED ERRORS · ${errors.length}` }),
+            ...[...errors].reverse().map(entry => el('section', { className: 'aethermoor-debug-record' },
+                el('div', {
+                    className: 'aethermoor-ui-text',
+                    text: `${entry.time} · Revision ${entry.revision ?? 'none'}\n${entry.context}\n${entry.message}`
+                }),
+                makeAethermoorAction('Copy error', 'world', () => void copyDebugText(JSON.stringify(entry, null, 2), 'Error record'))
+            )),
+            el('div', { className: 'aethermoor-ui-heading', text: `NARRATION EVENTS · ${entries.length}` }),
+            ...(entries.length === 0
+                ? [el('div', { className: 'aethermoor-ui-text', text: 'No narration records.' })]
+                : [...entries].reverse().map((entry, index) => {
+                    const details = entry.details || {};
+                    const copyLabel = entry.type === 'assistant_notification'
+                        ? 'Copy observed message'
+                        : entry.type === 'handoff_injected'
+                            ? 'Copy injected handoff'
+                            : 'Copy record';
+                    const copyPayload = typeof details.text === 'string'
+                        ? details.text
+                        : JSON.stringify(details, null, 2);
 
-        const errorHeading = document.createElement('div');
-        errorHeading.className = 'aethermoor-ui-heading';
-        errorHeading.textContent = `SAVED ERRORS · ${errors.length}`;
-        output.appendChild(errorHeading);
-
-        for (const entry of [...errors].reverse()) {
-            const record = document.createElement('section');
-            record.className = 'aethermoor-debug-record';
-
-            const text = document.createElement('div');
-            text.className = 'aethermoor-ui-text';
-            text.textContent =
-                `${entry.time} · Revision ${entry.revision ?? 'none'}\n` +
-                `${entry.context}\n${entry.message}`;
-
-            const copyButton = makeAethermoorAction(
-                'Copy error',
-                'world',
-                () => {
-                    void copyDebugText(
-                        JSON.stringify(entry, null, 2),
-                        'Error record'
+                    return el('section', { className: 'aethermoor-debug-record' },
+                        el('div', { className: 'aethermoor-ui-heading', text: `${entries.length - index}. ${entry.type} · ${entry.time}` }),
+                        el('div', {
+                            className: 'aethermoor-ui-text',
+                            text: `Revision: ${entry.revision ?? 'none'}` +
+                                (details.eventType ? ` · Event: ${details.eventType}` : '') +
+                                (details.messageId !== undefined && details.messageId !== null ? ` · Message: ${details.messageId}` : '')
+                        }),
+                        makeAethermoorAction(copyLabel, 'world', () => void copyDebugText(copyPayload, 'Diagnostic text'))
                     );
-                }
-            );
-
-            record.append(text, copyButton);
-            output.appendChild(record);
-        }
-
-        const eventHeading = document.createElement('div');
-        eventHeading.className = 'aethermoor-ui-heading';
-        eventHeading.textContent = `NARRATION EVENTS · ${entries.length}`;
-        output.appendChild(eventHeading);
-
-        if (entries.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'aethermoor-ui-text';
-            empty.textContent = 'No narration records.';
-            output.appendChild(empty);
-        }
-
-        [...entries].reverse().forEach((entry, index) => {
-            const details = entry.details || {};
-            const record = document.createElement('section');
-            record.className = 'aethermoor-debug-record';
-
-            const heading = document.createElement('div');
-            heading.className = 'aethermoor-ui-heading';
-            heading.textContent =
-                `${entries.length - index}. ${entry.type} · ` +
-                `${entry.time}`;
-
-            const metadataLine = document.createElement('div');
-            metadataLine.className = 'aethermoor-ui-text';
-            metadataLine.textContent =
-                `Revision: ${entry.revision ?? 'none'}` +
-                (
-                    details.eventType
-                        ? ` · Event: ${details.eventType}`
-                        : ''
-                ) +
-                (
-                    details.messageId !== undefined &&
-                    details.messageId !== null
-                        ? ` · Message: ${details.messageId}`
-                        : ''
-                );
-
-            const copyButton = makeAethermoorAction(
-                entry.type === 'assistant_notification'
-                    ? 'Copy observed message'
-                    : entry.type === 'handoff_injected'
-                        ? 'Copy injected handoff'
-                        : 'Copy record',
-                'world',
-                () => {
-                    void copyDebugText(
-                        recordCopyText(entry),
-                        'Diagnostic text'
-                    );
-                }
-            );
-
-            record.append(
-                heading,
-                metadataLine,
-                copyButton
-            );
-
-            output.appendChild(record);
-        });
+                }))
+        );
     }
 
-    async function changeDebug(change) {
-        try {
-            assert(
-                getContext().chatMetadata === metadata,
-                'Chat changed; reopen Narration Debug in the current chat'
-            );
-            await saveNarrationDebugChange(metadata, change);
-            refresh();
-        } catch (error) {
-            toastr.error(error.message || String(error), 'Narration Debug');
-        }
-    }
-
-    const toggle = makeAethermoorAction('Enable recording', 'world', () => {
-        void changeDebug(debug => {
-            debug.enabled = !debug.enabled;
-        });
-    });
-    const refreshButton = makeAethermoorAction('Refresh records', 'world', refresh);
-    const clear = makeAethermoorAction('Clear records', 'world', () => {
-        void changeDebug(debug => {
-            debug.entries = [];
-            debug.errors = [];
-        });
-    });
-
-    const createTestRumor = makeAethermoorAction(
-        'Create test rumor',
-        'world',
-        async () => {
-            try {
-                const result = await runStoredMechanic({
-                    cases: [{
-                        name: 'debug_create_rumor',
-                        kind: 'debug_create_rumor',
-                        inquiryId: `watchtower-test-${Date.now()}`,
-                        reason: 'Test Rumor Site',
-                        completionEvidence:
-                            'A debug rumor points to a test destination.'
-                    }]
-                });
-
-                assert(
-                    result?.ok === true &&
-                    result.results?.[0]?.ok !== false,
-                    result?.results?.[0]?.error ||
-                        'Could not create test rumor'
-                );
-
-                toastr.info('Test rumor created.', 'Aethermoor Debug');
-            } catch (error) {
-                toastr.error(
-                    error instanceof Error
-                        ? error.message
-                        : String(error),
-                    'Aethermoor Debug'
-                );
-            }
-        }
-    );
-
-    const resetCampaign = makeAethermoorAction(
-        'Reset This Chat’s Campaign',
-        'world',
-        async () => {
-            const confirmation = window.prompt(
-                'This permanently replaces this chat’s Aethermoor ' +
-                'campaign state. The chat messages will remain. ' +
-                'Type RESET to continue.'
-            );
-
-            if (confirmation !== 'RESET') return;
-
-            resetCampaign.disabled = true;
-
-            try {
-                await resetAethermoorCampaign();
-
-                clearAethermoorContractNotifications();
-
-                for (const id of [
-                    'aethermoor_shop_window',
-                    'aethermoor_herbalist_window',
-                    'aethermoor_inn_window',
-                    'aethermoor_charsheet_window'
-                ]) {
-                    document.getElementById(id)?.remove();
-                }
-
-                clearAethermoorQueuedMove();
-                clearAethermoorQueuedInn();
-                aethermoorLastCombatLog = '';
-                aethermoorLastCombatLogKey = null;
-                combatSelections.target = null;
-                aethermoorActiveTab = 'world';
-
-                if (aethermoorPanelOpen) {
-                    renderAethermoorTab('world');
-                }
-
-                panel.remove();
-                toastr.success(
-                    'This chat’s campaign reset to its level-1 start. ' +
-                    'Earlier chat messages were not deleted.',
-                    'Aethermoor'
-                );
-            } catch (error) {
-                resetCampaign.disabled = false;
-                reportAethermoorError(
-                    error,
-                    'Campaign reset failed'
-                );
-            }
-        }
-    );
-
-    controls.append(
-        toggle,
-        refreshButton,
-        clear,
-        createTestRumor,
-        resetCampaign
-    );
-
-    body.append(
-        status,
-        controls,
-        output
-    );
-    panel.append(header, body);
     document.body.appendChild(panel);
-
     attachAethermoorWindowGeometry(panel, header, 'aethermoorDebugWindowGeometry');
     refresh();
 }

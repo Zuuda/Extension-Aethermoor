@@ -19932,31 +19932,18 @@ async function renderQuestTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    function makeQuestDrawer(summaryText, bodyText, {
-        isMsq = false,
-        isHistory = false,
-        open = true
-    } = {}) {
-        const drawer = document.createElement('details');
-        drawer.className = 'aethermoor-quest-drawer';
-        drawer.open = open;
-        if (isMsq) drawer.dataset.msq = 'true';
-        if (isHistory) drawer.dataset.history = 'true';
-
-        const summary = document.createElement('summary');
-        summary.textContent = summaryText;
-
-        const body = document.createElement('div');
-        body.className = 'aethermoor-quest-drawer-body';
-
-        if (bodyText) {
-            const text = document.createElement('div');
-            text.className = 'aethermoor-ui-text';
-            text.textContent = bodyText;
-            body.appendChild(text);
-        }
-
-        drawer.append(summary, body);
+    function makeQuestDrawer(summaryText, bodyText, { isMsq = false, isHistory = false, open = true } = {}) {
+        const body = el('div', { className: 'aethermoor-quest-drawer-body' },
+            bodyText ? el('div', { className: 'aethermoor-ui-text', text: bodyText }) : null
+        );
+        const drawer = el('details', {
+            className: 'aethermoor-quest-drawer',
+            open,
+            dataset: {
+                ...(isMsq ? { msq: 'true' } : {}),
+                ...(isHistory ? { history: 'true' } : {})
+            }
+        }, el('summary', { text: summaryText }), body);
         return { drawer, body };
     }
 
@@ -20189,21 +20176,16 @@ async function renderQuestTab(host) {
             destinationId &&
             destinationId !== state.currentLocationId
         ) {
-            const journey =
-                state.currentJourney?.destinationId === destinationId
-                    ? state.currentJourney
-                    : null;
+            const journey = state.currentJourney?.destinationId === destinationId
+                ? state.currentJourney
+                : null;
 
             if (journey) {
-                const progress = document.createElement('div');
-                progress.className = 'aethermoor-ui-text';
-                progress.textContent =
-                    `Journey: ${journey.completedSegments}/` +
-                    `${journey.totalSegments} segments` +
-                    (journey.status === 'paused'
-                        ? ' · interrupted'
-                        : '');
-                body.appendChild(progress);
+                body.appendChild(el('div', {
+                    className: 'aethermoor-ui-text',
+                    text: `Journey: ${journey.completedSegments}/${journey.totalSegments} segments` +
+                        (journey.status === 'paused' ? ' · interrupted' : '')
+                }));
             }
 
             if (journey?.status === 'paused' && hasLiveEncounter) {
@@ -20405,22 +20387,12 @@ function queueAethermoorInnOrder(choices, label) {
 }
 
 function updateAethermoorQueuedMoveBar() {
-    const bar = aethermoorPanelElement?.querySelector(
-        '.aethermoor-queued-move'
-    );
+    const bar = aethermoorPanelElement?.querySelector('.aethermoor-queued-move');
     if (!bar) return;
 
     const currentMetadata = getContext().chatMetadata;
-    const activeMove =
-        aethermoorQueuedMove &&
-        aethermoorQueuedMove.metadata === currentMetadata
-            ? aethermoorQueuedMove
-            : null;
-    const activeInn =
-        aethermoorQueuedInn &&
-        aethermoorQueuedInn.metadata === currentMetadata
-            ? aethermoorQueuedInn
-            : null;
+    const activeMove = aethermoorQueuedMove?.metadata === currentMetadata ? aethermoorQueuedMove : null;
+    const activeInn = aethermoorQueuedInn?.metadata === currentMetadata ? aethermoorQueuedInn : null;
 
     if (!activeMove && !activeInn) {
         bar.hidden = true;
@@ -20428,43 +20400,25 @@ function updateAethermoorQueuedMoveBar() {
         return;
     }
 
-    function makeQueuedRow(label, onCancel) {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
-        row.style.justifyContent = 'space-between';
-        row.style.gap = '8px';
-        row.style.width = '100%';
+    const makeQueuedRow = (label, onClick) => el('div', {
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', width: '100%' }
+    },
+        el('span', { text: `Queued: ${label}` }),
+        el('button', { type: 'button', className: 'aethermoor-queued-move-cancel', text: 'Cancel', onClick })
+    );
 
-        const text = document.createElement('span');
-        text.textContent = `Queued: ${label}`;
-
-        const cancel = document.createElement('button');
-        cancel.type = 'button';
-        cancel.className = 'aethermoor-queued-move-cancel';
-        cancel.textContent = 'Cancel';
-        cancel.addEventListener('click', onCancel);
-
-        row.append(text, cancel);
-        return row;
-    }
-
-    const rows = [];
-    if (activeInn) {
-        rows.push(makeQueuedRow(activeInn.label, () => {
+    const rows = [
+        activeInn && makeQueuedRow(activeInn.label, () => {
             clearAethermoorQueuedInn();
             toastr.info('Queued inn services cancelled.', 'Aethermoor');
-        }));
-    }
-    if (activeMove) {
-        rows.push(makeQueuedRow(activeMove.label, () => {
+        }),
+        activeMove && makeQueuedRow(activeMove.label, () => {
             clearAethermoorQueuedMove();
             toastr.info('Queued movement cancelled.', 'Aethermoor');
-        }));
-    }
+        })
+    ].filter(Boolean);
 
-    bar.style.flexDirection = 'column';
-    bar.style.alignItems = 'stretch';
+    Object.assign(bar.style, { flexDirection: 'column', alignItems: 'stretch' });
     bar.replaceChildren(...rows);
     bar.hidden = false;
 }
@@ -20508,167 +20462,83 @@ function renderCrewKnowledge(state) {
      * hidden quest discoveries, or private social seeds for this view.
      * Rendering must not create, normalize, or save knowledge records.
      */
-    const entries = Object.values(state.discoveries || {})
-        .filter(entry =>
-            entry &&
-            typeof entry.id === 'string' &&
-            typeof entry.summary === 'string'
-        );
-
-    /*
-     * Knowledge can grow throughout the campaign. Native details elements
-     * keep the World view compact without changing saved knowledge or
-     * introducing mechanics operations when a group is opened.
-     */
-    const section = document.createElement('details');
-    section.className = 'aethermoor-knowledge';
-
-    const heading = document.createElement('summary');
-    heading.className = 'aethermoor-ui-heading';
-    heading.textContent = `CREW KNOWLEDGE · ${entries.length}`;
-    section.appendChild(heading);
+    const entries = Object.values(state.discoveries || {}).filter(
+        entry => entry && typeof entry.id === 'string' && typeof entry.summary === 'string'
+    );
 
     const groups = {};
-
-    for (const [key, label] of [
-        ['unverified', 'Unverified'],
-        ['established', 'Established']
-    ]) {
-        const count = entries.filter(entry =>
-            (entry.certainty === 'engine_established'
-                ? 'established'
-                : 'unverified') === key
-        ).length;
-
-        const group = document.createElement('details');
-        group.className = 'aethermoor-knowledge-group';
-
-        const summary = document.createElement('summary');
-        summary.textContent = `${label} · ${count}`;
-        group.appendChild(summary);
-
-        if (count === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'aethermoor-ui-text';
-            empty.textContent = 'No records yet.';
-            group.appendChild(empty);
-        }
-
-        groups[key] = group;
-        section.appendChild(group);
-    }
-
+    const section = el('details', { className: 'aethermoor-knowledge' },
+        el('summary', { className: 'aethermoor-ui-heading', text: `CREW KNOWLEDGE · ${entries.length}` }),
+        [['unverified', 'Unverified'], ['established', 'Established']].map(([key, label]) => {
+            const count = entries.filter(
+                entry => (entry.certainty === 'engine_established' ? 'established' : 'unverified') === key
+            ).length;
+            const group = el('details', { className: 'aethermoor-knowledge-group' },
+                el('summary', { text: `${label} · ${count}` }),
+                count === 0 ? el('div', { className: 'aethermoor-ui-text', text: 'No records yet.' }) : null
+            );
+            groups[key] = group;
+            return group;
+        })
+    );
 
     function locationLabel(locationId) {
         if (!locationId) return 'Location not recorded';
-
         const place = state.places?.[locationId];
         if (place?.label) return place.label;
-
-        const settlement = Object.values(
-            state.world?.settlements || {}
-        ).find(entry => entry.locationId === locationId);
-
+        const settlement = Object.values(state.world?.settlements || {}).find(e => e.locationId === locationId);
         return settlement?.label || locationId;
     }
 
     const rumorSummaries = {
-        travelogue_flub_benign_oddity:
-            'This rumor concluded as a mistaken claim or benign oddity.',
-        already_cleared_by_other_immortals:
-            'Others had already cleared the subject of this rumor.',
-        genuine_unclaimed_quest_or_dungeon_hook:
-            'Following this rumor revealed a genuine opportunity.'
+        travelogue_flub_benign_oddity: 'This rumor concluded as a mistaken claim or benign oddity.',
+        already_cleared_by_other_immortals: 'Others had already cleared the subject of this rumor.',
+        genuine_unclaimed_quest_or_dungeon_hook: 'Following this rumor revealed a genuine opportunity.'
     };
+    const typeLabels = { testimony: 'Testimony', observation: 'Observation', confirmed_fact: 'Confirmed fact' };
+    const certaintyLabels = { unverified_claim: 'Unverified claim', engine_established: 'Established result' };
 
     for (const entry of entries) {
         const sourceId = entry.source?.id;
         const sourceLead = state.leads?.[sourceId];
-        const sourceQuest =
-            entry.source?.type === 'quest'
-                ? Object.values(state.quests || {})
-                    .flatMap(bucket =>
-                        Array.isArray(bucket) ? bucket : []
-                    )
-                    .find(quest => quest?.id === sourceId)
-                : null;
-
-        const testRecord =
-            sourceLead?.testOnly === true ||
+        const sourceQuest = entry.source?.type === 'quest'
+            ? Object.values(state.quests || {}).flatMap(b => Array.isArray(b) ? b : []).find(q => q?.id === sourceId)
+            : null;
+        const testRecord = sourceLead?.testOnly === true ||
             entry.source?.type === 'debug_rumor_fixture' ||
-            state.places?.[
-                entry.learnedAtLocationId
-            ]?.testOnly === true;
+            state.places?.[entry.learnedAtLocationId]?.testOnly === true;
 
-        const typeLabel = {
-            testimony: 'Testimony',
-            observation: 'Observation',
-            confirmed_fact: 'Confirmed fact'
-        }[entry.knowledgeType] || 'Recorded knowledge';
-
-        const certaintyLabel = {
-            unverified_claim: 'Unverified claim',
-            engine_established: 'Established result'
-        }[entry.certainty] || 'Certainty not classified';
-
-        const finding =
-            sourceLead?.arrivalResolution?.finding ||
-            sourceLead?.finding;
-
-        const summary =
-            entry.kind === 'rumor_resolution' &&
-            rumorSummaries[finding]
-                ? rumorSummaries[finding]
-                : entry.summary;
-
-        const sourceLabel =
-            entry.source?.type === 'debug_rumor_fixture'
-                ? 'Debug rumor fixture'
-                : entry.source?.type === 'traveler'
-                    ? 'Traveler'
-                    : sourceQuest?.title ||
-                      sourceLead?.label ||
-                      sourceLead?.claim ||
-                      sourceId ||
-                      'Source not recorded';
+        const finding = sourceLead?.arrivalResolution?.finding || sourceLead?.finding;
+        const summary = entry.kind === 'rumor_resolution' && rumorSummaries[finding]
+            ? rumorSummaries[finding]
+            : entry.summary;
+        const sourceLabel = entry.source?.type === 'debug_rumor_fixture'
+            ? 'Debug rumor fixture'
+            : entry.source?.type === 'traveler'
+                ? 'Traveler'
+                : sourceQuest?.title || sourceLead?.label || sourceLead?.claim || sourceId || 'Source not recorded';
 
         const lines = [
             summary,
             '',
-            certaintyLabel,
+            certaintyLabels[entry.certainty] || 'Certainty not classified',
             `Source: ${sourceLabel}`,
-            `Learned at: ${locationLabel(
-                entry.learnedAtLocationId
-            )}` +
-                (
-                    Number.isInteger(entry.learnedAtZone)
-                        ? ` · ${zoneDisplayName(state, entry.learnedAtZone)} (z${entry.learnedAtZone})`
-                        : ''
-                )
+            `Learned at: ${locationLabel(entry.learnedAtLocationId)}` +
+                (Number.isInteger(entry.learnedAtZone)
+                    ? ` · ${zoneDisplayName(state, entry.learnedAtZone)} (z${entry.learnedAtZone})`
+                    : ''),
+            ...(entry.knowledgeType === 'testimony'
+                ? ['This records what was said; the claim itself is not confirmed.']
+                : [])
         ];
 
-        if (entry.knowledgeType === 'testimony') {
-            lines.push(
-                'This records what was said; the claim itself is not confirmed.'
-            );
-        }
-
         const card = makeAethermoorSection(
-            `${testRecord ? 'TEST · ' : ''}${typeLabel}`,
+            `${testRecord ? 'TEST · ' : ''}${typeLabels[entry.knowledgeType] || 'Recorded knowledge'}`,
             lines.join('\n'),
             'world'
         );
-
-        // Stable references remain inspectable without filling the card
-        // with implementation identifiers.
-        card.title =
-            `Knowledge: ${entry.id}\nSource: ${sourceId || 'unknown'}`;
-
-        const groupKey = entry.certainty === 'engine_established'
-            ? 'established'
-            : 'unverified';
-
-        groups[groupKey].appendChild(card);
+        card.title = `Knowledge: ${entry.id}\nSource: ${sourceId || 'unknown'}`;
+        groups[entry.certainty === 'engine_established' ? 'established' : 'unverified'].appendChild(card);
     }
 
     return section;
@@ -21612,48 +21482,33 @@ async function openAethermoorInnWindow() {
  */
 async function renderInventoryTab(host) {
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
-            makeAethermoorSection(
-                'INVENTORY',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
-                'world'
-            )
-        );
+        host.replaceChildren(makeAethermoorSection(
+            'INVENTORY',
+            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
+                ? 'No campaign yet. Open World to start one.'
+                : error instanceof Error ? error.message : String(error),
+            'world'
+        ));
         return;
     }
 
     const state = snapshot.state;
     const inventory = state.inventory || {};
     const gear = state.crew?.gear || {};
+    const rarityClass = item => `aethermoor-rarity-${String(item?.rarity || 'common').toLowerCase()}`;
 
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    const purseSection = makeAethermoorSection(
-        'PURSE',
-        'Add or deduct silver from fictional sales, meals, tips, or sundries.',
-        'world'
-    );
-
-    const purseAmount = document.createElement('input');
-    purseAmount.type = 'number';
-    purseAmount.min = '1';
-    purseAmount.placeholder = 'Silver amount';
-    purseAmount.className = 'text_pole';
-
-    const purseButtons = document.createElement('div');
-    purseButtons.style.display = 'grid';
-    purseButtons.style.gridTemplateColumns = '1fr 1fr';
-    purseButtons.style.gap = '6px';
+    const purseAmount = el('input', {
+        type: 'number',
+        min: '1',
+        placeholder: 'Silver amount',
+        className: 'text_pole'
+    });
 
     async function adjustPurse(action, button) {
         const amount = Number(purseAmount.value);
@@ -21661,157 +21516,96 @@ async function renderInventoryTab(host) {
             toastr.warning('Enter a whole silver amount of at least 1.', 'Aethermoor');
             return;
         }
-
         button.disabled = true;
-
         try {
             await runAethermoorPanelCase(
                 host,
                 'inventory',
-                {
-                    name: `manual_purse_${action}`,
-                    kind: 'currency',
-                    action,
-                    amount
-                },
-                action === 'spend'
-                    ? `Deducted ${amount}s.`
-                    : `Added ${amount}s.`
+                { name: `manual_purse_${action}`, kind: 'currency', action, amount },
+                action === 'spend' ? `Deducted ${amount}s.` : `Added ${amount}s.`
             );
         } finally {
             button.disabled = false;
         }
     }
 
-    const spendButton = makeAethermoorAction(
-        '− Spend',
-        'world',
-        () => adjustPurse('spend', spendButton)
-    );
+    const spendButton = makeAethermoorAction('− Spend', 'world', () => adjustPurse('spend', spendButton));
     spendButton.style.textAlign = 'center';
-
-    const earnButton = makeAethermoorAction(
-        '+ Earn',
-        'world',
-        () => adjustPurse('earn', earnButton)
-    );
+    const earnButton = makeAethermoorAction('+ Earn', 'world', () => adjustPurse('earn', earnButton));
     earnButton.style.textAlign = 'center';
 
-    purseButtons.append(spendButton, earnButton);
-    purseSection.append(purseAmount, purseButtons);
+    const purseSection = makeAethermoorSection(
+        'PURSE',
+        'Add or deduct silver from fictional sales, meals, tips, or sundries.',
+        'world'
+    );
+    purseSection.append(
+        purseAmount,
+        el('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } }, spendButton, earnButton)
+    );
     host.appendChild(purseSection);
+
     const potionSection = makeAethermoorSection(
         'POTIONS & TONICS',
         'Saved consumables available outside combat.',
         'world'
     );
-
-    const consumableEntries = (inventory.consumables || [])
-        .filter(item => item?.quantity > 0);
+    const consumableEntries = (inventory.consumables || []).filter(item => item?.quantity > 0);
 
     if (consumableEntries.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'aethermoor-ui-text';
-        empty.textContent = 'None in shared stock.';
-        potionSection.appendChild(empty);
+        potionSection.appendChild(el('div', { className: 'aethermoor-ui-text', text: 'None in shared stock.' }));
     }
+
+    const inActiveCombat = state.encounter?.status === 'active';
+    const crewStats = consumableEntries.length > 0 ? derived(state.crew) : null;
 
     for (const item of consumableEntries) {
         const definition = consumableDefinition(item.id);
-
-        const row = document.createElement('div');
-        row.className = 'aethermoor-inventory-item';
-
-        const main = document.createElement('div');
-        main.className = 'aethermoor-inventory-item-main';
-
-        const name = document.createElement('div');
-        name.className =
-            `aethermoor-vendor-name ${rarityClass(item)}`;
-        name.textContent =
-            `${consumableDisplayName(item)} ×${item.quantity}`;
-
-
-        main.appendChild(name);
-
-        if (definition?.type === 'tonic') {
-            const detail = document.createElement('div');
-            detail.className = 'aethermoor-vendor-detail';
-            detail.textContent = 'Cleansing tonic · combat use';
-            main.appendChild(detail);
-        }
-
-        const actions = document.createElement('div');
-        actions.className = 'aethermoor-inventory-item-actions';
-        const inActiveCombat = state.encounter?.status === 'active';
-        const crewStats = derived(state.crew);
-
-        if (definition?.type === 'potion') {
-            for (const [recipient, label] of [
-                ['qtik', "Use on Q'tik"],
-                ['tansy', 'Use on Tansy']
-            ]) {
+        const actionNodes = definition?.type === 'potion'
+            ? [['qtik', "Use on Q'tik"], ['tansy', 'Use on Tansy']].map(([recipient, label]) => {
                 const currentHp = state.crew?.[recipient]?.hp ?? 0;
-                const maxHp = recipient === 'qtik'
-                    ? crewStats.qtikMaxHp
-                    : crewStats.tansyMaxHp;
+                const maxHp = recipient === 'qtik' ? crewStats.qtikMaxHp : crewStats.tansyMaxHp;
                 const fullHp = currentHp >= maxHp;
-
-                const use = document.createElement('button');
-                use.type = 'button';
-                use.textContent = label;
-                use.disabled = inActiveCombat || fullHp;
-                if (inActiveCombat) {
-                    use.title = 'Use potions from the Combat tab during an active fight.';
-                } else if (fullHp) {
-                    use.title = `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP.`;
-                }
-
-                use.addEventListener('click', async () => {
-                    use.disabled = true;
-
-                    try {
-                        await runAethermoorPanelCase(
-                            host,
-                            'inventory',
-                            {
-                                name:
-                                    `use_${item.id}_${recipient}`,
-                                kind: 'consumable',
-                                action: 'use',
-                                item: item.id,
-                                quantity: 1,
-                                recipient
-                            },
-                            `${consumableDisplayName(item)} used on ${
-                                recipient === 'qtik'
-                                    ? "Q'tik"
-                                    : 'Tansy'
-                            }.`
-                        );
-                    } finally {
-                        use.disabled = false;
+                const use = el('button', {
+                    type: 'button',
+                    text: label,
+                    disabled: inActiveCombat || fullHp,
+                    title: inActiveCombat
+                        ? 'Use potions from the Combat tab during an active fight.'
+                        : fullHp
+                            ? `${recipient === 'qtik' ? "Q'tik" : 'Tansy'} is already at full HP.`
+                            : null,
+                    onClick: async () => {
+                        use.disabled = true;
+                        try {
+                            await runAethermoorPanelCase(
+                                host,
+                                'inventory',
+                                { name: `use_${item.id}_${recipient}`, kind: 'consumable', action: 'use', item: item.id, quantity: 1, recipient },
+                                `${consumableDisplayName(item)} used on ${recipient === 'qtik' ? "Q'tik" : 'Tansy'}.`
+                            );
+                        } finally {
+                            use.disabled = false;
+                        }
                     }
                 });
+                return use;
+            })
+            : [el('div', { className: 'aethermoor-inventory-neutral', text: 'No outside-combat use yet.' })];
 
-
-                actions.appendChild(use);
-            }
-        } else {
-            const note = document.createElement('div');
-            note.className = 'aethermoor-inventory-neutral';
-            note.textContent = 'No outside-combat use yet.';
-            actions.appendChild(note);
-        }
-
-        row.append(main, actions);
-        potionSection.appendChild(row);
+        potionSection.appendChild(el('div', { className: 'aethermoor-inventory-item' },
+            el('div', { className: 'aethermoor-inventory-item-main' },
+                el('div', { className: `aethermoor-vendor-name ${rarityClass(item)}`, text: `${consumableDisplayName(item)} ×${item.quantity}` }),
+                definition?.type === 'tonic'
+                    ? el('div', { className: 'aethermoor-vendor-detail', text: 'Cleansing tonic · combat use' })
+                    : null
+            ),
+            el('div', { className: 'aethermoor-inventory-item-actions' }, actionNodes)
+        ));
     }
-
     host.appendChild(potionSection);
 
     const curios = inventory.curios || [];
-
     if (curios.length > 0) {
         const curioSection = makeAethermoorSection(
             `VALUABLES & CURIOS · ${curios.length}`,
@@ -21820,252 +21614,114 @@ async function renderInventoryTab(host) {
         );
 
         for (const curio of curios) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
-
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
-
-            const name = document.createElement('div');
-            name.className =
-                `aethermoor-vendor-name aethermoor-rarity-${
-                    String(curio.rarity || 'common').toLowerCase()
-                }`;
-            name.textContent = curio.name || 'Unnamed curio';
-
-            const detail = document.createElement('div');
-            detail.className = 'aethermoor-vendor-detail';
-            detail.textContent =
-                `${zoneDisplayName(state, curio.zone)} (z${curio.zone}) · ` +
-                `Value ${curio.value}s`;
-
-            main.append(name, detail);
-
-            const actions = document.createElement('div');
-            actions.className = 'aethermoor-inventory-item-actions';
-
-            const sell = document.createElement('button');
-            sell.type = 'button';
-            sell.textContent = `Sell (+${curio.value}s)`;
-            sell.addEventListener('click', async () => {
-                sell.disabled = true;
-
-                try {
-                    await runAethermoorPanelCase(
-                        host,
-                        'inventory',
-                        {
-                            name: `sell_curio_${curio.id}`,
-                            kind: 'curio',
-                            action: 'sell',
-                            curioId: curio.id
-                        },
-                        `Sold ${curio.name} for +${curio.value}s.`
-                    );
-                } finally {
-                    sell.disabled = false;
+            const sell = el('button', {
+                type: 'button',
+                text: `Sell (+${curio.value}s)`,
+                onClick: async () => {
+                    sell.disabled = true;
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'inventory',
+                            { name: `sell_curio_${curio.id}`, kind: 'curio', action: 'sell', curioId: curio.id },
+                            `Sold ${curio.name} for +${curio.value}s.`
+                        );
+                    } finally {
+                        sell.disabled = false;
+                    }
+                }
+            });
+            const remove = el('button', {
+                type: 'button',
+                text: 'Remove',
+                onClick: async () => {
+                    remove.disabled = true;
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'inventory',
+                            { name: `remove_curio_${curio.id}`, kind: 'curio', action: 'remove', curioId: curio.id },
+                            `Removed ${curio.name}.`
+                        );
+                    } finally {
+                        remove.disabled = false;
+                    }
                 }
             });
 
-            const remove = document.createElement('button');
-            remove.type = 'button';
-            remove.textContent = 'Remove';
-            remove.addEventListener('click', async () => {
-                remove.disabled = true;
-
-                try {
-                    await runAethermoorPanelCase(
-                        host,
-                        'inventory',
-                        {
-                            name: `remove_curio_${curio.id}`,
-                            kind: 'curio',
-                            action: 'remove',
-                            curioId: curio.id
-                        },
-                        `Removed ${curio.name}.`
-                    );
-                } finally {
-                    remove.disabled = false;
-                }
-            });
-
-            actions.append(sell, remove);
-            row.append(main, actions);
-            curioSection.appendChild(row);
+            curioSection.appendChild(el('div', { className: 'aethermoor-inventory-item' },
+                el('div', { className: 'aethermoor-inventory-item-main' },
+                    el('div', { className: `aethermoor-vendor-name ${rarityClass(curio)}`, text: curio.name || 'Unnamed curio' }),
+                    el('div', { className: 'aethermoor-vendor-detail', text: `${zoneDisplayName(state, curio.zone)} (z${curio.zone}) · Value ${curio.value}s` })
+                ),
+                el('div', { className: 'aethermoor-inventory-item-actions' }, sell, remove)
+            ));
         }
-
         host.appendChild(curioSection);
     }
 
     const bag = inventory.bagReserves || [];
-
     const bagSection = makeAethermoorSection(
         `BAG RESERVES · ${bag.length}`,
-        bag.length
-            ? 'Unbound gear available to equip or trade.'
-            : 'No gear in Bag Reserves.',
+        bag.length ? 'Unbound gear available to equip or trade.' : 'No gear in Bag Reserves.',
         'world'
     );
 
-    const currentGear = gear;
-
-    function rarityClass(item) {
-        return `aethermoor-rarity-${
-            String(item.rarity || 'common').toLowerCase()
-        }`;
-    }
-
     function itemComparison(item) {
-        if (
-            !item.owner ||
-            !item.slot ||
-            !['tansy', 'qtik'].includes(item.owner)
-        ) {
-            return null;
-        }
+        if (!item.owner || !item.slot || !['tansy', 'qtik'].includes(item.owner)) return null;
+        const candidateBonus = gearBonus(item.owner, item.slot, { stat: item.rawStat, variant: item.variant });
+        const wornBonus = gearBonus(item.owner, item.slot, gear[item.owner]?.[item.slot] || null);
+        const diffs = [['atk', 'ATK'], ['def', 'DEF'], ['hp', 'HP'], ['luk', 'LUK']]
+            .map(([key, label]) => ({ diff: Number(candidateBonus[key] || 0) - Number(wornBonus[key] || 0), label }))
+            .filter(entry => entry.diff !== 0);
 
-        const worn =
-            currentGear[item.owner]?.[item.slot] || null;
-
-        const candidateBonus = gearBonus(
-            item.owner,
-            item.slot,
-            {
-                stat: item.rawStat,
-                variant: item.variant
-            }
-        );
-
-        const wornBonus = gearBonus(
-            item.owner,
-            item.slot,
-            worn
-        );
-
-        const differences = [];
-
-        for (const [key, label] of [
-            ['atk', 'ATK'],
-            ['def', 'DEF'],
-            ['hp', 'HP'],
-            ['luk', 'LUK']
-        ]) {
-            const difference =
-                Number(candidateBonus[key] || 0) -
-                Number(wornBonus[key] || 0);
-
-            if (difference !== 0) {
-                differences.push({
-                    difference,
-                    label
-                });
-            }
-        }
-
-        if (differences.length === 0) {
-            return {
-                text: 'Equal to worn gear',
-                className: 'aethermoor-inventory-neutral'
-            };
-        }
-
+        if (diffs.length === 0) return { text: 'Equal to worn gear', className: 'aethermoor-inventory-neutral' };
         return {
-            text: differences.map(entry =>
-                `${entry.difference > 0 ? '+' : ''}` +
-                    `${entry.difference} ${entry.label}`
-            ).join(' · '),
-            className: differences.every(
-                entry => entry.difference >= 0
-            )
+            text: diffs.map(e => `${e.diff > 0 ? '+' : ''}${e.diff} ${e.label}`).join(' · '),
+            className: diffs.every(e => e.diff >= 0)
                 ? 'aethermoor-inventory-gain'
-                : differences.every(
-                    entry => entry.difference <= 0
-                )
+                : diffs.every(e => e.diff <= 0)
                     ? 'aethermoor-inventory-loss'
                     : 'aethermoor-inventory-neutral'
         };
     }
 
     for (const [index, item] of bag.entries()) {
-        const row = document.createElement('div');
-        row.className = 'aethermoor-inventory-item';
-
-        const main = document.createElement('div');
-        main.className = 'aethermoor-inventory-item-main';
-
-        const name = document.createElement('div');
-        name.className =
-            `aethermoor-vendor-name ${rarityClass(item)}`;
-        name.textContent = formatGearLabel(item);
-
-        const detail = document.createElement('div');
-        detail.className = 'aethermoor-vendor-detail';
-        detail.textContent = [
-            gearSlotLabel(item),
-            item.bound ? 'Bound' : 'Unbound'
-        ].filter(Boolean).join(' · ');
-
-        main.append(name, detail);
-
         const comparison = itemComparison(item);
-
-        if (comparison) {
-            const comparisonLine = document.createElement('div');
-            comparisonLine.className = comparison.className;
-            comparisonLine.textContent = comparison.text;
-            main.appendChild(comparisonLine);
-        }
-
-        const actions = document.createElement('div');
-        actions.className = 'aethermoor-inventory-item-actions';
-
-        if (
-            item.owner &&
-            item.slot &&
-            item.classRestricted !== true
-        ) {
-            const equip = document.createElement('button');
-            equip.type = 'button';
-            equip.textContent = 'Equip';
-
-            equip.addEventListener('click', async () => {
-                equip.disabled = true;
-
-                try {
-                    await runAethermoorPanelCase(
-                        host,
-                        'inventory',
-                        {
-                            name: `equip_inventory_item_${index}`,
-                            kind: 'gear',
-                            action: 'equip',
-                            itemIndex: index
-                        },
-                        'Gear equipped.'
-                    );
-                } finally {
-                    equip.disabled = false;
+        let equipBtn = null;
+        if (item.owner && item.slot && item.classRestricted !== true) {
+            equipBtn = el('button', {
+                type: 'button',
+                text: 'Equip',
+                onClick: async () => {
+                    equipBtn.disabled = true;
+                    try {
+                        await runAethermoorPanelCase(
+                            host,
+                            'inventory',
+                            { name: `equip_inventory_item_${index}`, kind: 'gear', action: 'equip', itemIndex: index },
+                            'Gear equipped.'
+                        );
+                    } finally {
+                        equipBtn.disabled = false;
+                    }
                 }
             });
-
-            actions.appendChild(equip);
         }
 
-        row.append(main, actions);
-        bagSection.appendChild(row);
+        bagSection.appendChild(el('div', { className: 'aethermoor-inventory-item' },
+            el('div', { className: 'aethermoor-inventory-item-main' },
+                el('div', { className: `aethermoor-vendor-name ${rarityClass(item)}`, text: formatGearLabel(item) }),
+                el('div', { className: 'aethermoor-vendor-detail', text: [gearSlotLabel(item), item.bound ? 'Bound' : 'Unbound'].filter(Boolean).join(' · ') }),
+                comparison ? el('div', { className: comparison.className, text: comparison.text }) : null
+            ),
+            el('div', { className: 'aethermoor-inventory-item-actions' }, equipBtn)
+        ));
     }
-
     host.appendChild(bagSection);
 
-    const tansyFilled = TANSY_SLOTS.filter(slot => {
-        const item = gear.tansy?.[slot];
-        return item && Number(item.stat ?? item.rawStat) > 0;
-    }).length;
-    const qtikFilled = QTIK_SLOTS.filter(slot => {
-        const item = gear.qtik?.[slot];
-        return item && Number(item.stat ?? item.rawStat) > 0;
-    }).length;
+    const tansyFilled = TANSY_SLOTS.filter(s => Number(gear.tansy?.[s]?.stat ?? gear.tansy?.[s]?.rawStat) > 0).length;
+    const qtikFilled = QTIK_SLOTS.filter(s => Number(gear.qtik?.[s]?.stat ?? gear.qtik?.[s]?.rawStat) > 0).length;
 
     const sheetSection = makeAethermoorSection(
         'CHARACTER SHEET & PAPER DOLL',
@@ -22074,23 +21730,13 @@ async function renderInventoryTab(host) {
             'Inspect worn gear slots, empty slots, and full stat breakdowns.',
         'world'
     );
-
-    const openSheetBtn = makeAethermoorAction(
-        'Open Character Sheet & Paper Doll',
-        'world',
-        async () => {
-            try {
-                await openAethermoorCharacterSheetWindow();
-            } catch (error) {
-                toastr.error(
-                    error instanceof Error ? error.message : String(error),
-                    'Aethermoor'
-                );
-            }
+    sheetSection.appendChild(makeAethermoorAction('Open Character Sheet & Paper Doll', 'world', async () => {
+        try {
+            await openAethermoorCharacterSheetWindow();
+        } catch (error) {
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
         }
-    );
-
-    sheetSection.appendChild(openSheetBtn);
+    }));
     host.appendChild(sheetSection);
 }
 

@@ -15345,975 +15345,149 @@ function openAethermoorTab(tab) {
 let aethermoorPanelElement = null;
 let aethermoorPanelOpen = false;
 let aethermoorActiveTab = 'combat';
-
 function addAethermoorPanelStyles() {
     if (document.getElementById('aethermoor_panel_styles')) return;
-
     const style = document.createElement('style');
     style.id = 'aethermoor_panel_styles';
-
     style.textContent = `
-        .aethermoor-panel {
-            position: fixed;
-            left: auto;
-            top: auto;
-            right: 16px;
-            bottom: 82px;
-            z-index: 10001;
-            width: 520px;
-            height: 560px;
-            min-width: 320px;
-            min-height: 240px;
-            max-width: calc(100vw - 24px);
-            max-height: calc(100vh - 24px);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            resize: both;
-            color: #d0d7de;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-radius: 3px;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
-        }
-
-        .aethermoor-panel[hidden] {
-            display: none;
-        }
-
-        .aethermoor-panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 9px 12px;
-            border-bottom: 1px solid #1f2730;
-            background: #101419;
-            cursor: move;
-            user-select: none;
-            touch-action: none;
-        }
-
-        .aethermoor-panel-title {
-            color: #4da6ff;
-            font-family: Consolas, monospace;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-
-        .aethermoor-status-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px 12px;
-            padding: 7px 12px;
-            color: #d0d7de;
-            background: #101419;
-            border-bottom: 1px solid #1f2730;
-            font: 11px/1.4 Consolas, monospace;
-        }
-
-        .aethermoor-status-strip[hidden] {
-            display: none;
-        }
-
-        .aethermoor-status-strip span {
-            white-space: nowrap;
-        }
-
-        .aethermoor-status-strip [data-stat="level"] {
-            color: #c084fc;
-        }
-
-        .aethermoor-status-strip [data-stat="xp"] {
-            color: #4ade80;
-        }
-
-        .aethermoor-status-strip [data-stat="qtik"] {
-            color: #38bdf8;
-        }
-
-        .aethermoor-status-strip [data-stat="tansy"] {
-            color: #f9a8d4;
-        }
-
-        .aethermoor-status-strip [data-stat="silver"] {
-            color: #ffd166;
-        }
-
-        .aethermoor-status-copy {
-            margin-left: auto;
-            padding: 1px 7px;
-            color: #9caab8;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            border-radius: 2px;
-            cursor: pointer;
-            font: inherit;
-        }
-
-        .aethermoor-status-copy:hover,
-        .aethermoor-status-copy:focus-visible {
-            color: #ffffff;
-            border-color: #4da6ff;
-        }
-
-        .aethermoor-queued-move {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 6px 12px;
-            color: #ffd166;
-            background: #181d23;
-            border-bottom: 1px solid #2b3542;
-            border-left: 3px solid #ffd166;
-            font: 11px/1.4 Consolas, monospace;
-        }
-
-        .aethermoor-queued-move[hidden] {
-            display: none;
-        }
-
-        .aethermoor-queued-move-cancel {
-            padding: 2px 7px;
-            color: #f87171;
-            background: #12161c;
-            border: 1px solid #f87171;
-            border-radius: 2px;
-            cursor: pointer;
-            font: inherit;
-            flex-shrink: 0;
-        }
-
-        .aethermoor-queued-move-cancel:hover,
-        .aethermoor-queued-move-cancel:focus-visible {
-            color: #ffffff;
-            background: #2b181c;
-        }
-
-        .aethermoor-panel-close {
-
-
-            min-width: 28px;
-            padding: 3px 8px;
-            color: #9caab8;
-            background: transparent;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-        }
-
-        .aethermoor-tabs {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 4px;
-            padding: 7px 8px;
-            background: #101419;
-            border-bottom: 1px solid #1f2730;
-        }
-
-        .aethermoor-tab {
-            min-width: 0;
-            padding: 6px 6px;
-            color: #9caab8;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            border-radius: 2px;
-            cursor: pointer;
-            font-size: 11px;
-            font-weight: 700;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .aethermoor-tab[data-tab="combat"].active {
-            color: #ffffff;
-            border-top: 2px solid #ef4444;
-        }
-
-        .aethermoor-tab[data-tab="quests"].active {
-            color: #ffffff;
-            border-top: 2px solid #d99b26;
-        }
-
-        .aethermoor-tab[data-tab="world"].active {
-            color: #ffffff;
-            border-top: 2px solid #4da6ff;
-        }
-
-        .aethermoor-tab[data-tab="instances"].active {
-            color: #ffffff;
-            border-top: 2px solid #c084fc;
-        }
-
-        .aethermoor-tab[data-tab="inventory"].active {
-            color: #ffffff;
-            border-top: 2px solid #4ade80;
-        }
-
-        .aethermoor-tab[data-tab="shops"].active {
-            color: #ffffff;
-            border-top: 2px solid #ffd166;
-        }
-
-        .aethermoor-tab[data-tab="achievements"].active {
-            color: #ffffff;
-            border-top: 2px solid #fbbf24;
-        }
-
-        .aethermoor-tab[data-tab="aethernet"].active {
-            color: #ffffff;
-            border-top: 2px solid #38bdf8;
-        }
-
-        .aethermoor-tab:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .aethermoor-panel-content {
-            min-height: 150px;
-            overflow: auto;
-            padding: 12px;
-        }
-
-        .aethermoor-tab-content {
-            display: grid;
-            gap: 10px;
-        }
-
-        .aethermoor-panel-card {
-            padding: 12px;
-            color: #d0d7de;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #4da6ff;
-        }
-
-        .aethermoor-panel-card[data-accent="combat"] {
-            border-left-color: #ef4444;
-        }
-
-        .aethermoor-panel-card[data-accent="quest"] {
-            border-left-color: #d99b26;
-        }
-
-        .aethermoor-contract-popup {
-            position: fixed;
-            z-index: 10003;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: min(450px, calc(100vw - 24px));
-            box-sizing: border-box;
-            padding: 12px;
-            color: #d0d7de;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #d99b26;
-            border-radius: 2px;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
-            font: 11px/1.45 'Segoe UI', Tahoma, sans-serif;
-        }
-
-        .aethermoor-contract-popup-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 10px;
-            padding-bottom: 5px;
-            margin-bottom: 8px;
-            border-bottom: 1px solid #1f2730;
-        }
-
-        .aethermoor-contract-popup-heading {
-            color: #d99b26;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-        }
-
-        .aethermoor-contract-popup-rank {
-            color: #4ade80;
-            font-weight: 700;
-        }
-
-        .aethermoor-contract-popup-title {
-            color: #ffffff;
-            font-weight: 700;
-        }
-
-        .aethermoor-contract-popup-rewards {
-            margin-top: 8px;
-        }
-
-        .aethermoor-contract-popup-salvage {
-            margin-top: 6px;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-contract-popup-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 12px;
-        }
-
-        .aethermoor-contract-popup-actions button {
-            padding: 6px 9px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-            font: inherit;
-        }
-
-        .aethermoor-contract-popup-actions button:hover,
-        .aethermoor-contract-popup-actions button:focus-visible {
-            border-color: #d99b26;
-            color: #ffffff;
-        }
-
-        .aethermoor-contract-popup-actions button:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-
-        .aethermoor-panel-card[data-accent="world"] {
-
-            border-left-color: #4da6ff;
-        }
-
-        .aethermoor-panel-card-title {
-            margin-bottom: 6px;
-            color: #ffffff;
-            font-family: Consolas, monospace;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.6px;
-        }
-
-        .aethermoor-panel-card-text {
-            color: #9caab8;
-            font-size: 12px;
-            line-height: 1.45;
-        }
-
-        .aethermoor-panel-action {
-            width: 100%;
-            padding: 8px 10px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-            text-align: left;
-        }
-
-        .aethermoor-panel-action:hover,
-        .aethermoor-panel-action:focus-visible {
-            border-color: #4da6ff;
-            color: #ffffff;
-        }
-
-        #aethermoor_main_button {
-            border-left: 2px solid #4da6ff;
-        }
-        .aethermoor-tab-view {
-            display: grid;
-            align-content: start;
-            gap: 10px;
-        }
-
-        .aethermoor-tab-view[hidden] {
-            display: none;
-        }
-
-        .aethermoor-ui-section {
-            display: grid;
-            gap: 7px;
-            padding: 10px;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #4da6ff;
-        }
-
-        .aethermoor-ui-section[data-accent="combat"] {
-            border-left-color: #ef4444;
-        }
-
-        .aethermoor-ui-section[data-accent="quest"] {
-            border-left-color: #d99b26;
-        }
-
-        .aethermoor-ui-section[data-accent="msq"] {
-            border-left-color: #c084fc;
-        }
-
-        .aethermoor-ui-section[data-accent="world"] {
-            border-left-color: #4da6ff;
-        }
-
-        .aethermoor-quest-drawer {
-            padding: 10px;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #d99b26;
-        }
-
-        .aethermoor-quest-drawer[data-msq="true"] {
-            border-left-color: #c084fc;
-            background: #161420;
-        }
-
-        .aethermoor-quest-drawer[data-history="true"] {
-            border-left-color: #6e7f91;
-        }
-
-        .aethermoor-quest-drawer > summary {
-            cursor: pointer;
-            color: #ffffff;
-            font-family: Consolas, monospace;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.6px;
-            list-style-position: outside;
-        }
-
-        .aethermoor-quest-drawer[data-msq="true"] > summary {
-            color: #c084fc;
-        }
-
-        .aethermoor-quest-drawer-body {
-            display: grid;
-            gap: 7px;
-            margin-top: 8px;
-        }
-
-        .aethermoor-ui-heading {
-            color: #ffffff;
-            font-family: Consolas, monospace;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.6px;
-        }
-
-        .aethermoor-ui-text {
-            color: #9caab8;
-            font-size: 12px;
-            line-height: 1.45;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-shop {
-            position: fixed;
-            z-index: 10002;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: min(620px, calc(100vw - 24px));
-            height: min(75vh, 720px);
-            min-width: min(320px, calc(100vw - 24px));
-            min-height: min(260px, calc(100vh - 24px));
-            max-width: calc(100vw - 24px);
-            max-height: calc(100vh - 24px);
-            resize: both;
-            overflow: auto;
-            box-sizing: border-box;
-            padding: 12px;
-            color: #d0d7de;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #4da6ff;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
-            font: 12px/1.5 Consolas, monospace;
-        }
-
-        .aethermoor-shop-header {
-            position: sticky;
-            top: -12px;
-            z-index: 2;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin: -12px -12px 0;
-            padding: 12px 12px 8px;
-            background: #12161c;
-            border-bottom: 1px solid #1f2730;
-            cursor: move;
-            user-select: none;
-            touch-action: none;
-        }
-
-        .aethermoor-shop-header-actions {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-shrink: 0;
-        }
-
-        .aethermoor-shop-confirm {
-            color: #4ade80;
-            border-color: #4ade80;
-        }
-
-        .aethermoor-shop-title {
-            color: #ffffff;
-            font-weight: 700;
-        }
-
-        .aethermoor-shop-summary {
-            margin: 8px 0;
-            color: #9caab8;
-            white-space: pre-wrap;
-        }
-
-        .aethermoor-vendor-row {
-            padding: 9px 0;
-            border-top: 1px solid #1f2730;
-        }
-
-        .aethermoor-vendor-name {
-            color: #ffffff;
-            font-weight: 700;
-        }
-
-        .aethermoor-vendor-price {
-            float: right;
-            color: #ffd166;
-            font-weight: 700;
-        }
-
-        .aethermoor-vendor-detail {
-            color: #9caab8;
-        }
-
-        .aethermoor-inventory-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 8px 0;
-            border-top: 1px solid #1f2730;
-        }
-
-        .aethermoor-inventory-item:first-child {
-            border-top: 0;
-        }
-
-        .aethermoor-inventory-item-main {
-            min-width: 0;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-inventory-item-actions {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: 5px;
-        }
-
-        .aethermoor-inventory-item-actions button {
-            padding: 4px 7px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-            font: inherit;
-            white-space: nowrap;
-        }
-
-        .aethermoor-inventory-item-actions button:hover,
-        .aethermoor-inventory-item-actions button:focus-visible {
-            border-color: #4da6ff;
-            color: #ffffff;
-        }
-
-        .aethermoor-rarity-common {
-            color: #ffffff;
-        }
-
-        .aethermoor-rarity-uncommon,
-        .aethermoor-inventory-gain {
-            color: #4ade80;
-        }
-
-        .aethermoor-rarity-rare {
-            color: #38bdf8;
-        }
-
-        .aethermoor-rarity-epic {
-            color: #c084fc;
-        }
-
-        .aethermoor-rarity-legendary {
-            color: #fbbf24;
-        }
-
-        .aethermoor-inventory-loss {
-            color: #f87171;
-        }
-
-        .aethermoor-inventory-neutral {
-            color: #9caab8;
-        }
-
-        .aethermoor-herbalist-window .aethermoor-vendor-name {
-            color: #4ade80;
-        }
-
-        .aethermoor-inn-window .aethermoor-vendor-name,
-        .aethermoor-inn-window .aethermoor-inn-price {
-            color: #ffffff;
-        }
-
-        .aethermoor-inn-price {
-            font-weight: 700;
-        }
-
-        .aethermoor-herbalist-window .aethermoor-vendor-row button,
-        .aethermoor-inn-window .aethermoor-vendor-row button {
-
-            min-width: 28px;
-            margin: 7px 6px 0 0;
-            padding: 3px 7px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-        }
-
-        .aethermoor-herbalist-window .aethermoor-vendor-row button:hover,
-        .aethermoor-inn-window .aethermoor-vendor-row button:hover {
-            border-color: #4da6ff;
-        }
-
-        .aethermoor-herbalist-window .aethermoor-vendor-row button:disabled,
-        .aethermoor-inn-window .aethermoor-vendor-row button:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .aethermoor-herbalist-window .aethermoor-vendor-row span,
-        .aethermoor-inn-window .aethermoor-vendor-row span {
-            display: inline-block;
-            min-width: 30px;
-            text-align: center;
-            color: #ffd166;
-        }
-
-        .aethermoor-inn-window .aethermoor-vendor-row
-        span.aethermoor-inn-price {
-            min-width: 0;
-            text-align: left;
-            color: #ffffff;
-        }
-
-        .aethermoor-vendor-bonus {
-
-            color: #9caab8;
-        }
-
-        .aethermoor-trade-gain {
-            color: #4ade80;
-        }
-
-        .aethermoor-trade-loss,
-        .aethermoor-vendor-skip {
-            color: #f87171;
-        }
-
-        .aethermoor-trade-even {
-            color: #9caab8;
-        }
-
-        .aethermoor-trade-columns {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-        }
-
-        .aethermoor-trade-column {
-            min-width: 0;
-            padding: 10px;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.25);
-        }
-
-        .aethermoor-trade-column > h3 {
-            margin: 0 0 8px;
-            color: #ffffff;
-            font-size: 12px;
-        }
-
-        .aethermoor-trade-option {
-            display: block;
-            width: 100%;
-            margin-top: 6px;
-            padding: 8px;
-            color: #d0d7de;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            text-align: left;
-            white-space: pre-wrap;
-            cursor: pointer;
-            font: inherit;
-        }
-
-        .aethermoor-trade-option:hover,
-        .aethermoor-trade-option:focus-visible {
-            border-color: #4da6ff;
-        }
-
-        .aethermoor-trade-option[aria-pressed="true"] {
-            border-color: #4ade80;
-            box-shadow: 0 0 0 1px #4ade80,
-                0 0 12px rgba(74, 222, 128, 0.16);
-        }
-
-        .aethermoor-trade-option:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-
-        .aethermoor-trade-ledger {
-            position: sticky;
-            bottom: -12px;
-            margin: 12px -12px -12px;
-            padding: 12px;
-            color: #ffd166;
-            background: #101419;
-            border-top: 1px solid #2b3542;
-            box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.45);
-        }
-
-        @media (max-width: 600px) {
-            .aethermoor-trade-columns {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .aethermoor-knowledge {
-
-            padding: 10px;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #4da6ff;
-        }
-
-        .aethermoor-knowledge > summary,
-        .aethermoor-knowledge-group > summary {
-            cursor: pointer;
-            padding: 4px 0;
-        }
-
-        .aethermoor-knowledge-group {
-            margin-top: 8px;
-            padding-left: 8px;
-            border-left: 1px solid #2b3542;
-        }
-
-        .aethermoor-knowledge-group > summary {
-            color: #d0d7de;
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        .aethermoor-knowledge-group > .aethermoor-ui-section,
-        .aethermoor-knowledge-group > .aethermoor-ui-text {
-            margin-top: 8px;
-        }
-
-        .aethermoor-knowledge summary:focus-visible {
-            outline: 2px solid #4da6ff;
-            outline-offset: 3px;
-        }
-
-        .aethermoor-ui-actions {
-            display: grid;
-            gap: 6px;
-        }
-
-        .aethermoor-ui-action {
-            width: 100%;
-            padding: 8px 10px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            cursor: pointer;
-            text-align: left;
-        }
-
-        .aethermoor-ui-action:hover:not(:disabled),
-        .aethermoor-ui-action:focus-visible:not(:disabled) {
-            color: #ffffff;
-            border-color: #4da6ff;
-        }
-
-        .aethermoor-ui-action:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-
-        .aethermoor-ui-action[data-accent="quest"]:hover,
-        .aethermoor-ui-action[data-accent="quest"]:focus-visible {
-            border-color: #d99b26;
-        }
-
-        @media (max-width: 600px) {
-            .aethermoor-panel {
-                right: 8px;
-                bottom: 72px;
-                width: calc(100vw - 16px);
-                height: min(70vh, 560px);
-                min-width: 0;
-                resize: both;
-            }
-
-            .aethermoor-tab {
-                padding-inline: 4px;
-            }
-        }
-    `;
-
-    style.textContent += `
-        .aethermoor-debug-records {
-            display: grid;
-            gap: 8px;
-        }
-
-        .aethermoor-debug-record {
-            display: grid;
-            gap: 6px;
-            padding: 8px;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #c084fc;
-        }
-
-        .aethermoor-map-node-clickable {
-            cursor: pointer;
-        }
-
-        .aethermoor-map-node-clickable:hover .aethermoor-map-node-main {
-            filter: brightness(1.35);
-            stroke-width: 2.5;
-        }
-
-        .aethermoor-charsheet-stats {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 8px;
-            margin: 10px 0 12px;
-        }
-
-        .aethermoor-charsheet-stat {
-            padding: 8px 10px;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #4da6ff;
-            cursor: help;
-        }
-
-        .aethermoor-charsheet-stat:hover {
-            border-color: #4da6ff;
-            background: #1d242c;
-        }
-
-        .aethermoor-charsheet-stat-label {
-            color: #9caab8;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.6px;
-        }
-
-        .aethermoor-charsheet-stat-value {
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 700;
-            margin-top: 2px;
-        }
-
-        .aethermoor-charsheet-stat-sub {
-            color: #6e7f91;
-            font-size: 10px;
-            margin-top: 2px;
-        }
-
-        .aethermoor-doll-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 8px;
-            align-items: stretch;
-            margin-top: 8px;
-        }
-
-        .aethermoor-doll-slot {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            min-height: 68px;
-            padding: 7px 8px;
-            background: #12161c;
-            border: 1px solid #2b3542;
-            border-radius: 2px;
-            box-sizing: border-box;
-        }
-
-        .aethermoor-doll-slot[data-empty="true"] {
-            background: #0e1217;
-            border: 1px dashed #2b3542;
-            opacity: 0.72;
-        }
-
-        .aethermoor-doll-slot[data-passive="true"] {
-            background: #141920;
-            border: 1px solid #2b3542;
-            border-left: 2px solid #38bdf8;
-        }
-
-        .aethermoor-doll-slot-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 4px;
-            color: #6e7f91;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .aethermoor-doll-slot-name {
-            font-size: 11px;
-            font-weight: 700;
-            line-height: 1.3;
-            margin: 4px 0;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-doll-slot-bonus {
-            color: #4ade80;
-            font-size: 10px;
-        }
-
-        .aethermoor-doll-spacer {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 68px;
-            opacity: 0.22;
-            pointer-events: none;
-        }
-
-        @media (max-width: 600px) {
-            .aethermoor-charsheet-stats {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
-    `;
-
+.aethermoor-panel { position:fixed; left:auto; top:auto; right:16px; bottom:82px; z-index:10001; width:520px; height:560px; min-width:320px; min-height:240px; max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); overflow:hidden; display:flex; flex-direction:column; resize:both; color:#d0d7de; background:#12161c; border:1px solid #2b3542; border-radius:3px; box-shadow:0 12px 36px rgba(0,0,0,0.55); }
+.aethermoor-panel[hidden], .aethermoor-status-strip[hidden], .aethermoor-queued-move[hidden], .aethermoor-tab-view[hidden], .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-group[hidden] { display:none; }
+.aethermoor-panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 12px; border-bottom:1px solid #1f2730; background:#101419; cursor:move; user-select:none; touch-action:none; }
+.aethermoor-panel-title { color:#4da6ff; font-family:Consolas,monospace; font-size:12px; font-weight:700; letter-spacing:1px; }
+.aethermoor-status-strip { display:flex; flex-wrap:wrap; gap:4px 12px; padding:7px 12px; color:#d0d7de; background:#101419; border-bottom:1px solid #1f2730; font:11px/1.4 Consolas,monospace; }
+.aethermoor-status-strip span { white-space:nowrap; }
+.aethermoor-status-strip [data-stat="level"] { color:#c084fc; }
+.aethermoor-status-strip [data-stat="xp"] { color:#4ade80; }
+.aethermoor-status-strip [data-stat="qtik"] { color:#38bdf8; }
+.aethermoor-status-strip [data-stat="tansy"] { color:#f9a8d4; }
+.aethermoor-status-strip [data-stat="silver"] { color:#ffd166; }
+.aethermoor-status-copy { margin-left:auto; padding:1px 7px; color:#9caab8; background:#181d23; border:1px solid #2b3542; border-radius:2px; cursor:pointer; font:inherit; }
+.aethermoor-status-copy:hover, .aethermoor-status-copy:focus-visible { color:#ffffff; border-color:#4da6ff; }
+.aethermoor-queued-move { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 12px; color:#ffd166; background:#181d23; border-bottom:1px solid #2b3542; border-left:3px solid #ffd166; font:11px/1.4 Consolas,monospace; }
+.aethermoor-queued-move-cancel { padding:2px 7px; color:#f87171; background:#12161c; border:1px solid #f87171; border-radius:2px; cursor:pointer; font:inherit; flex-shrink:0; }
+.aethermoor-queued-move-cancel:hover, .aethermoor-queued-move-cancel:focus-visible { color:#ffffff; background:#2b181c; }
+.aethermoor-panel-close { min-width:28px; padding:3px 8px; color:#9caab8; background:transparent; border:1px solid #2b3542; cursor:pointer; }
+.aethermoor-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:7px 8px; background:#101419; border-bottom:1px solid #1f2730; }
+.aethermoor-tab { min-width:0; padding:6px; color:#9caab8; background:#181d23; border:1px solid #2b3542; border-radius:2px; cursor:pointer; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.aethermoor-tab.active { color:#ffffff; }
+.aethermoor-tab[data-tab="combat"].active { border-top:2px solid #ef4444; }
+.aethermoor-tab[data-tab="quests"].active { border-top:2px solid #d99b26; }
+.aethermoor-tab[data-tab="world"].active { border-top:2px solid #4da6ff; }
+.aethermoor-tab[data-tab="instances"].active { border-top:2px solid #c084fc; }
+.aethermoor-tab[data-tab="inventory"].active { border-top:2px solid #4ade80; }
+.aethermoor-tab[data-tab="shops"].active { border-top:2px solid #ffd166; }
+.aethermoor-tab[data-tab="achievements"].active { border-top:2px solid #fbbf24; }
+.aethermoor-tab[data-tab="aethernet"].active { border-top:2px solid #38bdf8; }
+.aethermoor-tab:disabled { opacity:0.4; cursor:not-allowed; }
+.aethermoor-panel-content { min-height:150px; overflow:auto; padding:12px; }
+.aethermoor-contract-popup { position:fixed; z-index:10003; top:50%; left:50%; transform:translate(-50%,-50%); width:min(450px,calc(100vw - 24px)); box-sizing:border-box; padding:12px; color:#d0d7de; background:#12161c; border:1px solid #2b3542; border-left:3px solid #d99b26; border-radius:2px; box-shadow:0 12px 36px rgba(0,0,0,0.65); font:11px/1.45 'Segoe UI',Tahoma,sans-serif; }
+.aethermoor-contract-popup-header { display:flex; justify-content:space-between; gap:10px; padding-bottom:5px; margin-bottom:8px; border-bottom:1px solid #1f2730; }
+.aethermoor-contract-popup-heading { color:#d99b26; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; }
+.aethermoor-contract-popup-rank { color:#4ade80; font-weight:700; }
+.aethermoor-contract-popup-title { color:#ffffff; font-weight:700; }
+.aethermoor-contract-popup-rewards { margin-top:8px; }
+.aethermoor-contract-popup-salvage { margin-top:6px; overflow-wrap:anywhere; }
+.aethermoor-contract-popup-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.aethermoor-contract-popup-actions button { padding:6px 9px; color:#d0d7de; background:#181d23; border:1px solid #2b3542; cursor:pointer; font:inherit; }
+.aethermoor-contract-popup-actions button:hover, .aethermoor-contract-popup-actions button:focus-visible { border-color:#d99b26; color:#ffffff; }
+.aethermoor-contract-popup-actions button:disabled { opacity:0.45; cursor:not-allowed; }
+#aethermoor_main_button { border-left:2px solid #4da6ff; }
+.aethermoor-tab-view { display:grid; align-content:start; gap:10px; }
+.aethermoor-ui-section { display:grid; gap:7px; padding:10px; background:#12161c; border:1px solid #2b3542; border-left:3px solid #4da6ff; }
+.aethermoor-ui-section[data-accent="combat"] { border-left-color:#ef4444; }
+.aethermoor-ui-section[data-accent="quest"] { border-left-color:#d99b26; }
+.aethermoor-ui-section[data-accent="msq"] { border-left-color:#c084fc; }
+.aethermoor-ui-section[data-accent="world"] { border-left-color:#4da6ff; }
+.aethermoor-quest-drawer { padding:10px; background:#12161c; border:1px solid #2b3542; border-left:3px solid #d99b26; }
+.aethermoor-quest-drawer[data-msq="true"] { border-left-color:#c084fc; background:#161420; }
+.aethermoor-quest-drawer[data-history="true"] { border-left-color:#6e7f91; }
+.aethermoor-quest-drawer > summary { cursor:pointer; color:#ffffff; font-family:Consolas,monospace; font-size:11px; font-weight:700; letter-spacing:0.6px; list-style-position:outside; }
+.aethermoor-quest-drawer[data-msq="true"] > summary { color:#c084fc; }
+.aethermoor-quest-drawer-body { display:grid; gap:7px; margin-top:8px; }
+.aethermoor-ui-heading { color:#ffffff; font-family:Consolas,monospace; font-size:11px; font-weight:700; letter-spacing:0.6px; }
+.aethermoor-ui-text { color:#9caab8; font-size:12px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+.aethermoor-shop { position:fixed; z-index:10002; top:50%; left:50%; transform:translate(-50%,-50%); width:min(620px,calc(100vw - 24px)); height:min(75vh,720px); min-width:min(320px,calc(100vw - 24px)); min-height:min(260px,calc(100vh - 24px)); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); resize:both; overflow:auto; box-sizing:border-box; padding:12px; color:#d0d7de; background:#12161c; border:1px solid #2b3542; border-left:3px solid #4da6ff; box-shadow:0 12px 36px rgba(0,0,0,0.65); font:12px/1.5 Consolas,monospace; }
+.aethermoor-shop-header { position:sticky; top:-12px; z-index:2; display:flex; justify-content:space-between; align-items:center; gap:12px; margin:-12px -12px 0; padding:12px 12px 8px; background:#12161c; border-bottom:1px solid #1f2730; cursor:move; user-select:none; touch-action:none; }
+.aethermoor-shop-header-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.aethermoor-shop-confirm { color:#4ade80; border-color:#4ade80; }
+.aethermoor-shop-title { color:#ffffff; font-weight:700; }
+.aethermoor-shop-summary { margin:8px 0; color:#9caab8; white-space:pre-wrap; }
+.aethermoor-vendor-row { padding:9px 0; border-top:1px solid #1f2730; }
+.aethermoor-vendor-name { color:#ffffff; font-weight:700; }
+.aethermoor-vendor-detail { color:#9caab8; }
+.aethermoor-inventory-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid #1f2730; }
+.aethermoor-inventory-item:first-child { border-top:0; }
+.aethermoor-inventory-item-main { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.aethermoor-inventory-item-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; }
+.aethermoor-inventory-item-actions button { padding:4px 7px; color:#d0d7de; background:#181d23; border:1px solid #2b3542; cursor:pointer; font:inherit; white-space:nowrap; }
+.aethermoor-inventory-item-actions button:hover, .aethermoor-inventory-item-actions button:focus-visible { border-color:#4da6ff; color:#ffffff; }
+.aethermoor-rarity-common { color:#ffffff; }
+.aethermoor-rarity-uncommon, .aethermoor-inventory-gain, .aethermoor-trade-gain { color:#4ade80; }
+.aethermoor-rarity-rare { color:#38bdf8; }
+.aethermoor-rarity-epic { color:#c084fc; }
+.aethermoor-rarity-legendary { color:#fbbf24; }
+.aethermoor-inventory-loss, .aethermoor-trade-loss { color:#f87171; }
+.aethermoor-inventory-neutral, .aethermoor-trade-even { color:#9caab8; }
+.aethermoor-herbalist-window .aethermoor-vendor-name { color:#4ade80; }
+.aethermoor-inn-window .aethermoor-vendor-name, .aethermoor-inn-window .aethermoor-inn-price { color:#ffffff; }
+.aethermoor-inn-price { font-weight:700; }
+.aethermoor-herbalist-window .aethermoor-vendor-row button, .aethermoor-inn-window .aethermoor-vendor-row button { min-width:28px; margin:7px 6px 0 0; padding:3px 7px; color:#d0d7de; background:#181d23; border:1px solid #2b3542; cursor:pointer; }
+.aethermoor-herbalist-window .aethermoor-vendor-row button:hover, .aethermoor-inn-window .aethermoor-vendor-row button:hover { border-color:#4da6ff; }
+.aethermoor-herbalist-window .aethermoor-vendor-row button:disabled, .aethermoor-inn-window .aethermoor-vendor-row button:disabled { opacity:0.4; cursor:not-allowed; }
+.aethermoor-herbalist-window .aethermoor-vendor-row span, .aethermoor-inn-window .aethermoor-vendor-row span { display:inline-block; min-width:30px; text-align:center; color:#ffd166; }
+.aethermoor-inn-window .aethermoor-vendor-row span.aethermoor-inn-price { min-width:0; text-align:left; color:#ffffff; }
+.aethermoor-trade-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.aethermoor-trade-column { min-width:0; padding:10px; background:#181d23; border:1px solid #2b3542; box-shadow:inset 0 1px 8px rgba(0,0,0,0.25); }
+.aethermoor-trade-column > h3 { margin:0 0 8px; color:#ffffff; font-size:12px; }
+.aethermoor-trade-option { display:block; width:100%; margin-top:6px; padding:8px; color:#d0d7de; background:#12161c; border:1px solid #2b3542; text-align:left; white-space:pre-wrap; cursor:pointer; font:inherit; }
+.aethermoor-trade-option:hover, .aethermoor-trade-option:focus-visible { border-color:#4da6ff; }
+.aethermoor-trade-option[aria-pressed="true"] { border-color:#4ade80; box-shadow:0 0 0 1px #4ade80,0 0 12px rgba(74,222,128,0.16); }
+.aethermoor-trade-option:disabled { opacity:0.45; cursor:not-allowed; }
+.aethermoor-trade-ledger { position:sticky; bottom:-12px; margin:12px -12px -12px; padding:12px; color:#ffd166; background:#101419; border-top:1px solid #2b3542; box-shadow:0 -8px 20px rgba(0,0,0,0.45); }
+.aethermoor-knowledge { padding:10px; background:#12161c; border:1px solid #2b3542; border-left:3px solid #4da6ff; }
+.aethermoor-knowledge > summary, .aethermoor-knowledge-group > summary { cursor:pointer; padding:4px 0; }
+.aethermoor-knowledge-group { margin-top:8px; padding-left:8px; border-left:1px solid #2b3542; }
+.aethermoor-knowledge-group > summary { color:#d0d7de; font-size:12px; font-weight:700; }
+.aethermoor-knowledge-group > .aethermoor-ui-section, .aethermoor-knowledge-group > .aethermoor-ui-text { margin-top:8px; }
+.aethermoor-knowledge summary:focus-visible { outline:2px solid #4da6ff; outline-offset:3px; }
+.aethermoor-ui-actions { display:grid; gap:6px; }
+.aethermoor-ui-action { width:100%; padding:8px 10px; color:#d0d7de; background:#181d23; border:1px solid #2b3542; cursor:pointer; text-align:left; }
+.aethermoor-ui-action:hover:not(:disabled), .aethermoor-ui-action:focus-visible:not(:disabled) { color:#ffffff; border-color:#4da6ff; }
+.aethermoor-ui-action:disabled { opacity:0.45; cursor:not-allowed; }
+.aethermoor-ui-action[data-accent="quest"]:hover, .aethermoor-ui-action[data-accent="quest"]:focus-visible { border-color:#d99b26; }
+.aethermoor-debug-records { display:grid; gap:8px; }
+.aethermoor-debug-record { display:grid; gap:6px; padding:8px; background:#181d23; border:1px solid #2b3542; border-left:3px solid #c084fc; }
+.aethermoor-map-node-clickable { cursor:pointer; }
+.aethermoor-map-node-clickable:hover .aethermoor-map-node-main { filter:brightness(1.35); stroke-width:2.5; }
+.aethermoor-charsheet-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:10px 0 12px; }
+.aethermoor-charsheet-stat { padding:8px 10px; background:#181d23; border:1px solid #2b3542; border-left:3px solid #4da6ff; cursor:help; }
+.aethermoor-charsheet-stat:hover { border-color:#4da6ff; background:#1d242c; }
+.aethermoor-charsheet-stat-label { color:#9caab8; font-size:10px; text-transform:uppercase; letter-spacing:0.6px; }
+.aethermoor-charsheet-stat-value { color:#ffffff; font-size:14px; font-weight:700; margin-top:2px; }
+.aethermoor-charsheet-stat-sub { color:#6e7f91; font-size:10px; margin-top:2px; }
+.aethermoor-doll-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-items:stretch; margin-top:8px; }
+.aethermoor-doll-slot { display:flex; flex-direction:column; justify-content:space-between; min-height:68px; padding:7px 8px; background:#12161c; border:1px solid #2b3542; border-radius:2px; box-sizing:border-box; }
+.aethermoor-doll-slot[data-empty="true"] { background:#0e1217; border:1px dashed #2b3542; opacity:0.72; }
+.aethermoor-doll-slot[data-passive="true"] { background:#141920; border:1px solid #2b3542; border-left:2px solid #38bdf8; }
+.aethermoor-doll-slot-header { display:flex; justify-content:space-between; gap:4px; color:#6e7f91; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; }
+.aethermoor-doll-slot-name { font-size:11px; font-weight:700; line-height:1.3; margin:4px 0; overflow-wrap:anywhere; }
+.aethermoor-doll-slot-bonus { color:#4ade80; font-size:10px; }
+.aethermoor-doll-spacer { display:flex; align-items:center; justify-content:center; min-height:68px; opacity:0.22; pointer-events:none; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-group { min-width:0; margin:10px 0; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choices { display:flex; flex-direction:row; flex-wrap:wrap; align-items:stretch; gap:6px; min-width:0; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice { display:inline-flex; flex:0 0 auto; flex-direction:column; align-items:center; justify-content:center; min-width:82px; max-width:100%; min-height:42px; padding:7px 10px; color:#d0d7de; background:#181d23; border:1px solid #2b3542; border-radius:2px; cursor:pointer; font:inherit; text-align:center; line-height:1.25; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice:hover, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice:focus-visible { color:#ffffff; border-color:#4da6ff; background:#202b36; transform:none; animation:none; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice[aria-pressed="true"] { border-color:#4ade80; outline:2px solid #4ade80; outline-offset:1px; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice:disabled, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice[aria-disabled="true"] { opacity:0.35; cursor:not-allowed; transform:none; animation:none; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-controls { width:100%; max-width:100%; min-width:0; box-sizing:border-box; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-status, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-result { width:100%; max-width:100%; min-width:0; box-sizing:border-box; white-space:pre-wrap !important; overflow-wrap:anywhere; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-result { max-height:260px; overflow-y:auto; margin:8px 0 0; padding:8px 10px; background:#101419; border:1px solid #2b3542; border-left:3px solid #ef4444; border-radius:2px; font:11px/1.45 Consolas,monospace; color:#d0d7de; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-forecast { margin:8px 0; padding:7px 10px; background:#101419; border:1px solid #2b3542; border-left:3px solid #ffd166; border-radius:2px; font:11px/1.45 Consolas,monospace; color:#ffd166; white-space:pre-wrap; overflow-wrap:anywhere; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-title, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-detail, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-telegraph { display:block; width:100%; text-align:center; overflow-wrap:anywhere; }
+.aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-telegraph { color:#ffd166; font-size:11px; }
+.aethermoor-tab-view[data-tab="combat"] button, .aethermoor-tab-view[data-tab="combat"] button:hover, .aethermoor-tab-view[data-tab="combat"] button:focus, .aethermoor-tab-view[data-tab="combat"] button:active { animation:none !important; transition:none !important; transform:none !important; }
+@media (max-width:600px) { .aethermoor-panel { right:8px; bottom:72px; width:calc(100vw - 16px); height:min(70vh,560px); min-width:0; resize:both; } .aethermoor-tab { padding-inline:4px; } .aethermoor-trade-columns { grid-template-columns:1fr; } .aethermoor-charsheet-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+`;
     document.head.appendChild(style);
 }
 
@@ -21013,172 +20187,6 @@ function decorateAethermoorCombatControls(host, state) {
     }
 }
 
-function ensureAethermoorCombatChoiceStyles() {
-    if (document.getElementById('aethermoor_combat_choice_styles')) {
-        return;
-    }
-
-    /*
-     * These buttons belong to our tab, not SillyTavern's menu_button
-     * layout. Keep the selector scoped so other ST controls are untouched.
-     * This is the authoritative combat-choice style; do not append
-     * another competing combat-choice block elsewhere.
-     */
-    const style = document.createElement('style');
-    style.id = 'aethermoor_combat_choice_styles';
-    style.textContent = `
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-group {
-            min-width: 0;
-            margin: 10px 0;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choices {
-            display: flex;
-            flex-direction: row;
-            flex-wrap: wrap;
-            align-items: stretch;
-            gap: 6px;
-            min-width: 0;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice {
-            display: inline-flex;
-            flex: 0 0 auto;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-width: 82px;
-            max-width: 100%;
-            min-height: 42px;
-            padding: 7px 10px;
-            color: #d0d7de;
-            background: #181d23;
-            border: 1px solid #2b3542;
-            border-radius: 2px;
-            cursor: pointer;
-            font: inherit;
-            text-align: center;
-            line-height: 1.25;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:hover,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:focus-visible {
-            color: #ffffff;
-            border-color: #4da6ff;
-            background: #202b36;
-            transform: none;
-            animation: none;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice[aria-pressed="true"] {
-            border-color: #4ade80;
-            outline: 2px solid #4ade80;
-            outline-offset: 1px;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice:disabled,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice[aria-disabled="true"] {
-            opacity: 0.35;
-            cursor: not-allowed;
-            transform: none;
-            animation: none;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-controls {
-            width: 100%;
-            max-width: 100%;
-            min-width: 0;
-            box-sizing: border-box;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-status,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-result {
-            width: 100%;
-            max-width: 100%;
-            min-width: 0;
-            box-sizing: border-box;
-            white-space: pre-wrap !important;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-result {
-            max-height: 260px;
-            overflow-y: auto;
-            margin: 8px 0 0;
-            padding: 8px 10px;
-            background: #101419;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #ef4444;
-            border-radius: 2px;
-            font: 11px/1.45 Consolas, monospace;
-            color: #d0d7de;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-forecast {
-            margin: 8px 0;
-            padding: 7px 10px;
-            background: #101419;
-            border: 1px solid #2b3542;
-            border-left: 3px solid #ffd166;
-            border-radius: 2px;
-            font: 11px/1.45 Consolas, monospace;
-            color: #ffd166;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-title,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-detail,
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-telegraph {
-            display: block;
-            width: 100%;
-            text-align: center;
-            overflow-wrap: anywhere;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-telegraph {
-            color: #ffd166;
-            font-size: 11px;
-        }
-
-        .aethermoor-tab-view[data-tab="combat"]
-        .aethermoor-combat-choice-group[hidden] {
-            display: none;
-        }
-
-        /*
-         * Our combat controls must remain stationary and clickable.
-         * Override theme animations on both the base and hover states.
-         */
-        .aethermoor-tab-view[data-tab="combat"] button,
-        .aethermoor-tab-view[data-tab="combat"] button:hover,
-        .aethermoor-tab-view[data-tab="combat"] button:focus,
-        .aethermoor-tab-view[data-tab="combat"] button:active {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-        }
-    `;
-
-    document.head.appendChild(style);
-}
 const QTIK_COMBAT_OPTIONS = [
     { value: 'fire_melee', label: 'Fire Melee' },
     { value: 'bodyguard', label: 'Bodyguard' },
@@ -21219,7 +20227,7 @@ function appendCombatCommandPreview(inlineHost, state) {
 }
 
 async function openCombatPanel(inlineHost) {
-    ensureAethermoorCombatChoiceStyles();
+    addAethermoorPanelStyles();
     assert(inlineHost instanceof HTMLElement, 'Combat must render inside the Aethermoor Combat tab');
 
     let snapshot;

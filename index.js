@@ -22732,6 +22732,116 @@ function addAethermoorPanelStyles() {
             filter: brightness(1.35);
             stroke-width: 2.5;
         }
+
+        .aethermoor-charsheet-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin: 10px 0 12px;
+        }
+
+        .aethermoor-charsheet-stat {
+            padding: 8px 10px;
+            background: #181d23;
+            border: 1px solid #2b3542;
+            border-left: 3px solid #4da6ff;
+            cursor: help;
+        }
+
+        .aethermoor-charsheet-stat:hover {
+            border-color: #4da6ff;
+            background: #1d242c;
+        }
+
+        .aethermoor-charsheet-stat-label {
+            color: #9caab8;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .aethermoor-charsheet-stat-value {
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+
+        .aethermoor-charsheet-stat-sub {
+            color: #6e7f91;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        .aethermoor-doll-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            align-items: stretch;
+            margin-top: 8px;
+        }
+
+        .aethermoor-doll-slot {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 68px;
+            padding: 7px 8px;
+            background: #12161c;
+            border: 1px solid #2b3542;
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+
+        .aethermoor-doll-slot[data-empty="true"] {
+            background: #0e1217;
+            border: 1px dashed #2b3542;
+            opacity: 0.72;
+        }
+
+        .aethermoor-doll-slot[data-passive="true"] {
+            background: #141920;
+            border: 1px solid #2b3542;
+            border-left: 2px solid #38bdf8;
+        }
+
+        .aethermoor-doll-slot-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 4px;
+            color: #6e7f91;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .aethermoor-doll-slot-name {
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1.3;
+            margin: 4px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .aethermoor-doll-slot-bonus {
+            color: #4ade80;
+            font-size: 10px;
+        }
+
+        .aethermoor-doll-spacer {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 68px;
+            opacity: 0.22;
+            pointer-events: none;
+        }
+
+        @media (max-width: 600px) {
+            .aethermoor-charsheet-stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
     `;
 
     document.head.appendChild(style);
@@ -25364,68 +25474,442 @@ async function renderInventoryTab(host) {
 
     host.appendChild(bagSection);
 
-    for (const [owner, label] of [
-        ['tansy', 'TANSY'],
-        ['qtik', "Q'TIK"]
-    ]) {
-        const wornSection = makeAethermoorSection(
-            `${label} · WORN GEAR`,
-            'Currently equipped items.',
-            'world'
-        );
+    const tansyFilled = TANSY_SLOTS.filter(slot => {
+        const item = gear.tansy?.[slot];
+        return item && Number(item.stat ?? item.rawStat) > 0;
+    }).length;
+    const qtikFilled = QTIK_SLOTS.filter(slot => {
+        const item = gear.qtik?.[slot];
+        return item && Number(item.stat ?? item.rawStat) > 0;
+    }).length;
 
-        const equipped = Object.entries(gear[owner] || {})
-            .filter(([, item]) =>
-                item && Number(item.stat ?? item.rawStat) > 0
-            );
+    const sheetSection = makeAethermoorSection(
+        'CHARACTER SHEET & PAPER DOLL',
+        `Tansy: ${tansyFilled}/${TANSY_SLOTS.length} slots equipped · ` +
+            `Q'tik: ${qtikFilled}/${QTIK_SLOTS.length} slots equipped\n` +
+            'Inspect worn gear slots, empty slots, and full stat breakdowns.',
+        'world'
+    );
 
-        if (equipped.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'aethermoor-ui-text';
-            empty.textContent = 'No gear equipped.';
-            wornSection.appendChild(empty);
+    const openSheetBtn = makeAethermoorAction(
+        'Open Character Sheet & Paper Doll',
+        'world',
+        async () => {
+            try {
+                await openAethermoorCharacterSheetWindow();
+            } catch (error) {
+                toastr.error(
+                    error instanceof Error ? error.message : String(error),
+                    'Aethermoor'
+                );
+            }
         }
+    );
 
-        for (const [slot, item] of equipped) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
+    sheetSection.appendChild(openSheetBtn);
+    host.appendChild(sheetSection);
+}
 
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
+async function openAethermoorCharacterSheetWindow() {
+    addAethermoorPanelStyles();
 
-            const name = document.createElement('div');
-            name.className =
-                `aethermoor-vendor-name ${rarityClass(item)}`;
-            name.textContent = formatGearLabel(item);
+    const metadata = getContext().chatMetadata;
+    const snapshot = await readStoredCombatState();
 
-            const bonus = gearBonus(owner, slot, {
-                ...item,
-                stat: item.stat ?? item.rawStat
-            });
-            const bonusParts = [
-                ['atk', 'ATK'],
-                ['def', 'DEF'],
-                ['hp', 'HP'],
-                ['luk', 'LUK']
-            ]
-                .filter(([key]) => Number(bonus[key]) > 0)
-                .map(([key, statLabel]) => `+${bonus[key]} ${statLabel}`);
+    assert(
+        getContext().chatMetadata === metadata,
+        'Chat changed before the character sheet could open'
+    );
 
-            const detail = document.createElement('div');
-            detail.className = 'aethermoor-vendor-detail';
-            detail.textContent = [
-                GEAR_SLOT_LABELS[slot] || slot,
-                ...bonusParts
-            ].join(' · ');
+    const state = snapshot.state;
+    const crew = state.crew;
+    const stats = derived(crew);
+    const shadows = shadowMechanics(crew);
+    const ach = achievementBonuses(crew);
+    const gear = crew.gear || {};
+    const level = crew.level;
+    const maxSlots = 3 + Math.floor(level / 2);
 
-            main.append(name, detail);
-            row.appendChild(main);
-            wornSection.appendChild(row);
-        }
+    let gearAtk = 0;
+    let gearLuk = 0;
+    let gearTansyHp = 0;
+    let gearDef = 0;
+    let gearQtikHp = 0;
 
-        host.appendChild(wornSection);
+    for (const slot of TANSY_SLOTS) {
+        const b = gearBonus('tansy', slot, gear.tansy?.[slot]);
+        gearAtk += b.atk;
+        gearLuk += b.luk;
+        gearTansyHp += b.hp;
+    }
+    for (const slot of QTIK_SLOTS) {
+        const b = gearBonus('qtik', slot, gear.qtik?.[slot]);
+        gearDef += b.def;
+        gearQtikHp += b.hp;
     }
 
+    const baseAtk = 2 * level;
+    const weaselAtk = 2 * crew.weasels.active;
+    const fireBonus = Math.max(3, Math.floor(stats.atk / 5));
+    const bodyguardDef = Math.max(2, Math.floor(stats.def / 3));
+    const fleeBonus = Math.min(3, Math.floor(stats.luk / 5));
+    const vitalsPierce = Math.floor((crew.weasels.active + shadows.slots) / 2);
+    const looseCap = Math.max(0, maxSlots - shadows.slots);
+    const momentumQuota = 1 + Math.floor(looseCap / 4);
+
+    document.getElementById('aethermoor_charsheet_window')?.remove();
+
+    const panel = document.createElement('section');
+    panel.id = 'aethermoor_charsheet_window';
+    panel.className = 'aethermoor-shop';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Character Sheet and Paper Doll');
+
+    const header = document.createElement('div');
+    header.className = 'aethermoor-shop-header';
+
+    const title = document.createElement('b');
+    title.className = 'aethermoor-shop-title';
+    title.textContent =
+        `System Log // Character Sheet · Level ${level} (${crew.xp}/${nextXp(level)} XP)`;
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'aethermoor-panel-close';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => panel.remove());
+
+    header.append(title, close);
+    panel.appendChild(header);
+
+    const hint = document.createElement('div');
+    hint.className = 'aethermoor-shop-summary';
+    hint.textContent =
+        'Hover over any stat or equipment slot to inspect its exact formula and active bonuses.';
+    panel.appendChild(hint);
+
+    const statGrid = document.createElement('div');
+    statGrid.className = 'aethermoor-charsheet-stats';
+
+    const statCards = [
+        {
+            label: 'Crew ATK',
+            value: String(stats.atk),
+            sub: `Fire Melee: +${fireBonus}/exch`,
+            accent: '#ef4444',
+            tooltip:
+                `CREW ATTACK (${stats.atk})\n` +
+                `• Base (2 × Lv ${level}): +${baseAtk}\n` +
+                `• Active Weasels (${crew.weasels.active} × 2): +${weaselAtk}\n` +
+                `• Active Shadows: +${shadows.attack}\n` +
+                `• Tansy Gear: +${gearAtk}\n` +
+                `• Achievements: +${ach.atk}\n\n` +
+                `EFFECTS:\n` +
+                `• Physical Hit: (Effective ATK − Target DEF + 1d6)\n` +
+                `• Fire Melee Bonus: +${fireBonus} Fire dmg/exch (max(3, floor(ATK / 5)), ignores ATK debuffs)\n` +
+                `• Boss Gear Check: Must exceed Boss DEF to deal damage.`
+        },
+        {
+            label: 'Frontline DEF',
+            value: String(stats.def),
+            sub: `Bodyguard: +${bodyguardDef} DEF`,
+            accent: '#38bdf8',
+            tooltip:
+                `FRONTLINE DEFENSE (${stats.def})\n` +
+                `• Base (Lv ${level}): +${level}\n` +
+                `• Q'tik Bulwark Gear: +${gearDef}\n` +
+                `• Achievements: +${ach.def}\n\n` +
+                `EFFECTS:\n` +
+                `• Reduces enemy frontline Base Bleed: max(1, round((Lead Enemy ATK − Effective DEF) / 10))\n` +
+                `• Bodyguard Stance: Adds +${bodyguardDef} DEF (max(2, floor(DEF / 3))) and reduces Base Bleed by 1.`
+        },
+        {
+            label: 'Crew LUK',
+            value: String(stats.luk),
+            sub: `Crit/Exposed: +${stats.luk} · Flee: +${fleeBonus}`,
+            accent: '#ffd166',
+            tooltip:
+                `CREW LUCK (${stats.luk})\n` +
+                `• Base (floor(Lv ${level} / 2)): +${Math.floor(level / 2)}\n` +
+                `• Tansy Gear: +${gearLuk}\n` +
+                `• Achievements: +${ach.luk}\n\n` +
+                `EFFECTS:\n` +
+                `• Critical Hits: Adds +${stats.luk} flat damage on player roll 6 (or rolls 5–6 with Vitals) on top of 1.5× base hit.\n` +
+                `• Visor Exposed: When an enemy rolls 1 while Tansy uses Visor, the next hit deals +${stats.luk} bonus damage.\n` +
+                `• Flee Roll Bonus: +${fleeBonus} to 1d6 escape rolls (floor(LUK / 5), max +3; need 6+ to flee).`
+        },
+        {
+            label: "Q'tik Vitality",
+            value: `${crew.qtik.hp} / ${stats.qtikMaxHp}`,
+            sub: `Regen: +${stats.regen} HP/exch`,
+            accent: '#38bdf8',
+            tooltip:
+                `Q'TIK VITALITY (${crew.qtik.hp}/${stats.qtikMaxHp} HP)\n` +
+                `• Base (125 + 25 × Lv ${level}): ${125 + 25 * level} HP\n` +
+                `• Q'tik Vitality Gear: +${gearQtikHp} HP\n` +
+                `• Achievements: +${ach.qtikHp} HP\n\n` +
+                `EFFECTS:\n` +
+                `• Combat Regeneration: Restores +${stats.regen} HP at the end of every exchange (round(MaxHP / 100)).\n` +
+                `• Out-of-Combat Recovery: Automatically restores Q'tik to full HP on your next travel or room move.`
+        },
+        {
+            label: 'Tansy Vitality',
+            value: `${crew.tansy.hp} / ${stats.tansyMaxHp}`,
+            sub: `Backline Commander`,
+            accent: '#f9a8d4',
+            tooltip:
+                `TANSY VITALITY (${crew.tansy.hp}/${stats.tansyMaxHp} HP)\n` +
+                `• Base (35 + 15 × Lv ${level}): ${35 + 15 * level} HP\n` +
+                `• Tansy Vitality Gear: +${gearTansyHp} HP\n` +
+                `• Achievements: +${ach.tansyHp} HP\n\n` +
+                `EFFECTS:\n` +
+                `• Backline HP pool against enemy Archers and Sweeping Cleave splash (10% of MaxHP = ${Math.ceil(stats.tansyMaxHp * 0.1)} dmg).`
+        },
+        {
+            label: 'Summon Pack',
+            value: `${crew.weasels.active + shadows.slots} / ${maxSlots} Slots`,
+            sub: `Weasels: ${crew.weasels.active} · Pierce: ${vitalsPierce}`,
+            accent: '#c084fc',
+            tooltip:
+                `SHADOW SUMMONS (${crew.weasels.active + shadows.slots}/${maxSlots} Slots)\n` +
+                `• Max Slots (3 + floor(Lv ${level} / 2)): ${maxSlots}\n` +
+                `• Loose Shadow-Weasels: ${crew.weasels.active} (+${weaselAtk} ATK; doubled to +${weaselAtk * 2} with Vitals)\n` +
+                `• Active Fused Shadows: ${shadows.slots} slots used\n\n` +
+                `EFFECTS:\n` +
+                `• Vitals Armor Pierce: Pierces up to ${vitalsPierce} enemy DEF on rolls 2–6 (floor(active slots / 2)).\n` +
+                `• Swarm Momentum: Reforms up to ${momentumQuota} missing loose weasel(s) after every full 3-exchange turn.`
+        }
+    ];
+
+    for (const card of statCards) {
+        const box = document.createElement('div');
+        box.className = 'aethermoor-charsheet-stat';
+        box.style.borderLeftColor = card.accent;
+        box.title = card.tooltip;
+
+        const lbl = document.createElement('div');
+        lbl.className = 'aethermoor-charsheet-stat-label';
+        lbl.textContent = card.label;
+
+        const val = document.createElement('div');
+        val.className = 'aethermoor-charsheet-stat-value';
+        val.textContent = card.value;
+
+        const sub = document.createElement('div');
+        sub.className = 'aethermoor-charsheet-stat-sub';
+        sub.textContent = card.sub;
+
+        box.append(lbl, val, sub);
+        statGrid.appendChild(box);
+    }
+
+    panel.appendChild(statGrid);
+
+    const columns = document.createElement('div');
+    columns.className = 'aethermoor-trade-columns';
+
+    function makeSilhouetteCell(accentColor) {
+        const cell = document.createElement('div');
+        cell.className = 'aethermoor-doll-spacer';
+        cell.innerHTML =
+            `<svg viewBox="0 0 40 50" width="34" height="42" fill="none" stroke="${accentColor}" stroke-width="1.5">` +
+                `<circle cx="20" cy="11" r="6"/>` +
+                `<path d="M9 44 C9 27 31 27 31 44"/>` +
+            `</svg>`;
+        return cell;
+    }
+
+    function makeSlotBox(owner, slot) {
+        const raw = gear[owner]?.[slot];
+        const stat = Number(raw?.stat ?? raw?.rawStat ?? 0);
+        const filled = Boolean(raw && stat > 0);
+        const slotLabel = GEAR_SLOT_LABELS[slot] || slot;
+
+        const box = document.createElement('div');
+        box.className = 'aethermoor-doll-slot';
+        box.dataset.empty = String(!filled);
+
+        const top = document.createElement('div');
+        top.className = 'aethermoor-doll-slot-header';
+
+        const slotSpan = document.createElement('span');
+        slotSpan.textContent = slotLabel;
+        top.appendChild(slotSpan);
+
+        if (filled) {
+            const statSpan = document.createElement('span');
+            statSpan.style.color = '#9caab8';
+            statSpan.textContent = `S${stat}`;
+            top.appendChild(statSpan);
+        }
+
+        const name = document.createElement('div');
+        name.className = 'aethermoor-doll-slot-name';
+
+        const bonusLine = document.createElement('div');
+        bonusLine.className = 'aethermoor-doll-slot-bonus';
+
+        if (filled) {
+            const rarityKey = String(raw.rarity || 'common').toLowerCase();
+            const rarityColor =
+                raw.rarityColor ||
+                LOOT_RARITY_INFO[rarityKey]?.color ||
+                '#ffffff';
+
+            box.style.borderLeft = `3px solid ${rarityColor}`;
+            name.style.color = rarityColor;
+            name.textContent = raw.name || slotLabel;
+
+            const bonus = gearBonus(owner, slot, {
+                ...raw,
+                stat
+            });
+            const parts = [
+                ['atk', 'ATK'],
+                ['def', 'DEF'],
+                ['hp', 'MaxHP'],
+                ['luk', 'LUK']
+            ]
+                .filter(([k]) => Number(bonus[k]) > 0)
+                .map(([k, lbl]) => `+${bonus[k]} ${lbl}`);
+
+            bonusLine.textContent = parts.join(' · ') || `Stat ${stat}`;
+            box.title =
+                `${formatGearLabel({ ...raw, stat })}\n` +
+                `Slot: ${slotLabel} (${raw.rarity || 'Common'})\n` +
+                `Bonus: ${parts.join(', ') || 'None'}\n` +
+                `Pawn Value: ${raw.sellValue ?? stat * 2}s`;
+        } else {
+            name.style.color = '#6e7f91';
+            name.textContent = 'Empty';
+            bonusLine.style.color = '#6e7f91';
+            bonusLine.textContent = '—';
+
+            const slotHint = owner === 'tansy'
+                ? (slot === 'weapon'
+                    ? 'Grants +2 ATK per Stat'
+                    : slot === 'gloves'
+                        ? 'Grants +1 ATK per Stat'
+                        : slot === 'chest' || slot === 'trousers'
+                            ? 'Grants +5 Tansy MaxHP per Stat and +1 LUK'
+                            : 'Modular: Vitality (+5 HP/Stat) or Luck (+1 LUK/Stat)')
+                : 'Modular: Vitality (+15 HP/Stat) or Bulwark (+2 DEF/Stat)';
+
+            box.title = `Empty ${slotLabel} Slot\n${slotHint}`;
+        }
+
+        box.append(top, name, bonusLine);
+        return box;
+    }
+
+    // Left Column: Tansy Paper Doll (9 slots in anatomical 3x3 layout + boots row)
+    const tansyCol = document.createElement('section');
+    tansyCol.className = 'aethermoor-trade-column';
+    const tansyHeader = document.createElement('h3');
+    tansyHeader.textContent = 'TANSY · PAPER DOLL (9 SLOTS)';
+    tansyCol.appendChild(tansyHeader);
+
+    const tansyGrid = document.createElement('div');
+    tansyGrid.className = 'aethermoor-doll-grid';
+
+    const tansyLayout = [
+        ['neck', 'headgear', null],
+        ['weapon', 'chest', 'gloves'],
+        ['ring1', 'trousers', 'ring2'],
+        [null, 'boots', null]
+    ];
+
+    for (const row of tansyLayout) {
+        for (const cell of row) {
+            if (cell === null) {
+                tansyGrid.appendChild(makeSilhouetteCell('#f9a8d4'));
+            } else {
+                tansyGrid.appendChild(makeSlotBox('tansy', cell));
+            }
+        }
+    }
+
+    tansyCol.appendChild(tansyGrid);
+
+    // Right Column: Q'tik Paper Doll (4 accessory slots around Titan core)
+    const qtikCol = document.createElement('section');
+    qtikCol.className = 'aethermoor-trade-column';
+    const qtikHeader = document.createElement('h3');
+    qtikHeader.textContent = "Q'TIK · PAPER DOLL (4 SLOTS)";
+    qtikCol.appendChild(qtikHeader);
+
+    const qtikGrid = document.createElement('div');
+    qtikGrid.className = 'aethermoor-doll-grid';
+
+    const titanCore = document.createElement('div');
+    titanCore.className = 'aethermoor-doll-slot';
+    titanCore.dataset.passive = 'true';
+    titanCore.title =
+        "ELEMENTAL TITAN PHYSIOLOGY\n" +
+        "Q'tik's symbiote-bonded frame cannot wear standard human armor, weapons, or boots.\n" +
+        "She equips 4 high-scaling accessory slots (Amulet, Wrist Cuffs, Ring 1, Ring 2) tuned for Bulwark (+2 DEF/Stat) or Vitality (+15 HP/Stat).";
+
+    const coreTop = document.createElement('div');
+    coreTop.className = 'aethermoor-doll-slot-header';
+    coreTop.textContent = 'Titan Core';
+
+    const coreName = document.createElement('div');
+    coreName.className = 'aethermoor-doll-slot-name';
+    coreName.style.color = '#38bdf8';
+    coreName.textContent = 'Symbiote Frame';
+
+    const coreBonus = document.createElement('div');
+    coreBonus.className = 'aethermoor-doll-slot-bonus';
+    coreBonus.textContent = `+25 HP & +1 DEF / Lv`;
+
+    titanCore.append(coreTop, coreName, coreBonus);
+
+    const qtikLayout = [
+        [null, 'amulet', null],
+        ['wristCuffs', 'CORE', null],
+        ['ring1', null, 'ring2']
+    ];
+
+    for (const row of qtikLayout) {
+        for (const cell of row) {
+            if (cell === null) {
+                qtikGrid.appendChild(makeSilhouetteCell('#38bdf8'));
+            } else if (cell === 'CORE') {
+                qtikGrid.appendChild(titanCore);
+            } else {
+                qtikGrid.appendChild(makeSlotBox('qtik', cell));
+            }
+        }
+    }
+
+    qtikCol.appendChild(qtikGrid);
+    columns.append(tansyCol, qtikCol);
+    panel.appendChild(columns);
+
+    document.body.appendChild(panel);
+
+    restoreAethermoorPanelGeometry(
+        panel,
+        AETHERMOOR_CHARSHEET_GEOMETRY_KEY
+    );
+    enableAethermoorPanelDragging(
+        header,
+        panel,
+        AETHERMOOR_CHARSHEET_GEOMETRY_KEY
+    );
+
+    panel.addEventListener('pointerup', () => {
+        setTimeout(() => {
+            if (panel.isConnected) {
+                saveAethermoorPanelGeometry(
+                    panel,
+                    AETHERMOOR_CHARSHEET_GEOMETRY_KEY
+                );
+            }
+        }, 0);
+    });
+
+    close.focus();
 }
 
 /*
@@ -27584,6 +28068,8 @@ const AETHERMOOR_HERBALIST_GEOMETRY_KEY =
     'aethermoorHerbalistWindowGeometry';
 const AETHERMOOR_INN_GEOMETRY_KEY =
     'aethermoorInnWindowGeometry';
+const AETHERMOOR_CHARSHEET_GEOMETRY_KEY =
+    'aethermoorCharSheetWindowGeometry';
 
 function restoreAethermoorPanelGeometry(
     panel,
@@ -29957,7 +30443,8 @@ function openNarrationDebug() {
                 for (const id of [
                     'aethermoor_shop_window',
                     'aethermoor_herbalist_window',
-                    'aethermoor_inn_window'
+                    'aethermoor_inn_window',
+                    'aethermoor_charsheet_window'
                 ]) {
                     document.getElementById(id)?.remove();
                 }

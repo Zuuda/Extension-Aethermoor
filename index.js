@@ -20544,409 +20544,228 @@ function renderCrewKnowledge(state) {
     return section;
 }
 
+async function readFreeSettlementState(shopLabel) {
+    addAethermoorPanelStyles();
+    const metadata = getContext().chatMetadata;
+    const snapshot = await readStoredCombatState();
+    assert(getContext().chatMetadata === metadata, `Chat changed before ${shopLabel} could open`);
+    const state = snapshot.state;
+    const settlement = Object.values(state.world?.settlements || {}).find(
+        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
+    );
+    assert(
+        settlement && !state.currentJourney && !state.activeInstanceId &&
+        !['active', 'spotted'].includes(state.encounter?.status),
+        `Reach a free settlement before opening ${shopLabel}`
+    );
+    return { state, settlement };
+}
+
+function createShopShell({ id, extraClass = '', ariaLabel, titleText, confirmText = 'Confirm', summaryText, onConfirm }) {
+    document.getElementById(id)?.remove();
+    const confirm = el('button', {
+        type: 'button',
+        className: 'aethermoor-panel-close aethermoor-shop-confirm',
+        text: confirmText,
+        onClick: () => onConfirm(confirm, panel)
+    });
+    const close = el('button', {
+        type: 'button',
+        className: 'aethermoor-panel-close',
+        text: 'Cancel',
+        onClick: () => panel.remove()
+    });
+    const header = el('div', { className: 'aethermoor-shop-header' },
+        el('b', { className: 'aethermoor-shop-title', text: titleText }),
+        el('div', { className: 'aethermoor-shop-header-actions' }, confirm, close)
+    );
+    const columns = el('div', { className: 'aethermoor-trade-columns' });
+    const ledger = el('div', { className: 'aethermoor-trade-ledger' });
+    const panel = el('section', {
+        id,
+        className: `aethermoor-shop${extraClass ? ` ${extraClass}` : ''}`,
+        attrs: { role: 'dialog', 'aria-label': ariaLabel }
+    }, header, el('div', { className: 'aethermoor-shop-summary', text: summaryText }), columns, ledger);
+    return { panel, header, close, columns, ledger };
+}
+
 /*
  * Two-sided Blacksmith trade window. Clicks are local UI selection only;
  * Cancel closes without changes, and Confirm commits the trade immediately.
  */
 async function openAethermoorShopWindow() {
-    addAethermoorPanelStyles();
-
-    const metadata = getContext().chatMetadata;
-    const snapshot = await readStoredCombatState();
-
-    assert(
-        getContext().chatMetadata === metadata,
-        'Chat changed before the shop could open'
-    );
-
-    const state = snapshot.state;
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !state.activeInstanceId &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Reach a free settlement before opening the shop'
-    );
-
-    const stock = resolveVendorAction({
-        action: 'stock',
-        zone: state.zone,
-        state
-    });
-
+    const { state, settlement } = await readFreeSettlementState('the shop');
+    const stock = resolveVendorAction({ action: 'stock', zone: state.zone, state });
     const selectedBuys = new Map();
     const selectedSales = new Map();
-    document.getElementById('aethermoor_shop_window')?.remove();
-    const windowElement = document.createElement('section');
-    windowElement.id = 'aethermoor_shop_window';
-    windowElement.className = 'aethermoor-shop';
-    windowElement.setAttribute('role', 'dialog');
-    windowElement.setAttribute(
-        'aria-label',
-        `Trade at ${settlement.label}`
-    );
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-shop-header';
-
-    const title = document.createElement('div');
-    title.className = 'aethermoor-shop-title';
-    title.textContent = `System Log // Trade · ${settlement.label}`;
-
-    const headerActions = document.createElement('div');
-    headerActions.className = 'aethermoor-shop-header-actions';
-
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
-    confirm.textContent = 'Confirm';
-
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'aethermoor-panel-close';
-    close.textContent = 'Cancel';
-
-    headerActions.append(confirm, close);
-    header.append(title, headerActions);
-    windowElement.appendChild(header);
-
-     const summary = document.createElement('div');
-    summary.className = 'aethermoor-shop-summary';
-    summary.textContent =
-        `${zoneDisplayName(state, state.zone)} (z${state.zone}) · Purse: ${state.crew.purse}s\n` +
-        'Select items to buy or sell, then click Confirm.';
-    windowElement.appendChild(summary);
-
-    const columns = document.createElement('div');
-    columns.className = 'aethermoor-trade-columns';
-
-    const merchant = document.createElement('section');
-    merchant.className = 'aethermoor-trade-column';
-    const merchantTitle = document.createElement('h3');
-    merchantTitle.textContent = 'MERCHANT OFFERS';
-    merchant.appendChild(merchantTitle);
-
-    const crew = document.createElement('section');
-    crew.className = 'aethermoor-trade-column';
-    const crewTitle = document.createElement('h3');
-    crewTitle.textContent = 'CREW OFFERS';
-    crew.appendChild(crewTitle);
-
-    columns.append(merchant, crew);
-    windowElement.appendChild(columns);
-
-    const ledger = document.createElement('div');
-    ledger.className = 'aethermoor-trade-ledger';
-    windowElement.appendChild(ledger);
-
     const buyButtons = [];
     const saleButtons = [];
 
-    function totals() {
-        const cost = [...selectedBuys.values()].reduce(
-            (total, choice) => total +
-                stock.catalog.find(
-                    entry => entry.number === choice.number
-                ).price,
-            0
-        );
+    const { panel, header, close, columns, ledger } = createShopShell({
+        id: 'aethermoor_shop_window',
+        ariaLabel: `Trade at ${settlement.label}`,
+        titleText: `System Log // Trade · ${settlement.label}`,
+        summaryText: `${zoneDisplayName(state, state.zone)} (z${state.zone}) · Purse: ${state.crew.purse}s\nSelect items to buy or sell, then click Confirm.`,
+        onConfirm: async (confirm, win) => {
+            if (!selectedBuys.size && !selectedSales.size) {
+                toastr.warning('Select at least one item first.', 'Aethermoor');
+                return;
+            }
+            confirm.disabled = true;
+            try {
+                const committed = await runStoredMechanic({
+                    cases: [{
+                        name: 'commit_vendor_trade',
+                        kind: 'vendor',
+                        action: 'commit',
+                        basket: {
+                            buy: [...selectedBuys.values()].map(({ number, variant }) => ({ number, variant })),
+                            sell: [...selectedSales.values()].map(({ location, owner, slot, index }) => ({
+                                location,
+                                ...(location === 'worn' ? { owner, slot } : { index })
+                            }))
+                        }
+                    }]
+                });
+                assert(
+                    committed?.ok === true && committed.results?.[0]?.ok !== false,
+                    committed?.results?.[0]?.error || 'Could not complete trade'
+                );
+                toastr.success('Trade completed.', 'Aethermoor');
+                win.remove();
+                if (aethermoorPanelOpen) renderAethermoorTab(aethermoorActiveTab);
+            } catch (error) {
+                confirm.disabled = false;
+                toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+            }
+        }
+    });
 
-        const proceeds = [...selectedSales.values()].reduce(
-            (total, choice) => total + choice.proceeds,
-            0
-        );
-
-        return {
-            cost,
-            proceeds,
-            remaining: state.crew.purse + proceeds - cost
-        };
-    }
+    const merchant = el('section', { className: 'aethermoor-trade-column' }, el('h3', { text: 'MERCHANT OFFERS' }));
+    const crew = el('section', { className: 'aethermoor-trade-column' }, el('h3', { text: 'CREW OFFERS' }));
+    columns.append(merchant, crew);
 
     function refresh() {
         for (const { key, wornKey, skip } of buyButtons) {
-            if (skip && !selectedSales.has(wornKey) && selectedBuys.has(key)) {
-                selectedBuys.delete(key);
-            }
+            if (skip && !selectedSales.has(wornKey) && selectedBuys.has(key)) selectedBuys.delete(key);
         }
+        const cost = [...selectedBuys.values()].reduce(
+            (sum, c) => sum + stock.catalog.find(e => e.number === c.number).price, 0
+        );
+        const proceeds = [...selectedSales.values()].reduce((sum, c) => sum + c.proceeds, 0);
+        const remaining = state.crew.purse + proceeds - cost;
 
-        const { cost, proceeds, remaining } = totals();
+        ledger.textContent = `Crew offers +${proceeds}s · Merchant offers −${cost}s\nProjected purse: ${remaining}s · Click Confirm to complete trade.`;
+        ledger.style.color = remaining < 0 ? '#f87171' : '#ffd166';
 
-        ledger.textContent =
-            `Crew offers +${proceeds}s · Merchant offers −${cost}s\n` +
-            `Projected purse: ${remaining}s · ` +
-            'Click Confirm to complete trade.';
-
-        ledger.style.color =
-            remaining < 0 ? '#f87171' : '#ffd166';
-
-        for (const {
-            button, key, wornKey, skip, price, number, variant
-        } of buyButtons) {
+        for (const { button, key, wornKey, skip, price, number, variant } of buyButtons) {
             const selected = selectedBuys.get(key);
-            const isSelected =
-                selected?.number === number &&
-                selected?.variant === variant;
+            const isSelected = selected?.number === number && selected?.variant === variant;
             const floorBlocked = skip && !selectedSales.has(wornKey);
-
             button.setAttribute('aria-pressed', String(isSelected));
-            button.disabled =
-                floorBlocked ||
-                (!selected && remaining < price);
+            button.disabled = floorBlocked || (!selected && remaining < price);
             button.title = floorBlocked
                 ? 'Worn gear already meets this zone’s vendor floor (select the worn item to sell to replace it).'
                 : '';
         }
-
         for (const { button, key } of saleButtons) {
-            button.setAttribute(
-                'aria-pressed',
-                String(selectedSales.has(key))
-            );
+            button.setAttribute('aria-pressed', String(selectedSales.has(key)));
         }
     }
+
+    const comparisonKeys = {
+        crewAtk: ['atk', 'Crew ATK'],
+        tansyMaxHp: ['hp', 'Tansy MaxHP'],
+        qtikMaxHp: ['hp', 'Q’tik MaxHP'],
+        frontlineDef: ['def', 'Frontline DEF'],
+        crewLuk: ['luk', 'Crew LUK']
+    };
 
     for (const entry of stock.catalog) {
         const key = `${entry.owner}:${entry.slot}`;
         const wornKey = `worn:${entry.owner}:${entry.slot}`;
+        const wornBonus = gearBonus(entry.owner, entry.slot, state.crew.gear?.[entry.owner]?.[entry.slot]);
+        const ownerLabel = entry.owner === 'qtik' ? "Q'tik" : 'Tansy';
+        const slotTag = entry.slot === 'weapon' ? 'Weapon' : entry.slotName;
+        const wornText = entry.equippedStat > 0 ? `Worn: Stat ${entry.equippedStat}` : 'Empty slot';
 
         for (const option of entry.variants) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'aethermoor-trade-option';
-            const worn =
-                state.crew.gear?.[entry.owner]?.[entry.slot];
+            const diffLines = Object.entries(comparisonKeys).map(([bonusKey, [wornStatKey, label]]) => {
+                if (bonusKey === 'tansyMaxHp' && entry.owner !== 'tansy') return null;
+                if (bonusKey === 'qtikMaxHp' && entry.owner !== 'qtik') return null;
+                const proposed = Number(option.bonus[bonusKey] || 0);
+                const current = Number(wornBonus[wornStatKey] || 0);
+                if (proposed === 0 && current === 0) return null;
+                const diff = proposed - current;
+                return el('div', {
+                    className: diff > 0 ? 'aethermoor-trade-gain' : diff < 0 ? 'aethermoor-trade-loss' : 'aethermoor-trade-even',
+                    text: `${label}: ${diff > 0 ? '+' : ''}${diff} vs worn`
+                });
+            });
 
-            const wornBonus = gearBonus(
-                entry.owner,
-                entry.slot,
-                worn
+            const button = el('button', {
+                type: 'button',
+                className: 'aethermoor-trade-option',
+                onClick: () => {
+                    const selected = selectedBuys.get(key);
+                    if (selected?.number === entry.number && selected?.variant === option.variant) {
+                        selectedBuys.delete(key);
+                    } else {
+                        selectedBuys.set(key, { number: entry.number, variant: option.variant });
+                    }
+                    refresh();
+                }
+            },
+                el('div', { className: 'aethermoor-vendor-name', text: `${option.displayName || entry.slotName} · ${entry.price}s` }),
+                el('div', { className: 'aethermoor-vendor-detail', text: `${ownerLabel} · ${slotTag} · Stat ${entry.stat} · ${wornText}` }),
+                diffLines
             );
 
-            const comparisonKeys = {
-                crewAtk: ['atk', 'Crew ATK'],
-                tansyMaxHp: ['hp', 'Tansy MaxHP'],
-                qtikMaxHp: ['hp', 'Q’tik MaxHP'],
-                frontlineDef: ['def', 'Frontline DEF'],
-                crewLuk: ['luk', 'Crew LUK']
-            };
-
-            const ownerLabel = entry.owner === 'qtik' ? "Q'tik" : 'Tansy';
-            const slotTag = entry.slot === 'weapon' ? 'Weapon' : entry.slotName;
-            const wornText = entry.equippedStat > 0
-                ? `Worn: Stat ${entry.equippedStat}`
-                : 'Empty slot';
-
-            const heading = document.createElement('div');
-            heading.className = 'aethermoor-vendor-name';
-            heading.textContent =
-                `${option.displayName || entry.slotName} · ` +
-                `${entry.price}s`;
-
-            const detail = document.createElement('div');
-            detail.className = 'aethermoor-vendor-detail';
-            detail.textContent =
-                `${ownerLabel} · ${slotTag} · Stat ${entry.stat} · ${wornText}`;
-
-            button.append(heading, detail);
-            for (const [key, [wornKey, label]] of Object.entries(
-                comparisonKeys
-            )) {
-                // Prevent the old shared 'hp' gear stat from cross-pollinating
-                if (key === 'tansyMaxHp' && entry.owner !== 'tansy') continue;
-                if (key === 'qtikMaxHp' && entry.owner !== 'qtik') continue;
-
-                const proposed = Number(option.bonus[key] || 0);
-                const current = Number(wornBonus[wornKey] || 0);
-
-                if (proposed === 0 && current === 0) continue;
-
-                const difference = proposed - current;
-                const line = document.createElement('div');
-
-                line.className = difference > 0
-                    ? 'aethermoor-trade-gain'
-                    : difference < 0
-                        ? 'aethermoor-trade-loss'
-                        : 'aethermoor-trade-even';
-
-                line.textContent =
-                    `${label}: ${difference > 0 ? '+' : ''}` +
-                    `${difference} vs worn`;
-
-                button.appendChild(line);
-            }
-
-            button.addEventListener('click', () => {
-                const selected = selectedBuys.get(key);
-
-                if (
-                    selected?.number === entry.number &&
-                    selected?.variant === option.variant
-                ) {
-                    selectedBuys.delete(key);
-                } else {
-                    selectedBuys.set(key, {
-                        number: entry.number,
-                        variant: option.variant
-                    });
-                }
-
-                refresh();
-            });
-
             merchant.appendChild(button);
-            buyButtons.push({
-                button,
-                key,
-                wornKey,
-                skip: entry.skip,
-                price: entry.price,
-                number: entry.number,
-                variant: option.variant
-            });
+            buyButtons.push({ button, key, wornKey, skip: entry.skip, price: entry.price, number: entry.number, variant: option.variant });
         }
     }
 
     function addSale(item, choice, label) {
         const rawStat = item.rawStat ?? item.stat;
         if (!Number.isInteger(rawStat) || rawStat <= 0) return;
-
-        const key = choice.location === 'worn'
-            ? `worn:${choice.owner}:${choice.slot}`
-            : `bag:${choice.index}`;
-
+        const key = choice.location === 'worn' ? `worn:${choice.owner}:${choice.slot}` : `bag:${choice.index}`;
         const proceeds = rawStat * 2;
         const rarity = String(item.rarity || 'common').toLowerCase();
-        const slotText = gearSlotLabel(item, choice.slot);
-        const sourceText = choice.location === 'worn' ? 'Worn' : 'Bag';
 
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'aethermoor-trade-option';
-
-        const heading = document.createElement('div');
-        heading.className = `aethermoor-vendor-name aethermoor-rarity-${rarity}`;
-        heading.textContent = `${item.name || label} · +${proceeds}s`;
-
-        const detail = document.createElement('div');
-        detail.className = 'aethermoor-vendor-detail';
-        detail.textContent = [sourceText, slotText, `Stat ${rawStat}`]
-            .filter(Boolean)
-            .join(' · ');
-
-        button.append(heading, detail);
-
-        button.addEventListener('click', () => {
-            if (selectedSales.has(key)) {
-                selectedSales.delete(key);
-            } else {
-                selectedSales.set(key, {
-                    ...choice,
-                    proceeds
-                });
+        const button = el('button', {
+            type: 'button',
+            className: 'aethermoor-trade-option',
+            onClick: () => {
+                if (selectedSales.has(key)) selectedSales.delete(key);
+                else selectedSales.set(key, { ...choice, proceeds });
+                refresh();
             }
-
-            refresh();
-        });
+        },
+            el('div', { className: `aethermoor-vendor-name aethermoor-rarity-${rarity}`, text: `${item.name || label} · +${proceeds}s` }),
+            el('div', {
+                className: 'aethermoor-vendor-detail',
+                text: [choice.location === 'worn' ? 'Worn' : 'Bag', gearSlotLabel(item, choice.slot), `Stat ${rawStat}`].filter(Boolean).join(' · ')
+            })
+        );
 
         crew.appendChild(button);
         saleButtons.push({ button, key });
     }
 
-    (state.inventory.bagReserves || []).forEach(
-        (item, index) => addSale(
-            item,
-            { location: 'bag', index },
-            'Bag Reserves'
-        )
-    );
-
+    (state.inventory.bagReserves || []).forEach((item, index) => addSale(item, { location: 'bag', index }, 'Bag Reserves'));
     for (const owner of ['tansy', 'qtik']) {
-        for (const [slot, item] of Object.entries(
-            state.crew.gear?.[owner] || {}
-        )) {
+        for (const [slot, item] of Object.entries(state.crew.gear?.[owner] || {})) {
             if (item && (item.stat ?? item.rawStat) > 0) {
-                addSale(
-                    item,
-                    { location: 'worn', owner, slot },
-                    `${owner === 'qtik' ? "Q'tik" : 'Tansy'} · worn ${slot}`
-                );
+                addSale(item, { location: 'worn', owner, slot }, `${owner === 'qtik' ? "Q'tik" : 'Tansy'} · worn ${slot}`);
             }
         }
     }
 
-    confirm.addEventListener('click', async () => {
-        if (!selectedBuys.size && !selectedSales.size) {
-            toastr.warning('Select at least one item first.', 'Aethermoor');
-            return;
-        }
-
-        confirm.disabled = true;
-
-        try {
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'commit_vendor_trade',
-                    kind: 'vendor',
-                    action: 'commit',
-                    basket: {
-                        buy: [...selectedBuys.values()].map(
-                            ({ number, variant }) => ({ number, variant })
-                        ),
-                        sell: [...selectedSales.values()].map(
-                            ({ location, owner, slot, index }) => ({
-                                location,
-                                ...(location === 'worn'
-                                    ? { owner, slot }
-                                    : { index })
-                            })
-                        )
-                    }
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not complete trade'
-            );
-
-            toastr.success('Trade completed.', 'Aethermoor');
-            windowElement.remove();
-
-            if (aethermoorPanelOpen) {
-                renderAethermoorTab(aethermoorActiveTab);
-            }
-        } catch (error) {
-            confirm.disabled = false;
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
-        }
-    });
-
-    close.addEventListener('click', () => {
-        windowElement.remove();
-    });
-
     refresh();
-    document.body.appendChild(windowElement);
-
-    attachAethermoorWindowGeometry(
-        windowElement,
-        header,
-        AETHERMOOR_SHOP_GEOMETRY_KEY
-    );
+    document.body.appendChild(panel);
+    attachAethermoorWindowGeometry(panel, header, AETHERMOOR_SHOP_GEOMETRY_KEY);
     close.focus();
-
 }
 
 /*
@@ -20955,523 +20774,220 @@ async function openAethermoorShopWindow() {
  * the exchange immediately.
  */
 async function openAethermoorHerbalistWindow() {
-    addAethermoorPanelStyles();
-
-    const metadata = getContext().chatMetadata;
-    const snapshot = await readStoredCombatState();
-
-    assert(
-        getContext().chatMetadata === metadata,
-        'Chat changed before the herbalist could open'
-    );
-
-    const state = snapshot.state;
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !state.activeInstanceId &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Reach a free settlement before opening the herbalist'
-    );
-
+    const { state, settlement } = await readFreeSettlementState('the herbalist');
     const stock = herbalistStock(state.zone).map(item => ({
         ...item,
-        name: cosmeticStockName(
-            state,
-            potionCosmeticStockKey(item.id),
-            item.name
-        )
+        name: cosmeticStockName(state, potionCosmeticStockKey(item.id), item.name)
     }));
     const quantities = new Map();
-    document.getElementById('aethermoor_herbalist_window')?.remove();
-    const panel = document.createElement('section');
-    panel.id = 'aethermoor_herbalist_window';
-    panel.className = 'aethermoor-shop aethermoor-herbalist-window';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Herbalist trade');
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-shop-header';
-
-    const title = document.createElement('b');
-    title.className = 'aethermoor-shop-title';
-    title.textContent =
-        `System Log // Herbalist · ${settlement.label}`;
-
-    const headerActions = document.createElement('div');
-    headerActions.className = 'aethermoor-shop-header-actions';
-
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
-    confirm.textContent = 'Confirm';
-
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'aethermoor-panel-close';
-    close.textContent = 'Cancel';
-
-    headerActions.append(confirm, close);
-    header.append(title, headerActions);
-    panel.appendChild(header);
-
-    const summary = document.createElement('div');
-    summary.className = 'aethermoor-shop-summary';
-    summary.textContent =
-        `Purse: ${state.crew.purse}s\n` +
-        'Choose quantities, then click Confirm.';
-    panel.appendChild(summary);
-
-    const columns = document.createElement('div');
-    columns.className = 'aethermoor-trade-columns';
-
-    const merchant = document.createElement('section');
-    merchant.className = 'aethermoor-trade-column';
-    merchant.innerHTML = '<h3>HERBALIST OFFERS</h3>';
-
-    const crew = document.createElement('section');
-    crew.className = 'aethermoor-trade-column';
-    crew.innerHTML = '<h3>CREW OFFERS</h3>';
-
-    columns.append(merchant, crew);
-    panel.appendChild(columns);
-
-    const ledger = document.createElement('div');
-    ledger.className = 'aethermoor-trade-ledger';
-    panel.appendChild(ledger);
-
     const controls = [];
 
-    function totals() {
-        let cost = 0;
-        let proceeds = 0;
-
-        for (const [key, quantity] of quantities) {
-            const [side, id] = key.split(':');
-            const item = consumableDefinition(id);
-
-            if (side === 'buy') {
-                cost += item.buyPrice * quantity;
-            } else {
-                proceeds += item.sellPrice * quantity;
+    const { panel, header, close, columns, ledger } = createShopShell({
+        id: 'aethermoor_herbalist_window',
+        extraClass: 'aethermoor-herbalist-window',
+        ariaLabel: 'Herbalist trade',
+        titleText: `System Log // Herbalist · ${settlement.label}`,
+        summaryText: `Purse: ${state.crew.purse}s\nChoose quantities, then click Confirm.`,
+        onConfirm: async (confirm, win) => {
+            const choices = [...quantities].map(([key, quantity]) => {
+                const [side, id] = key.split(':');
+                return { side, id, quantity };
+            });
+            if (choices.length === 0) {
+                toastr.warning('Select at least one potion first.', 'Aethermoor');
+                return;
+            }
+            confirm.disabled = true;
+            try {
+                const committed = await runStoredMechanic({
+                    cases: [{ name: 'commit_herbalist_trade', kind: 'herbalist', action: 'commit', basket: { choices } }]
+                });
+                assert(
+                    committed?.ok === true && committed.results?.[0]?.ok !== false,
+                    committed?.results?.[0]?.error || 'Could not complete exchange'
+                );
+                toastr.success('Herbalist trade completed.', 'Aethermoor');
+                win.remove();
+                if (aethermoorPanelOpen) renderAethermoorTab(aethermoorActiveTab);
+            } catch (error) {
+                confirm.disabled = false;
+                toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
             }
         }
+    });
 
-        return {
-            cost,
-            proceeds,
-            remaining: state.crew.purse + proceeds - cost
-        };
-    }
+    const merchant = el('section', { className: 'aethermoor-trade-column' }, el('h3', { text: 'HERBALIST OFFERS' }));
+    const crew = el('section', { className: 'aethermoor-trade-column' }, el('h3', { text: 'CREW OFFERS' }));
+    columns.append(merchant, crew);
 
     function refresh() {
-        const { cost, proceeds, remaining } = totals();
+        let cost = 0, proceeds = 0;
+        for (const [key, qty] of quantities) {
+            const [side, id] = key.split(':');
+            const item = consumableDefinition(id);
+            if (side === 'buy') cost += item.buyPrice * qty;
+            else proceeds += item.sellPrice * qty;
+        }
+        const remaining = state.crew.purse + proceeds - cost;
 
-        ledger.textContent =
-            `Sales +${proceeds}s · Purchases −${cost}s\n` +
-            `Projected purse: ${remaining}s · Click Confirm to complete trade.`;
-        ledger.style.color =
-            remaining < 0 ? '#f87171' : '#ffd166';
+        ledger.textContent = `Sales +${proceeds}s · Purchases −${cost}s\nProjected purse: ${remaining}s · Click Confirm to complete trade.`;
+        ledger.style.color = remaining < 0 ? '#f87171' : '#ffd166';
 
-        for (const control of controls) {
-            const count = quantities.get(control.key) || 0;
-            control.count.textContent = ` ×${count}`;
-            control.minus.disabled = count === 0;
-            control.plus.disabled =
-                control.max !== null
-                    ? count >= control.max
-                    : control.price > remaining;
+        for (const c of controls) {
+            const count = quantities.get(c.key) || 0;
+            c.count.textContent = ` ×${count}`;
+            c.minus.disabled = count === 0;
+            c.plus.disabled = c.max !== null ? count >= c.max : c.price > remaining;
         }
     }
 
     function addRow(container, side, item, maximum = null) {
         const key = `${side}:${item.id}`;
-        const row = document.createElement('div');
-        row.className = 'aethermoor-vendor-row';
-
-        const name = document.createElement('div');
-        name.className = 'aethermoor-vendor-name';
-        name.textContent = item.name;
-
-        const detail = document.createElement('div');
-        detail.className = 'aethermoor-vendor-detail';
-        detail.textContent =
-            `${item.type === 'potion'
-                ? `Restores ${item.heal} HP`
-                : 'Clears eligible debuff stacks'} · ` +
-            `${side === 'buy' ? item.buyPrice : item.sellPrice}s each` +
-            (maximum === null ? '' : ` · Owned: ${maximum}`);
-
-        const minus = document.createElement('button');
-        minus.type = 'button';
-        minus.textContent = '−';
-
-        const count = document.createElement('span');
-
-        const plus = document.createElement('button');
-        plus.type = 'button';
-        plus.textContent = '+';
-
-        minus.addEventListener('click', () => {
-            const next = (quantities.get(key) || 0) - 1;
-            if (next) quantities.set(key, next);
-            else quantities.delete(key);
-            refresh();
+        const minus = el('button', {
+            type: 'button',
+            text: '−',
+            onClick: () => {
+                const next = (quantities.get(key) || 0) - 1;
+                if (next) quantities.set(key, next);
+                else quantities.delete(key);
+                refresh();
+            }
+        });
+        const count = el('span');
+        const plus = el('button', {
+            type: 'button',
+            text: '+',
+            onClick: () => {
+                quantities.set(key, (quantities.get(key) || 0) + 1);
+                refresh();
+            }
         });
 
-        plus.addEventListener('click', () => {
-            quantities.set(key, (quantities.get(key) || 0) + 1);
-            refresh();
-        });
-
-        row.append(name, detail, minus, count, plus);
-        container.appendChild(row);
-
-        controls.push({
-            key,
-            minus,
-            plus,
-            count,
-            max: maximum,
-            price: item.buyPrice
-        });
+        container.appendChild(el('div', { className: 'aethermoor-vendor-row' },
+            el('div', { className: 'aethermoor-vendor-name', text: item.name }),
+            el('div', {
+                className: 'aethermoor-vendor-detail',
+                text: `${item.type === 'potion' ? `Restores ${item.heal} HP` : 'Clears eligible debuff stacks'} · ` +
+                    `${side === 'buy' ? item.buyPrice : item.sellPrice}s each${maximum === null ? '' : ` · Owned: ${maximum}`}`
+            }),
+            minus, count, plus
+        ));
+        controls.push({ key, minus, plus, count, max: maximum, price: item.buyPrice });
     }
 
-    for (const item of stock) {
-        addRow(merchant, 'buy', item);
-    }
-
+    for (const item of stock) addRow(merchant, 'buy', item);
     for (const owned of state.inventory.consumables || []) {
         if (owned.quantity > 0) {
-            const definition = consumableDefinition(owned.id);
-            addRow(
-                crew,
-                'sell',
-                {
-                    id: owned.id,
-                    ...definition,
-                    name: owned.name || cosmeticStockName(
-                        state,
-                        potionCosmeticStockKey(owned.id),
-                        definition.name
-                    )
-                },
-                owned.quantity
-            );
+            const def = consumableDefinition(owned.id);
+            addRow(crew, 'sell', {
+                id: owned.id,
+                ...def,
+                name: owned.name || cosmeticStockName(state, potionCosmeticStockKey(owned.id), def.name)
+            }, owned.quantity);
         }
     }
-
-    confirm.addEventListener('click', async () => {
-        const choices = [...quantities].map(([key, quantity]) => {
-            const [side, id] = key.split(':');
-            return { side, id, quantity };
-        });
-
-        if (choices.length === 0) {
-            toastr.warning('Select at least one potion first.', 'Aethermoor');
-            return;
-        }
-
-        confirm.disabled = true;
-
-        try {
-            const committed = await runStoredMechanic({
-                cases: [{
-                    name: 'commit_herbalist_trade',
-                    kind: 'herbalist',
-                    action: 'commit',
-                    basket: { choices }
-                }]
-            });
-
-            assert(
-                committed?.ok === true && committed.results?.[0]?.ok !== false,
-                committed?.results?.[0]?.error || 'Could not complete exchange'
-            );
-
-            toastr.success('Herbalist trade completed.', 'Aethermoor');
-            panel.remove();
-
-            if (aethermoorPanelOpen) {
-                renderAethermoorTab(aethermoorActiveTab);
-            }
-        } catch (error) {
-            confirm.disabled = false;
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
-        }
-    });
-
-    close.addEventListener('click', () => {
-        panel.remove();
-    });
 
     refresh();
     document.body.appendChild(panel);
-
-    attachAethermoorWindowGeometry(
-        panel,
-        header,
-        AETHERMOOR_HERBALIST_GEOMETRY_KEY
-    );
+    attachAethermoorWindowGeometry(panel, header, AETHERMOOR_HERBALIST_GEOMETRY_KEY);
     close.focus();
-
 }
 
 /*
  * Inn Services window. Selections are UI-local; Cancel closes without
- * changes, and Confirm deducts silver immediately.
+ * changes, and Queue applies services on the next roleplay message.
  */
 async function openAethermoorInnWindow() {
-    addAethermoorPanelStyles();
-
-    const metadata = getContext().chatMetadata;
-    const snapshot = await readStoredCombatState();
-
-    assert(
-        getContext().chatMetadata === metadata,
-        'Chat changed before the inn menu could open'
-    );
-
-    const state = snapshot.state;
-
-    const displayServices = INN_SERVICES.map(service => ({
-        ...service,
-        displayName: cosmeticStockName(
-            state,
-            `inn:${service.id}`,
-            service.label
-        )
+    const { state, settlement } = await readFreeSettlementState('inn services');
+    const displayServices = INN_SERVICES.map(s => ({
+        ...s,
+        displayName: cosmeticStockName(state, `inn:${s.id}`, s.label)
     }));
-
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !state.activeInstanceId &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Reach a free settlement before opening inn services'
-    );
-
     const quantities = new Map();
-    const serviceById = id =>
-        displayServices.find(service => service.id === id);
-
-    document.getElementById('aethermoor_inn_window')?.remove();
-
-    const panel = document.createElement('section');
-    panel.id = 'aethermoor_inn_window';
-    panel.className = 'aethermoor-shop aethermoor-inn-window';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Inn services');
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-shop-header';
-
-    const title = document.createElement('b');
-    title.className = 'aethermoor-shop-title';
-    title.textContent =
-        `System Log // Inn Services · ${settlement.label}`;
-
-    const headerActions = document.createElement('div');
-    headerActions.className = 'aethermoor-shop-header-actions';
-
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'aethermoor-panel-close aethermoor-shop-confirm';
-    confirm.textContent = 'Queue';
-
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'aethermoor-panel-close';
-    close.textContent = 'Cancel';
-
-    headerActions.append(confirm, close);
-    header.append(title, headerActions);
-    panel.appendChild(header);
-
-    const summary = document.createElement('div');
-    summary.className = 'aethermoor-shop-summary';
-    summary.textContent =
-        `Purse: ${state.crew.purse}s\n` +
-        'Meals are expenses only. Renting a room restores full HP after at least a 2-hour nap or overnight rest.\n' +
-        'Choose services, then click Queue to apply on your next message.';
-    panel.appendChild(summary);
-
-    const columns = document.createElement('div');
-    columns.className = 'aethermoor-trade-columns';
-    panel.appendChild(columns);
-
-    const ledger = document.createElement('div');
-    ledger.className = 'aethermoor-trade-ledger';
-    panel.appendChild(ledger);
-
+    const serviceById = id => displayServices.find(s => s.id === id);
+    const roomIds = ['common_room', 'private_room', 'luxurious_room'];
     const controls = [];
 
+    const { panel, header, close, columns, ledger } = createShopShell({
+        id: 'aethermoor_inn_window',
+        extraClass: 'aethermoor-inn-window',
+        ariaLabel: 'Inn services',
+        titleText: `System Log // Inn Services · ${settlement.label}`,
+        confirmText: 'Queue',
+        summaryText: `Purse: ${state.crew.purse}s\nMeals are expenses only. Renting a room restores full HP after at least a 2-hour nap or overnight rest.\nChoose services, then click Queue to apply on your next message.`,
+        onConfirm: (_confirm, win) => {
+            const choices = [...quantities].map(([id, quantity]) => ({ id, quantity }));
+            if (choices.length === 0) {
+                toastr.warning('Select at least one service first.', 'Aethermoor');
+                return;
+            }
+            const cost = choices.reduce((sum, c) => sum + (serviceById(c.id)?.price || 0) * c.quantity, 0);
+            const hasRoom = choices.some(c => roomIds.includes(c.id));
+            queueAethermoorInnOrder(choices, `Inn Services (−${cost}s${hasRoom ? ' · Full HP rest)' : ')'}`);
+            win.remove();
+        }
+    });
+
     function refresh() {
-        const cost = INN_SERVICES.reduce(
-            (sum, service) =>
-                sum + service.price *
-                    (quantities.get(service.id) || 0),
-            0
-        );
-
+        const cost = INN_SERVICES.reduce((sum, s) => sum + s.price * (quantities.get(s.id) || 0), 0);
         const remaining = state.crew.purse - cost;
+        ledger.textContent = `Services −${cost}s · Projected purse: ${remaining}s\nClick Queue to apply on your next roleplay message.`;
+        ledger.style.color = remaining < 0 ? '#f87171' : '#ffd166';
 
-        ledger.textContent =
-            `Services −${cost}s · Projected purse: ${remaining}s\n` +
-            'Click Queue to apply on your next roleplay message.';
-        ledger.style.color =
-            remaining < 0 ? '#f87171' : '#ffd166';
-
-        const roomIds = [
-            'common_room',
-            'private_room',
-            'luxurious_room'
-        ];
-        const selectedRoom = roomIds.find(id =>
-            (quantities.get(id) || 0) > 0
-        );
-
-        for (const control of controls) {
-            const { service } = control;
+        const selectedRoom = roomIds.find(id => (quantities.get(id) || 0) > 0);
+        for (const c of controls) {
+            const { service } = c;
             const count = quantities.get(service.id) || 0;
             const isRoom = roomIds.includes(service.id);
-            const maximum =
-                isRoom || service.id === 'hot_water' ? 1 : 20;
-
-            control.count.textContent = ` ×${count} `;
-            control.minus.disabled = count === 0;
-            control.plus.disabled =
-                count >= maximum ||
-                (isRoom &&
-                    selectedRoom !== undefined &&
-                    selectedRoom !== service.id) ||
-                remaining < service.price;
+            const max = isRoom || service.id === 'hot_water' ? 1 : 20;
+            c.count.textContent = ` ×${count} `;
+            c.minus.disabled = count === 0;
+            c.plus.disabled = count >= max || (isRoom && selectedRoom !== undefined && selectedRoom !== service.id) || remaining < service.price;
         }
     }
 
     for (const [heading, ids] of [
-        ['MEALS', [
-            'standard_meal',
-            'better_meal',
-            'special_meal'
-        ]],
-        ['ROOMS & COMFORTS', [
-            'common_room',
-            'private_room',
-            'luxurious_room',
-            'hot_water'
-        ]]
+        ['MEALS', ['standard_meal', 'better_meal', 'special_meal']],
+        ['ROOMS & COMFORTS', ['common_room', 'private_room', 'luxurious_room', 'hot_water']]
     ]) {
-        const column = document.createElement('section');
-        column.className = 'aethermoor-trade-column';
-
-        const label = document.createElement('h3');
-        label.textContent = heading;
-        column.appendChild(label);
-
+        const column = el('section', { className: 'aethermoor-trade-column' }, el('h3', { text: heading }));
         for (const id of ids) {
             const service = serviceById(id);
-            const row = document.createElement('div');
-            row.className = 'aethermoor-vendor-row';
+            const minus = el('button', {
+                type: 'button',
+                text: '−',
+                onClick: () => {
+                    const next = (quantities.get(id) || 0) - 1;
+                    if (next > 0) quantities.set(id, next);
+                    else quantities.delete(id);
+                    refresh();
+                }
+            });
+            const count = el('span');
+            const plus = el('button', {
+                type: 'button',
+                text: '+',
+                onClick: () => {
+                    quantities.set(id, (quantities.get(id) || 0) + 1);
+                    refresh();
+                }
+            });
 
-            const name = document.createElement('div');
-            name.className = 'aethermoor-vendor-name';
-            name.append(document.createTextNode(
-                `${service.displayName} · `
+            column.appendChild(el('div', { className: 'aethermoor-vendor-row' },
+                el('div', { className: 'aethermoor-vendor-name' },
+                    `${service.displayName} · `,
+                    el('span', { className: 'aethermoor-inn-price', text: `${service.price}s` })
+                ),
+                minus, count, plus
             ));
-
-            const price = document.createElement('span');
-            price.className = 'aethermoor-inn-price';
-            price.textContent = `${service.price}s`;
-            name.appendChild(price);
-
-            const minus = document.createElement('button');
-
-            minus.type = 'button';
-            minus.textContent = '−';
-
-            const count = document.createElement('span');
-
-            const plus = document.createElement('button');
-            plus.type = 'button';
-            plus.textContent = '+';
-
-            minus.addEventListener('click', () => {
-                const next = (quantities.get(id) || 0) - 1;
-                if (next > 0) quantities.set(id, next);
-                else quantities.delete(id);
-                refresh();
-            });
-
-            plus.addEventListener('click', () => {
-                quantities.set(id, (quantities.get(id) || 0) + 1);
-                refresh();
-            });
-
-            row.append(name, minus, count, plus);
-            column.appendChild(row);
-
             controls.push({ service, minus, count, plus });
         }
-
         columns.appendChild(column);
     }
 
-    confirm.addEventListener('click', () => {
-        const choices = [...quantities].map(
-            ([id, quantity]) => ({ id, quantity })
-        );
-
-        if (choices.length === 0) {
-            toastr.warning('Select at least one service first.', 'Aethermoor');
-            return;
-        }
-
-        const cost = choices.reduce(
-            (sum, choice) =>
-                sum + (serviceById(choice.id)?.price || 0) * choice.quantity,
-            0
-        );
-        const hasRoom = choices.some(choice =>
-            ['common_room', 'private_room', 'luxurious_room'].includes(choice.id)
-        );
-        const label =
-            `Inn Services (−${cost}s` +
-            (hasRoom ? ' · Full HP rest)' : ')');
-
-        queueAethermoorInnOrder(choices, label);
-        panel.remove();
-    });
-
-    close.addEventListener('click', () => {
-        panel.remove();
-    });
-
     refresh();
     document.body.appendChild(panel);
-
-    attachAethermoorWindowGeometry(
-        panel,
-        header,
-        AETHERMOOR_INN_GEOMETRY_KEY
-    );
+    attachAethermoorWindowGeometry(panel, header, AETHERMOOR_INN_GEOMETRY_KEY);
     close.focus();
 }
 

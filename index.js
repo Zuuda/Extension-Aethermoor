@@ -20425,169 +20425,164 @@ function addAethermoorPanelStyles() {
     document.head.appendChild(style);
 }
 
+function el(tag, props = null, ...children) {
+    const node = document.createElement(tag);
+    if (props) {
+        for (const [k, v] of Object.entries(props)) {
+            if (v === undefined || v === null) continue;
+            if (k === 'className') node.className = v;
+            else if (k === 'text') node.textContent = v;
+            else if (k === 'dataset') Object.assign(node.dataset, v);
+            else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+            else if (k === 'attrs') {
+                for (const [ak, av] of Object.entries(v)) {
+                    if (av !== undefined && av !== null) node.setAttribute(ak, String(av));
+                }
+            } else if (k.startsWith('on') && typeof v === 'function') {
+                node.addEventListener(k.slice(2).toLowerCase(), v);
+            } else {
+                node[k] = v;
+            }
+        }
+    }
+    for (const child of children.flat()) {
+        if (child !== null && child !== undefined && child !== false) {
+            node.append(child);
+        }
+    }
+    return node;
+}
+
+async function copyTextToClipboard(text, failMessage = 'Could not copy to clipboard') {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_error) {
+        const input = el('textarea', {
+            value: text,
+            style: { position: 'fixed', opacity: '0' }
+        });
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+        assert(copied, failMessage);
+    }
+}
+
 let aethermoorTabViews = null;
 
 function ensureAethermoorTabViews() {
     if (aethermoorTabViews) return aethermoorTabViews;
-
-    const content =
-        aethermoorPanelElement.querySelector('.aethermoor-panel-content');
-
+    const content = aethermoorPanelElement.querySelector('.aethermoor-panel-content');
     content.replaceChildren();
-
     aethermoorTabViews = {};
 
     for (const tab of [
         'combat', 'quests', 'world', 'instances', 'inventory', 'shops',
         'achievements', 'aethernet'
     ]) {
-
-        const view = document.createElement('section');
-        view.className = 'aethermoor-tab-view';
-        view.dataset.tab = tab;
-        view.hidden = true;
+        const view = el('section', {
+            className: 'aethermoor-tab-view',
+            dataset: { tab },
+            hidden: true
+        });
         content.appendChild(view);
         aethermoorTabViews[tab] = view;
     }
-
     return aethermoorTabViews;
 }
 
 function makeAethermoorSection(title, text, accent = 'world') {
-    const section = document.createElement('section');
-    section.className = 'aethermoor-ui-section';
-    section.dataset.accent = accent;
-
-    const heading = document.createElement('div');
-    heading.className = 'aethermoor-ui-heading';
-    heading.textContent = title;
-
-    const body = document.createElement('div');
-    body.className = 'aethermoor-ui-text';
-    body.textContent = text;
-
-    section.append(heading, body);
-    return section;
+    return el('section', { className: 'aethermoor-ui-section', dataset: { accent } },
+        el('div', { className: 'aethermoor-ui-heading', text: title }),
+        el('div', { className: 'aethermoor-ui-text', text })
+    );
 }
 
 function makeAethermoorAction(label, accent, handler) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'aethermoor-ui-action';
-    button.dataset.accent = accent;
-    button.textContent = label;
-    button.addEventListener('click', handler);
-    return button;
+    return el('button', {
+        type: 'button',
+        className: 'aethermoor-ui-action',
+        dataset: { accent },
+        text: label,
+        onClick: handler
+    });
+}
+
+const SALVAGE_BONUS_LABELS = {
+    crewAtk: 'Crew ATK',
+    tansyMaxHp: 'Tansy MaxHP',
+    qtikMaxHp: "Q'tik MaxHP",
+    frontlineDef: 'Frontline DEF',
+    crewLuk: 'Crew LUK'
+};
+
+function formatSalvageBonuses(salvage) {
+    return Object.entries(salvage?.bonus || {})
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => `+${value} ${SALVAGE_BONUS_LABELS[key] || key}`)
+        .join(', ');
 }
 
 function showAethermoorContractProgress(notice) {
     addAethermoorPanelStyles();
-
     const quest = notice.quest;
     const complete = notice.type === 'complete';
-    const popup = document.createElement('section');
+    const isMsq = quest.isMsq === true;
 
-    popup.id = 'aethermoor_contract_popup';
-    popup.className = 'aethermoor-contract-popup';
-    popup.setAttribute('role', 'dialog');
-    popup.setAttribute(
-        'aria-label',
-        complete
-            ? `Contract complete: ${quest.title}`
-            : `Gate cleared: ${quest.title}`
+    const close = el('button', {
+        type: 'button',
+        text: 'Close',
+        onClick: finishAethermoorContractNotification
+    });
+
+    const bonusText = complete && quest.salvage ? formatSalvageBonuses(quest.salvage) : '';
+    const popup = el('section', {
+        id: 'aethermoor_contract_popup',
+        className: 'aethermoor-contract-popup',
+        style: isMsq ? { borderLeftColor: '#c084fc' } : null,
+        attrs: {
+            role: 'dialog',
+            'aria-label': `${complete ? 'Contract complete' : 'Gate cleared'}: ${quest.title}`
+        }
+    },
+        el('div', { className: 'aethermoor-contract-popup-header' },
+            el('b', {
+                className: 'aethermoor-contract-popup-heading',
+                style: isMsq ? { color: '#c084fc' } : null,
+                text: complete
+                    ? (isMsq ? 'System Log // Main Story Complete' : 'System Log // Contract Complete')
+                    : (isMsq ? 'System Log // Main Story Gate Cleared' : 'System Log // Gate Cleared')
+            }),
+            el('b', {
+                className: 'aethermoor-contract-popup-rank',
+                text: complete ? `RANK ${quest.rank}` : `GATE ${notice.gate.step}/${quest.gates}`
+            })
+        ),
+        el('div', {
+            text: complete
+                ? `Completed: ${quest.title}`
+                : `${quest.title} — ${notice.gate.objective}`
+        }),
+        el('div', {
+            style: { marginTop: '6px' },
+            text: complete
+                ? `+${quest.payout.xp} XP | +${quest.payout.silver} silver | +${quest.payout.repSteps} reputation step(s)`
+                : `Next: ${quest.currentGate?.objective || 'Not recorded'}`
+        }),
+        complete && quest.salvage && el('div', {
+            className: 'aethermoor-contract-popup-salvage',
+            style: { color: quest.salvage.rarityColor || '#d0d7de' },
+            text: `System salvage: ${formatGearLabel(quest.salvage)}${bonusText ? ` — ${bonusText}` : ''}`
+        }),
+        el('div', { className: 'aethermoor-contract-popup-actions' }, close)
     );
 
-    const header = document.createElement('div');
-    header.className = 'aethermoor-contract-popup-header';
-
-    if (quest.isMsq === true) {
-        popup.style.borderLeftColor = '#c084fc';
-    }
-
-    const heading = document.createElement('b');
-    heading.className = 'aethermoor-contract-popup-heading';
-    if (quest.isMsq === true) {
-        heading.style.color = '#c084fc';
-    }
-    heading.textContent = complete
-        ? (quest.isMsq ? 'System Log // Main Story Complete' : 'System Log // Contract Complete')
-        : (quest.isMsq ? 'System Log // Main Story Gate Cleared' : 'System Log // Gate Cleared');
-
-    const label = document.createElement('b');
-    label.className = 'aethermoor-contract-popup-rank';
-    label.textContent = complete
-        ? `RANK ${quest.rank}`
-        : `GATE ${notice.gate.step}/${quest.gates}`;
-
-    header.append(heading, label);
-
-    const description = document.createElement('div');
-    description.textContent = complete
-        ? `Completed: ${quest.title}`
-        : `${quest.title} — ${notice.gate.objective}`;
-
-    popup.append(header, description);
-
-    const detail = document.createElement('div');
-    detail.style.marginTop = '6px';
-
-    if (complete) {
-        detail.textContent =
-            `+${quest.payout.xp} XP | ` +
-            `+${quest.payout.silver} silver | ` +
-            `+${quest.payout.repSteps} reputation step(s)`;
-    } else {
-        detail.textContent =
-            `Next: ${quest.currentGate?.objective || 'Not recorded'}`;
-    }
-
-    popup.appendChild(detail);
-
-    if (complete && quest.salvage) {
-        const salvage = document.createElement('div');
-        salvage.className = 'aethermoor-contract-popup-salvage';
-        salvage.style.color =
-            quest.salvage.rarityColor || '#d0d7de';
-        const bonusLabels = {
-            crewAtk: 'Crew ATK',
-            tansyMaxHp: 'Tansy MaxHP',
-            qtikMaxHp: "Q'tik MaxHP",
-            frontlineDef: 'Frontline DEF',
-            crewLuk: 'Crew LUK'
-        };
-        const bonusText = Object.entries(quest.salvage.bonus || {})
-            .filter(([, value]) => Number(value) > 0)
-            .map(([key, value]) => `+${value} ${bonusLabels[key] || key}`)
-            .join(', ');
-        salvage.textContent =
-            `System salvage: ${formatGearLabel(quest.salvage)}` +
-            (bonusText ? ` — ${bonusText}` : '');
-        popup.appendChild(salvage);
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'aethermoor-contract-popup-actions';
-
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.textContent = 'Close';
-    close.addEventListener(
-        'click',
-        finishAethermoorContractNotification
-    );
-
-    actions.appendChild(close);
-    popup.appendChild(actions);
     document.body.appendChild(popup);
     close.focus();
 }
 
-/*
- * The System, not the narrator or NPC, displays mechanical contract
- * details. This is a notification over the saved offered quest; closing
- * it does not accept or decline anything. All text is added as text nodes,
- * so quest names and cosmetic item names cannot inject HTML.
- */
 async function showAethermoorContractOffer(
     questId,
     expectedMetadata = getContext().chatMetadata,
@@ -20629,175 +20624,82 @@ async function showAethermoorContractOffer(
     addAethermoorPanelStyles();
     document.getElementById('aethermoor_contract_popup')?.remove();
 
-    const popup = document.createElement('section');
-    popup.id = 'aethermoor_contract_popup';
-    popup.className = 'aethermoor-contract-popup';
-    popup.setAttribute('role', 'dialog');
-    popup.setAttribute('aria-label', `Contract offered: ${quest.title}`);
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-contract-popup-header';
-
-    if (quest.isMsq === true) {
-        popup.style.borderLeftColor = '#c084fc';
-    }
-
-    const heading = document.createElement('span');
-    heading.className = 'aethermoor-contract-popup-heading';
-    if (quest.isMsq === true) {
-        heading.style.color = '#c084fc';
-    }
-    heading.textContent = quest.isMsq === true
-        ? 'System Log // Main Story Offered'
-        : 'System Log // Contract Offered';
-
-    const rank = document.createElement('span');
-    rank.className = 'aethermoor-contract-popup-rank';
-    if (quest.isMsq === true) {
-        rank.style.color = '#c084fc';
-    }
-    rank.textContent = quest.isMsq === true
-        ? `${quest.msq?.isFinale ? 'FINALE' : `CH. ${quest.msq?.chapter || 1}`} · RANK ${quest.rank}`
-        : `RANK ${quest.rank}`;
-
-    header.append(heading, rank);
-    popup.appendChild(header);
-
-    const title = document.createElement('div');
-    title.className = 'aethermoor-contract-popup-title';
-    title.textContent = quest.title;
-    popup.appendChild(title);
-
-    const premise = document.createElement('div');
-    premise.textContent = quest.pitch || '';
-    popup.appendChild(premise);
-
-    const objective = document.createElement('div');
-    objective.style.marginTop = '6px';
-    objective.textContent =
-        `First objective: ${quest.currentGate?.objective || 'Not recorded'}`;
-    popup.appendChild(objective);
-
-    const rewards = document.createElement('div');
-    rewards.className = 'aethermoor-contract-popup-rewards';
-
-    const xp = document.createElement('b');
-    xp.style.color = '#4ade80';
-    xp.textContent = `${quest.payout.xp} XP`;
-
-    const silver = document.createElement('b');
-    silver.style.color = '#ffd166';
-    silver.textContent = `${quest.payout.silver} silver`;
-
-    const reputation = document.createElement('b');
-    reputation.style.color = '#38bdf8';
-    reputation.textContent =
-        `${quest.payout.repSteps} reputation step(s)`;
-
-    rewards.append(xp, ' | ', silver, ' | ', reputation);
-    popup.appendChild(rewards);
-
-    const salvage = document.createElement('div');
-    salvage.className = 'aethermoor-contract-popup-salvage';
-
-    const item = document.createElement('b');
-    item.style.color = quest.salvage.rarityColor || '#d0d7de';
-    item.textContent = formatGearLabel(quest.salvage);
-
-    const bonuses = Object.entries(quest.salvage.bonus || {})
-        .filter(([, value]) => Number(value) > 0)
-        .map(([key, value]) => {
-            const label = {
-                crewAtk: 'Crew ATK',
-                tansyMaxHp: 'Tansy MaxHP',
-                qtikMaxHp: "Q'tik MaxHP",
-                frontlineDef: 'Frontline DEF',
-                crewLuk: 'Crew LUK'
-            }[key] || key;
-
-            return `+${value} ${label}`;
-        });
-
-    salvage.append(
-        'System salvage: ',
-        item,
-        ...(bonuses.length ? [` — ${bonuses.join(', ')}`] : [])
-    );
-    popup.appendChild(salvage);
-
-    const actions = document.createElement('div');
-    actions.className = 'aethermoor-contract-popup-actions';
-
-    const accept = document.createElement('button');
-    accept.type = 'button';
-    accept.textContent = 'Accept';
-
-    const decline = document.createElement('button');
-    decline.type = 'button';
-    decline.textContent = 'Decline';
-
-    const later = document.createElement('button');
-    later.type = 'button';
-    later.textContent = 'Close / Later';
-    later.addEventListener(
-        'click',
-        finishAethermoorContractNotification
-    );
+    const isMsq = quest.isMsq === true;
+    const accept = el('button', { type: 'button', text: 'Accept', onClick: () => void decide('accept') });
+    const decline = el('button', { type: 'button', text: 'Decline', onClick: () => void decide('decline') });
+    const later = el('button', { type: 'button', text: 'Close / Later', onClick: finishAethermoorContractNotification });
 
     async function decide(action) {
         accept.disabled = true;
         decline.disabled = true;
-
         try {
             assert(
                 getContext().chatMetadata === expectedMetadata &&
                 expectedEpoch === aethermoorContractNotificationEpoch,
                 'Chat or campaign changed; reopen this offer in its original chat'
             );
-
             const output = await runStoredMechanic({
-
-                cases: [{
-                    name: `contract_popup_${action}`,
-                    kind: 'quest',
-                    action,
-                    questId
-                }]
+                cases: [{ name: `contract_popup_${action}`, kind: 'quest', action, questId }]
             });
-
             assert(
-                output?.ok === true &&
-                output.results?.[0]?.ok !== false,
-                output?.results?.[0]?.error ||
-                    `Could not ${action} the contract`
+                output?.ok === true && output.results?.[0]?.ok !== false,
+                output?.results?.[0]?.error || `Could not ${action} the contract`
             );
-
             finishAethermoorContractNotification();
-            toastr.info(
-                action === 'accept'
-                    ? 'Contract accepted.'
-                    : 'Contract declined.',
-                'Aethermoor'
-            );
-
-            if (aethermoorPanelOpen) {
-                renderAethermoorTab(aethermoorActiveTab);
-            }
+            toastr.info(action === 'accept' ? 'Contract accepted.' : 'Contract declined.', 'Aethermoor');
+            if (aethermoorPanelOpen) renderAethermoorTab(aethermoorActiveTab);
         } catch (error) {
             accept.disabled = false;
             decline.disabled = false;
-            toastr.error(
-                error instanceof Error ? error.message : String(error),
-                'Aethermoor'
-            );
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
         }
     }
 
-    accept.addEventListener('click', () => void decide('accept'));
-    decline.addEventListener('click', () => void decide('decline'));
+    const bonusText = formatSalvageBonuses(quest.salvage);
+    const popup = el('section', {
+        id: 'aethermoor_contract_popup',
+        className: 'aethermoor-contract-popup',
+        style: isMsq ? { borderLeftColor: '#c084fc' } : null,
+        attrs: { role: 'dialog', 'aria-label': `Contract offered: ${quest.title}` }
+    },
+        el('div', { className: 'aethermoor-contract-popup-header' },
+            el('span', {
+                className: 'aethermoor-contract-popup-heading',
+                style: isMsq ? { color: '#c084fc' } : null,
+                text: isMsq ? 'System Log // Main Story Offered' : 'System Log // Contract Offered'
+            }),
+            el('span', {
+                className: 'aethermoor-contract-popup-rank',
+                style: isMsq ? { color: '#c084fc' } : null,
+                text: isMsq
+                    ? `${quest.msq?.isFinale ? 'FINALE' : `CH. ${quest.msq?.chapter || 1}`} · RANK ${quest.rank}`
+                    : `RANK ${quest.rank}`
+            })
+        ),
+        el('div', { className: 'aethermoor-contract-popup-title', text: quest.title }),
+        el('div', { text: quest.pitch || '' }),
+        el('div', {
+            style: { marginTop: '6px' },
+            text: `First objective: ${quest.currentGate?.objective || 'Not recorded'}`
+        }),
+        el('div', { className: 'aethermoor-contract-popup-rewards' },
+            el('b', { style: { color: '#4ade80' }, text: `${quest.payout.xp} XP` }),
+            ' | ',
+            el('b', { style: { color: '#ffd166' }, text: `${quest.payout.silver} silver` }),
+            ' | ',
+            el('b', { style: { color: '#38bdf8' }, text: `${quest.payout.repSteps} reputation step(s)` })
+        ),
+        el('div', { className: 'aethermoor-contract-popup-salvage' },
+            'System salvage: ',
+            el('b', {
+                style: { color: quest.salvage.rarityColor || '#d0d7de' },
+                text: formatGearLabel(quest.salvage)
+            }),
+            bonusText ? ` — ${bonusText}` : ''
+        ),
+        el('div', { className: 'aethermoor-contract-popup-actions' }, accept, decline, later)
+    );
 
-    actions.append(accept, decline, later);
-    popup.appendChild(actions);
     document.body.appendChild(popup);
     accept.focus();
 }
@@ -22018,31 +21920,13 @@ async function openAethermoorShopWindow() {
     refresh();
     document.body.appendChild(windowElement);
 
-    restoreAethermoorPanelGeometry(
+    attachAethermoorWindowGeometry(
         windowElement,
-        AETHERMOOR_SHOP_GEOMETRY_KEY
-    );
-
-    enableAethermoorPanelDragging(
         header,
-        windowElement,
         AETHERMOOR_SHOP_GEOMETRY_KEY
     );
-
-    // Resizing ends with a pointer release; dragging saves through its
-    // own handler. Neither operation stages or commits the trade.
-    windowElement.addEventListener('pointerup', () => {
-        setTimeout(() => {
-            if (windowElement.isConnected) {
-                saveAethermoorPanelGeometry(
-                    windowElement,
-                    AETHERMOOR_SHOP_GEOMETRY_KEY
-                );
-            }
-        }, 0);
-    });
-
     close.focus();
+
 }
 
 /*
@@ -22314,28 +22198,13 @@ async function openAethermoorHerbalistWindow() {
     refresh();
     document.body.appendChild(panel);
 
-    restoreAethermoorPanelGeometry(
+    attachAethermoorWindowGeometry(
         panel,
-        AETHERMOOR_HERBALIST_GEOMETRY_KEY
-    );
-    enableAethermoorPanelDragging(
         header,
-        panel,
         AETHERMOOR_HERBALIST_GEOMETRY_KEY
     );
-
-    panel.addEventListener('pointerup', () => {
-        setTimeout(() => {
-            if (panel.isConnected) {
-                saveAethermoorPanelGeometry(
-                    panel,
-                    AETHERMOOR_HERBALIST_GEOMETRY_KEY
-                );
-            }
-        }, 0);
-    });
-
     close.focus();
+
 }
 
 /*
@@ -22578,27 +22447,11 @@ async function openAethermoorInnWindow() {
     refresh();
     document.body.appendChild(panel);
 
-    restoreAethermoorPanelGeometry(
+    attachAethermoorWindowGeometry(
         panel,
-        AETHERMOOR_INN_GEOMETRY_KEY
-    );
-    enableAethermoorPanelDragging(
         header,
-        panel,
         AETHERMOOR_INN_GEOMETRY_KEY
     );
-
-    panel.addEventListener('pointerup', () => {
-        setTimeout(() => {
-            if (panel.isConnected) {
-                saveAethermoorPanelGeometry(
-                    panel,
-                    AETHERMOOR_INN_GEOMETRY_KEY
-                );
-            }
-        }, 0);
-    });
-
     close.focus();
 }
 
@@ -23093,14 +22946,9 @@ async function renderInventoryTab(host) {
 
 async function openAethermoorCharacterSheetWindow() {
     addAethermoorPanelStyles();
-
     const metadata = getContext().chatMetadata;
     const snapshot = await readStoredCombatState();
-
-    assert(
-        getContext().chatMetadata === metadata,
-        'Chat changed before the character sheet could open'
-    );
+    assert(getContext().chatMetadata === metadata, 'Chat changed before the character sheet could open');
 
     const state = snapshot.state;
     const crew = state.crew;
@@ -23111,22 +22959,14 @@ async function openAethermoorCharacterSheetWindow() {
     const level = crew.level;
     const maxSlots = 3 + Math.floor(level / 2);
 
-    let gearAtk = 0;
-    let gearLuk = 0;
-    let gearTansyHp = 0;
-    let gearDef = 0;
-    let gearQtikHp = 0;
-
+    let gearAtk = 0, gearLuk = 0, gearTansyHp = 0, gearDef = 0, gearQtikHp = 0;
     for (const slot of TANSY_SLOTS) {
         const b = gearBonus('tansy', slot, gear.tansy?.[slot]);
-        gearAtk += b.atk;
-        gearLuk += b.luk;
-        gearTansyHp += b.hp;
+        gearAtk += b.atk; gearLuk += b.luk; gearTansyHp += b.hp;
     }
     for (const slot of QTIK_SLOTS) {
         const b = gearBonus('qtik', slot, gear.qtik?.[slot]);
-        gearDef += b.def;
-        gearQtikHp += b.hp;
+        gearDef += b.def; gearQtikHp += b.hp;
     }
 
     const baseAtk = 2 * level;
@@ -23135,168 +22975,40 @@ async function openAethermoorCharacterSheetWindow() {
     const bodyguardDef = Math.max(2, Math.floor(stats.def / 3));
     const fleeBonus = Math.min(3, Math.floor(stats.luk / 5));
     const vitalsPierce = Math.floor((crew.weasels.active + shadows.slots) / 2);
-    const looseCap = Math.max(0, maxSlots - shadows.slots);
-    const momentumQuota = 1 + Math.floor(looseCap / 4);
+    const momentumQuota = 1 + Math.floor(Math.max(0, maxSlots - shadows.slots) / 4);
 
     document.getElementById('aethermoor_charsheet_window')?.remove();
 
-    const panel = document.createElement('section');
-    panel.id = 'aethermoor_charsheet_window';
-    panel.className = 'aethermoor-shop';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Character Sheet and Paper Doll');
-
-    const header = document.createElement('div');
-    header.className = 'aethermoor-shop-header';
-
-    const title = document.createElement('b');
-    title.className = 'aethermoor-shop-title';
-    title.textContent =
-        `System Log // Character Sheet · Level ${level} (${crew.xp}/${nextXp(level)} XP)`;
-
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'aethermoor-panel-close';
-    close.textContent = 'Close';
-    close.addEventListener('click', () => panel.remove());
-
-    header.append(title, close);
-    panel.appendChild(header);
-
-    const hint = document.createElement('div');
-    hint.className = 'aethermoor-shop-summary';
-    hint.textContent =
-        'Hover over any stat or equipment slot to inspect its exact formula and active bonuses.';
-    panel.appendChild(hint);
-
-    const statGrid = document.createElement('div');
-    statGrid.className = 'aethermoor-charsheet-stats';
-
     const statCards = [
         {
-            label: 'Crew ATK',
-            value: String(stats.atk),
-            sub: `Fire Melee: +${fireBonus}/exch`,
-            accent: '#ef4444',
-            tooltip:
-                `CREW ATTACK (${stats.atk})\n` +
-                `• Base (2 × Lv ${level}): +${baseAtk}\n` +
-                `• Active Weasels (${crew.weasels.active} × 2): +${weaselAtk}\n` +
-                `• Active Shadows: +${shadows.attack}\n` +
-                `• Tansy Gear: +${gearAtk}\n` +
-                `• Achievements: +${ach.atk}\n\n` +
-                `EFFECTS:\n` +
-                `• Physical Hit: (Effective ATK − Target DEF + 1d6)\n` +
-                `• Fire Melee Bonus: +${fireBonus} Fire dmg/exch (max(3, floor(ATK / 5)), ignores ATK debuffs)\n` +
-                `• Boss Gear Check: Must exceed Boss DEF to deal damage.`
+            label: 'Crew ATK', value: String(stats.atk), sub: `Fire Melee: +${fireBonus}/exch`, accent: '#ef4444',
+            tooltip: `CREW ATTACK (${stats.atk})\n• Base (2 × Lv ${level}): +${baseAtk}\n• Active Weasels (${crew.weasels.active} × 2): +${weaselAtk}\n• Active Shadows: +${shadows.attack}\n• Tansy Gear: +${gearAtk}\n• Achievements: +${ach.atk}\n\nEFFECTS:\n• Physical Hit: (Effective ATK − Target DEF + 1d6)\n• Fire Melee Bonus: +${fireBonus} Fire dmg/exch (max(3, floor(ATK / 5)), ignores ATK debuffs)\n• Boss Gear Check: Must exceed Boss DEF to deal damage.`
         },
         {
-            label: 'Frontline DEF',
-            value: String(stats.def),
-            sub: `Bodyguard: +${bodyguardDef} DEF`,
-            accent: '#38bdf8',
-            tooltip:
-                `FRONTLINE DEFENSE (${stats.def})\n` +
-                `• Base (Lv ${level}): +${level}\n` +
-                `• Q'tik Bulwark Gear: +${gearDef}\n` +
-                `• Achievements: +${ach.def}\n\n` +
-                `EFFECTS:\n` +
-                `• Reduces enemy frontline Base Bleed: max(1, round((Lead Enemy ATK − Effective DEF) / 10))\n` +
-                `• Bodyguard Stance: Adds +${bodyguardDef} DEF (max(2, floor(DEF / 3))) and reduces Base Bleed by 1.`
+            label: 'Frontline DEF', value: String(stats.def), sub: `Bodyguard: +${bodyguardDef} DEF`, accent: '#38bdf8',
+            tooltip: `FRONTLINE DEFENSE (${stats.def})\n• Base (Lv ${level}): +${level}\n• Q'tik Bulwark Gear: +${gearDef}\n• Achievements: +${ach.def}\n\nEFFECTS:\n• Reduces enemy frontline Base Bleed: max(1, round((Lead Enemy ATK − Effective DEF) / 10))\n• Bodyguard Stance: Adds +${bodyguardDef} DEF (max(2, floor(DEF / 3))) and reduces Base Bleed by 1.`
         },
         {
-            label: 'Crew LUK',
-            value: String(stats.luk),
-            sub: `Crit/Exposed: +${stats.luk} · Flee: +${fleeBonus}`,
-            accent: '#ffd166',
-            tooltip:
-                `CREW LUCK (${stats.luk})\n` +
-                `• Base (floor(Lv ${level} / 2)): +${Math.floor(level / 2)}\n` +
-                `• Tansy Gear: +${gearLuk}\n` +
-                `• Achievements: +${ach.luk}\n\n` +
-                `EFFECTS:\n` +
-                `• Critical Hits: Adds +${stats.luk} flat damage on player roll 6 (or rolls 5–6 with Vitals) on top of 1.5× base hit.\n` +
-                `• Visor Exposed: When an enemy rolls 1 while Tansy uses Visor, the next hit deals +${stats.luk} bonus damage.\n` +
-                `• Flee Roll Bonus: +${fleeBonus} to 1d6 escape rolls (floor(LUK / 5), max +3; need 6+ to flee).`
+            label: 'Crew LUK', value: String(stats.luk), sub: `Crit/Exposed: +${stats.luk} · Flee: +${fleeBonus}`, accent: '#ffd166',
+            tooltip: `CREW LUCK (${stats.luk})\n• Base (floor(Lv ${level} / 2)): +${Math.floor(level / 2)}\n• Tansy Gear: +${gearLuk}\n• Achievements: +${ach.luk}\n\nEFFECTS:\n• Critical Hits: Adds +${stats.luk} flat damage on player roll 6 (or rolls 5–6 with Vitals) on top of 1.5× base hit.\n• Visor Exposed: When an enemy rolls 1 while Tansy uses Visor, the next hit deals +${stats.luk} bonus damage.\n• Flee Roll Bonus: +${fleeBonus} to 1d6 escape rolls (floor(LUK / 5), max +3; need 6+ to flee).`
         },
         {
-            label: "Q'tik Vitality",
-            value: `${crew.qtik.hp} / ${stats.qtikMaxHp}`,
-            sub: `Regen: +${stats.regen} HP/exch`,
-            accent: '#38bdf8',
-            tooltip:
-                `Q'TIK VITALITY (${crew.qtik.hp}/${stats.qtikMaxHp} HP)\n` +
-                `• Base (125 + 25 × Lv ${level}): ${125 + 25 * level} HP\n` +
-                `• Q'tik Vitality Gear: +${gearQtikHp} HP\n` +
-                `• Achievements: +${ach.qtikHp} HP\n\n` +
-                `EFFECTS:\n` +
-                `• Combat Regeneration: Restores +${stats.regen} HP at the end of every exchange (round(MaxHP / 100)).\n` +
-                `• Out-of-Combat Recovery: Automatically restores Q'tik to full HP on your next travel or room move.`
+            label: "Q'tik Vitality", value: `${crew.qtik.hp} / ${stats.qtikMaxHp}`, sub: `Regen: +${stats.regen} HP/exch`, accent: '#38bdf8',
+            tooltip: `Q'TIK VITALITY (${crew.qtik.hp}/${stats.qtikMaxHp} HP)\n• Base (125 + 25 × Lv ${level}): ${125 + 25 * level} HP\n• Q'tik Vitality Gear: +${gearQtikHp} HP\n• Achievements: +${ach.qtikHp} HP\n\nEFFECTS:\n• Combat Regeneration: Restores +${stats.regen} HP at the end of every exchange (round(MaxHP / 100)).\n• Out-of-Combat Recovery: Automatically restores Q'tik to full HP on your next travel or room move.`
         },
         {
-            label: 'Tansy Vitality',
-            value: `${crew.tansy.hp} / ${stats.tansyMaxHp}`,
-            sub: `Backline Commander`,
-            accent: '#f9a8d4',
-            tooltip:
-                `TANSY VITALITY (${crew.tansy.hp}/${stats.tansyMaxHp} HP)\n` +
-                `• Base (35 + 15 × Lv ${level}): ${35 + 15 * level} HP\n` +
-                `• Tansy Vitality Gear: +${gearTansyHp} HP\n` +
-                `• Achievements: +${ach.tansyHp} HP\n\n` +
-                `EFFECTS:\n` +
-                `• Backline HP pool against enemy Archers and Sweeping Cleave splash (10% of MaxHP = ${Math.ceil(stats.tansyMaxHp * 0.1)} dmg).`
+            label: 'Tansy Vitality', value: `${crew.tansy.hp} / ${stats.tansyMaxHp}`, sub: 'Backline Commander', accent: '#f9a8d4',
+            tooltip: `TANSY VITALITY (${crew.tansy.hp}/${stats.tansyMaxHp} HP)\n• Base (35 + 15 × Lv ${level}): ${35 + 15 * level} HP\n• Tansy Vitality Gear: +${gearTansyHp} HP\n• Achievements: +${ach.tansyHp} HP\n\nEFFECTS:\n• Backline HP pool against enemy Archers and Sweeping Cleave splash (10% of MaxHP = ${Math.ceil(stats.tansyMaxHp * 0.1)} dmg).`
         },
         {
-            label: 'Summon Pack',
-            value: `${crew.weasels.active + shadows.slots} / ${maxSlots} Slots`,
-            sub: `Weasels: ${crew.weasels.active} · Pierce: ${vitalsPierce}`,
-            accent: '#c084fc',
-            tooltip:
-                `SHADOW SUMMONS (${crew.weasels.active + shadows.slots}/${maxSlots} Slots)\n` +
-                `• Max Slots (3 + floor(Lv ${level} / 2)): ${maxSlots}\n` +
-                `• Loose Shadow-Weasels: ${crew.weasels.active} (+${weaselAtk} ATK; doubled to +${weaselAtk * 2} with Vitals)\n` +
-                `• Active Fused Shadows: ${shadows.slots} slots used\n\n` +
-                `EFFECTS:\n` +
-                `• Vitals Armor Pierce: Pierces up to ${vitalsPierce} enemy DEF on rolls 2–6 (floor(active slots / 2)).\n` +
-                `• Swarm Momentum: Reforms up to ${momentumQuota} missing loose weasel(s) after every full 3-exchange turn.`
+            label: 'Summon Pack', value: `${crew.weasels.active + shadows.slots} / ${maxSlots} Slots`, sub: `Weasels: ${crew.weasels.active} · Pierce: ${vitalsPierce}`, accent: '#c084fc',
+            tooltip: `SHADOW SUMMONS (${crew.weasels.active + shadows.slots}/${maxSlots} Slots)\n• Max Slots (3 + floor(Lv ${level} / 2)): ${maxSlots}\n• Loose Shadow-Weasels: ${crew.weasels.active} (+${weaselAtk} ATK; doubled to +${weaselAtk * 2} with Vitals)\n• Active Fused Shadows: ${shadows.slots} slots used\n\nEFFECTS:\n• Vitals Armor Pierce: Pierces up to ${vitalsPierce} enemy DEF on rolls 2–6 (floor(active slots / 2)).\n• Swarm Momentum: Reforms up to ${momentumQuota} missing loose weasel(s) after every full 3-exchange turn.`
         }
     ];
 
-    for (const card of statCards) {
-        const box = document.createElement('div');
-        box.className = 'aethermoor-charsheet-stat';
-        box.style.borderLeftColor = card.accent;
-        box.title = card.tooltip;
-
-        const lbl = document.createElement('div');
-        lbl.className = 'aethermoor-charsheet-stat-label';
-        lbl.textContent = card.label;
-
-        const val = document.createElement('div');
-        val.className = 'aethermoor-charsheet-stat-value';
-        val.textContent = card.value;
-
-        const sub = document.createElement('div');
-        sub.className = 'aethermoor-charsheet-stat-sub';
-        sub.textContent = card.sub;
-
-        box.append(lbl, val, sub);
-        statGrid.appendChild(box);
-    }
-
-    panel.appendChild(statGrid);
-
-    const columns = document.createElement('div');
-    columns.className = 'aethermoor-trade-columns';
-
     function makeSilhouetteCell(accentColor) {
-        const cell = document.createElement('div');
-        cell.className = 'aethermoor-doll-spacer';
-        cell.innerHTML =
-            `<svg viewBox="0 0 40 50" width="34" height="42" fill="none" stroke="${accentColor}" stroke-width="1.5">` +
-                `<circle cx="20" cy="11" r="6"/>` +
-                `<path d="M9 44 C9 27 31 27 31 44"/>` +
-            `</svg>`;
+        const cell = el('div', { className: 'aethermoor-doll-spacer' });
+        cell.innerHTML = `<svg viewBox="0 0 40 50" width="34" height="42" fill="none" stroke="${accentColor}" stroke-width="1.5"><circle cx="20" cy="11" r="6"/><path d="M9 44 C9 27 31 27 31 44"/></svg>`;
         return cell;
     }
 
@@ -23306,92 +23018,56 @@ async function openAethermoorCharacterSheetWindow() {
         const filled = Boolean(raw && stat > 0);
         const slotLabel = GEAR_SLOT_LABELS[slot] || slot;
 
-        const box = document.createElement('div');
-        box.className = 'aethermoor-doll-slot';
-        box.dataset.empty = String(!filled);
-
-        const top = document.createElement('div');
-        top.className = 'aethermoor-doll-slot-header';
-
-        const slotSpan = document.createElement('span');
-        slotSpan.textContent = slotLabel;
-        top.appendChild(slotSpan);
-
-        if (filled) {
-            const statSpan = document.createElement('span');
-            statSpan.style.color = '#9caab8';
-            statSpan.textContent = `S${stat}`;
-            top.appendChild(statSpan);
-        }
-
-        const name = document.createElement('div');
-        name.className = 'aethermoor-doll-slot-name';
-
-        const bonusLine = document.createElement('div');
-        bonusLine.className = 'aethermoor-doll-slot-bonus';
-
-        if (filled) {
-            const rarityKey = String(raw.rarity || 'common').toLowerCase();
-            const rarityColor =
-                raw.rarityColor ||
-                LOOT_RARITY_INFO[rarityKey]?.color ||
-                '#ffffff';
-
-            box.style.borderLeft = `3px solid ${rarityColor}`;
-            name.style.color = rarityColor;
-            name.textContent = raw.name || slotLabel;
-
-            const bonus = gearBonus(owner, slot, {
-                ...raw,
-                stat
-            });
-            const parts = [
-                ['atk', 'ATK'],
-                ['def', 'DEF'],
-                ['hp', 'MaxHP'],
-                ['luk', 'LUK']
-            ]
-                .filter(([k]) => Number(bonus[k]) > 0)
-                .map(([k, lbl]) => `+${bonus[k]} ${lbl}`);
-
-            bonusLine.textContent = parts.join(' · ') || `Stat ${stat}`;
-            box.title =
-                `${formatGearLabel({ ...raw, stat })}\n` +
-                `Slot: ${slotLabel} (${raw.rarity || 'Common'})\n` +
-                `Bonus: ${parts.join(', ') || 'None'}\n` +
-                `Pawn Value: ${raw.sellValue ?? stat * 2}s`;
-        } else {
-            name.style.color = '#6e7f91';
-            name.textContent = 'Empty';
-            bonusLine.style.color = '#6e7f91';
-            bonusLine.textContent = '—';
-
+        if (!filled) {
             const slotHint = owner === 'tansy'
-                ? (slot === 'weapon'
-                    ? 'Grants +2 ATK per Stat'
-                    : slot === 'gloves'
-                        ? 'Grants +1 ATK per Stat'
-                        : slot === 'chest' || slot === 'trousers'
-                            ? 'Grants +5 Tansy MaxHP per Stat and +1 LUK'
-                            : 'Modular: Vitality (+5 HP/Stat) or Luck (+1 LUK/Stat)')
+                ? (slot === 'weapon' ? 'Grants +2 ATK per Stat'
+                    : slot === 'gloves' ? 'Grants +1 ATK per Stat'
+                    : slot === 'chest' || slot === 'trousers' ? 'Grants +5 Tansy MaxHP per Stat and +1 LUK'
+                    : 'Modular: Vitality (+5 HP/Stat) or Luck (+1 LUK/Stat)')
                 : 'Modular: Vitality (+15 HP/Stat) or Bulwark (+2 DEF/Stat)';
 
-            box.title = `Empty ${slotLabel} Slot\n${slotHint}`;
+            return el('div', {
+                className: 'aethermoor-doll-slot',
+                dataset: { empty: 'true' },
+                title: `Empty ${slotLabel} Slot\n${slotHint}`
+            },
+                el('div', { className: 'aethermoor-doll-slot-header' }, el('span', { text: slotLabel })),
+                el('div', { className: 'aethermoor-doll-slot-name', style: { color: '#6e7f91' }, text: 'Empty' }),
+                el('div', { className: 'aethermoor-doll-slot-bonus', style: { color: '#6e7f91' }, text: '—' })
+            );
         }
 
-        box.append(top, name, bonusLine);
-        return box;
+        const rarityKey = String(raw.rarity || 'common').toLowerCase();
+        const rarityColor = raw.rarityColor || LOOT_RARITY_INFO[rarityKey]?.color || '#ffffff';
+        const bonus = gearBonus(owner, slot, { ...raw, stat });
+        const parts = [['atk', 'ATK'], ['def', 'DEF'], ['hp', 'MaxHP'], ['luk', 'LUK']]
+            .filter(([k]) => Number(bonus[k]) > 0)
+            .map(([k, lbl]) => `+${bonus[k]} ${lbl}`);
+
+        return el('div', {
+            className: 'aethermoor-doll-slot',
+            dataset: { empty: 'false' },
+            style: { borderLeft: `3px solid ${rarityColor}` },
+            title: `${formatGearLabel({ ...raw, stat })}\nSlot: ${slotLabel} (${raw.rarity || 'Common'})\nBonus: ${parts.join(', ') || 'None'}\nPawn Value: ${raw.sellValue ?? stat * 2}s`
+        },
+            el('div', { className: 'aethermoor-doll-slot-header' },
+                el('span', { text: slotLabel }),
+                el('span', { style: { color: '#9caab8' }, text: `S${stat}` })
+            ),
+            el('div', { className: 'aethermoor-doll-slot-name', style: { color: rarityColor }, text: raw.name || slotLabel }),
+            el('div', { className: 'aethermoor-doll-slot-bonus', text: parts.join(' · ') || `Stat ${stat}` })
+        );
     }
 
-    // Left Column: Tansy Paper Doll (9 slots in anatomical 3x3 layout + boots row)
-    const tansyCol = document.createElement('section');
-    tansyCol.className = 'aethermoor-trade-column';
-    const tansyHeader = document.createElement('h3');
-    tansyHeader.textContent = 'TANSY · PAPER DOLL (9 SLOTS)';
-    tansyCol.appendChild(tansyHeader);
-
-    const tansyGrid = document.createElement('div');
-    tansyGrid.className = 'aethermoor-doll-grid';
+    const titanCore = el('div', {
+        className: 'aethermoor-doll-slot',
+        dataset: { passive: 'true' },
+        title: "ELEMENTAL TITAN PHYSIOLOGY\nQ'tik's symbiote-bonded frame cannot wear standard human armor, weapons, or boots.\nShe equips 4 high-scaling accessory slots (Amulet, Wrist Cuffs, Ring 1, Ring 2) tuned for Bulwark (+2 DEF/Stat) or Vitality (+15 HP/Stat)."
+    },
+        el('div', { className: 'aethermoor-doll-slot-header', text: 'Titan Core' }),
+        el('div', { className: 'aethermoor-doll-slot-name', style: { color: '#38bdf8' }, text: 'Symbiote Frame' }),
+        el('div', { className: 'aethermoor-doll-slot-bonus', text: '+25 HP & +1 DEF / Lv' })
+    );
 
     const tansyLayout = [
         ['neck', 'headgear', null],
@@ -23399,120 +23075,85 @@ async function openAethermoorCharacterSheetWindow() {
         ['ring1', 'trousers', 'ring2'],
         [null, 'boots', null]
     ];
-
-    for (const row of tansyLayout) {
-        for (const cell of row) {
-            if (cell === null) {
-                tansyGrid.appendChild(makeSilhouetteCell('#f9a8d4'));
-            } else {
-                tansyGrid.appendChild(makeSlotBox('tansy', cell));
-            }
-        }
-    }
-
-    tansyCol.appendChild(tansyGrid);
-
-    // Right Column: Q'tik Paper Doll (4 accessory slots around Titan core)
-    const qtikCol = document.createElement('section');
-    qtikCol.className = 'aethermoor-trade-column';
-    const qtikHeader = document.createElement('h3');
-    qtikHeader.textContent = "Q'TIK · PAPER DOLL (4 SLOTS)";
-    qtikCol.appendChild(qtikHeader);
-
-    const qtikGrid = document.createElement('div');
-    qtikGrid.className = 'aethermoor-doll-grid';
-
-    const titanCore = document.createElement('div');
-    titanCore.className = 'aethermoor-doll-slot';
-    titanCore.dataset.passive = 'true';
-    titanCore.title =
-        "ELEMENTAL TITAN PHYSIOLOGY\n" +
-        "Q'tik's symbiote-bonded frame cannot wear standard human armor, weapons, or boots.\n" +
-        "She equips 4 high-scaling accessory slots (Amulet, Wrist Cuffs, Ring 1, Ring 2) tuned for Bulwark (+2 DEF/Stat) or Vitality (+15 HP/Stat).";
-
-    const coreTop = document.createElement('div');
-    coreTop.className = 'aethermoor-doll-slot-header';
-    coreTop.textContent = 'Titan Core';
-
-    const coreName = document.createElement('div');
-    coreName.className = 'aethermoor-doll-slot-name';
-    coreName.style.color = '#38bdf8';
-    coreName.textContent = 'Symbiote Frame';
-
-    const coreBonus = document.createElement('div');
-    coreBonus.className = 'aethermoor-doll-slot-bonus';
-    coreBonus.textContent = `+25 HP & +1 DEF / Lv`;
-
-    titanCore.append(coreTop, coreName, coreBonus);
-
     const qtikLayout = [
         [null, 'amulet', null],
         ['wristCuffs', 'CORE', null],
         ['ring1', null, 'ring2']
     ];
 
-    for (const row of qtikLayout) {
-        for (const cell of row) {
-            if (cell === null) {
-                qtikGrid.appendChild(makeSilhouetteCell('#38bdf8'));
-            } else if (cell === 'CORE') {
-                qtikGrid.appendChild(titanCore);
-            } else {
-                qtikGrid.appendChild(makeSlotBox('qtik', cell));
-            }
-        }
-    }
+    const close = el('button', {
+        type: 'button',
+        className: 'aethermoor-panel-close',
+        text: 'Close',
+        onClick: () => panel.remove()
+    });
+    const header = el('div', { className: 'aethermoor-shop-header' },
+        el('b', {
+            className: 'aethermoor-shop-title',
+            text: `System Log // Character Sheet · Level ${level} (${crew.xp}/${nextXp(level)} XP)`
+        }),
+        close
+    );
 
-    qtikCol.appendChild(qtikGrid);
-    columns.append(tansyCol, qtikCol);
-    panel.appendChild(columns);
+    const panel = el('section', {
+        id: 'aethermoor_charsheet_window',
+        className: 'aethermoor-shop',
+        attrs: { role: 'dialog', 'aria-label': 'Character Sheet and Paper Doll' }
+    },
+        header,
+        el('div', {
+            className: 'aethermoor-shop-summary',
+            text: 'Hover over any stat or equipment slot to inspect its exact formula and active bonuses.'
+        }),
+        el('div', { className: 'aethermoor-charsheet-stats' },
+            statCards.map(c => el('div', {
+                className: 'aethermoor-charsheet-stat',
+                style: { borderLeftColor: c.accent },
+                title: c.tooltip
+            },
+                el('div', { className: 'aethermoor-charsheet-stat-label', text: c.label }),
+                el('div', { className: 'aethermoor-charsheet-stat-value', text: c.value }),
+                el('div', { className: 'aethermoor-charsheet-stat-sub', text: c.sub })
+            ))
+        ),
+        el('div', { className: 'aethermoor-trade-columns' },
+            el('section', { className: 'aethermoor-trade-column' },
+                el('h3', { text: 'TANSY · PAPER DOLL (9 SLOTS)' }),
+                el('div', { className: 'aethermoor-doll-grid' },
+                    tansyLayout.flat().map(cell =>
+                        cell === null ? makeSilhouetteCell('#f9a8d4') : makeSlotBox('tansy', cell)
+                    )
+                )
+            ),
+            el('section', { className: 'aethermoor-trade-column' },
+                el('h3', { text: "Q'TIK · PAPER DOLL (4 SLOTS)" }),
+                el('div', { className: 'aethermoor-doll-grid' },
+                    qtikLayout.flat().map(cell =>
+                        cell === null ? makeSilhouetteCell('#38bdf8')
+                        : cell === 'CORE' ? titanCore
+                        : makeSlotBox('qtik', cell)
+                    )
+                )
+            )
+        )
+    );
 
     document.body.appendChild(panel);
-
-    restoreAethermoorPanelGeometry(
-        panel,
-        AETHERMOOR_CHARSHEET_GEOMETRY_KEY
-    );
-    enableAethermoorPanelDragging(
-        header,
-        panel,
-        AETHERMOOR_CHARSHEET_GEOMETRY_KEY
-    );
-
-    panel.addEventListener('pointerup', () => {
-        setTimeout(() => {
-            if (panel.isConnected) {
-                saveAethermoorPanelGeometry(
-                    panel,
-                    AETHERMOOR_CHARSHEET_GEOMETRY_KEY
-                );
-            }
-        }, 0);
-    });
-
+    attachAethermoorWindowGeometry(panel, header, AETHERMOOR_CHARSHEET_GEOMETRY_KEY);
     close.focus();
 }
 
-/*
- * Aether-Net Trade-Stream tab: manage up to 3 active listings, quick-list
- * unbound gear from Bag Reserves, and inspect lifetime sales. Settling
- * queues one combined System Escrow HTML receipt and tiered GM handoff.
- */
 async function renderAetherNetTab(host) {
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
+        host.replaceChildren(
             makeAethermoorSection(
                 'AETHER-NET',
                 !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
                     ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
+                    : error instanceof Error ? error.message : String(error),
                 'world'
             )
         );
@@ -23528,13 +23169,13 @@ async function renderAetherNetTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    function rarityClass(item) {
-        return `aethermoor-rarity-${
-            String(item?.rarity || 'common').toLowerCase()
-        }`;
-    }
+    const rarityClass = item => `aethermoor-rarity-${String(item?.rarity || 'common').toLowerCase()}`;
+    const itemMetaText = item => [
+        gearSlotLabel(item),
+        `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s`,
+        item.slot === 'skill_tome' ? 'Skill Tome (S=10)' : null
+    ].filter(Boolean).join(' · ');
 
-    // 1. Active Listings (0/3)
     const activeSection = makeAethermoorSection(
         `ACTIVE LISTINGS · ${listings.length}/3`,
         listings.length
@@ -23544,269 +23185,168 @@ async function renderAetherNetTab(host) {
     );
 
     if (listings.length > 1) {
-        const settleAll = makeAethermoorAction(
-            `Settle All (${listings.length})`,
-            'world',
-            async () => {
-                settleAll.disabled = true;
-                try {
-                    const out = await runAethermoorPanelCase(
-                        host,
-                        'aethernet',
-                        {
-                            name: 'aethernet_settle_all',
-                            kind: 'trade',
-                            action: 'settle_all'
-                        },
-                        null
-                    );
-                    const res = out?.results?.[0]?.result;
-                    if (res) {
-                        toastr.success(
-                            res.silverGained > 0
-                                ? `Settled ${res.soldCount} sale(s) for +${res.silverGained}s` +
-                                    (res.unsoldCount ? ` (${res.unsoldCount} returned).` : '.')
-                                : `${res.unsoldCount} listing(s) went unsold and returned to Bag Reserves.`,
-                            'Aether-Net'
-                        );
-                    }
-                } finally {
-                    settleAll.disabled = false;
-                }
-            }
-        );
-        activeSection.appendChild(settleAll);
-    }
-
-    listings.forEach((item, index) => {
-        const row = document.createElement('div');
-        row.className = 'aethermoor-inventory-item';
-
-        const main = document.createElement('div');
-        main.className = 'aethermoor-inventory-item-main';
-
-        const name = document.createElement('div');
-        name.className = `aethermoor-vendor-name ${rarityClass(item)}`;
-        name.textContent = formatGearLabel(item);
-
-        const detail = document.createElement('div');
-        detail.className = 'aethermoor-vendor-detail';
-        detail.textContent = [
-            gearSlotLabel(item),
-            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s`,
-            item.slot === 'skill_tome' ? 'Skill Tome (S=10)' : null
-        ].filter(Boolean).join(' · ');
-
-        main.append(name, detail);
-
-        const actions = document.createElement('div');
-        actions.className = 'aethermoor-inventory-item-actions';
-
-        const settle = document.createElement('button');
-        settle.type = 'button';
-        settle.textContent = 'Settle';
-        settle.addEventListener('click', async () => {
-            settle.disabled = true;
+        const settleAll = makeAethermoorAction(`Settle All (${listings.length})`, 'world', async () => {
+            settleAll.disabled = true;
             try {
-                const out = await runAethermoorPanelCase(
-                    host,
-                    'aethernet',
-                    {
-                        name: `aethernet_settle_${index}`,
-                        kind: 'trade',
-                        action: 'settle',
-                        listingIndex: index
-                    },
-                    null
-                );
+                const out = await runAethermoorPanelCase(host, 'aethernet', {
+                    name: 'aethernet_settle_all', kind: 'trade', action: 'settle_all'
+                }, null);
                 const res = out?.results?.[0]?.result;
                 if (res) {
-                    toastr.info(
-                        res.status === 'sold'
-                            ? `Sold for +${res.silverGained}s (${TRADE_MARKET_LABELS[res.marketResult] || 'Sold'}).`
-                            : 'Unsold — returned to Bag Reserves.',
+                    toastr.success(
+                        res.silverGained > 0
+                            ? `Settled ${res.soldCount} sale(s) for +${res.silverGained}s` +
+                                (res.unsoldCount ? ` (${res.unsoldCount} returned).` : '.')
+                            : `${res.unsoldCount} listing(s) went unsold and returned to Bag Reserves.`,
                         'Aether-Net'
                     );
                 }
             } finally {
-                settle.disabled = false;
+                settleAll.disabled = false;
+            }
+        });
+        activeSection.appendChild(settleAll);
+    }
+
+    listings.forEach((item, index) => {
+        const settle = el('button', {
+            type: 'button',
+            text: 'Settle',
+            onClick: async () => {
+                settle.disabled = true;
+                try {
+                    const out = await runAethermoorPanelCase(host, 'aethernet', {
+                        name: `aethernet_settle_${index}`, kind: 'trade', action: 'settle', listingIndex: index
+                    }, null);
+                    const res = out?.results?.[0]?.result;
+                    if (res) {
+                        toastr.info(
+                            res.status === 'sold'
+                                ? `Sold for +${res.silverGained}s (${TRADE_MARKET_LABELS[res.marketResult] || 'Sold'}).`
+                                : 'Unsold — returned to Bag Reserves.',
+                            'Aether-Net'
+                        );
+                    }
+                } finally {
+                    settle.disabled = false;
+                }
             }
         });
 
-        const withdraw = document.createElement('button');
-        withdraw.type = 'button';
-        withdraw.textContent = 'Withdraw';
-        withdraw.addEventListener('click', async () => {
-            withdraw.disabled = true;
-            try {
-                await runAethermoorPanelCase(
-                    host,
-                    'aethernet',
-                    {
-                        name: `aethernet_withdraw_${index}`,
-                        kind: 'trade',
-                        action: 'withdraw',
-                        listingIndex: index
-                    },
-                    'Listing withdrawn to Bag Reserves.'
-                );
-            } finally {
-                withdraw.disabled = false;
+        const withdraw = el('button', {
+            type: 'button',
+            text: 'Withdraw',
+            onClick: async () => {
+                withdraw.disabled = true;
+                try {
+                    await runAethermoorPanelCase(host, 'aethernet', {
+                        name: `aethernet_withdraw_${index}`, kind: 'trade', action: 'withdraw', listingIndex: index
+                    }, 'Listing withdrawn to Bag Reserves.');
+                } finally {
+                    withdraw.disabled = false;
+                }
             }
         });
 
-        actions.append(settle, withdraw);
-        row.append(main, actions);
-        activeSection.appendChild(row);
+        activeSection.appendChild(
+            el('div', { className: 'aethermoor-inventory-item' },
+                el('div', { className: 'aethermoor-inventory-item-main' },
+                    el('div', { className: `aethermoor-vendor-name ${rarityClass(item)}`, text: formatGearLabel(item) }),
+                    el('div', { className: 'aethermoor-vendor-detail', text: itemMetaText(item) })
+                ),
+                el('div', { className: 'aethermoor-inventory-item-actions' }, settle, withdraw)
+            )
+        );
     });
-
     host.appendChild(activeSection);
 
-    // 2. Ready to List (Unbound Bag Reserves)
     const eligible = bag
         .map((item, index) => ({ item, index }))
         .filter(({ item }) =>
-            item &&
-            item.bound !== true &&
-            item.tradeStreamEligible !== false &&
+            item && item.bound !== true && item.tradeStreamEligible !== false &&
             Number.isInteger(Number(item.tradeStat || item.rawStat)) &&
             Number(item.tradeStat || item.rawStat) > 0
         );
 
     const readySection = makeAethermoorSection(
         `READY TO LIST · ${eligible.length}`,
-        eligible.length
-            ? 'Unbound gear from Bag Reserves eligible for Aether-Net.'
-            : 'No unbound gear ready to list.',
+        eligible.length ? 'Unbound gear from Bag Reserves eligible for Aether-Net.' : 'No unbound gear ready to list.',
         'world'
     );
-
     const atCap = listings.length >= 3;
 
     for (const { item, index } of eligible) {
-        const row = document.createElement('div');
-        row.className = 'aethermoor-inventory-item';
-
-        const main = document.createElement('div');
-        main.className = 'aethermoor-inventory-item-main';
-
-        const name = document.createElement('div');
-        name.className = `aethermoor-vendor-name ${rarityClass(item)}`;
-        name.textContent = formatGearLabel(item);
-
-        const detail = document.createElement('div');
-        detail.className = 'aethermoor-vendor-detail';
-        detail.textContent = [
-            gearSlotLabel(item),
-            `Pawn ${item.sellValue ?? ((item.rawStat || 0) * 2)}s`,
-            item.slot === 'skill_tome' ? 'Skill Tome (S=10)' : null
-        ].filter(Boolean).join(' · ');
-
-        main.append(name, detail);
-
-        const actions = document.createElement('div');
-        actions.className = 'aethermoor-inventory-item-actions';
-
-        const listBtn = document.createElement('button');
-        listBtn.type = 'button';
-        listBtn.textContent = 'List';
-        listBtn.disabled = atCap;
-        if (atCap) {
-            listBtn.title = 'Aether-Net cap reached (3/3 active listings).';
-        }
-        listBtn.addEventListener('click', async () => {
-            listBtn.disabled = true;
-            try {
-                await runAethermoorPanelCase(
-                    host,
-                    'aethernet',
-                    {
-                        name: `aethernet_list_${index}`,
-                        kind: 'trade',
-                        action: 'list',
-                        itemIndex: index
-                    },
-                    'Item listed on Aether-Net.'
-                );
-            } finally {
-                listBtn.disabled = false;
+        const listBtn = el('button', {
+            type: 'button',
+            text: 'List',
+            disabled: atCap,
+            title: atCap ? 'Aether-Net cap reached (3/3 active listings).' : null,
+            onClick: async () => {
+                listBtn.disabled = true;
+                try {
+                    await runAethermoorPanelCase(host, 'aethernet', {
+                        name: `aethernet_list_${index}`, kind: 'trade', action: 'list', itemIndex: index
+                    }, 'Item listed on Aether-Net.');
+                } finally {
+                    listBtn.disabled = false;
+                }
             }
         });
 
-        actions.appendChild(listBtn);
-        row.append(main, actions);
-        readySection.appendChild(row);
+        readySection.appendChild(
+            el('div', { className: 'aethermoor-inventory-item' },
+                el('div', { className: 'aethermoor-inventory-item-main' },
+                    el('div', { className: `aethermoor-vendor-name ${rarityClass(item)}`, text: formatGearLabel(item) }),
+                    el('div', { className: 'aethermoor-vendor-detail', text: itemMetaText(item) })
+                ),
+                el('div', { className: 'aethermoor-inventory-item-actions' }, listBtn)
+            )
+        );
     }
-
     host.appendChild(readySection);
 
-    // 3. Sales Ledger
-    const lifetimeSilver = Number(state.stats?.tradeSilver || 0);
     const ledgerSection = makeAethermoorSection(
         'SALES LEDGER',
-        `Lifetime Aether-Net Silver: ${lifetimeSilver}s · Recorded Sales: ${history.length}`,
+        `Lifetime Aether-Net Silver: ${Number(state.stats?.tradeSilver || 0)}s · Recorded Sales: ${history.length}`,
         'world'
     );
 
     if (history.length > 0) {
-        const drawer = document.createElement('details');
-        drawer.className = 'aethermoor-knowledge';
-        drawer.style.borderLeftColor = '#38bdf8';
-
-        const summary = document.createElement('summary');
-        summary.className = 'aethermoor-ui-heading';
-        summary.textContent = `RECENT SALES · ${history.length}`;
-        drawer.appendChild(summary);
-
-        for (const entry of [...history].reverse()) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
-
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
-
-            const name = document.createElement('div');
-            name.className = 'aethermoor-vendor-name';
-            name.style.color = entry.rarityColor || '#ffffff';
-            name.textContent = `${entry.name} · +${entry.proceeds}s`;
-
-            const detail = document.createElement('div');
-            detail.className = 'aethermoor-vendor-detail';
-            detail.textContent =
-                `${TRADE_MARKET_LABELS[entry.marketResult] || entry.marketResult}` +
-                (entry.zone ? ` · z${entry.zone}` : '');
-
-            main.append(name, detail);
-            row.appendChild(main);
-            drawer.appendChild(row);
-        }
-
-        ledgerSection.appendChild(drawer);
+        ledgerSection.appendChild(
+            el('details', { className: 'aethermoor-knowledge', style: { borderLeftColor: '#38bdf8' } },
+                el('summary', { className: 'aethermoor-ui-heading', text: `RECENT SALES · ${history.length}` }),
+                [...history].reverse().map(entry =>
+                    el('div', { className: 'aethermoor-inventory-item' },
+                        el('div', { className: 'aethermoor-inventory-item-main' },
+                            el('div', {
+                                className: 'aethermoor-vendor-name',
+                                style: { color: entry.rarityColor || '#ffffff' },
+                                text: `${entry.name} · +${entry.proceeds}s`
+                            }),
+                            el('div', {
+                                className: 'aethermoor-vendor-detail',
+                                text: `${TRADE_MARKET_LABELS[entry.marketResult] || entry.marketResult}${entry.zone ? ` · z${entry.zone}` : ''}`
+                            })
+                        )
+                    )
+                )
+            )
+        );
     }
-
     host.appendChild(ledgerSection);
 }
 
-/*
- * Shops opens the settlement's direct-confirm windows (Blacksmith,
- * Herbalist, Inn Services). Opening any window is read-only; clicking
- * Confirm inside the window commits the exchange immediately.
- */
 async function renderShopsTab(host) {
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
+        host.replaceChildren(
             makeAethermoorSection(
                 'SHOPS',
                 !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
                     ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
+                    : error instanceof Error ? error.message : String(error),
                 'world'
             )
         );
@@ -23814,11 +23354,8 @@ async function renderShopsTab(host) {
     }
 
     const state = snapshot.state;
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
+    const settlement = Object.values(state.world?.settlements || {}).find(
+        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
     );
 
     host.replaceChildren();
@@ -23833,8 +23370,7 @@ async function renderShopsTab(host) {
         host.appendChild(
             makeAethermoorSection(
                 'SHOPS UNAVAILABLE',
-                'Reach a saved settlement and resolve travel or the ' +
-                    'nearby encounter before opening shops.',
+                'Reach a saved settlement and resolve travel or the nearby encounter before opening shops.',
                 'world'
             )
         );
@@ -23844,51 +23380,31 @@ async function renderShopsTab(host) {
     host.appendChild(
         makeAethermoorSection(
             `SHOPS · ${settlement.label}`,
-            `Purse: ${state.crew.purse}s\n` +
-                'Opening a shop is read-only. Clicking Confirm completes the exchange immediately.',
+            `Purse: ${state.crew.purse}s\nOpening a shop is read-only. Clicking Confirm completes the exchange immediately.`,
             'world'
         )
     );
 
-    for (const shop of [
-        {
-            label: 'Blacksmith & Gear',
-            open: openAethermoorShopWindow
-        },
-        {
-            label: 'Herbalist',
-            open: openAethermoorHerbalistWindow
-        },
-        {
-            label: 'Inn Services',
-            open: openAethermoorInnWindow
-        }
+    for (const [label, open] of [
+        ['Blacksmith & Gear', openAethermoorShopWindow],
+        ['Herbalist', openAethermoorHerbalistWindow],
+        ['Inn Services', openAethermoorInnWindow]
     ]) {
-        const button = makeAethermoorAction(
-            `Open ${shop.label}`,
-            'world',
-            async () => {
+        host.appendChild(
+            makeAethermoorAction(`Open ${label}`, 'world', async () => {
                 try {
-                    await shop.open();
+                    await open();
                 } catch (error) {
-                    toastr.error(
-                        error instanceof Error
-                            ? error.message
-                            : String(error),
-                        'Aethermoor'
-                    );
+                    toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
                 }
-            }
+            })
         );
-
-        host.appendChild(button);
     }
 }
 
 function nextChaseableAchievements(unlockedSet) {
     const seenChains = new Set();
     const list = [];
-
     for (const ach of AETHERMOOR_ACHIEVEMENTS) {
         if (unlockedSet.has(ach.id)) continue;
         if (ach.chain) {
@@ -23897,7 +23413,6 @@ function nextChaseableAchievements(unlockedSet) {
         }
         list.push(ach);
     }
-
     return list;
 }
 
@@ -23972,18 +23487,13 @@ function achievementProgressText(state, ach) {
 }
 
 function achievementsChatTableHtml(state) {
-    const unlockedSet = new Set(
-        Array.isArray(state.crew?.achievements) ? state.crew.achievements : []
-    );
+    const unlockedSet = new Set(Array.isArray(state.crew?.achievements) ? state.crew.achievements : []);
     const chaseable = nextChaseableAchievements(unlockedSet);
     const totals = achievementBonuses(state.crew);
 
     const rows = chaseable.map(ach => {
         const progress = achievementProgressText(state, ach);
-        const reqText = progress
-            ? `${ach.requirement} (${progress})`
-            : ach.requirement;
-
+        const reqText = progress ? `${ach.requirement} (${progress})` : ach.requirement;
         return `<tr>` +
             `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#ffffff; font-weight:700; white-space:nowrap;">${escapeSystemLogHtml(ach.title)}</td>` +
             `<td style="padding:4px 6px; border-top:1px solid #1f2730; color:#9caab8;">${escapeSystemLogHtml(reqText)}</td>` +
@@ -23997,9 +23507,7 @@ function achievementsChatTableHtml(state) {
                 `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Achievement</th>` +
                 `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Requirement</th>` +
                 `<th style="text-align:left; padding:3px 6px; color:#ffd166; border-bottom:1px solid #2b3542;">Bonus</th>` +
-            `</tr></thead>` +
-            `<tbody>${rows}</tbody>` +
-          `</table>`
+            `</tr></thead><tbody>${rows}</tbody></table>`
         : `<div style="margin-top:6px; color:#4ade80;">All milestones unlocked!</div>`;
 
     return `<div style="background:#12161c; border:1px solid #2b3542; border-left:3px solid #ffd166; border-radius:2px; padding:8px 10px; font-family:'Segoe UI', Tahoma, sans-serif; font-size:11px; color:#d0d7de; line-height:1.4; max-width:560px;">` +
@@ -24013,45 +23521,21 @@ function achievementsChatTableHtml(state) {
 }
 
 async function copyAethermoorAchievementsTable(state) {
-    const html = achievementsChatTableHtml(state);
-
-    try {
-        await navigator.clipboard.writeText(html);
-    } catch (_error) {
-        const input = document.createElement('textarea');
-        input.value = html;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        const copied = document.execCommand('copy');
-        input.remove();
-
-        assert(copied, 'Could not copy achievements table');
-    }
-
-    toastr.info(
-        'Unearned achievements HTML table copied for chat.',
-        'Aethermoor'
-    );
+    await copyTextToClipboard(achievementsChatTableHtml(state), 'Could not copy achievements table');
+    toastr.info('Unearned achievements HTML table copied for chat.', 'Aethermoor');
 }
 
 async function renderAchievementsTab(host) {
     let snapshot;
-
     try {
         snapshot = await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
+        host.replaceChildren(
             makeAethermoorSection(
                 'ACHIEVEMENTS',
                 !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
                     ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
+                    : error instanceof Error ? error.message : String(error),
                 'quest'
             )
         );
@@ -24062,133 +23546,68 @@ async function renderAchievementsTab(host) {
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    const unlockedSet = new Set(
-        Array.isArray(state.crew?.achievements) ? state.crew.achievements : []
-    );
+    const unlockedSet = new Set(Array.isArray(state.crew?.achievements) ? state.crew.achievements : []);
     const earned = AETHERMOOR_ACHIEVEMENTS.filter(ach => unlockedSet.has(ach.id));
     const unearned = nextChaseableAchievements(unlockedSet);
     const totals = achievementBonuses(state.crew);
 
-    host.appendChild(
+    const copyBtn = makeAethermoorAction('Copy Table for Chat', 'quest', () => {
+        void copyAethermoorAchievementsTable(state).catch(error => {
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+        });
+    });
+    copyBtn.style.marginTop = '8px';
+    copyBtn.title = 'Copies a styled HTML table of chaseable unearned achievements to paste into your reply when Tansy checks the tab.';
+
+    const unearnedDrawer = el('details', {
+        className: 'aethermoor-knowledge',
+        style: { borderLeftColor: '#9caab8' },
+        open: true
+    },
+        el('summary', { className: 'aethermoor-ui-heading', text: `UNEARNED (NEXT TIER) · ${unearned.length}` }),
+        copyBtn,
+        unearned.length === 0
+            ? el('div', { className: 'aethermoor-ui-text', style: { marginTop: '6px' }, text: 'Every milestone has been unlocked!' })
+            : unearned.map(ach => {
+                const progress = achievementProgressText(state, ach);
+                return el('div', { className: 'aethermoor-inventory-item' },
+                    el('div', { className: 'aethermoor-inventory-item-main' },
+                        el('div', { className: 'aethermoor-vendor-name', text: progress ? `${ach.title} · ${progress}` : ach.title }),
+                        el('div', { className: 'aethermoor-vendor-detail', text: ach.requirement }),
+                        el('div', { className: 'aethermoor-inventory-gain', text: formatAchievementBonus(ach.bonus) })
+                    )
+                );
+            })
+    );
+
+    const earnedDrawer = el('details', {
+        className: 'aethermoor-knowledge',
+        style: { borderLeftColor: '#ffd166' },
+        open: false
+    },
+        el('summary', { className: 'aethermoor-ui-heading', text: `EARNED · ${earned.length}` }),
+        earned.length === 0
+            ? el('div', { className: 'aethermoor-ui-text', style: { marginTop: '6px' }, text: 'No achievements unlocked yet.' })
+            : earned.map(ach =>
+                el('div', { className: 'aethermoor-inventory-item' },
+                    el('div', { className: 'aethermoor-inventory-item-main' },
+                        el('div', { className: 'aethermoor-vendor-name', style: { color: '#ffd166' }, text: ach.title }),
+                        el('div', { className: 'aethermoor-vendor-detail', style: { fontStyle: 'italic' }, text: ach.blurb }),
+                        el('div', { className: 'aethermoor-inventory-gain', text: formatAchievementBonus(ach.bonus) })
+                    )
+                )
+            )
+    );
+
+    host.append(
         makeAethermoorSection(
             `ACHIEVEMENTS · ${earned.length}/${AETHERMOOR_ACHIEVEMENTS.length}`,
             `Active Bonuses: ${formatAchievementBonus(totals)}`,
             'quest'
-        )
+        ),
+        unearnedDrawer,
+        earnedDrawer
     );
-
-    // Drawer 1: Unearned Achievements (Next Chaseable Tier — open by default)
-    const unearnedDrawer = document.createElement('details');
-    unearnedDrawer.className = 'aethermoor-knowledge';
-    unearnedDrawer.style.borderLeftColor = '#9caab8';
-    unearnedDrawer.open = true;
-
-    const unearnedSummary = document.createElement('summary');
-    unearnedSummary.className = 'aethermoor-ui-heading';
-    unearnedSummary.textContent = `UNEARNED (NEXT TIER) · ${unearned.length}`;
-    unearnedDrawer.appendChild(unearnedSummary);
-
-    const copyBtn = makeAethermoorAction(
-        'Copy Table for Chat',
-        'quest',
-        () => {
-            void copyAethermoorAchievementsTable(state).catch(error => {
-                toastr.error(
-                    error instanceof Error ? error.message : String(error),
-                    'Aethermoor'
-                );
-            });
-        }
-    );
-    copyBtn.style.marginTop = '8px';
-    copyBtn.title =
-        'Copies a styled HTML table of chaseable unearned achievements to paste into your reply when Tansy checks the tab.';
-    unearnedDrawer.appendChild(copyBtn);
-
-    if (unearned.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'aethermoor-ui-text';
-        empty.style.marginTop = '6px';
-        empty.textContent = 'Every milestone has been unlocked!';
-        unearnedDrawer.appendChild(empty);
-    } else {
-        for (const ach of unearned) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
-
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
-
-            const progress = achievementProgressText(state, ach);
-
-            const title = document.createElement('div');
-            title.className = 'aethermoor-vendor-name';
-            title.textContent = progress
-                ? `${ach.title} · ${progress}`
-                : ach.title;
-
-            const req = document.createElement('div');
-            req.className = 'aethermoor-vendor-detail';
-            req.textContent = ach.requirement;
-
-            const reward = document.createElement('div');
-            reward.className = 'aethermoor-inventory-gain';
-            reward.textContent = formatAchievementBonus(ach.bonus);
-
-            main.append(title, req, reward);
-            row.appendChild(main);
-            unearnedDrawer.appendChild(row);
-        }
-    }
-
-    host.appendChild(unearnedDrawer);
-
-    // Drawer 2: Earned Achievements (collapsed by default)
-    const earnedDrawer = document.createElement('details');
-    earnedDrawer.className = 'aethermoor-knowledge';
-    earnedDrawer.style.borderLeftColor = '#ffd166';
-    earnedDrawer.open = false;
-
-    const earnedSummary = document.createElement('summary');
-    earnedSummary.className = 'aethermoor-ui-heading';
-    earnedSummary.textContent = `EARNED · ${earned.length}`;
-    earnedDrawer.appendChild(earnedSummary);
-
-    if (earned.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'aethermoor-ui-text';
-        empty.style.marginTop = '6px';
-        empty.textContent = 'No achievements unlocked yet.';
-        earnedDrawer.appendChild(empty);
-    } else {
-        for (const ach of earned) {
-            const row = document.createElement('div');
-            row.className = 'aethermoor-inventory-item';
-
-            const main = document.createElement('div');
-            main.className = 'aethermoor-inventory-item-main';
-
-            const title = document.createElement('div');
-            title.className = 'aethermoor-vendor-name';
-            title.style.color = '#ffd166';
-            title.textContent = ach.title;
-
-            const blurb = document.createElement('div');
-            blurb.className = 'aethermoor-vendor-detail';
-            blurb.style.fontStyle = 'italic';
-            blurb.textContent = ach.blurb;
-
-            const reward = document.createElement('div');
-            reward.className = 'aethermoor-inventory-gain';
-            reward.textContent = formatAchievementBonus(ach.bonus);
-
-            main.append(title, blurb, reward);
-            row.appendChild(main);
-            earnedDrawer.appendChild(row);
-        }
-    }
-
-    host.appendChild(earnedDrawer);
 }
 
 function combatRecapPrompt(receipt) {
@@ -25831,9 +25250,24 @@ function enableAethermoorPanelDragging(
     });
 }
 
+function attachAethermoorWindowGeometry(
+    panel,
+    header,
+    storageKey = AETHERMOOR_PANEL_GEOMETRY_KEY
+) {
+    restoreAethermoorPanelGeometry(panel, storageKey);
+    enableAethermoorPanelDragging(header, panel, storageKey);
+    panel.addEventListener('pointerup', () => {
+        setTimeout(() => {
+            if (panel.isConnected) {
+                saveAethermoorPanelGeometry(panel, storageKey);
+            }
+        }, 0);
+    });
+}
+
 function openAethermoorPanel() {
     addAethermoorPanelStyles();
-
     if (aethermoorPanelElement && aethermoorPanelOpen) {
         aethermoorPanelElement.hidden = true;
         aethermoorPanelOpen = false;
@@ -25925,16 +25359,7 @@ function openAethermoorPanel() {
         panel.append(header, statusStrip, queuedMoveBar, tabs, content);
         document.body.appendChild(panel);
 
-        restoreAethermoorPanelGeometry(panel);
-        enableAethermoorPanelDragging(header, panel);
-
-        panel.addEventListener('pointerup', () => {
-            setTimeout(
-                () => saveAethermoorPanelGeometry(panel),
-                0
-            );
-        });
-
+        attachAethermoorWindowGeometry(panel, header);
         aethermoorPanelElement = panel;
     }
 
@@ -26053,33 +25478,10 @@ function aethermoorStatusReadouts(state) {
 }
 
 async function copyAethermoorStatus() {
-    // Read at click time: the displayed tab may not have refreshed yet.
-    const state = getContext().chatMetadata?.[
-        AETHERMOOR_METADATA_KEY
-    ]?.state;
-
+    const state = getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
     assert(state?.crew, 'No saved crew status to copy');
-
-    const text = aethermoorStatusReadouts(state)
-        .map(readout => readout.text)
-        .join(' | ');
-
-    try {
-        await navigator.clipboard.writeText(text);
-    } catch (_error) {
-        const input = document.createElement('textarea');
-        input.value = text;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        const copied = document.execCommand('copy');
-        input.remove();
-
-        assert(copied, 'Could not copy crew status');
-    }
-
+    const text = aethermoorStatusReadouts(state).map(r => r.text).join(' | ');
+    await copyTextToClipboard(text, 'Could not copy crew status');
     toastr.info('Crew status copied.', 'Aethermoor');
 }
 
@@ -27802,21 +27204,8 @@ function openNarrationDebug() {
     const output = document.createElement('div');
     output.className = 'aethermoor-debug-records';
 
-        async function copyDebugText(text, label) {
-        try {
-            await navigator.clipboard.writeText(text);
-        } catch (_error) {
-            const input = document.createElement('textarea');
-            input.value = text;
-            input.style.position = 'fixed';
-            input.style.opacity = '0';
-            document.body.appendChild(input);
-            input.focus();
-            input.select();
-            document.execCommand('copy');
-            input.remove();
-        }
-
+    async function copyDebugText(text, label) {
+        await copyTextToClipboard(text);
         toastr.info(`${label} copied to clipboard.`, 'Narration Debug');
     }
 
@@ -28073,17 +27462,7 @@ function openNarrationDebug() {
     panel.append(header, body);
     document.body.appendChild(panel);
 
-    const debugGeometryKey = 'aethermoorDebugWindowGeometry';
-    restoreAethermoorPanelGeometry(panel, debugGeometryKey);
-    enableAethermoorPanelDragging(header, panel, debugGeometryKey);
-    panel.addEventListener('pointerup', () => {
-        setTimeout(() => {
-            if (panel.isConnected) {
-                saveAethermoorPanelGeometry(panel, debugGeometryKey);
-            }
-        }, 0);
-    });
-
+    attachAethermoorWindowGeometry(panel, header, 'aethermoorDebugWindowGeometry');
     refresh();
 }
 

@@ -10898,90 +10898,35 @@ function resolveQuestAction(test) {
 }
 
 function equipBagItem(stateInput, itemIndex) {
-    assert(
-        stateInput &&
-        typeof stateInput === 'object',
-        'gear equip requires state'
-    );
-
+    assert(stateInput && typeof stateInput === 'object', 'gear equip requires state');
     const state = clone(stateInput);
 
     assert(
-        state.crew &&
-        state.inventory &&
-        Array.isArray(state.inventory.bagReserves),
+        state.crew && state.inventory && Array.isArray(state.inventory.bagReserves),
         'Gear equip requires crew and inventory.bagReserves'
     );
+    int(itemIndex, 'itemIndex');
+    assert(itemIndex < state.inventory.bagReserves.length, `No bag item at index ${itemIndex}`);
 
-    int(
-        itemIndex,
-        'itemIndex'
-    );
+    const item = state.inventory.bagReserves[itemIndex];
+    assert(item?.owner && ['tansy', 'qtik'].includes(item.owner), 'Item is not equippable by the crew');
+    assert(!item.classRestricted, 'Class-restricted item cannot be equipped');
+    assert(typeof item.slot === 'string', 'Gear item has no equipment slot');
+    assert(Number.isInteger(item.rawStat) && item.rawStat > 0, 'Gear item needs a positive rawStat');
 
-    assert(
-        itemIndex < state.inventory.bagReserves.length,
-        `No bag item at index ${itemIndex}`
-    );
-
-    const item =
-        state.inventory.bagReserves[itemIndex];
-
-    assert(
-        item &&
-        item.owner &&
-        ['tansy', 'qtik'].includes(item.owner),
-        'Item is not equippable by the crew'
-    );
-
-    assert(
-        !item.classRestricted,
-        'Class-restricted item cannot be equipped'
-    );
-
-    assert(
-        typeof item.slot === 'string',
-        'Gear item has no equipment slot'
-    );
-
-    assert(
-        Number.isInteger(item.rawStat) &&
-        item.rawStat > 0,
-        'Gear item needs a positive rawStat'
-    );
-
-    const ownerSlots =
-        item.owner === 'tansy'
-            ? TANSY_SLOTS
-            : QTIK_SLOTS;
-
-    assert(
-        ownerSlots.includes(item.slot),
-        `Invalid ${item.owner} equipment slot: ${item.slot}`
-    );
+    const ownerSlots = item.owner === 'tansy' ? TANSY_SLOTS : QTIK_SLOTS;
+    assert(ownerSlots.includes(item.slot), `Invalid ${item.owner} equipment slot: ${item.slot}`);
 
     if (item.owner === 'tansy' && MODULAR_TANSY.has(item.slot)) {
-        assert(
-            ['vitality', 'luck'].includes(item.variant),
-            `Tansy ${item.slot} requires vitality or luck variant`
-        );
+        assert(['vitality', 'luck'].includes(item.variant), `Tansy ${item.slot} requires vitality or luck variant`);
     }
-
     if (item.owner === 'qtik') {
-        assert(
-            ['vitality', 'bulwark'].includes(item.variant),
-            `Q'tik ${item.slot} requires vitality or bulwark variant`
-        );
+        assert(['vitality', 'bulwark'].includes(item.variant), `Q'tik ${item.slot} requires vitality or bulwark variant`);
     }
 
-    const oldDerived =
-        derived(state.crew);
-
-    const character =
-        state.crew[item.owner];
-
-    const oldItem =
-        state.crew.gear[item.owner][item.slot] || null;
-
+    const oldDerived = derived(state.crew);
+    const character = state.crew[item.owner];
+    const oldItem = state.crew.gear[item.owner][item.slot] || null;
     const equippedItem = {
         ...item,
         stat: item.rawStat,
@@ -10990,77 +10935,35 @@ function equipBagItem(stateInput, itemIndex) {
         tradeStreamEligible: false
     };
 
-
-    /*
-     * Remove the selected reserve item before adding the replaced item,
-     * so the returned bag index cannot accidentally refer to the new copy.
-     */
+    // Remove the selected reserve item before pushing any replaced gear.
     state.inventory.bagReserves.splice(itemIndex, 1);
 
-if (oldItem && Number(oldItem.stat) > 0) {
-    state.inventory.bagReserves.push({
-        ...oldItem,
-        name: oldItem.name || 'Replaced gear',
-        owner: item.owner,
-        slot: item.slot,
-        rawStat: oldItem.stat,
-        bound: Boolean(oldItem.bound),
-        classRestricted: false,
-        tradeStreamEligible: oldItem.bound !== true,
-        sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
-        bonus: lootBonus(
-            item.owner,
-            item.slot,
-            oldItem.variant || null,
-            oldItem.stat
-        )
-    });
-}
-
-    state.crew.gear[item.owner][item.slot] =
-        equippedItem;
-
-    const newDerived =
-        derived(state.crew);
-
-    /*
-     * Preserve current HP when MaxHP changes, adjusting it by the
-     * MaxHP delta and clamping it to the new maximum.
-     */
-    if (item.owner === 'qtik') {
-        character.hp = Math.max(
-            0,
-            Math.min(
-                newDerived.qtikMaxHp,
-                character.hp +
-                (
-                    newDerived.qtikMaxHp -
-                    oldDerived.qtikMaxHp
-                )
-            )
-        );
-    } else {
-        character.hp = Math.max(
-            0,
-            Math.min(
-                newDerived.tansyMaxHp,
-                character.hp +
-                (
-                    newDerived.tansyMaxHp -
-                    oldDerived.tansyMaxHp
-                )
-            )
-        );
+    if (oldItem && Number(oldItem.stat) > 0) {
+        state.inventory.bagReserves.push({
+            ...oldItem,
+            name: oldItem.name || 'Replaced gear',
+            owner: item.owner,
+            slot: item.slot,
+            rawStat: oldItem.stat,
+            bound: Boolean(oldItem.bound),
+            classRestricted: false,
+            tradeStreamEligible: oldItem.bound !== true,
+            sellValue: oldItem.sellValue ?? 2 * oldItem.stat,
+            bonus: lootBonus(item.owner, item.slot, oldItem.variant || null, oldItem.stat)
+        });
     }
 
-    state.crew.qtik.maxHp =
-        newDerived.qtikMaxHp;
-    state.crew.qtik.def =
-        newDerived.def;
-    state.crew.qtik.regen =
-        newDerived.regen;
-    state.crew.tansy.maxHp =
-        newDerived.tansyMaxHp;
+    state.crew.gear[item.owner][item.slot] = equippedItem;
+    const newDerived = derived(state.crew);
+
+    // Adjust current HP by the MaxHP delta and clamp to the new maximum.
+    const maxKey = item.owner === 'qtik' ? 'qtikMaxHp' : 'tansyMaxHp';
+    character.hp = Math.max(0, Math.min(newDerived[maxKey], character.hp + (newDerived[maxKey] - oldDerived[maxKey])));
+
+    state.crew.qtik.maxHp = newDerived.qtikMaxHp;
+    state.crew.qtik.def = newDerived.def;
+    state.crew.qtik.regen = newDerived.regen;
+    state.crew.tansy.maxHp = newDerived.tansyMaxHp;
 
     return {
         ok: true,
@@ -11071,13 +10974,9 @@ if (oldItem && Number(oldItem.stat) > 0) {
         state
     };
 }
-function resolveTradeAction(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'trade action requires state'
-    );
 
+function resolveTradeAction(test) {
+    assert(test.state && typeof test.state === 'object', 'trade action requires state');
     const state = clone(test.state);
 
     state.crew ||= {};
@@ -11087,210 +10986,100 @@ function resolveTradeAction(test) {
     state.inventory.activeTradeListings ||= [];
     state.inventory.tradeHistory ||= [];
 
-    assert(
-        Array.isArray(state.inventory.bagReserves),
-        'inventory.bagReserves must be an array'
-    );
-
-    assert(
-        Array.isArray(state.inventory.activeTradeListings),
-        'inventory.activeTradeListings must be an array'
-    );
-
+    assert(Array.isArray(state.inventory.bagReserves), 'inventory.bagReserves must be an array');
+    assert(Array.isArray(state.inventory.activeTradeListings), 'inventory.activeTradeListings must be an array');
     assert(
         ['list', 'withdraw', 'settle', 'settle_all'].includes(test.action),
         `Unsupported trade action: ${test.action}`
     );
 
-    const result = {
-        ok: true,
-        action: test.action,
-        silverGained: 0,
-        item: null,
-        state
-    };
+    const result = { ok: true, action: test.action, silverGained: 0, item: null, state };
 
     if (test.action === 'list') {
         int(test.itemIndex, 'itemIndex', 0);
+        assert(state.inventory.activeTradeListings.length < 3, 'Aether-Net already has three active listings');
+        assert(test.itemIndex < state.inventory.bagReserves.length, `No bag item at index ${test.itemIndex}`);
 
+        const item = state.inventory.bagReserves[test.itemIndex];
         assert(
-            state.inventory.activeTradeListings.length < 3,
-            'Aether-Net already has three active listings'
-        );
-
-        assert(
-            test.itemIndex < state.inventory.bagReserves.length,
-            `No bag item at index ${test.itemIndex}`
-        );
-
-        const item =
-            state.inventory.bagReserves[test.itemIndex];
-
-        assert(
-            item &&
-            item.bound !== true &&
-            item.tradeStreamEligible !== false,
+            item && item.bound !== true && item.tradeStreamEligible !== false,
             'Only unbound Aether-Net-eligible gear may be listed'
         );
 
-        const tradeStat =
-            Number(item.tradeStat || item.rawStat);
-
-        assert(
-            Number.isInteger(tradeStat) &&
-            tradeStat > 0,
-            'Listed item needs a positive trade value'
-        );
+        const tradeStat = Number(item.tradeStat || item.rawStat);
+        assert(Number.isInteger(tradeStat) && tradeStat > 0, 'Listed item needs a positive trade value');
 
         const tradeRoll = roll(state, 6);
-        const rarity =
-            String(item.rarity || 'Common').toLowerCase();
+        const rarity = String(item.rarity || 'Common').toLowerCase();
+        const tierIdx = rarity === 'common' ? 0 : rarity === 'uncommon' ? 1 : 2;
+        const rollTable = {
+            2: ['standard_market', [5, 8, 15]],
+            3: ['standard_market', [6, 9, 18]],
+            4: ['guild_bulk_buyer', [7, 11, 20]],
+            5: ['bidding_war', [9, 13, 25]],
+            6: ['whale_collector_buyout', [12, 16, 35]]
+        };
 
-        let multiplier;
-        let saleStatus;
-        let marketResult;
+        const saleStatus = tradeRoll === 1 ? 'unsold' : 'sold';
+        const marketResult = tradeRoll === 1 ? 'lowball_trolls' : rollTable[tradeRoll][0];
+        const multiplier = tradeRoll === 1 ? 0 : rollTable[tradeRoll][1][tierIdx];
+        const listingId = test.listingId || `listing-${Date.now()}-${state.inventory.activeTradeListings.length + 1}`;
 
-        if (tradeRoll === 1) {
-            saleStatus = 'unsold';
-            marketResult = 'lowball_trolls';
-            multiplier = 0;
-        } else {
-            saleStatus = 'sold';
-
-            if (tradeRoll === 2) {
-                marketResult = 'standard_market';
-                multiplier =
-                    rarity === 'common' ? 5 :
-                    rarity === 'uncommon' ? 8 :
-                    15;
-            } else if (tradeRoll === 3) {
-                marketResult = 'standard_market';
-                multiplier =
-                    rarity === 'common' ? 6 :
-                    rarity === 'uncommon' ? 9 :
-                    18;
-            } else if (tradeRoll === 4) {
-                marketResult = 'guild_bulk_buyer';
-                multiplier =
-                    rarity === 'common' ? 7 :
-                    rarity === 'uncommon' ? 11 :
-                    20;
-            } else if (tradeRoll === 5) {
-                marketResult = 'bidding_war';
-                multiplier =
-                    rarity === 'common' ? 9 :
-                    rarity === 'uncommon' ? 13 :
-                    25;
-            } else {
-                marketResult = 'whale_collector_buyout';
-                multiplier =
-                    rarity === 'common' ? 12 :
-                    rarity === 'uncommon' ? 16 :
-                    35;
-            }
-        }
-
-        const listingId =
-            test.listingId ||
-            `listing-${Date.now()}-${state.inventory.activeTradeListings.length + 1}`;
-
+        // Market outcome is locked at listing time; settlement reveals it later without rerolling.
         const lockedListing = {
             ...item,
             listingId,
             listedAt: test.listedAt || null,
-
-            /*
-             * Market outcome is locked at listing time; settlement reveals
-             * it later without rerolling. No hardcoded buyer stereotypes.
-             */
             lockedSale: {
                 status: saleStatus,
                 result: marketResult,
                 tradeRoll,
                 tradeStat,
                 multiplier,
-                proceeds:
-                    saleStatus === 'sold'
-                        ? tradeStat * multiplier
-                        : 0,
+                proceeds: saleStatus === 'sold' ? tradeStat * multiplier : 0,
                 revealed: false
             }
         };
 
-        state.inventory.bagReserves.splice(
-            test.itemIndex,
-            1
-        );
-
-        state.inventory.activeTradeListings.push(
-            lockedListing
-        );
-
-        result.item = {
-            name: lockedListing.name,
-            listingId,
-            locked: true
-        };
-
+        state.inventory.bagReserves.splice(test.itemIndex, 1);
+        state.inventory.activeTradeListings.push(lockedListing);
+        result.item = { name: lockedListing.name, listingId, locked: true };
         result.status = 'listed';
-
         return result;
     }
 
     if (test.action === 'withdraw') {
         int(test.listingIndex, 'listingIndex', 0);
+        assert(test.listingIndex < state.inventory.activeTradeListings.length, `No active listing at index ${test.listingIndex}`);
 
-        assert(
-            test.listingIndex < state.inventory.activeTradeListings.length,
-            `No active listing at index ${test.listingIndex}`
-        );
-
-        const [listing] = state.inventory.activeTradeListings.splice(
-            test.listingIndex,
-            1
-        );
-
+        const [listing] = state.inventory.activeTradeListings.splice(test.listingIndex, 1);
         delete listing.lockedSale;
         delete listing.listingId;
         delete listing.listedAt;
-
         state.inventory.bagReserves.push(listing);
 
         result.status = 'withdrawn';
         result.returnedToBag = true;
         result.item = listing;
-
         return result;
     }
 
     function settleListing(listing) {
+        assert(listing && listing.bound !== true, 'Bound gear cannot be settled through Aether-Net');
         assert(
-            listing && listing.bound !== true,
-            'Bound gear cannot be settled through Aether-Net'
-        );
-
-        assert(
-            listing.lockedSale &&
-            ['sold', 'unsold'].includes(listing.lockedSale.status),
+            listing.lockedSale && ['sold', 'unsold'].includes(listing.lockedSale.status),
             'Listing has no locked sale result'
         );
 
         const lockedSale = listing.lockedSale;
-
-        assert(
-            lockedSale.revealed !== true,
-            'Aether-Net listing has already been settled'
-        );
-
+        assert(lockedSale.revealed !== true, 'Aether-Net listing has already been settled');
         lockedSale.revealed = true;
 
         if (lockedSale.status === 'unsold') {
             delete listing.lockedSale;
             delete listing.listingId;
             delete listing.listedAt;
-
             state.inventory.bagReserves.push(listing);
-
             return {
                 status: 'unsold',
                 marketResult: lockedSale.result,
@@ -11301,11 +11090,7 @@ function resolveTradeAction(test) {
         }
 
         const proceeds = Number(lockedSale.proceeds);
-
-        assert(
-            Number.isInteger(proceeds) && proceeds >= 0,
-            'Locked Aether-Net proceeds are invalid'
-        );
+        assert(Number.isInteger(proceeds) && proceeds >= 0, 'Locked Aether-Net proceeds are invalid');
 
         state.crew.purse += proceeds;
         state.inventory.tradeHistory.push({
@@ -11317,8 +11102,7 @@ function resolveTradeAction(test) {
             proceeds,
             zone: state.zone
         });
-        state.inventory.tradeHistory =
-            state.inventory.tradeHistory.slice(-25);
+        state.inventory.tradeHistory = state.inventory.tradeHistory.slice(-25);
 
         return {
             status: 'sold',
@@ -11331,120 +11115,71 @@ function resolveTradeAction(test) {
     }
 
     if (test.action === 'settle_all') {
-        assert(
-            state.inventory.activeTradeListings.length > 0,
-            'No active Aether-Net listings to settle'
-        );
-
-        const batch = state.inventory.activeTradeListings.splice(0);
-        const settlements = batch.map(settleListing);
-        const totalSilver = settlements.reduce(
-            (sum, entry) => sum + entry.silverGained,
-            0
-        );
-        const soldCount = settlements.filter(
-            entry => entry.status === 'sold'
-        ).length;
+        assert(state.inventory.activeTradeListings.length > 0, 'No active Aether-Net listings to settle');
+        const settlements = state.inventory.activeTradeListings.splice(0).map(settleListing);
+        const soldCount = settlements.filter(entry => entry.status === 'sold').length;
 
         result.settlements = settlements;
-        result.silverGained = totalSilver;
+        result.silverGained = settlements.reduce((sum, entry) => sum + entry.silverGained, 0);
         result.soldCount = soldCount;
         result.unsoldCount = settlements.length - soldCount;
         result.status = soldCount > 0 ? 'sold' : 'unsold';
-
         return result;
     }
 
     int(test.listingIndex, 'listingIndex', 0);
+    assert(test.listingIndex < state.inventory.activeTradeListings.length, `No active listing at index ${test.listingIndex}`);
 
-    assert(
-        test.listingIndex <
-        state.inventory.activeTradeListings.length,
-        `No active listing at index ${test.listingIndex}`
-    );
-
-    const [listing] = state.inventory.activeTradeListings.splice(
-        test.listingIndex,
-        1
-    );
+    const [listing] = state.inventory.activeTradeListings.splice(test.listingIndex, 1);
     const settled = settleListing(listing);
 
-    result.item = settled.item;
-    result.status = settled.status;
-    result.silverGained = settled.silverGained;
-    result.multiplier = settled.multiplier;
-    result.marketResult = settled.marketResult;
-    result.returnedToBag = settled.returnedToBag;
-    result.settlements = [settled];
-
-    return result;
+    return Object.assign(result, {
+        item: settled.item,
+        status: settled.status,
+        silverGained: settled.silverGained,
+        multiplier: settled.multiplier,
+        marketResult: settled.marketResult,
+        returnedToBag: settled.returnedToBag,
+        settlements: [settled]
+    });
 }
 
 /*
  * Validates and prices a vendor trade basket against current state.
- * Called internally by resolveVendorTradeCommit() before mutating gear
- * or silver.
+ * Called internally by resolveVendorTradeCommit() before mutating gear or silver.
  */
 function resolveVendorSelection(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Vendor selection requires saved state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'Vendor selection requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
+    const settlement = Object.values(state.world?.settlements || {}).find(
+        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
     );
 
     assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
+        settlement && !state.currentJourney && !['active', 'spotted'].includes(state.encounter?.status),
         'Trade selection requires presence at the open shop'
     );
 
     const basket = test.basket;
-
     assert(
-        basket &&
-        Array.isArray(basket.buy) &&
-        Array.isArray(basket.sell) &&
-        basket.buy.length + basket.sell.length > 0,
+        basket && Array.isArray(basket.buy) && Array.isArray(basket.sell) && basket.buy.length + basket.sell.length > 0,
         'Select at least one item to trade'
     );
 
-    const stock = resolveVendorAction({
-        action: 'stock',
-        zone: state.zone,
-        state
-    });
-
+    const stock = resolveVendorAction({ action: 'stock', zone: state.zone, state });
     const seenBuys = new Set();
     const seenSales = new Set();
 
     const buy = basket.buy.map(choice => {
-        const entry = stock.catalog.find(
-            item => item.number === choice.number
-        );
-
+        const entry = stock.catalog.find(item => item.number === choice.number);
         assert(entry, `Unknown shop row ${choice.number}`);
         assert(
-            entry.variants.some(option =>
-                option.variant === choice.variant
-            ),
+            entry.variants.some(option => option.variant === choice.variant),
             `Invalid tuning for shop row ${choice.number}`
         );
 
         const key = `${entry.owner}:${entry.slot}`;
-
-        assert(
-            !seenBuys.has(key),
-            `Select only one replacement for ${key}`
-        );
-
+        assert(!seenBuys.has(key), `Select only one replacement for ${key}`);
         seenBuys.add(key);
 
         return {
@@ -11460,7 +11195,6 @@ function resolveVendorSelection(test) {
         const key = choice.location === 'worn'
             ? `worn:${choice.owner}:${choice.slot}`
             : `bag:${choice.index}`;
-
         assert(!seenSales.has(key), `Duplicate sale: ${key}`);
         seenSales.add(key);
 
@@ -11469,109 +11203,67 @@ function resolveVendorSelection(test) {
             : choice.location === 'bag'
                 ? state.inventory?.bagReserves?.[choice.index]
                 : null;
-
-        assert(
-            item &&
-            Number.isInteger(item.rawStat ?? item.stat) &&
-            (item.rawStat ?? item.stat) > 0,
-            `Selected item is unavailable: ${key}`
-        );
+        const statVal = item?.rawStat ?? item?.stat;
+        assert(item && Number.isInteger(statVal) && statVal > 0, `Selected item is unavailable: ${key}`);
 
         return {
             location: choice.location,
-            ...(choice.location === 'worn'
-                ? { owner: choice.owner, slot: choice.slot }
-                : { index: choice.index }),
+            ...(choice.location === 'worn' ? { owner: choice.owner, slot: choice.slot } : { index: choice.index }),
             item: clone(item),
-            proceeds: 2 * (item.rawStat ?? item.stat)
+            proceeds: 2 * statVal
         };
     });
 
-    const cost = buy.reduce(
-        (total, item) => total + item.price,
-        0
-    );
-    const proceeds = sell.reduce(
-        (total, item) => total + item.proceeds,
-        0
-    );
+    const cost = buy.reduce((total, item) => total + item.price, 0);
+    const proceeds = sell.reduce((total, item) => total + item.proceeds, 0);
     const purseAfter = state.crew.purse + proceeds - cost;
+    assert(purseAfter >= 0, `Trade would leave the crew ${-purseAfter}s short`);
 
-    assert(
-        purseAfter >= 0,
-        `Trade would leave the crew ${-purseAfter}s short`
-    );
-
-    /*
-     * Buying an equal-or-worse item remains forbidden unless the
-     * currently worn item in that slot is part of this exchange.
-     */
+    // Equal-or-worse purchases are forbidden unless the worn item in that slot is sold in the same exchange.
     for (const choice of buy) {
-        const wornStat = Number(
-            state.crew.gear?.[choice.owner]?.[choice.slot]?.stat || 0
+        const wornStat = Number(state.crew.gear?.[choice.owner]?.[choice.slot]?.stat || 0);
+        const sellingWorn = sell.some(
+            item => item.location === 'worn' && item.owner === choice.owner && item.slot === choice.slot
         );
-        const sellingWorn = sell.some(item =>
-            item.location === 'worn' &&
-            item.owner === choice.owner &&
-            item.slot === choice.slot
-        );
-
-        assert(
-            sellingWorn || wornStat < stock.stat,
-            `${choice.owner} ${choice.slot} already meets the vendor floor`
-        );
+        assert(sellingWorn || wornStat < stock.stat, `${choice.owner} ${choice.slot} already meets the vendor floor`);
     }
-
-    const validatedBasket = {
-        settlementId: settlement.id,
-        zone: state.zone,
-        buy,
-        sell,
-        cost,
-        proceeds,
-        purseBefore: state.crew.purse,
-        purseAfter
-    };
 
     return {
         ok: true,
         action: 'stage',
-        basket: validatedBasket,
+        basket: {
+            settlementId: settlement.id,
+            zone: state.zone,
+            buy,
+            sell,
+            cost,
+            proceeds,
+            purseBefore: state.crew.purse,
+            purseAfter
+        },
         state
     };
 }
 
 /*
  * Direct-confirm vendor trade. Validates the submitted basket against
- * current state and applies all sales, purchases, and silver changes
- * atomically on one clone.
+ * current state and applies all sales, purchases, and silver changes atomically.
  */
 function resolveVendorTradeCommit(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Trade commit requires saved state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'Trade commit requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
+    const settlement = Object.values(state.world?.settlements || {}).find(
+        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
     );
 
     assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
+        settlement && !state.currentJourney && !['active', 'spotted'].includes(state.encounter?.status),
         'The crew must be free at a saved settlement to trade'
     );
 
     const requested = test.basket;
     assert(
-        requested &&
-        Array.isArray(requested.buy) &&
-        Array.isArray(requested.sell),
+        requested && Array.isArray(requested.buy) && Array.isArray(requested.sell),
         'Select at least one item to trade'
     );
 
@@ -11579,21 +11271,11 @@ function resolveVendorTradeCommit(test) {
         state,
         action: 'stage',
         basket: {
-            buy: requested.buy.map(item => ({
-                number: item.number,
-                variant: item.variant
-            })),
+            buy: requested.buy.map(({ number, variant }) => ({ number, variant })),
             sell: requested.sell.map(item =>
                 item.location === 'worn'
-                    ? {
-                        location: 'worn',
-                        owner: item.owner,
-                        slot: item.slot
-                    }
-                    : {
-                        location: 'bag',
-                        index: item.index
-                    }
+                    ? { location: 'worn', owner: item.owner, slot: item.slot }
+                    : { location: 'bag', index: item.index }
             )
         }
     });
@@ -11610,25 +11292,15 @@ function resolveVendorTradeCommit(test) {
         proceeds: choice.proceeds
     }));
 
-    for (const choice of pending.sell.filter(
-        item => item.location === 'worn'
-    )) {
+    for (const choice of pending.sell.filter(item => item.location === 'worn')) {
         delete working.crew.gear[choice.owner][choice.slot];
     }
-
-    for (const choice of pending.sell
-        .filter(item => item.location === 'bag')
-        .sort((a, b) => b.index - a.index)) {
+    for (const choice of pending.sell.filter(item => item.location === 'bag').sort((a, b) => b.index - a.index)) {
         working.inventory.bagReserves.splice(choice.index, 1);
     }
 
-    /*
-     * Sale proceeds can fund purchases in the same exchange. Purchases
-     * still go through the existing authoritative vendor item builder.
-     * None of these intermediate clones is saved separately.
-     */
+    // Sale proceeds can fund purchases in the same exchange.
     working.crew.purse += pending.proceeds;
-
     const bought = [];
 
     for (const choice of pending.buy) {
@@ -11640,74 +11312,47 @@ function resolveVendorTradeCommit(test) {
             slot: choice.slot,
             variant: choice.variant
         });
-
         working = purchase.state;
         bought.push(clone(purchase.item));
     }
 
-    assert(
-        working.crew.purse === pending.purseAfter,
-        'Trade purse does not match the validated quote'
-    );
+    assert(working.crew.purse === pending.purseAfter, 'Trade purse does not match the validated quote');
 
     const afterStats = derived(working.crew);
-
-    /*
-     * Selling worn gear changes derived stats immediately on commit.
-     * Preserve the existing equip rule: adjust current HP by the change
-     * in maximum HP, then clamp. Purchases stay in Bag Reserves.
-     */
     working.crew.qtik.hp = Math.max(
         0,
-        Math.min(
-            afterStats.qtikMaxHp,
-            working.crew.qtik.hp +
-                afterStats.qtikMaxHp - beforeStats.qtikMaxHp
-        )
+        Math.min(afterStats.qtikMaxHp, working.crew.qtik.hp + afterStats.qtikMaxHp - beforeStats.qtikMaxHp)
     );
-
     working.crew.tansy.hp = Math.max(
         0,
-        Math.min(
-            afterStats.tansyMaxHp,
-            working.crew.tansy.hp +
-                afterStats.tansyMaxHp - beforeStats.tansyMaxHp
-        )
+        Math.min(afterStats.tansyMaxHp, working.crew.tansy.hp + afterStats.tansyMaxHp - beforeStats.tansyMaxHp)
     );
-
     working.crew.qtik.maxHp = afterStats.qtikMaxHp;
     working.crew.qtik.def = afterStats.def;
     working.crew.qtik.regen = afterStats.regen;
     working.crew.tansy.maxHp = afterStats.tansyMaxHp;
 
-    const receipt = {
-        settlementId: settlement.id,
-        bought,
-        sold,
-        cost: pending.cost,
-        proceeds: pending.proceeds,
-        purseBefore,
-        purseAfter: working.crew.purse,
-        derivedBefore: beforeStats,
-        derivedAfter: afterStats
-    };
-
     return {
         ok: true,
         created: true,
         action: 'commit',
-        receipt,
+        receipt: {
+            settlementId: settlement.id,
+            bought,
+            sold,
+            cost: pending.cost,
+            proceeds: pending.proceeds,
+            purseBefore,
+            purseAfter: working.crew.purse,
+            derivedBefore: beforeStats,
+            derivedAfter: afterStats
+        },
         state: working
     };
 }
 
 function resolveVendorAction(test) {
-
-    assert(
-        Number.isInteger(test.zone) &&
-        ZONES[test.zone],
-        `Unknown zone: ${test.zone}`
-    );
+    assert(Number.isInteger(test.zone) && ZONES[test.zone], `Unknown zone: ${test.zone}`);
 
     const zone = test.zone;
     const zoneInfo = ZONES[zone];
@@ -11720,141 +11365,64 @@ function resolveVendorAction(test) {
         { owner: 'tansy', slot: 'gloves', variants: [null] },
         { owner: 'tansy', slot: 'chest', variants: [null] },
         { owner: 'tansy', slot: 'trousers', variants: [null] },
-
-        {
-            owner: 'tansy',
-            slot: 'headgear',
-            variants: ['vitality', 'luck']
-        },
-        {
-            owner: 'tansy',
-            slot: 'boots',
-            variants: ['vitality', 'luck']
-        },
-        {
-            owner: 'tansy',
-            slot: 'neck',
-            variants: ['vitality', 'luck']
-        },
-        {
-            owner: 'tansy',
-            slot: 'ring1',
-            variants: ['vitality', 'luck']
-        },
-        {
-            owner: 'tansy',
-            slot: 'ring2',
-            variants: ['vitality', 'luck']
-        },
-
-        {
-            owner: 'qtik',
-            slot: 'ring1',
-            variants: ['bulwark', 'vitality']
-        },
-        {
-            owner: 'qtik',
-            slot: 'ring2',
-            variants: ['bulwark', 'vitality']
-        },
-        {
-            owner: 'qtik',
-            slot: 'amulet',
-            variants: ['bulwark', 'vitality']
-        },
-        {
-            owner: 'qtik',
-            slot: 'wristCuffs',
-            variants: ['bulwark', 'vitality']
-        }
+        { owner: 'tansy', slot: 'headgear', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'boots', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'neck', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'ring1', variants: ['vitality', 'luck'] },
+        { owner: 'tansy', slot: 'ring2', variants: ['vitality', 'luck'] },
+        { owner: 'qtik', slot: 'ring1', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'ring2', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'amulet', variants: ['bulwark', 'vitality'] },
+        { owner: 'qtik', slot: 'wristCuffs', variants: ['bulwark', 'vitality'] }
     ];
 
     const slotNames = {
-        weapon: 'Focus',
-        gloves: 'Bracers',
-        chest: 'Chest',
-        trousers: 'Trousers',
-        headgear: 'Headgear',
-        boots: 'Boots',
-        neck: 'Necklace',
-        ring1: 'Ring 1',
-        ring2: 'Ring 2',
-        amulet: 'Amulet',
-        wristCuffs: 'Wrist Cuffs'
+        weapon: 'Focus', gloves: 'Bracers', chest: 'Chest', trousers: 'Trousers',
+        headgear: 'Headgear', boots: 'Boots', neck: 'Necklace',
+        ring1: 'Ring 1', ring2: 'Ring 2', amulet: 'Amulet', wristCuffs: 'Wrist Cuffs'
     };
-
-    const variantTitle = variant => {
-        if (!variant) return null;
-
-        return (
-            variant[0].toUpperCase() +
-            variant.slice(1)
-        );
-    };
+    const variantTitle = variant => (variant ? variant[0].toUpperCase() + variant.slice(1) : null);
 
     if (test.action === 'stock') {
         const state = test.state || {};
         const gear = state.crew?.gear || {};
 
-        const catalog = definitions.map(
-            (definition, index) => {
-                const equipped =
-                    gear[definition.owner]?.[definition.slot];
+        const catalog = definitions.map((definition, index) => {
+            const equippedStat = Number(gear[definition.owner]?.[definition.slot]?.stat || 0);
+            const upgradeable = equippedStat < stat;
 
-                const equippedStat =
-                    Number(equipped?.stat || 0);
+            return {
+                number: index + 1,
+                owner: definition.owner,
+                slot: definition.slot,
+                slotName: slotNames[definition.slot],
+                equippedStat,
+                stat,
+                price,
+                pawnValue,
+                upgradeable,
+                skip: !upgradeable,
+                variants: definition.variants.map(variant => {
+                    const fallback = [
+                        definition.owner === 'qtik' ? "Q'tik" : 'Tansy',
+                        ZONE_LOOT_MATERIALS[zone],
+                        variantTitle(variant),
+                        slotNames[definition.slot]
+                    ].filter(Boolean).join(' ');
 
-                const upgradeable =
-                    equippedStat < stat;
-
-                return {
-                    number: index + 1,
-                    owner: definition.owner,
-                    slot: definition.slot,
-                    slotName: slotNames[definition.slot],
-                    equippedStat,
-                    stat,
-                    price,
-                    pawnValue,
-                    upgradeable,
-                    skip: !upgradeable,
-                    variants: definition.variants.map(
-                        variant => {
-                            const fallback =
-                                `${definition.owner === 'qtik'
-                                    ? "Q'tik"
-                                    : 'Tansy'} ` +
-                                `${ZONE_LOOT_MATERIALS[zone]} ` +
-                                `${variantTitle(variant) || ''} ` +
-                                `${slotNames[definition.slot]}`
-                                    .replace(/\s+/g, ' ')
-                                    .trim();
-
-                            return {
-                                variant,
-                                label: variantTitle(variant),
-                                displayName:
-                                    cosmeticStockName(
-                                        state,
-                                        gearCosmeticStockKey(
-                                            definition.owner,
-                                            definition.slot,
-                                            variant
-                                        ),
-                                        fallback
-                                    ),
-                                bonus: lootBonus(
-                                    definition.owner,
-                                    definition.slot,
-                                    variant,
-                                    stat
-                                )
-                            };
-                        }
-                    )
-                };
-            }
-        );
+                    return {
+                        variant,
+                        label: variantTitle(variant),
+                        displayName: cosmeticStockName(
+                            state,
+                            gearCosmeticStockKey(definition.owner, definition.slot, variant),
+                            fallback
+                        ),
+                        bonus: lootBonus(definition.owner, definition.slot, variant, stat)
+                    };
+                })
+            };
+        });
 
         return {
             ok: true,
@@ -11864,119 +11432,45 @@ function resolveVendorAction(test) {
             stat,
             price,
             pawnValue,
-            upgradeableSlots: catalog
-                .filter(entry => entry.upgradeable)
-                .map(entry => entry.number),
+            upgradeableSlots: catalog.filter(entry => entry.upgradeable).map(entry => entry.number),
             skipSlots: catalog
                 .filter(entry => entry.skip)
-                .map(entry => ({
-                    number: entry.number,
-                    owner: entry.owner,
-                    slot: entry.slot,
-                    equippedStat: entry.equippedStat
-                })),
+                .map(({ number, owner, slot, equippedStat }) => ({ number, owner, slot, equippedStat })),
             catalog
         };
     }
 
-    assert(
-        test.action === 'buy',
-        `Unsupported vendor action: ${test.action}`
-    );
-
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'Vendor purchase requires state'
-    );
+    assert(test.action === 'buy', `Unsupported vendor action: ${test.action}`);
+    assert(test.state && typeof test.state === 'object', 'Vendor purchase requires state');
 
     const state = clone(test.state);
-
-    assert(
-        state.crew &&
-        state.crew.gear &&
-        state.inventory,
-        'Vendor purchase requires crew and inventory state'
-    );
-
+    assert(state.crew?.gear && state.inventory, 'Vendor purchase requires crew and inventory state');
     state.inventory.bagReserves ||= [];
+    assert(Array.isArray(state.inventory.bagReserves), 'inventory.bagReserves must be an array');
+    assert(Number.isInteger(state.crew.purse) && state.crew.purse >= price, `Insufficient silver: purchase costs ${price}s`);
+    assert(['tansy', 'qtik'].includes(test.owner), 'Purchase owner must be tansy or qtik');
 
-    assert(
-        Array.isArray(state.inventory.bagReserves),
-        'inventory.bagReserves must be an array'
-    );
+    const definition = definitions.find(entry => entry.owner === test.owner && entry.slot === test.slot);
+    assert(definition, `Invalid ${test.owner} vendor slot: ${test.slot}`);
 
-    assert(
-        Number.isInteger(state.crew.purse) &&
-        state.crew.purse >= price,
-        `Insufficient silver: purchase costs ${price}s`
-    );
-
-    assert(
-        ['tansy', 'qtik'].includes(test.owner),
-        'Purchase owner must be tansy or qtik'
-    );
-
-    const definition = definitions.find(
-        entry =>
-            entry.owner === test.owner &&
-            entry.slot === test.slot
-    );
-
-    assert(
-        definition,
-        `Invalid ${test.owner} vendor slot: ${test.slot}`
-    );
-
-    const equipped =
-        state.crew.gear[test.owner]?.[test.slot];
-
-    const equippedStat =
-        Number(equipped?.stat || 0);
-
+    const equippedStat = Number(state.crew.gear[test.owner]?.[test.slot]?.stat || 0);
     assert(
         equippedStat < stat,
-        `${test.owner} ${test.slot} already meets ` +
-        `the Zone ${zone} vendor floor of Stat ${stat}`
+        `${test.owner} ${test.slot} already meets the Zone ${zone} vendor floor of Stat ${stat}`
     );
 
-    const variant =
-        test.variant === undefined ||
-        test.variant === null ||
-        test.variant === ''
-            ? null
-            : test.variant;
-
+    const variant = test.variant === undefined || test.variant === null || test.variant === '' ? null : test.variant;
     assert(
         definition.variants.includes(variant),
-        `${test.owner} ${test.slot} requires one of: ` +
-        definition.variants
-            .map(value => value || 'no variant')
-            .join(', ')
+        `${test.owner} ${test.slot} requires one of: ${definition.variants.map(v => v || 'no variant').join(', ')}`
     );
 
-    const material =
-        ZONE_LOOT_MATERIALS[zone];
-
-    const nameParts = [
-        material,
-        variantTitle(variant),
-        slotNames[test.slot]
-    ].filter(Boolean);
-
-    const fallbackName = nameParts.join(' ');
+    const fallbackName = [ZONE_LOOT_MATERIALS[zone], variantTitle(variant), slotNames[test.slot]]
+        .filter(Boolean)
+        .join(' ');
 
     const item = {
-        name: cosmeticStockName(
-            state,
-            gearCosmeticStockKey(
-                test.owner,
-                test.slot,
-                variant
-            ),
-            fallbackName
-        ),
-
+        name: cosmeticStockName(state, gearCosmeticStockKey(test.owner, test.slot, variant), fallbackName),
         owner: test.owner,
         slot: test.slot,
         variant,
@@ -11988,74 +11482,33 @@ function resolveVendorAction(test) {
         bound: false,
         classRestricted: false,
         tradeStreamEligible: true,
-        bonus: lootBonus(
-            test.owner,
-            test.slot,
-            variant,
-            stat
-        ),
+        bonus: lootBonus(test.owner, test.slot, variant, stat),
         acquiredFrom: 'armory'
     };
 
-    const purseBefore =
-        state.crew.purse;
-
+    const purseBefore = state.crew.purse;
     state.crew.purse -= price;
     state.inventory.bagReserves.push(item);
 
-    return {
-        ok: true,
-        action: 'buy',
-        item,
-        purseBefore,
-        purseAfter: state.crew.purse,
-        state
-    };
+    return { ok: true, action: 'buy', item, purseBefore, purseAfter: state.crew.purse, state };
 }
 
 function resolveCurrencyAction(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'currency action requires state'
-    );
+    assert(test.state && typeof test.state === 'object', 'currency action requires state');
     const state = clone(test.state);
     state.crew ||= {};
-    state.crew.purse =
-        Number(state.crew.purse || 0);
+    state.crew.purse = Number(state.crew.purse || 0);
 
-    assert(
-        Number.isInteger(state.crew.purse) &&
-        state.crew.purse >= 0,
-        'Crew purse must be a non-negative integer'
-    );
+    assert(Number.isInteger(state.crew.purse) && state.crew.purse >= 0, 'Crew purse must be a non-negative integer');
+    assert(['spend', 'earn'].includes(test.action), `Unsupported currency action: ${test.action}`);
+    assert(Number.isInteger(test.amount) && test.amount > 0, 'Currency amount must be a positive integer');
 
-    assert(
-        ['spend', 'earn'].includes(test.action),
-        `Unsupported currency action: ${test.action}`
-    );
-
-    assert(
-        Number.isInteger(test.amount) &&
-        test.amount > 0,
-        'Currency amount must be a positive integer'
-    );
-
-    const before =
-        state.crew.purse;
-
+    const before = state.crew.purse;
     if (test.action === 'spend') {
-        assert(
-            before >= test.amount,
-            `Insufficient silver: need ${test.amount}s, ` +
-            `have ${before}s`
-        );
-
-        state.crew.purse -=
-            test.amount;
+        assert(before >= test.amount, `Insufficient silver: need ${test.amount}s, have ${before}s`);
+        state.crew.purse -= test.amount;
     } else {
-        state.crew.purse +=
-            test.amount;
+        state.crew.purse += test.amount;
     }
 
     return {
@@ -12068,6 +11521,7 @@ function resolveCurrencyAction(test) {
         state
     };
 }
+
 /*
  * A healing bottle's ID includes its PURCHASE zone. Its healing and price
  * are fixed from that ID, never recalculated from the crew's current zone

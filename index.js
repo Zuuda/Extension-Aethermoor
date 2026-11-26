@@ -4049,12 +4049,7 @@ function finishEncounterRespawns(state, totalDefeat = false) {
     };
 }
 
-function resolveTurn({
-    state,
-    actions,
-    rolls
-}) {
-
+function resolveTurn({ state, actions, rolls }) {
     const s = clone(state);
     s.inventory ||= {};
     s.inventory.bagReserves ||= [];
@@ -4064,117 +4059,58 @@ function resolveTurn({
     const c = s.crew;
     const encounter = s.encounter;
 
-    /*
-     * The UI normally exposes turn controls only after Engage, but this
-     * assertion is the actual mechanics boundary. A spotted encounter is
-     * discovered, not combat; fled, cleared, and dead encounters are over.
-     */
     assert(
         encounter.status === 'active',
-        `Combat turn requires an active encounter; current status is ` +
-            `${encounter.status}`
+        `Combat turn requires an active encounter; current status is ${encounter.status}`
     );
-
-    assert(
-        actions && typeof actions === 'object',
-        'Turn actions are required'
-    );
+    assert(actions && typeof actions === 'object', 'Turn actions are required');
 
     const fleeing = actions.flee === true;
-    const fallenAtStart = ['qtik', 'tansy'].filter(
-        owner => c[owner].hp === 0
-    );
-
-    assert(
-        fallenAtStart.length < 2,
-        'Both protagonists have fallen; combat must end'
-    );
-
-    assert(
-        fallenAtStart.length === 0 || fleeing,
-        'A surviving protagonist can only attempt Flee'
-    );
+    const fallenAtStart = ['qtik', 'tansy'].filter(owner => c[owner].hp === 0);
+    assert(fallenAtStart.length < 2, 'Both protagonists have fallen; combat must end');
+    assert(fallenAtStart.length === 0 || fleeing, 'A surviving protagonist can only attempt Flee');
 
     if (fleeing) {
         assert(
-            actions.qtik === undefined &&
-            actions.tansy === undefined &&
-            actions.target === undefined,
+            actions.qtik === undefined && actions.tansy === undefined && actions.target === undefined,
             'Flee cannot be combined with combat actions'
         );
     } else {
         assert(
-            [
-                'fire_melee', 'bodyguard', 'stun',
-                'ice_patch', 'frost_stomp', 'drink'
-            ].includes(actions.qtik),
+            ['fire_melee', 'bodyguard', 'stun', 'ice_patch', 'frost_stomp', 'drink'].includes(actions.qtik),
             `Unsupported Q'tik action: ${actions.qtik}`
         );
-
         assert(
-            [
-                'visor', 'vitals', 'overrun',
-                'recall', 'surge', 'drink', 'raise_shadow'
-            ].includes(actions.tansy),
+            ['visor', 'vitals', 'overrun', 'recall', 'surge', 'drink', 'raise_shadow'].includes(actions.tansy),
             `Unsupported Tansy action: ${actions.tansy}`
         );
-
-        assert(
-            typeof actions.target === 'string',
-            'A combat target is required'
-        );
-
-        assert(
-            live(s).some(foe => foe.id === actions.target),
-            `Target ${actions.target} is not alive`
-        );
+        assert(typeof actions.target === 'string', 'A combat target is required');
+        assert(live(s).some(foe => foe.id === actions.target), `Target ${actions.target} is not alive`);
     }
 
-    assert(
-        live(s).length > 0,
-        'No living foes'
-    );
+    assert(live(s).length > 0, 'No living foes');
 
-    let fleeRoll = null;
-    let fleeBonus = null;
-    let fleeTotal = null;
-
+    let fleeRoll = null, fleeBonus = null, fleeTotal = null;
     if (fleeing) {
         const stats = derived(c);
         fleeRoll = roll(s, 6);
         fleeBonus = Math.min(3, Math.floor(stats.luk / 5));
         fleeTotal = fleeRoll + fleeBonus;
-        encounter.fleeAttempts =
-            Number(encounter.fleeAttempts || 0) + 1;
+        encounter.fleeAttempts = Number(encounter.fleeAttempts || 0) + 1;
 
         if (fleeTotal >= 6) {
             encounter.status = 'fled';
-            encounter.fledOnAttempt =
-                encounter.fleeAttempts;
-
+            encounter.fledOnAttempt = encounter.fleeAttempts;
             const death = finishEncounterRespawns(s);
-
             return {
                 ok: true,
                 turn: encounter.turn,
                 action: 'flee',
                 death,
-                flee: {
-                    roll: fleeRoll,
-                    lukBonus: fleeBonus,
-                    total: fleeTotal,
-                    threshold: 6,
-                    success: true
-                },
+                flee: { roll: fleeRoll, lukBonus: fleeBonus, total: fleeTotal, threshold: 6, success: true },
                 exchanges: [],
                 turnEffects: ['Flee succeeded'],
-                rewards: {
-                    xp: 0,
-                    silver: 0,
-                    loot: [],
-                    applied: false,
-                    resolved: false
-                },
+                rewards: { xp: 0, silver: 0, loot: [], applied: false, resolved: false },
                 state: s,
                 derived: stats
             };
@@ -4189,109 +4125,47 @@ function resolveTurn({
         tansyMaxHp: Number(initial.tansyMaxHp),
         regen: Number(initial.regen)
     };
-
     for (const [name, value] of Object.entries(crewStats)) {
-        assert(
-            Number.isFinite(value),
-            `Derived crew stat ${name} is not finite`
-        );
+        assert(Number.isFinite(value), `Derived crew stat ${name} is not finite`);
     }
 
     const maxWeasels = 3 + Math.floor(c.level / 2);
-
     c.weasels.max = maxWeasels;
 
     const initialShadows = shadowMechanics(c);
-    const baseAndGearAttack =
-        crewStats.atk -
-        2 * state.crew.weasels.active -
-        initialShadows.attack;
-/*
- * Vitals empowers loose Shadow-Weasels and Shadow-Archers.
- * Ice Patch no longer suppresses the Vitals multiplier.
- */
-
-const summonDamageMultiplier =
-    actions.tansy === 'vitals'
-        ? 2
-        : 1;
+    const baseAndGearAttack = crewStats.atk - 2 * state.crew.weasels.active - initialShadows.attack;
+    // Vitals empowers loose Shadow-Weasels and Shadow-Archers.
+    const summonDamageMultiplier = actions.tansy === 'vitals' ? 2 : 1;
 
     function activeDamageShadowAttack(shadows) {
-        /*
-         * Recall removes loose-weasel participation but preserves
-         * Shadow-Archer damage.
-         */
-        if (actions.tansy === 'recall') {
-            return shadows.archerAttack;
-        }
-
-        /*
-         * Only Archer attack is command-amplified.
-         * Hexer/Warder attack remains at its normal value.
-         */
-        const specialistAttack =
-            shadows.attack - shadows.archerAttack;
-
-        const archerAttack =
-            shadows.archerAttack *
-            summonDamageMultiplier;
-
-        return specialistAttack + archerAttack;
+        if (actions.tansy === 'recall') return shadows.archerAttack;
+        return (shadows.attack - shadows.archerAttack) + shadows.archerAttack * summonDamageMultiplier;
     }
 
     function looseWeaselAttack() {
-        if (actions.tansy === 'recall') {
-            return 0;
-        }
-
-        return 2 * c.weasels.active *
-            summonDamageMultiplier;
+        return actions.tansy === 'recall' ? 0 : 2 * c.weasels.active * summonDamageMultiplier;
     }
 
     encounter.used ||= { stun: false, icePatch: false, surge: false };
     encounter.used.surge ??= false;
     encounter.hexStacks ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
-    let eliteBossFoes = live(s).filter(
-        foe => ['elite', 'boss'].includes(foe.role)
-    );
+    let eliteBossFoes = live(s).filter(foe => ['elite', 'boss'].includes(foe.role));
 
     encounter.turn = Number(encounter.turn || 0) + 1;
     encounter.shadowWarderSacrificeUsed ||= [];
-
-    assert(
-        Array.isArray(encounter.shadowWarderSacrificeUsed),
-        'Shadow-Warder sacrifice history must be an array'
-    );
+    assert(Array.isArray(encounter.shadowWarderSacrificeUsed), 'Shadow-Warder sacrifice history must be an array');
 
     const turnEffects = [];
     const itemUse = {};
     const tape = checkTape(s);
 
     if (fleeing) {
-        /*
-         * The flee roll was already consumed above. The combat tape
-         * now supplies the enemy response, while the player-action
-         * section below is skipped.
-         */
-        tape.flee = {
-            roll: fleeRoll,
-            lukBonus: fleeBonus,
-            total: fleeTotal,
-            threshold: 6,
-            success: false
-        };
+        tape.flee = { roll: fleeRoll, lukBonus: fleeBonus, total: fleeTotal, threshold: 6, success: false };
     }
 
-    const declaredStunTarget =
-        actions.qtik === 'stun'
-            ? live(s).find(foe => foe.id === actions.target)
-            : null;
-
-    const guardingBrute = live(s).find(
-        foe => foe.role === 'brute'
-    );
-
+    const declaredStunTarget = actions.qtik === 'stun' ? live(s).find(foe => foe.id === actions.target) : null;
+    const guardingBrute = live(s).find(foe => foe.role === 'brute');
     const stunTargetId =
         declaredStunTarget &&
         declaredStunTarget.role !== 'brute' &&
@@ -4302,141 +4176,51 @@ const summonDamageMultiplier =
             ? guardingBrute.id
             : declaredStunTarget?.id || null;
 
-    let activeTelegraphs =
-        eliteBossFoes.map(foe => ({
-            foe,
-            effect: telegraphEffects(foe)
-        }));
+    let activeTelegraphs = eliteBossFoes.map(foe => ({ foe, effect: telegraphEffects(foe) }));
 
-    let activeTelegraphEffects =
-        activeTelegraphs
-            .map(entry => entry.effect)
-            .filter(Boolean);
-
-   
     if (actions.qtik === 'stun') {
-        assert(
-            !encounter.used.stun,
-            'Stun has already been used this fight'
-        );
+        assert(!encounter.used.stun, 'Stun has already been used this fight');
         encounter.used.stun = true;
 
-        const stunnedEliteBoss =
-            eliteBossFoes.find(
-                foe => foe.id === stunTargetId
-            );
-
+        const stunnedEliteBoss = eliteBossFoes.find(foe => foe.id === stunTargetId);
         if (stunnedEliteBoss?.nextTelegraph) {
-            turnEffects.push(
-                `Stun cancelled ` +
-                `${telegraphLabel(
-                    stunnedEliteBoss.nextTelegraph
-                )}`
-            );
-
-            // Keep the cancelled telegraph as the anti-repeat reference
-            // when selecting this foe's next telegraph.
-            stunnedEliteBoss.lastCancelledTelegraph =
-                stunnedEliteBoss.nextTelegraph;
+            turnEffects.push(`Stun cancelled ${telegraphLabel(stunnedEliteBoss.nextTelegraph)}`);
+            // Keep the cancelled telegraph as the anti-repeat reference for next roll.
+            stunnedEliteBoss.lastCancelledTelegraph = stunnedEliteBoss.nextTelegraph;
             stunnedEliteBoss.nextTelegraph = null;
-
-            activeTelegraphs
-                .filter(
-                    entry =>
-                        entry.foe.id === stunnedEliteBoss.id
-                )
-                .forEach(entry => {
-                    entry.effect = null;
-                });
-
-            activeTelegraphEffects =
-                activeTelegraphs
-                    .map(entry => entry.effect)
-                    .filter(Boolean);
+            activeTelegraphs.filter(e => e.foe.id === stunnedEliteBoss.id).forEach(e => { e.effect = null; });
         }
     }
 
-    /*
-     * A successful boss Call Reinforcements telegraph resolves only
-     * after the players have had their chance to Stun the boss.
-     */
-    const reinforcements =
-        materializeBossReinforcements(s);
-
+    // Boss Call Reinforcements resolves only after the crew's chance to Stun.
+    const reinforcements = materializeBossReinforcements(s);
     if (reinforcements.length > 0) {
-        turnEffects.push(
-            `Boss reinforcements arrived: ` +
-            reinforcements
-                .map(foe => foe.id)
-                .join(', ')
-        );
-
-        eliteBossFoes = live(s).filter(
-            foe => ['elite', 'boss'].includes(foe.role)
-        );
-
-        activeTelegraphs =
-            eliteBossFoes.map(foe => ({
-                foe,
-                effect: telegraphEffects(foe)
-            }));
-
-        activeTelegraphEffects =
-            activeTelegraphs
-                .map(entry => entry.effect)
-                .filter(Boolean);
+        turnEffects.push(`Boss reinforcements arrived: ${reinforcements.map(foe => foe.id).join(', ')}`);
+        eliteBossFoes = live(s).filter(foe => ['elite', 'boss'].includes(foe.role));
+        activeTelegraphs = eliteBossFoes.map(foe => ({ foe, effect: telegraphEffects(foe) }));
     }
 
     if (actions.qtik === 'ice_patch') {
-
-        assert(
-            !encounter.used.icePatch,
-            'Ice Patch has already been used this fight'
-        );
+        assert(!encounter.used.icePatch, 'Ice Patch has already been used this fight');
         encounter.used.icePatch = true;
     }
-    /*
-     * Crew-wide immunity does not stack. Reject a redundant pair before
-     * either potion is consumed; the stored operation remains unchanged.
-     */
+
     assert(
-        !(
-            actions.qtik === 'drink' &&
-            actions.qtikItem === 'cleansing_tonic' &&
-            actions.tansy === 'drink' &&
-            actions.tansyItem === 'cleansing_tonic'
-        ),
-        'One cleansing tonic protects the whole crew for this turn; ' +
-        'choose a different action or potion for the other character'
+        !(actions.qtik === 'drink' && actions.qtikItem === 'cleansing_tonic' &&
+          actions.tansy === 'drink' && actions.tansyItem === 'cleansing_tonic'),
+        'One cleansing tonic protects the whole crew for this turn; choose a different action or potion for the other character'
     );
 
     if (actions.qtik === 'drink') {
-        assert(
-            typeof actions.qtikItem === 'string',
-            "Q'tik drink action requires actions.qtikItem"
-        );
-        itemUse.qtik = applyConsumableItem(
-
-            s, actions.qtikItem, 'qtik'
-        );
+        assert(typeof actions.qtikItem === 'string', "Q'tik drink action requires actions.qtikItem");
+        itemUse.qtik = applyConsumableItem(s, actions.qtikItem, 'qtik');
     }
-
     if (actions.tansy === 'drink') {
-        assert(
-            typeof actions.tansyItem === 'string',
-            'Tansy drink action requires actions.tansyItem'
-        );
-        itemUse.tansy = applyConsumableItem(
-
-            s, actions.tansyItem, 'tansy'
-        );
+        assert(typeof actions.tansyItem === 'string', 'Tansy drink action requires actions.tansyItem');
+        itemUse.tansy = applyConsumableItem(s, actions.tansyItem, 'tansy');
     }
-
     if (actions.tansy === 'raise_shadow') {
-        assert(
-            typeof actions.shadowId === 'string',
-            'Raise Shadow requires actions.shadowId'
-        );
+        assert(typeof actions.shadowId === 'string', 'Raise Shadow requires actions.shadowId');
         const activation = resolveShadowDeckAction({
             action: 'activate',
             shadowId: actions.shadowId,
@@ -4445,405 +4229,163 @@ const summonDamageMultiplier =
         });
         c.weasels = activation.state.crew.weasels;
         c.shadows = activation.state.crew.shadows;
-        turnEffects.push(
-            `Summoned ${actions.shadowId}; fused ` +
-            `${activation.weaselsFused} loose weasel(s)`
-        );
+        turnEffects.push(`Summoned ${actions.shadowId}; fused ${activation.weaselsFused} loose weasel(s)`);
     }
-
-if (actions.tansy === 'surge') {
-    assert(
-        !encounter.used.surge,
-        'Surge has already been used this fight'
-    );
-    encounter.used.surge = true;
-
-    c.weasels.active =
-        maxWeasels - shadowMechanics(c).slots;
-}
+    if (actions.tansy === 'surge') {
+        assert(!encounter.used.surge, 'Surge has already been used this fight');
+        encounter.used.surge = true;
+        c.weasels.active = maxWeasels - shadowMechanics(c).slots;
+    }
 
     const logs = [];
     const kills = [];
     const startingCount = live(s).length;
     let weaselsDestroyed = 0;
-    function lowestHpFoe() {
 
-        // Stable sorting preserves encounter order for ties.
-        return [...live(s)].sort((a, b) => a.hp - b.hp)[0];
+    // Stable sorting preserves encounter order for ties.
+    const lowestHpFoe = () => [...live(s)].sort((a, b) => a.hp - b.hp)[0];
+    const currentBuffer = () => live(s).find(foe => foe.id === encounter.bufferId && foe.role === 'buffer');
+    const currentHexPenalty = () => Object.entries(encounter.hexStacks).reduce((total, [id, stacks]) => {
+        const hexer = live(s).find(foe => foe.id === id && foe.role === 'hexer');
+        return total + (hexer ? 2 * enemyTier(hexer.level) * Number(stacks) : 0);
+    }, 0);
+
+    let visorGuaranteedExchange = null;
+    function visorDisrupts(foe, enemyRoll, ex = 1) {
+        if (actions.tansy !== 'visor' || !foe || foe.id !== actions.target) return false;
+        if (visorGuaranteedExchange === null || visorGuaranteedExchange === ex) {
+            visorGuaranteedExchange = ex;
+            return true;
+        }
+        return enemyRoll >= 2 && enemyRoll <= 4;
     }
-
-    function currentHexPenalty() {
-        return Object.entries(encounter.hexStacks)
-            .reduce((total, [id, stacks]) => {
-                const hexer = live(s).find(
-                    foe => foe.id === id && foe.role === 'hexer'
-                );
-                return total + (
-                    hexer
-                        ? 2 * enemyTier(hexer.level) * Number(stacks)
-                        : 0
-                );
-            }, 0);
-    }
-
-function currentBuffer() {
-    return live(s).find(
-        foe =>
-            foe.id === encounter.bufferId &&
-            foe.role === 'buffer'
-    );
-}
-
-let visorGuaranteedExchange = null;
-
-function visorDisrupts(foe, enemyRoll, ex = 1) {
-    if (
-        actions.tansy !== 'visor' ||
-        !foe ||
-        foe.id !== actions.target
-    ) {
-        return false;
-    }
-
-    if (
-        visorGuaranteedExchange === null ||
-        visorGuaranteedExchange === ex
-    ) {
-        visorGuaranteedExchange = ex;
-        return true;
-    }
-
-    return enemyRoll >= 2 && enemyRoll <= 4;
-}
 
     function enemyDefense(foe, isFireTarget = false) {
         const buffer = currentBuffer();
         const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
-        const telegraphBonus = Number(
-            activeTelegraphs.find(
-                entry => entry.foe.id === foe.id
-            )?.effect?.defenseBonus || 0
-        );
-
-        const stunReduction =
-            actions.qtik === 'stun' &&
-             foe.id === stunTargetId
-                ? 4 * enemyTier(foe.level)
-                : 0;
-
-        const fireShred =
-            actions.qtik === 'fire_melee' && isFireTarget
-                ? Math.max(2, 2 * enemyTier(foe.level))
-                : 0;
-
-        return Math.max(
-            0,
-            foe.def + bufferBonus + telegraphBonus -
-            stunReduction - fireShred - shadowMechanics(c).hexStrip
-        );
+        const telegraphBonus = Number(activeTelegraphs.find(e => e.foe.id === foe.id)?.effect?.defenseBonus || 0);
+        const stunReduction = actions.qtik === 'stun' && foe.id === stunTargetId ? 4 * enemyTier(foe.level) : 0;
+        const fireShred = actions.qtik === 'fire_melee' && isFireTarget ? Math.max(2, 2 * enemyTier(foe.level)) : 0;
+        return Math.max(0, foe.def + bufferBonus + telegraphBonus - stunReduction - fireShred - shadowMechanics(c).hexStrip);
     }
 
     function destroyWeasel(effects, cause) {
         const destroyed = Math.min(c.weasels.active, 1);
         c.weasels.active -= destroyed;
         weaselsDestroyed += destroyed;
-
-        if (destroyed > 0) {
-            effects.push(`${cause} destroyed 1 melee weasel`);
-        }
+        if (destroyed > 0) effects.push(`${cause} destroyed 1 melee weasel`);
     }
 
     for (
         let ex = 0;
-        ex < (fleeing ? 1 : 3) &&
-        live(s).length > 0 &&
-        (
-            fleeing
-                ? c.qtik.hp > 0 || c.tansy.hp > 0
-                : c.qtik.hp > 0 && c.tansy.hp > 0
-        );
+        ex < (fleeing ? 1 : 3) && live(s).length > 0 &&
+        (fleeing ? c.qtik.hp > 0 || c.tansy.hp > 0 : c.qtik.hp > 0 && c.tansy.hp > 0);
         ex++
     ) {
-
         const p = tape.player[ex];
         const e = tape.enemy[ex];
         const effects = [];
-        if (
-            actions.qtik === 'frost_stomp' &&
-            ex === 0
-        ) {
-            effects.push(
-                'Frost Stomp interrupted ordinary specialists for Ex1'
-            );
+        if (actions.qtik === 'frost_stomp' && ex === 0) {
+            effects.push('Frost Stomp interrupted ordinary specialists for Ex1');
         }
 
         const patchActive = actions.qtik === 'ice_patch';
         const bodyguardActive = actions.qtik === 'bodyguard';
         const overrunActive = actions.tansy === 'overrun';
         const isAoE = actions.qtik === 'frost_stomp' || overrunActive;
-
-        const missLimit = patchActive ? 3 : 1;
-        const enemyMiss = e <= missLimit;
-
-        const stunnedFoeId =
-            ex === 0 ? stunTargetId : null;
-
-        const specialistInterrupted =
-            actions.qtik === 'frost_stomp' &&
-            ex === 0;
-
+        const enemyMiss = e <= (patchActive ? 3 : 1);
+        const stunnedFoeId = ex === 0 ? stunTargetId : null;
+        const specialistInterrupted = actions.qtik === 'frost_stomp' && ex === 0;
         const hexPenalty = currentHexPenalty();
 
-        /*
-         * Tansy's action controls summons.
-         * Bodyguard forfeits Q'tik's personal attack (2 * level) to guard Tansy.
-         */
+        // Bodyguard forfeits Q'tik's personal attack (2 * level) to guard Tansy.
         const raised = shadowMechanics(c);
-
-        const exchangeWeaselAttack =
-            looseWeaselAttack();
-
-        const activeShadowAttack =
-            activeDamageShadowAttack(raised);
-
+        const activeShadowAttack = activeDamageShadowAttack(raised);
         const qtikBaseContribution = bodyguardActive ? 2 * c.level : 0;
-
         const unpenalizedAttack = Math.max(
             0,
             (actions.tansy === 'recall'
                 ? baseAndGearAttack + activeShadowAttack
-                : baseAndGearAttack +
-                  exchangeWeaselAttack +
-                  activeShadowAttack) - qtikBaseContribution
+                : baseAndGearAttack + looseWeaselAttack() + activeShadowAttack) - qtikBaseContribution
         );
-
-        const effectiveAttack = Math.max(
-            0,
-            unpenalizedAttack -
-            hexPenalty -
-            passiveAttackPenalty(encounter)
-        );
-
-        const bodyguardDefenseBonus = bodyguardActive
-            ? Math.max(2, Math.floor(crewStats.def / 3))
-            : 0;
-
+        const effectiveAttack = Math.max(0, unpenalizedAttack - hexPenalty - passiveAttackPenalty(encounter));
+        const bodyguardDefenseBonus = bodyguardActive ? Math.max(2, Math.floor(crewStats.def / 3)) : 0;
         const effectiveDefense = Math.max(
             0,
-            crewStats.def -
-            hexPenalty -
-            passiveDefensePenalty(encounter) +
-            bodyguardDefenseBonus
+            crewStats.def - hexPenalty - passiveDefensePenalty(encounter) + bodyguardDefenseBonus
         );
 
-        let target = fleeing
-            ? lowestHpFoe()
-            : live(s).find(
-                foe => foe.id === actions.target
-            );
-
-        // Once a declared target dies, continue against lowest HP.
+        let target = fleeing ? lowestHpFoe() : live(s).find(foe => foe.id === actions.target);
         if (!target) {
             target = lowestHpFoe();
             effects.push(`Retargeted to ${target.id}`);
         }
-
         if (stunnedFoeId && target.id !== stunnedFoeId) {
-            target = live(s).find(
-                foe => foe.id === stunnedFoeId
-            );
+            target = live(s).find(foe => foe.id === stunnedFoeId);
             effects.push(`${target.id} intercepted Stun with Guard`);
         }
 
-        const brute = live(s).find(
-            foe =>
-                foe.role === 'brute' &&
-                foe.id !== stunnedFoeId
-        );
-
+        const brute = live(s).find(foe => foe.role === 'brute' && foe.id !== stunnedFoeId);
         if (
-            brute &&
-            target.role !== 'brute' &&
-            !(actions.qtik === 'stun' && ex === 0) &&
-            !enemyMiss &&
-            !patchActive &&
-            brute.id !== stunnedFoeId &&
-            actions.tansy !== 'visor' &&
-            !isAoE
+            brute && target.role !== 'brute' && !(actions.qtik === 'stun' && ex === 0) &&
+            !enemyMiss && !patchActive && brute.id !== stunnedFoeId && actions.tansy !== 'visor' && !isAoE
         ) {
             effects.push(`${brute.id} intercepted with Guard`);
             target = brute;
         }
 
-        /*
-         * Fire uses current action/summon contribution before
-         * ATK debuffs. Withering and Hexer penalties cannot reduce it.
-         */
-        const fireDamage = actions.qtik === 'fire_melee'
-            ? Math.max(3, Math.floor(derived(c).atk / 5))
-            : 0;
-
-        const isCritical =
-            p === 6 ||
-            (actions.tansy === 'vitals' && p === 5);
-
+        // Fire bonus ignores ATK debuffs.
+        const fireDamage = actions.qtik === 'fire_melee' ? Math.max(3, Math.floor(derived(c).atk / 5)) : 0;
+        const isCritical = p === 6 || (actions.tansy === 'vitals' && p === 5);
         const targetDefense = enemyDefense(target, true);
 
-        /*
-         * Q'tik's personal damage is kept separate from Tansy's
-         * summons. Bodyguard deals no personal attack and takes no reflection.
-         */
-        const qtikPhysicalDamage =
-            bodyguardActive
-                ? 0
-                : p === 1
-                    ? 1
-                    : Math.max(
-                        1,
-                        2 * c.level -
-                        targetDefense +
-                        p
-                    );
+        const qtikPhysicalDamage = bodyguardActive ? 0 : p === 1 ? 1 : Math.max(1, 2 * c.level - targetDefense + p);
+        const qtikPersonalDamage = qtikPhysicalDamage + fireDamage;
+        const vitalsBonus = actions.tansy === 'vitals' && p >= 2
+            ? Math.min(targetDefense, Math.floor((c.weasels.active + raised.slots) / 2))
+            : 0;
 
-        const qtikFireDamage = fireDamage;
-
-        const qtikPersonalDamage =
-            qtikPhysicalDamage +
-            qtikFireDamage;
-
-        const vitalsBonus =
-            actions.tansy === 'vitals' && p >= 2
-                ? Math.min(
-                    targetDefense,
-                    Math.floor((c.weasels.active + raised.slots) / 2)
-                )
-                : 0;
-
-        /*
-         * A miss does not consume Exposed.
-         * The bonus is spent on the next successful physical hit.
-         */
-        const exposedBonus =
-            fleeing || p === 1
-                ? 0
-                : encounter.exposed;
-
-        if (!fleeing && p !== 1) {
-            encounter.exposed = 0;
-        }
+        // A miss does not consume Exposed.
+        const exposedBonus = fleeing || p === 1 ? 0 : encounter.exposed;
+        if (!fleeing && p !== 1) encounter.exposed = 0;
 
         let damage = 0;
         let hits = [];
-
         const targetedCarapace =
-            activeTelegraphs.find(
-                entry => entry.foe.id === target.id
-            )?.effect?.reflectsQtikDamage === true;
+            activeTelegraphs.find(entry => entry.foe.id === target.id)?.effect?.reflectsQtikDamage === true;
 
         if (isAoE && !fleeing) {
-            const stompTargets = [...live(s)].sort((a, b) => {
-                const aIndex = s.encounter.foes.indexOf(a);
-                const bIndex = s.encounter.foes.indexOf(b);
-                return aIndex - bIndex;
-            });
-
+            const stompTargets = [...live(s)].sort((a, b) => s.encounter.foes.indexOf(a) - s.encounter.foes.indexOf(b));
             // Frost Stomp = 50%, Overrun = 60%, Both together = 75%.
-            const aoeFactor =
-                actions.qtik === 'frost_stomp' && overrunActive
-                    ? 0.75
-                    : overrunActive
-                        ? 0.6
-                        : 0.5;
-
+            const aoeFactor = actions.qtik === 'frost_stomp' && overrunActive ? 0.75 : overrunActive ? 0.6 : 0.5;
             let totalAttempted = 0;
             let totalApplied = 0;
 
-            for (let targetIndex = 0;
-                 targetIndex < stompTargets.length;
-                 targetIndex++) {
-                const primaryTarget =
-                    stompTargets[targetIndex];
-
-                if (primaryTarget.hp <= 0) {
-                    continue;
-                }
+            for (let targetIndex = 0; targetIndex < stompTargets.length; targetIndex++) {
+                const primaryTarget = stompTargets[targetIndex];
+                if (primaryTarget.hp <= 0) continue;
 
                 const isPrimary = primaryTarget.id === target.id;
-                const baseAoE = Math.max(
-                    0,
-                    Math.floor(
-                        (
-                            effectiveAttack -
-                            enemyDefense(primaryTarget, isPrimary)
-                        ) * aoeFactor
-                    )
-                );
-
-                let attempted = p === 1
-                    ? Math.max(
-                        1,
-                        Math.floor(baseAoE / 2)
-                    )
-                    : baseAoE + p;
-
-                /*
-                 * Vitals/LUK, Fire Melee bonus, and Exposed apply only to
-                 * the declared primary target, never to spillover targets.
-                 */
+                const baseAoE = Math.max(0, Math.floor((effectiveAttack - enemyDefense(primaryTarget, isPrimary)) * aoeFactor));
+                let attempted = p === 1 ? Math.max(1, Math.floor(baseAoE / 2)) : baseAoE + p;
                 if (isPrimary && p !== 1) {
-                    attempted += (
-                        isCritical
-                            ? crewStats.luk
-                            : vitalsBonus
-                    ) + exposedBonus + fireDamage;
+                    attempted += (isCritical ? crewStats.luk : vitalsBonus) + exposedBonus + fireDamage;
                 }
-
-                attempted = Math.max(
-                    1,
-                    Number(attempted)
-                );
-
-                assert(
-                    Number.isFinite(attempted),
-                    `Frost Stomp damage is invalid against ` +
-                    `${primaryTarget.id}`
-                );
-
+                attempted = Math.max(1, Number(attempted));
+                assert(Number.isFinite(attempted), `Frost Stomp damage is invalid against ${primaryTarget.id}`);
                 totalAttempted += attempted;
 
                 let remaining = attempted;
                 let spillIndex = targetIndex;
-
-                /*
-                 * Any excess damage from a slain target moves into the
-                 * next living target in encounter order. This preserves
-                 * the original pack order and prevents the same foe from
-                 * being selected repeatedly by an HP sort.
-                 */
                 while (remaining > 0) {
-                    while (
-                        spillIndex < stompTargets.length &&
-                        stompTargets[spillIndex].hp <= 0
-                    ) {
-                        spillIndex++;
-                    }
+                    while (spillIndex < stompTargets.length && stompTargets[spillIndex].hp <= 0) spillIndex++;
+                    const spillTarget = stompTargets[spillIndex];
+                    if (!spillTarget) break;
 
-                    const spillTarget =
-                        stompTargets[spillIndex];
-
-                    if (!spillTarget) {
-                        break;
-                    }
-
-                    const applied = Math.min(
-                        spillTarget.hp,
-                        remaining
-                    );
-
+                    const applied = Math.min(spillTarget.hp, remaining);
                     spillTarget.hp -= applied;
                     remaining -= applied;
                     totalApplied += applied;
-
                     hits.push({
                         id: spillTarget.id,
                         damage: applied,
@@ -4853,470 +4395,183 @@ function visorDisrupts(foe, enemyRoll, ex = 1) {
                     });
 
                     if (spillTarget.hp === 0) {
-                        kills.push({
-                            id: spillTarget.id,
-                            level: spillTarget.level,
-                            role: spillTarget.role
-                        });
-
+                        kills.push({ id: spillTarget.id, level: spillTarget.level, role: spillTarget.role });
                         spillIndex++;
                     } else {
                         break;
                     }
                 }
             }
-
-            /*
-             * Preserve the resolver's existing damage field as total
-             * attempted AoE damage, while hit records show actual HP
-             * removed and spillover.
-             */
             damage = totalAttempted;
-
-            assert(
-                Number.isFinite(totalApplied),
-                'Frost Stomp applied damage is not finite'
-            );
-                } else if (!fleeing) {
-
-
-            /*
-             * Drinking removes Fire/Ice bonuses, not ordinary
-             * attack rolls, criticals, or Tansy's active command.
-             */
-            const baseHit = Math.max(
-                1,
-                effectiveAttack -
-                targetDefense +
-                p + vitalsBonus
-            );
-
-            const physicalDamage = p === 1
-                ? 1
-                : isCritical
-                    ? Math.round(baseHit * 1.5) + crewStats.luk
-                    : baseHit;
-
+            assert(Number.isFinite(totalApplied), 'Frost Stomp applied damage is not finite');
+        } else if (!fleeing) {
+            const baseHit = Math.max(1, effectiveAttack - targetDefense + p + vitalsBonus);
+            const physicalDamage = p === 1 ? 1 : isCritical ? Math.round(baseHit * 1.5) + crewStats.luk : baseHit;
             damage = physicalDamage + fireDamage + exposedBonus;
-
-            assert(
-                Number.isFinite(damage),
-                'Player damage is not finite'
-            );
-
+            assert(Number.isFinite(damage), 'Player damage is not finite');
             hits = dealDamage(s, target, damage, kills);
         }
-    
-        /*
-         * Spiked Carapace is reactive damage, not a shield.
-         *
-         * The enemy still receives the complete Crew attack.
-         * Only Q'tik's personal damage is reflected to Q'tik.
-         * Tansy's loose weasels and Shadows are not reflected.
-         *
-         * Fire Melee is intentionally dangerous here: its Fire
-         * contribution is part of Q'tik's personal damage.
-         * Ice Patch and Hamstring do not prevent Thorns.
-         * Recall prevents loose-weasel participation but does not
-         * prevent Q'tik's own damage from reflecting.
-         */
-        if (
-            targetedCarapace &&
-            actions.qtik !== 'frost_stomp' &&
-            hits.some(hit => hit.id === target.id)
-        ) {
 
-            const reflected =
-                Math.min(
-                    c.qtik.hp,
-                    qtikPersonalDamage
-                );
-
+        // Spiked Carapace reflects Q'tik's personal damage only (never summons).
+        if (targetedCarapace && actions.qtik !== 'frost_stomp' && hits.some(hit => hit.id === target.id)) {
+            const reflected = Math.min(c.qtik.hp, qtikPersonalDamage);
             c.qtik.hp -= reflected;
-            if (reflected > 0) {
-                encounter.crewTookDamage = true;
-            }
-
-            effects.push(
-                `Spiked Carapace reflected ` +
-                `${reflected} pure damage to Q'tik`
-            );
-
-            if (
-                c.weasels.active > 0 &&
-                actions.tansy !== 'recall'
-            ) {
-                destroyWeasel(
-                    effects,
-                    'Spiked Carapace'
-                );
-            }
+            if (reflected > 0) encounter.crewTookDamage = true;
+            effects.push(`Spiked Carapace reflected ${reflected} pure damage to Q'tik`);
+            if (c.weasels.active > 0 && actions.tansy !== 'recall') destroyWeasel(effects, 'Spiked Carapace');
         }
-
 
         if (live(s).length === 0) {
             logs.push({
-                exchange: ex + 1,
-                playerRoll: p,
-                enemyRoll: null,
-                target: target.id,
-                crit: isCritical,
-                damage,
-                hits,
-                enemyMiss: null,
-                enemyAttackAbsorbed: false,
-                frontlineDamage: 0,
-                backlineDamage: 0,
-                effects: [
-                    ...effects,
-                    'Final foe slain before enemy response'
-                ],
-                qtikHp: c.qtik.hp,
-                tansyHp: c.tansy.hp,
-                livingFoes: []
+                exchange: ex + 1, playerRoll: p, enemyRoll: null, target: target.id, crit: isCritical,
+                damage, hits, enemyMiss: null, enemyAttackAbsorbed: false,
+                frontlineDamage: 0, backlineDamage: 0,
+                effects: [...effects, ' foe slain before enemy response'],
+                qtikHp: c.qtik.hp, tansyHp: c.tansy.hp, livingFoes: []
             });
             break;
         }
-        const responseTelegraphs = activeTelegraphs
-            .filter(
-                entry =>
-                    entry.foe.hp > 0 &&
-                    entry.effect &&
-                    entry.effect.name !== 'call_reinforcements'
-            );
 
-        const responseEffects = responseTelegraphs
-            .map(entry => entry.effect);
-
-        const telegraphBleedMultiplier = responseEffects.reduce(
-            (total, effect) =>
-                total * Number(effect.bleedMultiplier || 1),
-            1
+        const responseTelegraphs = activeTelegraphs.filter(
+            entry => entry.foe.hp > 0 && entry.effect && entry.effect.name !== 'call_reinforcements'
         );
-
-        const telegraphExtraDebuffStacks = responseEffects.reduce(
-            (total, effect) =>
-                total + Number(effect.extraDebuffStacks || 0),
-            0
-        );
-
-        const telegraphDestroysMeleeWeasel = responseEffects.some(
-            effect => effect.destroysMeleeWeasel
-        );
-
-        const telegraphTansySplashPercent = responseEffects.reduce(
-            (total, effect) =>
-                total + Number(effect.tansySplashPercent || 0),
-            0
-        );
+        const responseEffects = responseTelegraphs.map(entry => entry.effect);
+        const telegraphBleedMultiplier = responseEffects.reduce((t, ef) => t * Number(ef.bleedMultiplier || 1), 1);
+        const telegraphExtraDebuffStacks = responseEffects.reduce((t, ef) => t + Number(ef.extraDebuffStacks || 0), 0);
+        const telegraphDestroysMeleeWeasel = responseEffects.some(ef => ef.destroysMeleeWeasel);
+        const telegraphTansySplashPercent = responseEffects.reduce((t, ef) => t + Number(ef.tansySplashPercent || 0), 0);
 
         const frontliners = live(s).filter(
-            foe =>
-                foe.id !== stunnedFoeId &&
-                ['brute', 'elite', 'boss'].includes(foe.role)
+            foe => foe.id !== stunnedFoeId && ['brute', 'elite', 'boss'].includes(foe.role)
         );
-
-        const bruteAlive = live(s).some(
-            foe => foe.role === 'brute'
-        );
+        const bruteAlive = live(s).some(foe => foe.role === 'brute');
 
         let frontlineDamage = 0;
         let backlineDamage = 0;
         let enemyHitCount = 0;
         let shadowWarderSavedTansy = false;
         let bodyguardInterceptsLeft = bodyguardActive ? 1 : 0;
+
         if (!enemyMiss) {
-
-            /*
-             * A successful Buffer cast activates its non-stacking
-             * aura. DEF matters on subsequent player exchanges.
-             * Base Bleed matters on this enemy response.
-             */
-const castingBuffer = live(s).find(
-    foe =>
-        foe.role === 'buffer' &&
-        foe.id !== stunnedFoeId &&
-        !specialistInterrupted &&
-        !visorDisrupts(foe, e, ex)
-);
-
+            const castingBuffer = live(s).find(
+                foe => foe.role === 'buffer' && foe.id !== stunnedFoeId && !specialistInterrupted && !visorDisrupts(foe, e, ex)
+            );
             if (castingBuffer) {
                 encounter.bufferId = castingBuffer.id;
-                effects.push(
-                    `${castingBuffer.id} activated ` +
-                    `+${3 * enemyTier(castingBuffer.level)} Pack DEF`
-                );
+                effects.push(`${castingBuffer.id} activated +${3 * enemyTier(castingBuffer.level)} Pack DEF`);
             }
 
             if (frontliners.length > 0) {
                 const lead = frontliners[0];
-
-                let baseBleed = Math.max(
-                    1,
-                    Math.round((lead.atk - effectiveDefense) / 10)
-                );
-
-                if (bodyguardActive) {
-                    baseBleed = Math.max(1, baseBleed - 1);
-                }
-
-                baseBleed = Math.max(
-                    1,
-                    baseBleed - raised.bruteReduction
-                );
-
-                baseBleed += enemyTier(lead.level) *
-                    Math.max(0, frontliners.length - 1);
+                let baseBleed = Math.max(1, Math.round((lead.atk - effectiveDefense) / 10));
+                if (bodyguardActive) baseBleed = Math.max(1, baseBleed - 1);
+                baseBleed = Math.max(1, baseBleed - raised.bruteReduction);
+                baseBleed += enemyTier(lead.level) * Math.max(0, frontliners.length - 1);
 
                 const buffer = currentBuffer();
-                if (buffer) {
-                    baseBleed += enemyTier(buffer.level);
-                }
-
+                if (buffer) baseBleed += enemyTier(buffer.level);
                 if (telegraphBleedMultiplier > 1) {
                     baseBleed *= telegraphBleedMultiplier;
-                    effects.push(
-                        'Telegraphs multiplied Base Bleed'
-                    );
+                    effects.push('Telegraphs multiplied Base Bleed');
                 }
 
-                const rollDamage = e === 6
-                    ? 4
-                    : e === 5
-                        ? 2
-                        : e >= 3 ? 1 : 0;
-
-                frontlineDamage =
-                    baseBleed +
-                    rollDamage +
-                    passiveBleedBonus(encounter);
-
+                const rollDamage = e === 6 ? 4 : e === 5 ? 2 : e >= 3 ? 1 : 0;
+                frontlineDamage = baseBleed + rollDamage + passiveBleedBonus(encounter);
                 enemyHitCount++;
 
-                if (
-                    telegraphDestroysMeleeWeasel &&
-                    actions.tansy !== 'recall'
-                ) {
+                if (telegraphDestroysMeleeWeasel && actions.tansy !== 'recall') {
                     destroyWeasel(effects, 'Sweeping Cleave');
-
-                    const splash = Math.ceil(
-                        crewStats.tansyMaxHp *
-                        telegraphTansySplashPercent / 100
-
-                    );
-
+                    const splash = Math.ceil(crewStats.tansyMaxHp * telegraphTansySplashPercent / 100);
                     backlineDamage += splash;
-                    effects.push(
-                        `Sweeping Cleave dealt ${splash} splash to Tansy`
-                    );
+                    effects.push(`Sweeping Cleave dealt ${splash} splash to Tansy`);
                 }
             }
 
-                        for (const foe of live(s)) {
+            for (const foe of live(s)) {
                 const tier = enemyTier(foe.level);
+                const isSpecialist = ['archer', 'mender', 'hexer', 'buffer'].includes(foe.role);
 
                 if (foe.id === stunnedFoeId) {
-                    effects.push(
-                        `${foe.id} lost its Ex1 response to Stun`
-                    );
+                    effects.push(`${foe.id} lost its Ex1 response to Stun`);
                     continue;
                 }
-
-                if (
-                    specialistInterrupted &&
-                    [
-                        'archer',
-                        'mender',
-                        'hexer',
-                        'buffer'
-                    ].includes(foe.role)
-                ) {
-                    effects.push(
-                        `${foe.id} was interrupted by Frost Stomp`
-                    );
+                if (specialistInterrupted && isSpecialist) {
+                    effects.push(`${foe.id} was interrupted by Frost Stomp`);
                     continue;
                 }
-
-                if (
-                    [
-                        'archer',
-                        'mender',
-                        'hexer',
-                        'buffer'
-                    ].includes(foe.role) &&
-                    visorDisrupts(foe, e, ex)
-                ) {
-                    effects.push(
-                        `Visor disrupted ` +
-                        `${foe.id}'s ${foe.role} action`
-                    );
+                if (isSpecialist && visorDisrupts(foe, e, ex)) {
+                    effects.push(`Visor disrupted ${foe.id}'s ${foe.role} action`);
                     continue;
                 }
 
                 if (foe.role === 'archer') {
-                    const amount =
-                        (3 * tier + foe.level) * (e === 6 ? 2 : 1);
-
+                    const amount = (3 * tier + foe.level) * (e === 6 ? 2 : 1);
                     if (bodyguardInterceptsLeft > 0) {
                         bodyguardInterceptsLeft -= 1;
                         frontlineDamage += amount;
                         enemyHitCount++;
-
-                        effects.push(
-                            `Bodyguard intercepted ${foe.id}'s shot ` +
-                            `(${amount} damage redirected to Q'tik)`
-                        );
+                        effects.push(`Bodyguard intercepted ${foe.id}'s shot (${amount} damage redirected to Q'tik)`);
                     } else {
                         backlineDamage += amount;
                         enemyHitCount++;
-
-                        effects.push(
-                            `${foe.id} dealt ` +
-                            `${amount} damage to Tansy`
-                        );
+                        effects.push(`${foe.id} dealt ${amount} damage to Tansy`);
                     }
-                }
-
-                if (foe.role === 'mender') {
+                } else if (foe.role === 'mender') {
                     if (!bruteAlive) {
                         frontlineDamage++;
                         enemyHitCount++;
-
-                        effects.push(
-                            `${foe.id} dealt ` +
-                            `1 panicked melee bleed`
-                        );
+                        effects.push(`${foe.id} dealt 1 panicked melee bleed`);
                     } else {
                         const wounded = [...live(s)]
-                            .filter(ally =>
-                                ally.hp <
-                                mobStats(
-                                    ally.level,
-                                    ally.role
-                                ).maxHp
-                            )
+                            .filter(ally => ally.hp < mobStats(ally.level, ally.role).maxHp)
                             .sort((a, b) =>
-                                a.hp /
-                                    mobStats(
-                                        a.level,
-                                        a.role
-                                    ).maxHp -
-                                b.hp /
-                                    mobStats(
-                                        b.level,
-                                        b.role
-                                    ).maxHp
+                                a.hp / mobStats(a.level, a.role).maxHp - b.hp / mobStats(b.level, b.role).maxHp
                             )[0];
-
                         if (wounded) {
-                            const amount = Math.min(
-                                10 * tier,
-                                mobStats(
-                                    wounded.level,
-                                    wounded.role
-                                ).maxHp - wounded.hp
-                            );
-
+                            const amount = Math.min(10 * tier, mobStats(wounded.level, wounded.role).maxHp - wounded.hp);
                             wounded.hp += amount;
-
-                            effects.push(
-                                `${foe.id} healed ` +
-                                `${wounded.id} for ${amount}`
-                            );
+                            effects.push(`${foe.id} healed ${wounded.id} for ${amount}`);
                         }
                     }
-                }
-
-                if (foe.role === 'hexer') {
+                } else if (foe.role === 'hexer') {
                     if (encounter.debuffImmunityTurn === encounter.turn) {
-                        effects.push(
-                            `Cleansing immunity blocked ${foe.id}'s Hex`
-                        );
+                        effects.push(`Cleansing immunity blocked ${foe.id}'s Hex`);
                         continue;
                     }
-
-                    const stacks =
-
-                        (e === 6 ? 2 : 1) +
-                        telegraphExtraDebuffStacks;
-
-                    encounter.hexStacks[foe.id] =
-                        Number(
-                            encounter.hexStacks[foe.id] || 0
-                        ) + stacks;
-
-                    effects.push(
-                        `${foe.id} added ` +
-                        `${stacks} hex stack(s)`
-                    );
+                    const stacks = (e === 6 ? 2 : 1) + telegraphExtraDebuffStacks;
+                    encounter.hexStacks[foe.id] = Number(encounter.hexStacks[foe.id] || 0) + stacks;
+                    effects.push(`${foe.id} added ${stacks} hex stack(s)`);
                 }
             }
 
-if (frontliners.length > 0) {
-    const stacks =
-        (e === 6 ? 2 : 1) +
-        telegraphExtraDebuffStacks;
-
-    for (const foe of eliteBossFoes) {
-        if (
-            foe.hp <= 0 ||
-            foe.id === stunnedFoeId ||
-            !foe.passive
-        ) {
-            continue;
-        }
-        if (encounter.debuffImmunityTurn === encounter.turn) {
-            effects.push(
-                `Cleansing immunity blocked ${foe.id}'s passive stacks`
-            );
-            continue;
-        }
-
-        if (visorDisrupts(foe, e, ex)) {
-            effects.push(
-                `Visor disrupted ${foe.id}'s passive`
-            );
-            continue;
-        }
-
-        foe.passiveStacks =
-            Number(foe.passiveStacks || 0) +
-            stacks;
-
-        effects.push(
-            `${foe.id} ${foe.passive} stack ` +
-            `${foe.passiveStacks}`
-        );
-    }
-}
-
+            if (frontliners.length > 0) {
+                const stacks = (e === 6 ? 2 : 1) + telegraphExtraDebuffStacks;
+                for (const foe of eliteBossFoes) {
+                    if (foe.hp <= 0 || foe.id === stunnedFoeId || !foe.passive) continue;
+                    if (encounter.debuffImmunityTurn === encounter.turn) {
+                        effects.push(`Cleansing immunity blocked ${foe.id}'s passive stacks`);
+                        continue;
+                    }
+                    if (visorDisrupts(foe, e, ex)) {
+                        effects.push(`Visor disrupted ${foe.id}'s passive`);
+                        continue;
+                    }
+                    foe.passiveStacks = Number(foe.passiveStacks || 0) + stacks;
+                    effects.push(`${foe.id} ${foe.passive} stack ${foe.passiveStacks}`);
+                }
+            }
 
             if (enemyHitCount > 0) {
                 for (const { foe, effect } of responseTelegraphs) {
-                    if (!effect.healPerHit || foe.hp <= 0) {
-                        continue;
-                    }
-
-                    const requested =
-                        effect.healPerHit * enemyHitCount;
-                    const healed = Math.min(
-                        requested,
-                        foe.maxHp - foe.hp
-                    );
-
+                    if (!effect.healPerHit || foe.hp <= 0) continue;
+                    const healed = Math.min(effect.healPerHit * enemyHitCount, foe.maxHp - foe.hp);
                     foe.hp += healed;
-                    effects.push(
-                        `${foe.id} Aether-Drain restored ` +
-                        `${healed} HP`
-                    );
+                    effects.push(`${foe.id} Aether-Drain restored ${healed} HP`);
                 }
             }
         }
-        /*
-         * During a survivor's failed escape, enemies threaten the one
-         * still standing. Never absorb another hit with the companion
-         * already at 0 HP.
-         */
+
+        // During a survivor's failed escape, redirect all incoming damage to the survivor.
         if (fleeing && c.qtik.hp === 0) {
             backlineDamage += frontlineDamage;
             frontlineDamage = 0;
@@ -5325,248 +4580,114 @@ if (frontliners.length > 0) {
             backlineDamage = 0;
         }
 
-        if (frontlineDamage > 0 || backlineDamage > 0) {
-            encounter.crewTookDamage = true;
-        }
+        if (frontlineDamage > 0 || backlineDamage > 0) encounter.crewTookDamage = true;
         c.qtik.hp = Math.max(0, c.qtik.hp - frontlineDamage);
 
-        /*
-         * Once per fight, an active Shadow-Warder automatically sacrifices
-         * itself if an incoming blow would drop Tansy to 0 HP, leaving her
-         * standing at 1 HP.
-         */
-        if (
-            backlineDamage > 0 &&
-            c.tansy.hp > 0 &&
-            c.tansy.hp - backlineDamage <= 0
-        ) {
+        // Once per fight, an active Shadow-Warder sacrifices itself to prevent a lethal hit on Tansy.
+        if (backlineDamage > 0 && c.tansy.hp > 0 && c.tansy.hp - backlineDamage <= 0) {
             const warderIndex = (c.shadows?.active || []).findIndex(
-                entry =>
-                    entry.type === 'warder' &&
-                    !encounter.shadowWarderSacrificeUsed.includes(entry.id)
+                entry => entry.type === 'warder' && !encounter.shadowWarderSacrificeUsed.includes(entry.id)
             );
-
             if (warderIndex >= 0) {
                 const [sacrificed] = c.shadows.active.splice(warderIndex, 1);
                 encounter.shadowWarderSacrificeUsed.push(sacrificed.id);
                 c.tansy.hp = 1;
                 shadowWarderSavedTansy = true;
-
                 const saveMessage =
-                    `Shadow-Warder ${sacrificed.id} sacrificed itself ` +
-                    `to intercept a lethal blow on Tansy (1 HP remaining)`;
+                    `Shadow-Warder ${sacrificed.id} sacrificed itself to intercept a lethal blow on Tansy (1 HP remaining)`;
                 effects.push(saveMessage);
                 turnEffects.push(saveMessage);
             }
         }
+        if (!shadowWarderSavedTansy) c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
 
-        if (!shadowWarderSavedTansy) {
-            c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
-        }
-
-        /*
-         * End-of-exchange regeneration includes any Grave-Chill
-         * stacks inflicted during this exchange.
-         */
-        const effectiveRegen =
-            crewStats.regen - passiveRegenPenalty(encounter);
+        // End-of-exchange regeneration includes Grave-Chill stacks inflicted this exchange.
+        const effectiveRegen = crewStats.regen - passiveRegenPenalty(encounter);
         const menderHeal = shadowMechanics(c).menderHeal;
         const menderHealed = [];
 
         if (c.qtik.hp > 0) {
-            c.qtik.hp = Math.max(
-                0,
-                Math.min(
-                    crewStats.qtikMaxHp,
-                    c.qtik.hp + effectiveRegen + menderHeal
-                )
-            );
-            if (effectiveRegen < 0) {
-                effects.push(
-                    `Negative regeneration dealt ` +
-                    `${-effectiveRegen} internal damage`
-                );
-            }
-            if (menderHeal > 0) {
-                menderHealed.push("Q'tik");
-            }
+            c.qtik.hp = Math.max(0, Math.min(crewStats.qtikMaxHp, c.qtik.hp + effectiveRegen + menderHeal));
+            if (effectiveRegen < 0) effects.push(`Negative regeneration dealt ${-effectiveRegen} internal damage`);
+            if (menderHeal > 0) menderHealed.push("Q'tik");
         }
-
         if (c.tansy.hp > 0 && menderHeal > 0) {
-            c.tansy.hp = Math.min(
-                crewStats.tansyMaxHp,
-                c.tansy.hp + menderHeal
-            );
+            c.tansy.hp = Math.min(crewStats.tansyMaxHp, c.tansy.hp + menderHeal);
             menderHealed.push('Tansy');
         }
-
         if (menderHealed.length > 0) {
-            effects.push(
-                `Shadow-Mender healed ${menderHealed.join(' & ')} ` +
-                `for ${menderHeal} HP`
-            );
+            effects.push(`Shadow-Mender healed ${menderHealed.join(' & ')} for ${menderHeal} HP`);
         }
 
         if (actions.tansy === 'visor' && e === 1) {
             encounter.exposed = crewStats.luk;
-            effects.push(
-                `Target exposed for +${crewStats.luk} damage`
-            );
+            effects.push(`Target exposed for +${crewStats.luk} damage`);
         }
 
         logs.push({
-            exchange: ex + 1,
-            playerRoll: p,
-            enemyRoll: e,
-            target: target.id,
-            crit: isCritical,
-            damage,
-            hits,
-            enemyMiss,
-            enemyAttackAbsorbed: shadowWarderSavedTansy,
-            frontlineDamage,
-            backlineDamage,
-            effectiveRegen,
-            effects,
-            qtikHp: c.qtik.hp,
-            tansyHp: c.tansy.hp,
-            livingFoes: live(s).map(
-                foe => ({ id: foe.id, hp: foe.hp })
-            )
+            exchange: ex + 1, playerRoll: p, enemyRoll: e, target: target.id, crit: isCritical,
+            damage, hits, enemyMiss, enemyAttackAbsorbed: shadowWarderSavedTansy,
+            frontlineDamage, backlineDamage, effectiveRegen, effects,
+            qtikHp: c.qtik.hp, tansyHp: c.tansy.hp,
+            livingFoes: live(s).map(foe => ({ id: foe.id, hp: foe.hp }))
         });
     }
 
-    /*
-     * Swarm Momentum replenishes missing loose weasels after a full
-     * three-exchange turn while both protagonists and a foe survive.
-     * Recovery uses available loose-weasel capacity, so depletion does
-     * not weaken recovery and losses from earlier turns remain eligible.
-     * Active Shadows retain their occupied slots. Surge remains the
-     * immediate refill before exchanges; Momentum occurs afterward.
-     */
-
+    // Swarm Momentum replenishes missing loose weasels after a full 3-exchange turn.
     let momentum = null;
-
-    if (
-        logs.length === 3 &&
-        live(s).length > 0 &&
-        c.qtik.hp > 0 &&
-        c.tansy.hp > 0
-    ) {
+    if (logs.length === 3 && live(s).length > 0 && c.qtik.hp > 0 && c.tansy.hp > 0) {
         const activeBefore = c.weasels.active;
-        const looseCapacity =
-            maxWeasels - shadowMechanics(c).slots;
-        const missing = Math.max(0, looseCapacity - activeBefore);
+        const looseCapacity = maxWeasels - shadowMechanics(c).slots;
         const quota = 1 + Math.floor(looseCapacity / 4);
-        const restored = Math.min(missing, quota);
+        const restored = Math.min(Math.max(0, looseCapacity - activeBefore), quota);
         c.weasels.active += restored;
         momentum = {
-            activeBefore,
-            destroyedThisTurn: weaselsDestroyed,
-            quota,
-            restored,
-            activeAfter: c.weasels.active,
-            maximum: maxWeasels
+            activeBefore, destroyedThisTurn: weaselsDestroyed, quota, restored,
+            activeAfter: c.weasels.active, maximum: maxWeasels
         };
-
-        if (restored > 0) {
-            turnEffects.push(
-                `Swarm Momentum reformed ${restored} weasel(s)`
-            );
-        }
+        if (restored > 0) turnEffects.push(`Swarm Momentum reformed ${restored} weasel(s)`);
     }
-    if (shadowMechanics(c).menderHeal > 0) {
-        const hex = Object.keys(encounter.hexStacks || {})
-            .find(id => encounter.hexStacks[id] > 0);
 
+    if (shadowMechanics(c).menderHeal > 0) {
+        const hex = Object.keys(encounter.hexStacks || {}).find(id => encounter.hexStacks[id] > 0);
         if (hex) {
             encounter.hexStacks[hex] -= 1;
-            if (encounter.hexStacks[hex] === 0) {
-                delete encounter.hexStacks[hex];
-            }
+            if (encounter.hexStacks[hex] === 0) delete encounter.hexStacks[hex];
             turnEffects.push('Shadow-Mender cleansed one Hexer stack');
         } else {
-            const passiveFoe =
-                eliteBossFoes.find(
-                    foe =>
-                        Number(foe.passiveStacks || 0) > 0
-                );
-
+            const passiveFoe = eliteBossFoes.find(foe => Number(foe.passiveStacks || 0) > 0);
             if (passiveFoe) {
                 passiveFoe.passiveStacks -= 1;
-                turnEffects.push(
-                    `Shadow-Mender cleansed one ` +
-                    `${passiveFoe.id} passive stack`
-                );
+                turnEffects.push(`Shadow-Mender cleansed one ${passiveFoe.id} passive stack`);
             }
         }
     }
 
     encounter.narrativeTurns ||= [];
-    encounter.narrativeTurns.push(
-        combatNarrativeTurn(
-            encounter,
-            actions,
-            logs,
-            kills,
-            itemUse
-        )
-    );
+    encounter.narrativeTurns.push(combatNarrativeTurn(encounter, actions, logs, kills, itemUse));
 
     const casualties = recordEncounterCasualties(s);
-
     if (casualties && live(s).length > 0) {
-        const totalDefeat =
-            c.qtik.hp === 0 && c.tansy.hp === 0;
-
+        const totalDefeat = c.qtik.hp === 0 && c.tansy.hp === 0;
         const death = totalDefeat
             ? finishEncounterRespawns(s, true)
-            : {
-                fallen: [...casualties.fallen],
-                xpLost: casualties.xpLost,
-                respawned: false,
-                totalDefeat: false
-            };
+            : { fallen: [...casualties.fallen], xpLost: casualties.xpLost, respawned: false, totalDefeat: false };
 
         return {
-            ok: true,
-            turn: encounter.turn,
-            rolls: tape,
-            flee: fleeing ? tape.flee : null,
-            itemUse,
-            exchanges: logs,
+            ok: true, turn: encounter.turn, rolls: tape, flee: fleeing ? tape.flee : null,
+            itemUse, exchanges: logs,
             turnEffects: [
                 ...turnEffects,
-                totalDefeat
-                    ? 'Both protagonists fell; the encounter ended'
-                    : 'One protagonist fell; only Flee remains available'
+                totalDefeat ? 'Both protagonists fell; the encounter ended' : 'One protagonist fell; only Flee remains available'
             ],
-            weaselsDestroyed,
-            momentum,
-            kills,
-            rewards: {
-                xp: 0,
-                silver: 0,
-                applied: false,
-                resolved: false,
-                loot: [],
-                packDrop: null,
-                trophies: []
-            },
-            levelUps: [],
-            questGate: null,
-            packCleared: false,
-            death,
-            state: s,
-            derived: derived(s.crew)
+            weaselsDestroyed, momentum, kills,
+            rewards: { xp: 0, silver: 0, applied: false, resolved: false, loot: [], packDrop: null, trophies: [] },
+            levelUps: [], questGate: null, packCleared: false, death,
+            state: s, derived: derived(s.crew)
         };
     }
 
-    const encounterRewards = finalizeEncounterRewards(
-        s,
-        kills.map(kill => kill.id)
-    );
-
+    const encounterRewards = finalizeEncounterRewards(s, kills.map(kill => kill.id));
     let levelUps = [];
     let questGate = null;
 
@@ -5574,64 +4695,36 @@ if (frontliners.length > 0) {
         levelUps = applyXp(c, encounterRewards.xp);
         c.purse += encounterRewards.silver;
         questGate = completeLinkedCombatQuestGate(s);
-
         if (questGate?.questCompletion?.levelUps?.length) {
-            levelUps.push(
-                ...questGate.questCompletion.levelUps
-            );
+            levelUps.push(...questGate.questCompletion.levelUps);
         }
     }
 
     encounter.hexStacks = Object.fromEntries(
-        Object.entries(encounter.hexStacks)
-            .filter(([id]) =>
-                live(s).some(foe => foe.id === id)
-            )
+        Object.entries(encounter.hexStacks).filter(([id]) => live(s).some(foe => foe.id === id))
     );
-
-    if (!currentBuffer()) {
-        delete encounter.bufferId;
-    }
-
+    if (!currentBuffer()) delete encounter.bufferId;
     for (const foe of eliteBossFoes) {
-        if (foe.hp === 0) {
-            foe.nextTelegraph = null;
-        }
+        if (foe.hp === 0) foe.nextTelegraph = null;
     }
 
     if (live(s).length === 0) {
         encounter.status = 'cleared';
         markInstanceRoomThreatCleared(s);
-    } else if (
-        eliteBossFoes.some(foe => foe.hp > 0) &&
-        c.qtik.hp > 0 &&
-        c.tansy.hp > 0
-    ) {
+    } else if (eliteBossFoes.some(foe => foe.hp > 0) && c.qtik.hp > 0 && c.tansy.hp > 0) {
         for (const foe of eliteBossFoes.filter(foe => foe.hp > 0)) {
-            const telegraphSides =
-                foe.role === 'boss' &&
-                foe.reinforcementsCalled !== true
-                    ? BOSS_TELEGRAPHS.length
-                    : ELITE_TELEGRAPHS.length;
-
-            const telegraphRoll = roll(s, telegraphSides);
-            foe.nextTelegraph = chooseNextTelegraph(
-                foe,
-                telegraphRoll
-            );
+            const sides = foe.role === 'boss' && foe.reinforcementsCalled !== true
+                ? BOSS_TELEGRAPHS.length
+                : ELITE_TELEGRAPHS.length;
+            foe.nextTelegraph = chooseNextTelegraph(foe, roll(s, sides));
             delete foe.lastCancelledTelegraph;
         }
     }
 
-
     c.weasels.max = 3 + Math.floor(c.level / 2);
 
-    // The last foe may fall in the same exchange as a protagonist.
-    // Keep the victory and its rewards, but respawn the fallen member.
-    const victoryDeath = encounterRewards.resolved
-        ? finishEncounterRespawns(s)
-        : null;
-
+    // If the final foe fell in the same exchange as a protagonist, keep victory and respawn the fallen member.
+    const victoryDeath = encounterRewards.resolved ? finishEncounterRespawns(s) : null;
     const finalStats = derived(c);
     c.qtik.maxHp = finalStats.qtikMaxHp;
     c.qtik.def = finalStats.def;
@@ -5639,19 +4732,8 @@ if (frontliners.length > 0) {
     c.tansy.maxHp = finalStats.tansyMaxHp;
 
     const result = {
-        ok: true,
-        turn: encounter.turn,
-        rolls: tape,
-        flee: fleeing
-            ? tape.flee
-            : null,
-
-        itemUse,
-        exchanges: logs,
-        turnEffects,
-        weaselsDestroyed,
-        momentum,
-        kills,
+        ok: true, turn: encounter.turn, rolls: tape, flee: fleeing ? tape.flee : null,
+        itemUse, exchanges: logs, turnEffects, weaselsDestroyed, momentum, kills,
         rewards: {
             xp: encounterRewards.xp,
             silver: encounterRewards.silver,
@@ -5661,43 +4743,24 @@ if (frontliners.length > 0) {
             packDrop: encounterRewards.packDrop || null,
             trophies: encounterRewards.trophies
         },
-
-        levelUps,
-        questGate,
-        death: victoryDeath,
-        packCleared:
-            startingCount > 0 && live(s).length === 0,
-        state: s,
-        derived: finalStats
+        levelUps, questGate, death: victoryDeath,
+        packCleared: startingCount > 0 && live(s).length === 0,
+        state: s, derived: finalStats
     };
 
-    /*
-     * Rewards were already applied by finalizeEncounterRewards() and the
-     * XP/silver updates above. This is a read-only receipt attached to the
-     * cleared encounter, not another claimable drop or payout operation.
-     * It survives panel refresh and reload; a later encounter has its own
-     * record instead of inheriting this receipt.
-     */
     if (encounterRewards.resolved) {
         encounter.victoryReceipt = {
             encounterId: encounter.id,
             xp: encounterRewards.xp,
             silver: encounterRewards.silver,
             loot: clone(encounterRewards.loot),
-            packDrop: encounterRewards.packDrop
-                ? clone(encounterRewards.packDrop)
-                : null,
+            packDrop: encounterRewards.packDrop ? clone(encounterRewards.packDrop) : null,
             questGate: questGate ? clone(questGate) : null,
             levelUps: clone(levelUps),
-            xpProgress: {
-                level: c.level,
-                xp: c.xp
-            },
+            xpProgress: { level: c.level, xp: c.xp },
             postFightHp: {
-                qtik: c.qtik.hp,
-                qtikMax: finalStats.qtikMaxHp,
-                tansy: c.tansy.hp,
-                tansyMax: finalStats.tansyMaxHp
+                qtik: c.qtik.hp, qtikMax: finalStats.qtikMaxHp,
+                tansy: c.tansy.hp, tansyMax: finalStats.tansyMaxHp
             },
             death: victoryDeath ? clone(victoryDeath) : null,
             narrativeTurns: clone(encounter.narrativeTurns || [])
@@ -5706,24 +4769,11 @@ if (frontliners.length > 0) {
 
     function assertNoNonFinite(value, path = 'result') {
         if (typeof value === 'number') {
-            assert(
-                Number.isFinite(value),
-                `${path} contains a non-finite number`
-            );
-            return;
-        }
-
-        if (Array.isArray(value)) {
-            value.forEach((child, index) =>
-                assertNoNonFinite(child, `${path}[${index}]`)
-            );
-            return;
-        }
-
-        if (value !== null && typeof value === 'object') {
-            for (const [key, child] of Object.entries(value)) {
-                assertNoNonFinite(child, `${path}.${key}`);
-            }
+            assert(Number.isFinite(value), `${path} contains a non-finite number`);
+        } else if (Array.isArray(value)) {
+            value.forEach((child, index) => assertNoNonFinite(child, `${path}[${index}]`));
+        } else if (value !== null && typeof value === 'object') {
+            for (const [key, child] of Object.entries(value)) assertNoNonFinite(child, `${path}.${key}`);
         }
     }
 
@@ -7422,32 +6472,15 @@ function questsForArrival(state, locationId) {
 }
 
 function completeQuestArrivalGate(state, outcome, questId) {
-    assert(
-        typeof questId === 'string' && questId.length > 0,
-        'Quest arrival requires an explicit quest ID'
-    );
-
+    assert(typeof questId === 'string' && questId.length > 0, 'Quest arrival requires an explicit quest ID');
     ensureQuestJournal(state);
 
     const quest = findQuestById(state, questId);
+    assert(quest?.status === 'in_progress', `Arrival requires an in-progress quest: ${questId}`);
 
-    assert(
-        quest?.status === 'in_progress',
-        `Arrival requires an in-progress quest: ${questId}`
-    );
-
-    const nextState = completeSelectedQuestArrivalGate(
-        state,
-        outcome,
-        questId
-    );
-
+    const nextState = completeSelectedQuestArrivalGate(state, outcome, questId);
     const updatedQuest = findQuestById(nextState, questId);
-
-    assert(
-        updatedQuest,
-        `Arrival lost its quest record: ${questId}`
-    );
+    assert(updatedQuest, `Arrival lost its quest record: ${questId}`);
 
     saveQuestToJournal(nextState, updatedQuest);
     return nextState;
@@ -7458,60 +6491,36 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
     ensureQuestJournal(nextState);
 
     let quest = findQuestById(nextState, questId);
-    assert(
-        quest?.status === 'in_progress',
-        `Arrival requires an in-progress quest: ${questId}`
-    );
+    assert(quest?.status === 'in_progress', `Arrival requires an in-progress quest: ${questId}`);
 
     outcome.questGates ||= [];
     outcome.questEncounters ||= [];
     outcome.questObjectiveSecuredList ||= [];
     outcome.deliveryReadyList ||= [];
 
+    const family = quest.structureV2?.family;
     const returningWithObjective =
-        Boolean(quest.objectiveResolution) &&
-        ['rescue_person', 'retrieve_item']
-            .includes(quest.structureV2?.family);
+        Boolean(quest.objectiveResolution) && ['rescue_person', 'retrieve_item'].includes(family);
 
     assert(
-        nextState.currentLocationId ===
-            (returningWithObjective
-                ? quest.turnIn?.locationId
-                : quest.destinationId),
+        nextState.currentLocationId === (returningWithObjective ? quest.turnIn?.locationId : quest.destinationId),
         `Quest ${quest.id} is not associated with this arrival location`
     );
 
-    if (
-        quest.structureV2?.family === 'retrieve_item' &&
-        quest.objectiveResolution
-    ) {
-        const cargo = quest.discoveries?.find(
-            item => item.id === quest.turnIn?.discoveryId
-        );
-
-        assert(
-            cargo?.kind === 'quest_item' &&
-            cargo.state === 'acquired',
-            'The required item is not secured as quest cargo'
-        );
+    if (family === 'retrieve_item' && quest.objectiveResolution) {
+        const cargo = quest.discoveries?.find(item => item.id === quest.turnIn?.discoveryId);
+        assert(cargo?.kind === 'quest_item' && cargo.state === 'acquired', 'The required item is not secured as quest cargo');
 
         quest.deliveryReady = true;
-        outcome.deliveryReadyList.push({
-            questId: quest.id,
-            recipient: quest.turnIn.recipient,
-            cargo: cargo.name
-        });
+        outcome.deliveryReadyList.push({ questId: quest.id, recipient: quest.turnIn.recipient, cargo: cargo.name });
         saveQuestToJournal(nextState, quest);
         return nextState;
     }
 
-    /*
-     * For Missing Person quests, safe arrival is the last condition.
-     * The System pays here; no sponsor meeting or DELIVERED tag follows.
-     */
+    // For Missing Person quests, safe arrival at origin completes and pays automatically.
     if (
         quest.status === 'in_progress' &&
-        quest.structureV2?.family === 'rescue_person' &&
+        family === 'rescue_person' &&
         quest.objectiveResolution &&
         nextState.currentLocationId === quest.originLocationId
     ) {
@@ -7520,8 +6529,7 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             questId: quest.id,
             action: 'complete',
             objectiveCompleted: true,
-            completionEvidence:
-                `${quest.facts.person} reached the origin settlement safely.`
+            completionEvidence: `${quest.facts.person} reached the origin settlement safely.`
         });
 
         outcome.questCompletions ||= [];
@@ -7531,34 +6539,21 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             rewards: completion.rewards,
             levelUps: completion.levelUps || []
         });
-
         return completion.state;
     }
 
     const gate = quest.currentGate;
     if (
         quest?.status !== 'in_progress' ||
-        nextState.currentLocationId !==
-            (gate?.destinationId || quest.destinationId) ||
+        nextState.currentLocationId !== (gate?.destinationId || quest.destinationId) ||
         ['active', 'spotted'].includes(nextState.encounter?.status)
     ) {
         return nextState;
     }
 
-    /*
-     * A short V2 Elite structure may start directly with its linked
-     * combat gate. Arrival spots the engine-authored threat; the player
-     * still chooses Engage or Avoid.
-     */
-    if (
-        ['defeat_elite', 'rescue_person']
-            .includes(quest.structureV2?.family) &&
-        gate.trigger === 'linked_combat'
-    ) {
-        const spawned = spawnLinkedQuestEncounter(
-            nextState,
-            quest.id
-        );
+    // Short V2 combat structures may start directly on their linked-combat gate (spotted, not engaged).
+    if (['defeat_elite', 'rescue_person'].includes(family) && gate.trigger === 'linked_combat') {
+        const spawned = spawnLinkedQuestEncounter(nextState, quest.id);
         nextState = spawned.state;
 
         const questEncounter = {
@@ -7568,43 +6563,21 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             status: 'spotted',
             foe: spawned.encounter.foes[0]
         };
-
         outcome.questEncounters.push(questEncounter);
-
-        /*
-         * Keep the compatibility field for current narration consumers.
-         * Do not use it for new multi-quest logic.
-         */
-        outcome.questEncounter =
-            outcome.questEncounter || questEncounter;
-
+        outcome.questEncounter ||= questEncounter;
         return nextState;
     }
 
-    const eligibleArrival =
-        gate.trigger === 'arrival' ||
-        gate.trigger === 'arrival_with_evidence';
-
-    if (!eligibleArrival) {
+    if (gate.trigger !== 'arrival' && gate.trigger !== 'arrival_with_evidence') {
         return nextState;
     }
 
     const place = nextState.places?.[quest.destinationId];
-    assert(
-        place,
-        'Arrival gate needs an established destination'
-    );
+    assert(place, 'Arrival gate needs an established destination');
 
-    const evidence =
-        gate.trigger === 'arrival_with_evidence'
-            ? quest.facts?.evidence
-            : `Arrived at ${place.label}.`;
-
-    assert(
-        typeof evidence === 'string' &&
-        evidence.length > 0,
-        'Arrival gate needs established evidence'
-    );
+    const withEvidence = gate.trigger === 'arrival_with_evidence';
+    const evidence = withEvidence ? quest.facts?.evidence : `Arrived at ${place.label}.`;
+    assert(typeof evidence === 'string' && evidence.length > 0, 'Arrival gate needs established evidence');
 
     if (gate.step < quest.gates) {
         const progression = resolveQuestAction({
@@ -7612,10 +6585,7 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             questId: quest.id,
             action: 'clear_gate',
             objectiveCompleted: true,
-            completionEvidence:
-                gate.trigger === 'arrival_with_evidence'
-                    ? `Found ${evidence} at ${place.label}.`
-                    : evidence
+            completionEvidence: withEvidence ? `Found ${evidence} at ${place.label}.` : evidence
         });
 
         nextState = progression.state;
@@ -7623,21 +6593,11 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
             questId: quest.id,
             completed: progression.completedGate,
             next: progression.nextGate,
-            evidence: gate.trigger === 'arrival_with_evidence'
-                ? evidence
-                : null,
+            evidence: withEvidence ? evidence : null,
             linkedEncounter: progression.linkedEncounter || null
         };
-
         outcome.questGates.push(questGate);
-
-        /*
-         * Compatibility alias for existing one-quest narration.
-         * New code should read questGates.
-         */
-        outcome.questGate =
-            outcome.questGate || questGate;
-
+        outcome.questGate ||= questGate;
         return nextState;
     }
 
@@ -7652,42 +6612,21 @@ function completeSelectedQuestArrivalGate(state, outcome, questId) {
 
     nextState = progression.state;
     quest = findQuestById(nextState, questId);
-
-    assert(
-        quest,
-        `Arrival lost its quest record: ${questId}`
-    );
+    assert(quest, `Arrival lost its quest record: ${questId}`);
 
     quest.completedGates ||= [];
-
-    if (!quest.completedGates.some(
-        completed => completed.step === gate.step
-    )) {
-        quest.completedGates.push({
-            ...gate,
-            completionEvidence: evidence
-        });
+    if (!quest.completedGates.some(completed => completed.step === gate.step)) {
+        quest.completedGates.push({ ...gate, completionEvidence: evidence });
     }
 
-    // resolve_objective owns System payment or the Missing Person
-    // safety-return lead. Arrival must not manufacture an NPC turn-in.
+    // resolve_objective owns System payment or the Missing Person safety-return lead.
     const questObjectiveSecured = {
         questId: quest.id,
         evidence,
         questCompletion: progression.questCompletion || null
     };
-
-    outcome.questObjectiveSecuredList.push(
-        questObjectiveSecured
-    );
-
-    /*
-     * Compatibility alias for existing one-quest consumers.
-     */
-    outcome.questObjectiveSecured =
-        outcome.questObjectiveSecured ||
-        questObjectiveSecured;
-
+    outcome.questObjectiveSecuredList.push(questObjectiveSecured);
+    outcome.questObjectiveSecured ||= questObjectiveSecured;
     return nextState;
 }
 
@@ -7854,20 +6793,11 @@ function resolveCurioAction(test) {
 }
 
 function resolveTravelStep(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Travel step requires saved state'
-    );
-    assert(
-        typeof test.stepId === 'string' && test.stepId.length > 0,
-        'Travel step requires a stable stepId'
-    );
+    assert(test.state && typeof test.state === 'object', 'Travel step requires saved state');
+    assert(typeof test.stepId === 'string' && test.stepId.length > 0, 'Travel step requires a stable stepId');
 
     let state = clone(test.state);
-    assert(
-        !state.activeInstanceId,
-        'Leave the instance before using overland movement'
-    );
+    assert(!state.activeInstanceId, 'Leave the instance before using overland movement');
 
     state.travelSteps ||= {};
     state.inquiries ||= {};
@@ -7875,35 +6805,15 @@ function resolveTravelStep(test) {
     state.places ||= {};
     state.leads ||= {};
 
-    /*
-     * A message ID identifies one movement operation. Replay its saved
-     * result before changing direction, starting an automatic return,
-     * or checking whether the crew is already at the destination.
-     */
+    // Replay saved result for this stepId before altering journeys or rolling.
     const existing = state.travelSteps[test.stepId];
-
     if (existing) {
-        return {
-            ok: true,
-            created: false,
-            ...clone(existing),
-            state
-        };
+        return { ok: true, created: false, ...clone(existing), state };
     }
 
-    /*
-     * Explicit UI-generated movement takes precedence over automatic
-     * quest-return routing. A new destination can change direction from
-     * an existing journey; canceling preserves the crew's current position
-     * before the replacement route is calculated.
-     */
+    // Explicit UI movement takes precedence over automatic quest-return routing.
     if (test.destinationId) {
-        assert(
-            typeof test.destinationId === 'string' &&
-            test.destinationId.length > 0,
-            'Explicit movement requires destinationId'
-        );
-
+        assert(typeof test.destinationId === 'string' && test.destinationId.length > 0, 'Explicit movement requires destinationId');
         assert(
             !['active', 'spotted'].includes(state.encounter?.status),
             'Resolve or avoid the current encounter before changing destination'
@@ -7911,71 +6821,37 @@ function resolveTravelStep(test) {
 
         const destination =
             state.places?.[test.destinationId] ||
-            Object.values(state.world?.settlements || {})
-                .find(entry => entry.locationId === test.destinationId);
+            Object.values(state.world?.settlements || {}).find(entry => entry.locationId === test.destinationId);
+        assert(destination, `Unknown known destination: ${test.destinationId}`);
 
-        assert(
-            destination,
-            `Unknown known destination: ${test.destinationId}`
-        );
-
-        if (
-            state.currentJourney &&
-            state.currentJourney.destinationId !== test.destinationId
-        ) {
-            const cancelled = resolveJourneyAction({
-                state,
-                action: 'cancel'
-            });
-
-            state = cancelled.state;
+        if (state.currentJourney && state.currentJourney.destinationId !== test.destinationId) {
+            state = resolveJourneyAction({ state, action: 'cancel' }).state;
         }
-
         if (!state.currentJourney) {
-            const started = resolveJourneyAction({
-                state,
-                action: 'start',
-                destinationId: test.destinationId
-            });
-
-            state = started.state;
+            state = resolveJourneyAction({ state, action: 'start', destinationId: test.destinationId }).state;
         }
     }
 
-    /*
-     * Missing Person needs safe arrival; retrieval quests need cargo
-     * handover after arrival. Explicit travel takes precedence.
-     */
+    // Auto-route home when a single rescue/retrieval quest awaits return and no destination was chosen.
     if (!state.currentJourney && !test.destinationId) {
-        const returnCandidates = ensureQuestJournal(state)
-            .accepted.filter(quest =>
-                quest.status === 'in_progress' &&
-                Boolean(quest.objectiveResolution) &&
-                ['rescue_person', 'retrieve_item']
-                    .includes(quest.structureV2?.family) &&
-                Boolean(quest.turnIn?.locationId) &&
-                state.currentLocationId !== quest.turnIn.locationId
-            );
+        const returnCandidates = ensureQuestJournal(state).accepted.filter(quest =>
+            quest.status === 'in_progress' &&
+            Boolean(quest.objectiveResolution) &&
+            ['rescue_person', 'retrieve_item'].includes(quest.structureV2?.family) &&
+            Boolean(quest.turnIn?.locationId) &&
+            state.currentLocationId !== quest.turnIn.locationId
+        );
 
         if (returnCandidates.length === 1) {
             const returnQuest = returnCandidates[0];
             const safetyId = returnQuest.turnIn.locationId;
-            const safetySettlement = Object.values(
-                state.world?.settlements || {}
-            ).find(entry => entry.locationId === safetyId);
-
-
-            assert(
-                safetySettlement,
-                'Quest return settlement is unavailable'
+            const safetySettlement = Object.values(state.world?.settlements || {}).find(
+                entry => entry.locationId === safetyId
             );
+            assert(safetySettlement, 'Quest return settlement is unavailable');
 
             const route = shortestRoute(state, safetyId);
-
-            assert(
-                route && route.totalSegments > 0,
-                `No return route to ${safetySettlement.label}`
-            );
+            assert(route && route.totalSegments > 0, `No return route to ${safetySettlement.label}`);
 
             state.currentJourney = {
                 id: `return-${returnQuest.id}`,
@@ -7994,44 +6870,23 @@ function resolveTravelStep(test) {
         }
     }
 
-    assert(!['active', 'spotted'].includes(state.encounter?.status),
-        'Resolve or avoid the current encounter before moving');
+    assert(!['active', 'spotted'].includes(state.encounter?.status), 'Resolve or avoid the current encounter before moving');
 
     let journey = state.currentJourney;
-    if (journey?.status === 'paused') {
-        journey.status = 'traveling';
-    }
-    /*
-     * Destination content supplies the arrival scene. Consume the final
-     * route segment here, before the random travel-event roll below.
-     * Quest and rumor arrival resolution still run in this branch.
-     *
-     * Older saves may already have consumed the final segment during an
-     * encounter. Preserve that progress and finalize their arrival without
-     * consuming another segment. The encounter guard above still applies.
-     */
-    if (
-        journey &&
-        journey.completedSegments >= journey.totalSegments - 1
-    ) {
+    if (journey?.status === 'paused') journey.status = 'traveling';
+
+    //  route segment: destination content supplies the arrival scene without a random travel roll.
+    if (journey && journey.completedSegments >= journey.totalSegments - 1) {
         int(journey.totalSegments, 'journey.totalSegments', 1);
         int(journey.completedSegments, 'journey.completedSegments');
+        assert(journey.completedSegments <= journey.totalSegments, 'Journey progress exceeds its route');
 
-        assert(
-            journey.completedSegments <= journey.totalSegments,
-            'Journey progress exceeds its route'
-        );
-
-        const finalSegmentConsumed =
-            journey.completedSegments < journey.totalSegments;
-
-        if (finalSegmentConsumed) {
-            journey.completedSegments += 1;
-        }
+        const finalSegmentConsumed = journey.completedSegments < journey.totalSegments;
+        if (finalSegmentConsumed) journey.completedSegments += 1;
 
         state.places[journey.destinationId].visited = true;
         journey.status = 'arrived';
-       
+
         const arrival = {
             stepId: test.stepId,
             zone: state.zone,
@@ -8053,55 +6908,27 @@ function resolveTravelStep(test) {
         state.currentJourney = null;
         state.currentLocationId = journey.destinationId;
         state.currentPosition = { nodeId: journey.destinationId };
+        state = applyArrivalLocation(state, journey.destinationId, arrival);
 
-        state = applyArrivalLocation(
-            state,
-            journey.destinationId,
-            arrival
-        );
-
-                const arrivalQuests =
-            questsForArrival(state, arrival.destinationId);
-
-        for (const arrivalQuest of arrivalQuests) {
-            state = completeQuestArrivalGate(
-                state,
-                arrival,
-                arrivalQuest.id
-            );
+        for (const arrivalQuest of questsForArrival(state, arrival.destinationId)) {
+            state = completeQuestArrivalGate(state, arrival, arrivalQuest.id);
         }
 
         state.travelSteps[test.stepId] = clone(arrival);
         return { ok: true, created: true, ...arrival, state };
-
     }
 
-    /*
-     * Exploring from a settlement leaves its streets. Save a nearby
-     * outskirts node and route back before resolving the exploration
-     * event. Otherwise the fiction can move outside while settlement
-     * shops and conversations still treat the crew as being in town.
-     *
-     * Only destinationless exploration from a settlement does this.
-     * An existing journey and exploration from another place retain
-     * their current movement rules.
-     */
+    // Destinationless exploration from a settlement or instance entrance steps out into settlement outskirts.
     if (!journey && !test.destinationId) {
         const currentPlace = state.places?.[state.currentLocationId];
-        const settlement = Object.values(
-            state.world?.settlements || {}
-        ).find(entry =>
-            entry.locationId === state.currentLocationId &&
-            entry.zone === state.zone
-        ) || (
-            currentPlace?.kind === 'instance_entrance'
-                ? savedPrimarySettlement(state, state.zone)
-                : null
-        );
+        const settlement =
+            Object.values(state.world?.settlements || {}).find(
+                entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
+            ) ||
+            (currentPlace?.kind === 'instance_entrance' ? savedPrimarySettlement(state, state.zone) : null);
 
         if (settlement) {
             const outskirtsId = `outskirts-${settlement.id}`;
-
             state.places[outskirtsId] ||= {
                 id: outskirtsId,
                 label: `${settlement.label} Outskirts`,
@@ -8111,13 +6938,12 @@ function resolveTravelStep(test) {
             };
 
             state.routeEdges ||= [];
-
-            if (!state.routeEdges.some(edge =>
-                (edge.fromId === settlement.locationId &&
-                    edge.toId === outskirtsId) ||
-                (edge.fromId === outskirtsId &&
-                    edge.toId === settlement.locationId)
-            )) {
+            const linked = state.routeEdges.some(
+                edge =>
+                    (edge.fromId === settlement.locationId && edge.toId === outskirtsId) ||
+                    (edge.fromId === outskirtsId && edge.toId === settlement.locationId)
+            );
+            if (!linked) {
                 state.routeEdges.push({
                     fromId: settlement.locationId,
                     toId: outskirtsId,
@@ -8133,39 +6959,24 @@ function resolveTravelStep(test) {
             state.places[outskirtsId].visited = true;
         }
     }
+
     const travelRoll = roll(state, 100);
-
-    let event;
-
-    if (travelRoll <= 28) {
-        event = 'quiet_travel';
-    } else if (travelRoll <= 55) {
-        event = 'passing_vignette';
-    } else if (travelRoll <= 63) {
-        event = 'hidden_cache';
-    } else if (travelRoll <= 73) {
-        event = 'environmental_sign';
-    } else if (travelRoll <= 82) {
-        event = 'point_of_interest';
-    } else if (travelRoll <= 90) {
-        event = 'wild_encounter';
-    } else if (travelRoll <= 97) {
-        event = 'social_opportunity';
-    } else {
-        event = 'hidden_instance';
-    }
+    const event =
+        travelRoll <= 28 ? 'quiet_travel' :
+        travelRoll <= 55 ? 'passing_vignette' :
+        travelRoll <= 63 ? 'hidden_cache' :
+        travelRoll <= 73 ? 'environmental_sign' :
+        travelRoll <= 82 ? 'point_of_interest' :
+        travelRoll <= 90 ? 'wild_encounter' :
+        travelRoll <= 97 ? 'social_opportunity' :
+        'hidden_instance';
 
     const outcome = {
         stepId: test.stepId,
         zone: state.zone,
         travelRoll,
         event,
-        movement: {
-            travelStepConsumed: true,
-            journeySegmentConsumed: false,
-            arrivalOnly: false,
-            interrupted: false
-        },
+        movement: { travelStepConsumed: true, journeySegmentConsumed: false, arrivalOnly: false, interrupted: false },
         encounterId: null,
         encounter: null,
         environmentalSign: null,
@@ -8177,56 +6988,27 @@ function resolveTravelStep(test) {
     };
 
     if (event === 'hidden_cache') {
-        outcome.cache = rollChestLoot(
-            state,
-            state.zone,
-            test.stepId
-        );
-    }
-
-    if (event === 'hidden_instance') {
-        const created = createHiddenInstance(
-            state,
-            state.zone,
-            test.stepId
-        );
+        outcome.cache = rollChestLoot(state, state.zone, test.stepId);
+    } else if (event === 'hidden_instance') {
+        const created = createHiddenInstance(state, state.zone, test.stepId);
         const atEntrance = !state.currentJourney;
-
         if (atEntrance) {
             state.currentLocationId = created.entranceId;
             state.currentPosition = { nodeId: created.entranceId };
             state.places[created.entranceId].visited = true;
         }
-
-        outcome.hiddenInstance = {
-            id: created.id,
-            entranceId: created.entranceId,
-            label: created.label,
-            atEntrance
-        };
-    }
-
-    if (event === 'environmental_sign') {
+        outcome.hiddenInstance = { id: created.id, entranceId: created.entranceId, label: created.label, atEntrance };
+    } else if (event === 'environmental_sign') {
         const signs = [
             'fresh tracks cross the route',
             'recent smoke or cooking smells drift from nearby',
             'a damaged trail marker suggests recent passage',
             'the local wildlife abruptly falls quiet'
         ];
-
-        outcome.environmentalSign =
-            signs[roll(state, signs.length) - 1];
-    }
-
-     /*
-     * A POI is noticed directly during travel, unlike a rumor, which is
-     * an unverified claim heard from someone. Ordinary POIs are scenic
-     * places only: this travel event creates no hidden loot, hazard,
-     * lore, encounter, or quest result. Visiting is not searching.
-     */
-    if (event === 'point_of_interest') {
+        outcome.environmentalSign = signs[roll(state, signs.length) - 1];
+    } else if (event === 'point_of_interest') {
+        // Ordinary POIs are scenic places only; no hidden loot, hazard, encounter, or quest.
         const siteId = `site-${test.stepId}`;
-
         state.places[siteId] ||= {
             id: siteId,
             label: 'Uncharted point of interest',
@@ -8238,18 +7020,13 @@ function resolveTravelStep(test) {
         };
 
         state.routeEdges ||= [];
-
-        const anchor = savedPrimarySettlement(
-            state,
-            state.zone
+        const anchor = savedPrimarySettlement(state, state.zone);
+        const linked = state.routeEdges.some(
+            edge =>
+                (edge.fromId === anchor.locationId && edge.toId === siteId) ||
+                (edge.fromId === siteId && edge.toId === anchor.locationId)
         );
-
-        if (!state.routeEdges.some(edge =>
-            (edge.fromId === anchor.locationId &&
-                edge.toId === siteId) ||
-            (edge.fromId === siteId &&
-                edge.toId === anchor.locationId)
-        )) {
+        if (!linked) {
             state.routeEdges.push({
                 fromId: anchor.locationId,
                 toId: siteId,
@@ -8259,21 +7036,12 @@ function resolveTravelStep(test) {
                 toZone: state.zone
             });
         }
-
-        outcome.site = {
-            id: siteId,
-            zone: state.zone,
-            label: state.places[siteId].label
-        };
-    }
-
-    if (event === 'wild_encounter') {
+        outcome.site = { id: siteId, zone: state.zone, label: state.places[siteId].label };
+    } else if (event === 'wild_encounter') {
         assert(
-            !state.encounter ||
-            ['cleared', 'fled', 'dead'].includes(state.encounter.status),
+            !state.encounter || ['cleared', 'fled', 'dead'].includes(state.encounter.status),
             'Cannot discover a new encounter while another is unresolved'
         );
-
         const spawned = spawnEncounter({
             state,
             zone: state.zone,
@@ -8281,45 +7049,28 @@ function resolveTravelStep(test) {
             siteAffinity: test.siteAffinity || 'ordinary',
             encounterId: `travel-${test.stepId}`
         });
-
         state.rngState = spawned.state.rngState;
         state.encounter = spawned.encounter;
-       
         outcome.encounterId = state.encounter.id;
         outcome.encounter = clone(state.encounter);
-    }
-
-    if (event === 'social_opportunity') {
+    } else if (event === 'social_opportunity') {
         const socialId = `traveler-${test.stepId}`;
         const social = resolveSocialSeed({ state, socialId });
-
         state = social.state;
         outcome.social = clone(social.seed);
 
-        // A traveler may have nothing useful to tell the crew.
-        const hasRumor = roll(state, 2) === 1;
-
-        if (hasRumor) {
-            const template = TRAVELER_RUMORS[
-                roll(state, TRAVELER_RUMORS.length) - 1
-            ];
+        if (roll(state, 2) === 1) {
+            const template = TRAVELER_RUMORS[roll(state, TRAVELER_RUMORS.length) - 1];
             const leadId = `rumor-${test.stepId}`;
-
-            // The template describes a kind of place, not one shared
-            // landmark for every traveler who mentions that kind.
-            // The saved travel-step ID gives this rumor its own stable site.
-            const placeId =
-                `place-z${state.zone}-${template.id}-${test.stepId}`;
+            const placeId = `place-z${state.zone}-${template.id}-${test.stepId}`;
 
             state.places[placeId] ||= {
-
                 id: placeId,
                 label: template.place,
                 zone: state.zone,
                 knownFrom: 'rumor',
                 visited: false
             };
-
             state.leads[leadId] = {
                 id: leadId,
                 kind: 'rumor',
@@ -8330,54 +7081,27 @@ function resolveTravelStep(test) {
                 status: 'known'
             };
 
-            // World generation consumes no combat RNG. Save the route
-            // alongside the lead, so World can offer movement to this
-            // particular site as soon as the rumor is established.
             ensureWorldRecords(state);
-
             recordCrewKnowledge(state, {
                 id: `knowledge-testimony-${leadId}`,
                 kind: 'testimony',
                 knowledgeType: 'testimony',
                 certainty: 'unverified_claim',
                 summary: template.claim,
-                source: {
-                    id: socialId,
-                    type: 'traveler'
-                },
+                source: { id: socialId, type: 'traveler' },
                 learnedAtLocationId: state.currentLocationId,
                 learnedAtZone: state.zone
             });
-
-            outcome.rumor = {
-                id: leadId,
-                claim: template.claim,
-                targetId: placeId,
-                targetLabel: template.place
-            };
+            outcome.rumor = { id: leadId, claim: template.claim, targetId: placeId, targetLabel: template.place };
         }
     }
-    
-          /*
-     * Event resolvers may return a cloned state, notably the traveler
-     * social seed. Advance the journey belonging to the final state,
-     * not a reference retained from before that clone.
-     *
-     * Otherwise the outcome can report a consumed segment while the
-     * saved journey silently loses that progress.
-     */
-    journey = state.currentJourney;
 
+    // Re-read currentJourney from the final state (social_opportunity clones state).
+    journey = state.currentJourney;
     if (journey) {
         journey.completedSegments += 1;
-        state.currentPosition = positionAfterSegments(
-            journeyLegs(journey),
-            journey.completedSegments
-        );
-
-        if (event === 'wild_encounter') {
-            journey.status = 'paused';
-        }
+        state.currentPosition = positionAfterSegments(journeyLegs(journey), journey.completedSegments);
+        if (event === 'wild_encounter') journey.status = 'paused';
 
         outcome.movement = {
             travelStepConsumed: true,
@@ -8388,26 +7112,16 @@ function resolveTravelStep(test) {
             totalSegments: journey.totalSegments,
             journeyStatus: journey.status
         };
-
         outcome.journey = clone(journey);
     }
 
     const activeMsq = state.world?.zones?.[state.zone]?.msq;
-    if (
-        activeMsq?.status === 'active' &&
-        Number(activeMsq.pendingBeatDelay || 0) > 0
-    ) {
+    if (activeMsq?.status === 'active' && Number(activeMsq.pendingBeatDelay || 0) > 0) {
         activeMsq.pendingBeatDelay -= 1;
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
-
-    return {
-        ok: true,
-        created: true,
-        ...outcome,
-        state
-    };
+    return { ok: true, created: true, ...outcome, state };
 }
 
 const QUEST_REWARD_TABLES = new Proxy({}, {

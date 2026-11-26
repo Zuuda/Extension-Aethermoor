@@ -9633,320 +9633,123 @@ function findQuestById(state, questId) {
 }
 
 function resolveQuestSeed(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'quest requires state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'quest requires state');
     const state = clone(test.state);
-
     state.inquiries ||= {};
     ensureQuestJournal(state);
 
-    const zone =
-        test.zone ?? state.zone;
+    const zone = test.zone ?? state.zone;
+    assert(Number.isInteger(zone) && ZONES[zone], `Unknown zone: ${zone}`);
 
-    assert(
-        Number.isInteger(zone) && ZONES[zone],
-        `Unknown zone: ${zone}`
-    );
+    const issuerSettlement = questIssuerSettlement(state, test);
+    assert(issuerSettlement.zone === zone, `Quest issuer ${issuerSettlement.label} is not in Zone ${zone}`);
 
-    const issuerSettlement =
-        questIssuerSettlement(state, test);
-
-    assert(
-        issuerSettlement.zone === zone,
-        `Quest issuer ${issuerSettlement.label} is not in Zone ${zone}`
-    );
-
-    const reputationKey =
-        issuerSettlement.reputationKey;
-
-    const repRecord =
-        state.reputation?.[reputationKey];
-
-    assert(
-        repRecord,
-        `No reputation record exists for ${issuerSettlement.label}`
-    );
-
-    const rep =
-        normalizeQuestRepTier(
-            test.repTier || repRecord.tier
-        );
+    const repRecord = state.reputation?.[issuerSettlement.reputationKey];
+    assert(repRecord, `No reputation record exists for ${issuerSettlement.label}`);
+    const rep = normalizeQuestRepTier(test.repTier || repRecord.tier);
 
     const inquiryRecord = test.inquiryId !== undefined
         ? state.inquiries?.[`rumor:${test.inquiryId}`]
         : test.socialId !== undefined
-            ? state.socialOpportunities?.contacts?.[
-                `${issuerSettlement.id}:${test.socialId}`
-              ]
+            ? state.socialOpportunities?.contacts?.[`${issuerSettlement.id}:${test.socialId}`]
             : null;
-
     const breadcrumb = test.breadcrumbId !== undefined
         ? state.breadcrumbs?.[test.breadcrumbId]
         : null;
 
     assert(
-        [
-            test.inquiryId,
-            test.socialId,
-            test.breadcrumbId
-        ].filter(value => value !== undefined).length <= 1,
+        [test.inquiryId, test.socialId, test.breadcrumbId].filter(v => v !== undefined).length <= 1,
         'Quest offer requires only one named trigger'
     );
-
     assert(
-        (test.inquiryId === undefined &&
-            test.socialId === undefined) ||
-            inquiryRecord,
+        (test.inquiryId === undefined && test.socialId === undefined) || inquiryRecord,
         'Unknown locked quest trigger'
     );
-
-    assert(
-        test.breadcrumbId === undefined || breadcrumb,
-        'Unknown saved breadcrumb'
-    );
+    assert(test.breadcrumbId === undefined || breadcrumb, 'Unknown saved breadcrumb');
 
     const namedTrigger = inquiryRecord || breadcrumb;
-
-    if (namedTrigger) {
-        assert(
-            zone === namedTrigger.zone,
-            'Quest zone does not match its locked trigger'
-        );
-    }
-
-    if (breadcrumb) {
-        assert(
-            breadcrumb.settlementId === issuerSettlement.id,
-            'Breadcrumb issuer does not match its saved settlement'
-        );
-    }
+    if (namedTrigger) assert(zone === namedTrigger.zone, 'Quest zone does not match its locked trigger');
+    if (breadcrumb) assert(breadcrumb.settlementId === issuerSettlement.id, 'Breadcrumb issuer does not match its saved settlement');
 
     const trigger = namedTrigger || state.encounter;
-
-    assert(
-    trigger && typeof trigger === 'object',
-    'Quest offer requires an encounter or rumor inquiry'
-    );
+    assert(trigger && typeof trigger === 'object', 'Quest offer requires an encounter or rumor inquiry');
 
     const sourceSeed = trigger.questSeed;
-
     assert(
-        sourceSeed &&
-        (
-            sourceSeed.result ===
-                'genuine_unclaimed_quest_or_dungeon_hook' ||
-            sourceSeed.result ===
-                'diegetic_quest_breadcrumb'
-        ),
+        sourceSeed && ['genuine_unclaimed_quest_or_dungeon_hook', 'diegetic_quest_breadcrumb'].includes(sourceSeed.result),
         'Quest offer requires a locked quest-trigger seed'
     );
+    // Each trigger produces at most one offer; active quests do not block new offers from distinct triggers.
+    assert(trigger.questSeedConsumed !== true, 'This quest trigger was already consumed');
 
-    /*
-     * A saved active quest no longer blocks creation of another offer.
-     * The trigger itself remains the duplicate-protection boundary:
-     * once its quest seed is consumed, that trigger cannot create another
-     * quest. A different rumor or breadcrumb may create another offer.
-     *
-     * Existing in-progress state remains the compatibility-selected quest
-     * for progression. New offers are stored in the journal and do not
-     * silently replace it.
-     *
-     * The current encounter's trigger can produce only one offer.
-     * A later encounter may provide a fresh trigger after this
-     * quest is declined or completed.
-     */
-    assert(
-    trigger.questSeedConsumed !== true,
-        'This quest trigger was already consumed'
-    );
-    /*
-     * Reputation defines the permitted ranks; geography and authored
-     * scenarios determine which of those ranks can actually be offered.
-     * Never consume a quest trigger by rolling an impossible rank.
-     */
-    const channel =
-        sourceSeed.source === 'social'
-            ? 'social'
-            : breadcrumb?.fromInstance === true ||
-              sourceSeed.fromInstance === true
-                ? 'instance'
-                : 'overland';
+    const channel = sourceSeed.source === 'social'
+        ? 'social'
+        : (breadcrumb?.fromInstance === true || sourceSeed.fromInstance === true)
+            ? 'instance'
+            : 'overland';
 
     const availableRanks = rep.ranks
-        .map(rank => ({
-            rank,
-            archetypes: eligibleQuestArchetypes(
-                state,
-                zone,
-                rank,
-                channel
-            )
-        }))
+        .map(rank => ({ rank, archetypes: eligibleQuestArchetypes(state, zone, rank, channel) }))
         .filter(entry => entry.archetypes.length > 0);
-
     assert(
         availableRanks.length > 0,
-        `No authored quest offers are available for Zone ${zone} ` +
-            `at ${rep.label} reputation`
+        `No authored quest offers are available for Zone ${zone} at ${rep.label} reputation`
     );
 
-    /*
-     * A settlement's first successful conversational work inquiry gives
-     * routine F work extra weight, not a guarantee. Other triggers and
-     * later contacts use the ordinary reputation-permitted rank pool.
-     * Repeat entries affect this rank roll only; archetype and scenario
-     * selection still use their existing eligible pools.
-     */
+    // Weight Rank F higher on a settlement's first social offer without guaranteeing it.
     const firstSocialOffer =
         test.socialId !== undefined &&
-        state.socialOpportunities?.settlements?.[
-            issuerSettlement.id
-        ]?.offers === 0;
+        state.socialOpportunities?.settlements?.[issuerSettlement.id]?.offers === 0;
+    const rankPool = firstSocialOffer && availableRanks.some(entry => entry.rank === 'F')
+        ? [...availableRanks, ...Array(2).fill(availableRanks.find(entry => entry.rank === 'F'))]
+        : availableRanks;
 
-    const rankPool =
-        firstSocialOffer &&
-        availableRanks.some(entry => entry.rank === 'F')
-            ? [
-                ...availableRanks,
-                ...Array(2).fill(
-                    availableRanks.find(entry => entry.rank === 'F')
-                )
-            ]
-            : availableRanks;
-
-    const questRoll =
-        roll(state, rankPool.length);
-
-    const selectedRank =
-        rankPool[questRoll - 1];
-
-    const gateCountRoll =
-        roll(state, 2);
-
-    const salvageSlotRoll =
-        roll(state, QUEST_SALVAGE_SLOTS.length);
+    const questRoll = roll(state, rankPool.length);
+    const selectedRank = rankPool[questRoll - 1];
+    const gateCountRoll = roll(state, 2);
+    const salvageSlotRoll = roll(state, QUEST_SALVAGE_SLOTS.length);
 
     const rank = selectedRank.rank;
+    const row = QUEST_REWARD_TABLES[zone][rank];
+    assert(row, 'No quest table entry exists for these inputs');
 
-    const row =
-        QUEST_REWARD_TABLES[zone][rank];
+    const progression = QUEST_PROGRESSION[row.rank];
+    assert(progression, `No quest progression settings for rank ${row.rank}`);
 
-    assert(
-        row,
-        'No quest table entry exists for these inputs'
-    );
-
-
-    const progression =
-        QUEST_PROGRESSION[row.rank];
-
-    assert(
-        progression,
-        `No quest progression settings for rank ${row.rank}`
-    );
-
-    const gates =
-        progression.minGates +
-        (
-            gateCountRoll === 2 &&
-            progression.maxGates > progression.minGates
-                ? 1
-                : 0
-        );
-
-    const referencePackXp = canonicalMixedPackXp(
-        zone,
-        state.crew.level
-    );
-
+    const gates = progression.minGates +
+        (gateCountRoll === 2 && progression.maxGates > progression.minGates ? 1 : 0);
+    const referencePackXp = canonicalMixedPackXp(zone, state.crew.level);
     const questPackMultiplier =
-        progression.packMultiplier +
-        Math.max(0, gates - 1) *
-            EXTRA_QUEST_GATE_PACK_MULTIPLIER;
+        progression.packMultiplier + Math.max(0, gates - 1) * EXTRA_QUEST_GATE_PACK_MULTIPLIER;
 
-    const questXp = Math.round(
-        referencePackXp * questPackMultiplier
-    );
+    const terminalThreat = rollQuestTerminalThreat(state, row.rank, zone);
+    const salvage = makeQuestSalvage(state, zone, salvageSlotRoll, row);
 
-    const terminalThreat =
-        rollQuestTerminalThreat(
-            state,
-            row.rank,
-            zone
-        );
-
-    const salvage =
-        makeQuestSalvage(
-            state,
-            zone,
-            salvageSlotRoll,
-            row
-        );
-
-    // Use the exact eligible pool that made this rank selectable,
-    // excluding the settlement's last offered archetype when alternatives exist.
+    // Exclude the settlement's last offered archetype when alternatives exist.
     state.lastQuestArchetypeBySettlement ||= {};
-    const lastArchetypeId =
-        state.lastQuestArchetypeBySettlement[issuerSettlement.id] || null;
-    const nonRepeating = selectedRank.archetypes.filter(
-        entry => entry.archetype.id !== lastArchetypeId
-    );
-    const eligibleArchetypes = nonRepeating.length > 0
-        ? nonRepeating
-        : selectedRank.archetypes;
+    const lastArchetypeId = state.lastQuestArchetypeBySettlement[issuerSettlement.id] || null;
+    const nonRepeating = selectedRank.archetypes.filter(entry => entry.archetype.id !== lastArchetypeId);
+    const eligibleArchetypes = nonRepeating.length > 0 ? nonRepeating : selectedRank.archetypes;
     const archetypeRoll = roll(state, eligibleArchetypes.length);
-    const selectedArchetype =
-        eligibleArchetypes[archetypeRoll - 1];
+    const selectedArchetype = eligibleArchetypes[archetypeRoll - 1];
     const archetype = selectedArchetype.archetype;
     state.lastQuestArchetypeBySettlement[issuerSettlement.id] = archetype.id;
-    const authored = buildQuestFacts(
-        state,
-        archetype,
-        zone,
-        selectedArchetype.scenarios,
-        rank
-    );
 
+    const authored = buildQuestFacts(state, archetype, zone, selectedArchetype.scenarios, rank);
     if (archetype.id === 'local_bounty') {
-        authored.facts.threat = terminalThreat.kind === 'normal_pack'
-            ? 'the hostile group'
-            : 'the dangerous foe';
+        authored.facts.threat = terminalThreat.kind === 'normal_pack' ? 'the hostile group' : 'the dangerous foe';
     }
 
-    const structureV2 = buildQuestV2PlanForOffer(
-        state,
-        archetype,
-        gates,
-        authored.facts,
-        authored.variantId
-    );
-
-    /*
-     * Every archetype eligible for a new offer must supply a complete V2
-     * structure. Never fall back to slicing legacy templates: doing so
-     * could omit the decisive objective from a newly generated quest.
-     * Existing saved quests retain their already-locked gate records.
-     */
+    const structureV2 = buildQuestV2PlanForOffer(state, archetype, gates, authored.facts, authored.variantId);
     assert(
-        structureV2?.version === 2 &&
-        Array.isArray(structureV2.gates) &&
-        structureV2.gates.length === gates,
+        structureV2?.version === 2 && Array.isArray(structureV2.gates) && structureV2.gates.length === gates,
         `New quest archetype ${archetype.id} lacks a complete V2 plan`
     );
 
     // Non-combat contracts earn +0.5 pack XP to offset having no linked mob kills.
-    const hasLinkedCombat = structureV2.gates.some(
-        gate => gate.trigger === 'linked_combat'
-    );
-    const finalPackMultiplier =
-        questPackMultiplier + (hasLinkedCombat ? 0 : 0.5);
-    const finalQuestXp = Math.round(
-        referencePackXp * finalPackMultiplier
-    );
+    const hasLinkedCombat = structureV2.gates.some(gate => gate.trigger === 'linked_combat');
+    const finalPackMultiplier = questPackMultiplier + (hasLinkedCombat ? 0 : 0.5);
+    const finalQuestXp = Math.round(referencePackXp * finalPackMultiplier);
 
     const questGatesData = clone(structureV2.gates);
     const seed = {
@@ -9973,55 +9776,36 @@ function resolveQuestSeed(test) {
 
     const zoneSpine = state.world?.zones?.[zone]?.spine;
     let spineTieIn = 'independent';
-
     if (zoneSpine?.established === true) {
-        if (channel === 'social') {
-            spineTieIn = roll(state, 10) <= 7 ? 'fallout' : 'ordinary';
-        } else if (channel === 'overland') {
-            spineTieIn = roll(state, 10) <= 4 ? 'ripple' : 'independent';
-        }
+        if (channel === 'social') spineTieIn = roll(state, 10) <= 7 ? 'fallout' : 'ordinary';
+        else if (channel === 'overland') spineTieIn = roll(state, 10) <= 4 ? 'ripple' : 'independent';
     }
 
-    const quest = {
-        id:
-            `quest-${
-                breadcrumb
-                    ? breadcrumb.id
-                    : inquiryRecord
-                        ? test.socialId !== undefined
-                            ? `social-${issuerSettlement.id}-${inquiryRecord.id}`
-                            : `rumor-${inquiryRecord.id}`
-                        : state.encounter.id
-            }-${row.rank}-${questRoll}-${archetype.id}`,
+    const triggerPrefix = breadcrumb
+        ? breadcrumb.id
+        : inquiryRecord
+            ? (test.socialId !== undefined
+                ? `social-${issuerSettlement.id}-${inquiryRecord.id}`
+                : `rumor-${inquiryRecord.id}`)
+            : state.encounter.id;
 
-        title:
-            `Rank ${row.rank} ${archetype.label}`,
+    const quest = {
+        id: `quest-${triggerPrefix}-${row.rank}-${questRoll}-${archetype.id}`,
+        title: `Rank ${row.rank} ${archetype.label}`,
         rank: row.rank,
-        archetype: {
-            id: archetype.id,
-            label: archetype.label
-        },
-        variant: authored.variantId
-            ? { id: authored.variantId }
-            : null,
+        archetype: { id: archetype.id, label: archetype.label },
+        variant: authored.variantId ? { id: authored.variantId } : null,
         gates,
         gatesData: questGatesData,
-
         structureV2,
         status: 'offered',
         seed,
         pitch: authored.pitch,
         facts: authored.facts,
-
-        // Internal truth: only use this for quest validation/resolution,
-        // never include it in narrator-facing offer packets.
+        // Internal truth: never include in narrator-facing offer packets.
         coreTruth: authored.truth,
-
-        currentGate: {
-            ...questGatesData[0]
-        },
+        currentGate: { ...questGatesData[0] },
         objectiveResolution: null,
-
         payout: {
             xp: finalQuestXp,
             silver: row.silver,
@@ -10029,11 +9813,8 @@ function resolveQuestSeed(test) {
             xpBasis: referencePackXp,
             xpBasisType: 'canonical_mid_mixed_pack',
             packMultiplier: finalPackMultiplier
-
         },
-
         salvage,
-
         terminalThreat: {
             kind: terminalThreat.kind,
             zone: terminalThreat.zone,
@@ -10045,80 +9826,43 @@ function resolveQuestSeed(test) {
         originLocationId: issuerSettlement.locationId,
         repTierAtOffer: rep.label,
         requiresDelivery: !['sealed_cache', 'field_job'].includes(archetype.id),
-        spineTieIn
+        spineTieIn,
+        targetId: null
     };
 
     quest.targetId = `quest-target-${quest.id}`;
-
     for (const gate of quest.gatesData) {
-        if (gate.trigger === 'linked_combat') {
-            gate.linkedTargetId = quest.targetId;
-        }
+        if (gate.trigger === 'linked_combat') gate.linkedTargetId = quest.targetId;
     }
-
     if (quest.currentGate?.trigger === 'linked_combat') {
         quest.currentGate.linkedTargetId = quest.targetId;
     }
 
-    /*
-     * Keep the rank-selected threat. V2 links the encounter to the
-     * objective, but does not require every linked threat to be an
-     * Elite; F/E use normal packs, D/C may roll a pack or Elite, and
-     * B uses an Elite as established by rollQuestTerminalThreat().
-     */
     registerQuestDestination(state, quest);
-
     quest.turnIn ||= {
         locationId: issuerSettlement.locationId,
         settlementId: issuerSettlement.id,
-        recipient: quest.facts?.sponsor ||
-            issuerSettlement.label
+        recipient: quest.facts?.sponsor || issuerSettlement.label
     };
 
-    /*
-     * Every generated quest is durable journal data. Preserve the current
-     * active quest when it is offered or in progress; a newly discovered
-     * offer must not replace or disappear behind that compatibility pointer.
-     *
-     * If there is no selectable current quest, retain the historical
-     * activeQuest behavior so existing UI and progression continue to work.
-     */
     saveQuestToJournal(state, quest);
-
-    if (
-        !state.activeQuest ||
-        !['offered', 'in_progress'].includes(
-            state.activeQuest.status
-        )
-    ) {
+    if (!state.activeQuest || !['offered', 'in_progress'].includes(state.activeQuest.status)) {
         state.activeQuest = quest;
     }
 
-    /*
-     * Preparation targets this newly created quest directly. It must not
-     * change the compatibility selection or depend on activeQuest identity.
-     * Defeat-elite discoveries are prepared after acceptance.
-     */
     prepareRetrievalQuestDiscovery(quest);
     prepareV2QuestDiscoveries(quest);
     validateRetrievalQuestDiscoveries(quest);
 
     trigger.questSeedConsumed = true;
-
     if (breadcrumb) {
         breadcrumb.questId = quest.id;
-
         if (state.encounter?.id === breadcrumb.encounterId) {
             state.encounter.questSeedConsumed = true;
         }
     }
 
-    return {
-        ok: true,
-        created: true,
-        quest,
-        state
-    };
+    return { ok: true, created: true, quest, state };
 }
 
 /*
@@ -10795,48 +10539,15 @@ function resolveSelectedQuestEvent(test) {
 
 
 function resolveQuestAction(test) {
-    assert(
-        test.state &&
-        typeof test.state === 'object',
-        'quest action requires state'
-    );
+    assert(test.state && typeof test.state === 'object', 'quest action requires state');
     const state = clone(test.state);
     ensureQuestJournal(state);
 
     const quest = findQuestById(state, test.questId);
-
     assert(
         quest && typeof quest === 'object',
-        test.questId != null
-            ? `Unknown quest ID: ${test.questId}`
-            : 'No selected quest'
+        test.questId != null ? `Unknown quest ID: ${test.questId}` : 'No selected quest'
     );
-
-    /*
-     * Offers coexist in the journal. Field progression still supports
-     * one in-progress quest until arrival, combat, discovery, and delivery
-     * have all been migrated to explicit quest selection.
-     * Never silently displace an accepted quest when accepting an offer.
-     */
-    /*
-     * Multiple accepted quests are part of the campaign model. The journal
-     * owns their independent identity and state. activeQuest remains only
-     * as a compatibility selection while arrival, discovery, combat, and
-     * delivery are migrated to explicit quest lookup.
-     */
-    if (test.action === 'accept') {
-        assert(
-            quest.status === 'offered',
-            `Quest cannot be accepted from status ${quest.status}`
-        );
-    }
-
-    /*
-     * Progression is authorized by the journal quest ID above.
-     * activeQuest remains a UI/compatibility selection, not ownership
-     * of a discovery or encounter event.
-     */
-
     assert(
         ['accept', 'decline', 'cancel', 'fail', 'clear_gate', 'resolve_objective', 'complete'].includes(test.action),
         `Unsupported quest action: ${test.action}`
@@ -10851,183 +10562,30 @@ function resolveQuestAction(test) {
         action: test.action,
         questId: quest.id,
         quest,
-        rewards: {
-            xp: 0,
-            silver: 0,
-            repSteps: 0,
-            loot: []
-        },
+        rewards: { xp: 0, silver: 0, repSteps: 0, loot: [] },
         state
     };
 
-    if (test.action === 'accept') {
-        assert(
-            quest.status === 'offered',
-            `Quest cannot be accepted from status ${quest.status}`
-        );
-        const selectedQuestIsInProgress =
-            state.activeQuest?.status === 'in_progress';
-
-        registerQuestDestination(state, quest);
-        quest.status = 'in_progress';
-
-        /*
-         * Accepting another offer must not change the compatibility
-         * selection away from an already in-progress quest. The journal
-         * remains authoritative; new mechanics use quest IDs.
-         */
-        if (!selectedQuestIsInProgress) {
-            state.activeQuest = quest;
-        }
-        if (quest.structureV2?.version === 2) {
-            prepareRetrievalQuestDiscovery(quest);
-            prepareV2QuestDiscoveries(quest);
-
-            for (const gate of quest.gatesData) {
-                if (gate.trigger !== 'discovery') continue;
-
-                const discovery = quest.discoveries?.find(
-                    item => item.id === gate.requiredDiscoveryId
-                );
-
-                assert(
-                    discovery &&
-                    gate.requiredDiscoveryState === 'acquired' &&
-                    discovery.locationId === quest.destinationId &&
-                    discovery.acquisitionPolicy === 'auto_on_reveal' &&
-                    typeof discovery.hidingPlace === 'string' &&
-                    discovery.hidingPlace.trim().length > 0 &&
-                    typeof discovery.significance === 'string' &&
-                    discovery.significance.trim().length > 0,
-                    `Quest ${quest.id} has no complete authored discovery for gate ${gate.step}`
-                );
-            }
-        }
-
-        saveQuestToJournal(state, quest);
-        return result;
-
-    }
-
-    if (test.action === 'decline') {
-        assert(
-            quest.status === 'offered',
-            `Quest cannot be declined from status ${quest.status}`
-        );
-
-        quest.status = 'declined';
-        saveQuestToJournal(state, quest);
-
+    // Shared cleanup when a quest closes (declined, cancelled, failed, or completed).
+    // MSQ chapters fail forward (advanceMsq = true) so a failed chapter never bricks the zone arc.
+    function finalizeQuestClosure(advanceMsq) {
         if (quest.isMsq === true) {
             const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
             const msq = state.world?.zones?.[msqZone]?.msq;
             if (msq) {
                 msq.activeQuestId = null;
-                msq.status = 'declined';
-            }
-        }
-
-        for (const lead of Object.values(state.leads || {})) {
-            if (
-                lead.id === `quest-return-${quest.id}` ||
-                lead.id === `quest-lead-${quest.id}`
-            ) {
-                lead.status = 'resolved';
-            }
-        }
-
-        if (state.activeQuest?.id === quest.id) {
-            state.activeQuest = null;
-        }
-
-        return result;
-    }
-
-    assert(
-        quest.status === 'in_progress',
-        `Quest action requires an in-progress quest, got ${quest.status}`
-    );
-
-    if (test.action === 'cancel' || test.action === 'fail') {
-        assert(
-            !['active', 'spotted'].includes(state.encounter?.status),
-            'Resolve, avoid, or flee the encounter before closing the quest'
-        );
-
-        quest.status = test.action === 'cancel' ? 'cancelled' : 'failed';
-        quest.cancelledAtGate = test.action === 'cancel' ? quest.currentGate?.step || null : undefined;
-        quest.failedAtGate = test.action === 'fail' ? quest.currentGate?.step || null : undefined;
-        quest.cancelReason = test.action === 'cancel' ? test.reason || null : undefined;
-        quest.failReason = test.action === 'fail' ? test.reason || null : undefined;
-
-        /*
-         * Dropping or failing a quest also stops travel undertaken for its
-         * field objective. Preserve the actual position along the saved route.
-         * Shared settlement return travel remains independent, and another
-         * accepted quest at the same destination may still justify the trip.
-         */
-        const journey = state.currentJourney;
-        const anotherQuestUsesDestination =
-            state.quests.accepted.some(entry =>
-                entry.id !== quest.id &&
-                entry.status === 'in_progress' &&
-                !entry.objectiveResolution &&
-                entry.destinationId === journey?.destinationId
-            );
-
-        if (
-            journey &&
-            (
-                journey.questId === quest.id ||
-                (
-                    !journey.questId &&
-                    journey.destinationId === quest.destinationId &&
-                    !anotherQuestUsesDestination
-                )
-            )
-        ) {
-            state.currentPosition = positionAfterSegments(
-                journeyLegs(journey),
-                journey.completedSegments
-            ) || state.currentPosition || {
-                nodeId: state.currentLocationId
-            };
-
-            state.currentJourney = null;
-        }
-
-        saveQuestToJournal(state, quest);
-
-        if (quest.isMsq === true) {
-            const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
-            const msq = state.world?.zones?.[msqZone]?.msq;
-            if (msq) {
-                msq.activeQuestId = null;
-
-                if (test.action === 'fail') {
-                    /*
-                     * MSQ chapters fail forward: no rewards are paid, but the
-                     * regional arc stays active so the next chapter picks up
-                     * from the worse fallout instead of bricking the zone.
-                     */
-                    msq.completedChapters = Math.max(
-                        Number(msq.completedChapters || 0),
-                        Number(quest.msq?.chapter || 0)
-                    );
-
-                    if (quest.msq?.isFinale || msq.completedChapters >= msq.totalChapters) {
+                if (advanceMsq) {
+                    msq.completedChapters = Math.max(Number(msq.completedChapters || 0), Number(quest.msq?.chapter || 0));
+                    if (quest.msq?.ise || msq.completedChapters >= msq.totalChapters) {
                         msq.status = 'completed';
                         msq.pendingBeatDelay = 0;
                     } else {
                         const nextChapter = msq.completedChapters + 1;
-                        const isNextFinale = nextChapter >= msq.totalChapters;
-                        const hotLead = isNextFinale ||
+                        const hotLead = nextChapter >= msq.totalChapters ||
                             (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
-
                         msq.pendingBeatDelay = hotLead
                             ? 1
                             : 2 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
-
                     }
                 } else {
                     msq.status = 'declined';
@@ -11036,138 +10594,164 @@ function resolveQuestAction(test) {
         }
 
         for (const lead of Object.values(state.leads || {})) {
-            if (
-                lead.id === `quest-return-${quest.id}` ||
-                lead.id === `quest-lead-${quest.id}`
-            ) {
+            if (lead.id === `quest-return-${quest.id}` || lead.id === `quest-lead-${quest.id}`) {
                 lead.status = 'resolved';
             }
         }
+        if (state.activeQuest?.id === quest.id) state.activeQuest = null;
+    }
 
-        if (state.activeQuest?.id === quest.id) {
-            state.activeQuest = null;
+    if (test.action === 'accept') {
+        assert(quest.status === 'offered', `Quest cannot be accepted from status ${quest.status}`);
+        const selectedQuestIsInProgress = state.activeQuest?.status === 'in_progress';
+
+        registerQuestDestination(state, quest);
+        quest.status = 'in_progress';
+        if (!selectedQuestIsInProgress) state.activeQuest = quest;
+
+        if (quest.structureV2?.version === 2) {
+            prepareRetrievalQuestDiscovery(quest);
+            prepareV2QuestDiscoveries(quest);
+
+            for (const gate of quest.gatesData) {
+                if (gate.trigger !== 'discovery') continue;
+                const discovery = quest.discoveries?.find(item => item.id === gate.requiredDiscoveryId);
+                assert(
+                    discovery &&
+                    gate.requiredDiscoveryState === 'acquired' &&
+                    discovery.locationId === quest.destinationId &&
+                    discovery.acquisitionPolicy === 'auto_on_reveal' &&
+                    typeof discovery.hidingPlace === 'string' && discovery.hidingPlace.trim().length > 0 &&
+                    typeof discovery.significance === 'string' && discovery.significance.trim().length > 0,
+                    `Quest ${quest.id} has no complete authored discovery for gate ${gate.step}`
+                );
+            }
         }
 
+        saveQuestToJournal(state, quest);
         return result;
     }
 
-     if (test.action === 'clear_gate') {
+    if (test.action === 'decline') {
+        assert(quest.status === 'offered', `Quest cannot be declined from status ${quest.status}`);
+        quest.status = 'declined';
+        saveQuestToJournal(state, quest);
+        finalizeQuestClosure(false);
+        return result;
+    }
+
+    assert(quest.status === 'in_progress', `Quest action requires an in-progress quest, got ${quest.status}`);
+
+    if (test.action === 'cancel' || test.action === 'fail') {
         assert(
-            Array.isArray(quest.gatesData) &&
-            quest.gatesData.length === quest.gates,
+            !['active', 'spotted'].includes(state.encounter?.status),
+            'Resolve, avoid, or flee the encounter before closing the quest'
+        );
+
+        const isCancel = test.action === 'cancel';
+        quest.status = isCancel ? 'cancelled' : 'failed';
+        quest.cancelledAtGate = isCancel ? quest.currentGate?.step || null : undefined;
+        quest.failedAtGate = !isCancel ? quest.currentGate?.step || null : undefined;
+        quest.cancelReason = isCancel ? test.reason || null : undefined;
+        quest.failReason = !isCancel ? test.reason || null : undefined;
+
+        // Stop travel undertaken solely for this quest while preserving route position.
+        const journey = state.currentJourney;
+        const anotherQuestUsesDestination = state.quests.accepted.some(entry =>
+            entry.id !== quest.id &&
+            entry.status === 'in_progress' &&
+            !entry.objectiveResolution &&
+            entry.destinationId === journey?.destinationId
+        );
+
+        if (
+            journey &&
+            (journey.questId === quest.id ||
+                (!journey.questId && journey.destinationId === quest.destinationId && !anotherQuestUsesDestination))
+        ) {
+            state.currentPosition =
+                positionAfterSegments(journeyLegs(journey), journey.completedSegments) ||
+                state.currentPosition ||
+                { nodeId: state.currentLocationId };
+            state.currentJourney = null;
+        }
+
+        saveQuestToJournal(state, quest);
+        finalizeQuestClosure(!isCancel);
+        return result;
+    }
+
+    if (test.action === 'clear_gate') {
+        assert(
+            Array.isArray(quest.gatesData) && quest.gatesData.length === quest.gates,
             'This legacy quest has no engine-authored gate plan'
         );
+        assert(quest.currentGate?.step < quest.gates, ' gate must use resolve_objective before complete');
+        assert(test.objectiveCompleted === true, 'Gate clearance requires objectiveCompleted: true');
         assert(
-            quest.currentGate?.step < quest.gates,
-            'Final gate must use resolve_objective before complete'
-        );
-        assert(
-            test.objectiveCompleted === true,
-            'Gate clearance requires objectiveCompleted: true'
-        );
-        assert(
-            typeof test.completionEvidence === 'string' &&
-            test.completionEvidence.trim().length > 0,
+            typeof test.completionEvidence === 'string' && test.completionEvidence.trim().length > 0,
             'Gate clearance requires completionEvidence'
         );
-        assert(
-            state.encounter?.status !== 'active',
-            'Resolve or flee the active encounter first'
-        );
+        assert(state.encounter?.status !== 'active', 'Resolve or flee the active encounter first');
 
-        const completedGate = {
-            ...quest.currentGate,
-            completionEvidence: test.completionEvidence.trim()
-        };
-
+        const completedGate = { ...quest.currentGate, completionEvidence: test.completionEvidence.trim() };
         quest.completedGates ||= [];
         quest.completedGates.push(completedGate);
 
-        const nextStep = completedGate.step + 1;
-        quest.currentGate = {
-            ...quest.gatesData[nextStep - 1]
-        };
-
+        quest.currentGate = { ...quest.gatesData[completedGate.step] };
         result.completedGate = completedGate;
         result.nextGate = { ...quest.currentGate };
 
         if (
             quest.currentGate.trigger === 'linked_combat' &&
-            ['defeat_elite', 'rescue_person']
-                .includes(quest.structureV2?.family)
+            ['defeat_elite', 'rescue_person'].includes(quest.structureV2?.family)
         ) {
-
             const spawned = spawnEncounter({
                 state,
                 questId: quest.id,
                 encounterType: 'quest_terminal',
                 encounterId: `quest-terminal-${quest.id}`
             });
-
             state.rngState = spawned.state.rngState;
             state.encounter = spawned.encounter;
-
-            // The target is revealed, but the player still chooses whether
-            // to engage, avoid, or flee.
             state.encounter.status = 'spotted';
             state.encounter.questTerminal.targetId = quest.targetId;
 
             quest.terminalThreat.revealed = true;
             quest.terminalThreat.resolved = false;
-            quest.terminalThreat.encounterId =
-                state.encounter.id;
-            quest.terminalThreat.targetId =
-                quest.targetId;
+            quest.terminalThreat.encounterId = state.encounter.id;
+            quest.terminalThreat.targetId = quest.targetId;
 
+            const leadFoe = state.encounter.foes[0];
             result.linkedEncounter = {
                 id: state.encounter.id,
                 targetId: quest.targetId,
                 status: 'spotted',
-                role: state.encounter.foes[0]?.role,
-                level: state.encounter.foes[0]?.level,
-                hp: state.encounter.foes[0]?.hp,
-                maxHp: state.encounter.foes[0]?.maxHp
+                role: leadFoe?.role,
+                level: leadFoe?.level,
+                hp: leadFoe?.hp,
+                maxHp: leadFoe?.maxHp
             };
         }
 
         return result;
-
     }
 
-
     if (test.action === 'resolve_objective') {
+        assert(quest.currentGate?.step === quest.gates, 'Reach the final quest gate before resolving its objective');
+        assert(!quest.objectiveResolution, 'Quest objective has already been resolved');
+        assert(test.objectiveCompleted === true, 'Objective resolution requires objectiveCompleted: true');
         assert(
-            quest.currentGate?.step === quest.gates,
-            'Reach the final quest gate before resolving its objective'
-        );
-        assert(
-            !quest.objectiveResolution,
-            'Quest objective has already been resolved'
-        );
-        assert(
-            test.objectiveCompleted === true,
-            'Objective resolution requires objectiveCompleted: true'
-        );
-        assert(
-            typeof test.completionEvidence === 'string' &&
-            test.completionEvidence.trim().length > 0,
+            typeof test.completionEvidence === 'string' && test.completionEvidence.trim().length > 0,
             'Objective resolution requires completionEvidence'
         );
         assert(
-            ['combat', 'heist', 'negotiation', 'other']
-                .includes(test.objectiveRoute),
+            ['combat', 'heist', 'negotiation', 'other'].includes(test.objectiveRoute),
             'Objective resolution requires a supported objectiveRoute'
         );
-        assert(
-            state.encounter?.status !== 'active',
-            'Resolve or flee the active encounter first'
-        );
-
+        assert(state.encounter?.status !== 'active', 'Resolve or flee the active encounter first');
         if (test.objectiveRoute === 'combat') {
-            assert(
-                quest.terminalThreat?.resolved === true,
-                'Combat route requires the linked threat to be defeated'
-            );
+            assert(quest.terminalThreat?.resolved === true, 'Combat route requires the linked threat to be defeated');
         }
 
         quest.objectiveResolution = {
@@ -11176,40 +10760,19 @@ function resolveQuestAction(test) {
         };
         result.objectiveResolution = quest.objectiveResolution;
 
-        /*
-         * Both current retrieve_item archetypes carry physical cargo.
-         * Securing it does not deliver it. Missing Person instead finishes
-         * on safe arrival. Completed historical quests are not reopened.
-         */
-        const cargoDelivery =
-            quest.structureV2?.family === 'retrieve_item' &&
-            quest.requiresDelivery !== false;
-
-        if (
-            cargoDelivery ||
-            quest.structureV2?.family === 'rescue_person'
-        ) {
+        const cargoDelivery = quest.structureV2?.family === 'retrieve_item' && quest.requiresDelivery !== false;
+        if (cargoDelivery || quest.structureV2?.family === 'rescue_person') {
             state.leads ||= {};
             const returnLeadId = `quest-return-${quest.id}`;
             const cargoName = cargoDelivery
-                ? quest.discoveries?.find(
-                    item => item.id === quest.turnIn?.discoveryId
-                  )?.name
+                ? quest.discoveries?.find(item => item.id === quest.turnIn?.discoveryId)?.name
                 : null;
-
-            if (cargoDelivery) {
-                assert(
-                    cargoName,
-                    'Retrieval quest has no locked turn-in cargo'
-                );
-            }
+            if (cargoDelivery) assert(cargoName, 'Retrieval quest has no locked turn-in cargo');
 
             state.leads[returnLeadId] ||= {
                 id: returnLeadId,
                 kind: 'quest_return',
-                label: cargoDelivery
-                    ? `Deliver ${cargoName}`
-                    : `Bring ${quest.facts.person} to safety`,
+                label: cargoDelivery ? `Deliver ${cargoName}` : `Bring ${quest.facts.person} to safety`,
                 claim: cargoDelivery
                     ? `Bring ${cargoName} to ${quest.turnIn.recipient}.`
                     : `${quest.facts.person} must reach the origin settlement safely.`,
@@ -11218,10 +10781,7 @@ function resolveQuestAction(test) {
                 status: 'known'
             };
 
-            if (cargoDelivery) {
-                quest.deliveryReady = false;
-            }
-
+            if (cargoDelivery) quest.deliveryReady = false;
             saveQuestToJournal(state, quest);
             return result;
         }
@@ -11247,147 +10807,55 @@ function resolveQuestAction(test) {
         };
     }
 
+    // action === 'complete'
+    assert(test.objectiveCompleted === true, 'Quest completion requires objectiveCompleted: true');
     assert(
-        test.objectiveCompleted === true,
-        'Quest completion requires objectiveCompleted: true'
-    );
-
-    assert(
-        typeof test.completionEvidence === 'string' &&
-        test.completionEvidence.trim().length > 0,
+        typeof test.completionEvidence === 'string' && test.completionEvidence.trim().length > 0,
         'Quest completion requires completionEvidence'
     );
+    assert(state.encounter?.status !== 'active', 'Cannot complete a quest during an active encounter');
     assert(
-        state.encounter?.status !== 'active',
-        'Cannot complete a quest during an active encounter'
-    );
-
-    assert(
-        quest.objectiveResolution &&
-        typeof quest.objectiveResolution.evidence === 'string',
+        quest.objectiveResolution && typeof quest.objectiveResolution.evidence === 'string',
         'Secure the quest objective before turning it in'
     );
+    assert(quest.currentGate.step === quest.gates, 'Quest cannot complete before its final gate');
 
-    assert(
-        quest.currentGate.step === quest.gates,
-        'Quest cannot complete before its final gate'
-    );
-
-    if (
-        quest.structureV2?.family === 'retrieve_item' &&
-        quest.requiresDelivery !== false
-    ) {
+    if (quest.structureV2?.family === 'retrieve_item' && quest.requiresDelivery !== false) {
         assert(
-            quest.deliveryReady === true &&
-            state.currentLocationId === quest.turnIn?.locationId &&
-            !state.currentJourney,
+            quest.deliveryReady === true && state.currentLocationId === quest.turnIn?.locationId && !state.currentJourney,
             'Return to the locked recipient with the quest cargo before completion'
         );
     }
 
-    const payout =
-        quest.payout;
-
+    const { payout, salvage } = quest;
     assert(
-        payout &&
-        Number.isInteger(payout.xp) &&
-        Number.isInteger(payout.silver) &&
-        Number.isInteger(payout.repSteps),
+        payout && Number.isInteger(payout.xp) && Number.isInteger(payout.silver) && Number.isInteger(payout.repSteps),
         'Quest payout is invalid'
     );
+    assert(salvage && typeof salvage === 'object', 'Quest salvage is missing');
 
-    const salvage =
-        quest.salvage;
-
-    assert(
-        salvage &&
-        typeof salvage === 'object',
-        'Quest salvage is missing'
-    );
-
-    /*
-     * The System supplies rewards, but retrieval cargo must be handed
-     * over first. Record that transfer on the locked quest discovery
-     * during the same completion operation as the payout.
-     */
-    if (
-        quest.structureV2?.family === 'retrieve_item' &&
-        quest.requiresDelivery !== false
-    ) {
-        const cargo = quest.discoveries?.find(
-            item => item.id === quest.turnIn?.discoveryId
-        );
-
-        assert(
-            cargo?.kind === 'quest_item' &&
-            cargo.state === 'acquired',
-            'The required quest cargo has not been recovered'
-        );
-
+    if (quest.structureV2?.family === 'retrieve_item' && quest.requiresDelivery !== false) {
+        const cargo = quest.discoveries?.find(item => item.id === quest.turnIn?.discoveryId);
+        assert(cargo?.kind === 'quest_item' && cargo.state === 'acquired', 'The required quest cargo has not been recovered');
         cargo.state = 'delivered';
         quest.deliveryReady = false;
     }
 
     if (quest.structureV2?.family === 'rescue_person') {
         assert(
-            state.currentLocationId === quest.originLocationId &&
-            !state.currentJourney,
+            state.currentLocationId === quest.originLocationId && !state.currentJourney,
             'Bring the missing person to the origin settlement safely'
         );
     }
+
     quest.status = 'complete';
-
     quest.completionEvidence = test.completionEvidence.trim();
-
     saveQuestToJournal(state, quest);
+    finalizeQuestClosure(true);
 
-    if (quest.isMsq === true) {
-        const msqZone = quest.msq?.zone ?? quest.seed?.zone ?? state.zone;
-        const msq = state.world?.zones?.[msqZone]?.msq;
-        if (msq) {
-            msq.completedChapters = Math.max(
-                Number(msq.completedChapters || 0),
-                Number(quest.msq?.chapter || 0)
-            );
-            msq.activeQuestId = null;
-
-            if (quest.msq?.isFinale || msq.completedChapters >= msq.totalChapters) {
-                msq.status = 'completed';
-                msq.pendingBeatDelay = 0;
-            } else {
-                const nextChapter = msq.completedChapters + 1;
-                const isNextFinale = nextChapter >= msq.totalChapters;
-                const hotLead = isNextFinale ||
-                    (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
-
-                msq.pendingBeatDelay = hotLead
-                    ? 1
-                    : 2 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
-            }
-        }
-    }
-
-    if (state.activeQuest?.id === quest.id) {
-        state.activeQuest = null;
-    }
-
-    for (const lead of Object.values(state.leads || {})) {
-        if (
-            lead.id === `quest-return-${quest.id}` ||
-            lead.id === `quest-lead-${quest.id}`
-        ) {
-            lead.status = 'resolved';
-        }
-    }
-
-    result.rewards.xp =
-        payout.xp;
-
-    result.rewards.silver =
-        payout.silver;
-
-    result.rewards.repSteps =
-        payout.repSteps;
+    result.rewards.xp = payout.xp;
+    result.rewards.silver = payout.silver;
+    result.rewards.repSteps = payout.repSteps;
 
     const acquiredSalvage = {
         ...salvage,
@@ -11395,73 +10863,37 @@ function resolveQuestAction(test) {
         acquiredAtQuest: quest.id,
         bound: false
     };
+    state.inventory.bagReserves.push(acquiredSalvage);
+    result.rewards.loot.push(acquiredSalvage);
 
-    state.inventory.bagReserves.push(
-        acquiredSalvage
-    );
-
-    result.rewards.loot.push(
-        acquiredSalvage
-    );
-
-    const town =
-        test.town ||
-        quest.town;
-
+    const town = test.town || quest.town;
     if (town) {
         state.reputation ||= {};
-        state.reputation[town] ||= {
-            tier: 'Unknown',
-            steps: 0
-        };
+        state.reputation[town] ||= { tier: 'Unknown', steps: 0 };
 
-        const tierOrder = [
-            'Unknown',
-            'Slightly Known',
-            'Known',
-            'Well Respected',
-            'Renowned'
-        ];
-
+        const tierOrder = ['Unknown', 'Slightly Known', 'Known', 'Well Respected', 'Renowned'];
         const rep = state.reputation[town];
         let rung = tierOrder.indexOf(rep.tier);
+        assert(rung >= 0, `Unknown reputation tier: ${rep.tier}`);
 
-        assert(
-            rung >= 0,
-            `Unknown reputation tier: ${rep.tier}`
-        );
         const stepsPerTier = QUEST_REPUTATION_STEPS_PER_TIER;
-
         int(rep.steps, `${town} reputation steps`);
         assert(
-            rep.steps < stepsPerTier ||
-                rung === tierOrder.length - 1,
+            rep.steps < stepsPerTier || rung === tierOrder.length - 1,
             `${town} reputation steps must be below ${stepsPerTier}`
         );
 
         let steps = rep.steps + payout.repSteps;
-
-        while (
-            steps >= stepsPerTier &&
-            rung < tierOrder.length - 1
-        ) {
+        while (steps >= stepsPerTier && rung < tierOrder.length - 1) {
             steps -= stepsPerTier;
             rung++;
         }
-
         rep.tier = tierOrder[rung];
-        rep.steps =
-            rung === tierOrder.length - 1 ? 0 : steps;
+        rep.steps = rung === tierOrder.length - 1 ? 0 : steps;
     }
-    result.levelUps =
-        applyXp(
-            state.crew,
-            payout.xp
-        );
 
-    state.crew.purse +=
-        payout.silver;
-
+    result.levelUps = applyXp(state.crew, payout.xp);
+    state.crew.purse += payout.silver;
     return result;
 }
 

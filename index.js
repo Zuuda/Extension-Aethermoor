@@ -24256,10 +24256,13 @@ async function openAethermoorShopWindow() {
                 `${ownerLabel} · ${slotTag} · Stat ${entry.stat} · ${wornText}`;
 
             button.append(heading, detail);
-
             for (const [key, [wornKey, label]] of Object.entries(
                 comparisonKeys
             )) {
+                // Prevent the old shared 'hp' gear stat from cross-pollinating
+                if (key === 'tansyMaxHp' && entry.owner !== 'tansy') continue;
+                if (key === 'qtikMaxHp' && entry.owner !== 'qtik') continue;
+
                 const proposed = Number(option.bonus[key] || 0);
                 const current = Number(wornBonus[wornKey] || 0);
 

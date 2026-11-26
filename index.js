@@ -19570,8 +19570,6 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3${trinketNote}${exposedNote})`;
     }
 
-    const normalMaxRoll = tansyAction === 'vitals' ? 4 : 5;
- 
 function updateCombatTooltips(host, state) {
     const crew = state.crew;
     const stats = derived(crew);

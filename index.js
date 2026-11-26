@@ -20209,13 +20209,32 @@ function questDiscoveryNarrationPacket(result, quest) {
     return lines.join('\n');
 }
 
-function questDeliveryNarrationPacket(result, quest) {
+function questDeliveryNarrationPacket(
+    result,
+    quest,
+    { preHandover = false } = {}
+) {
     const rewards = result.rewards || {
         xp: 0,
         silver: 0,
         repSteps: 0,
         loot: []
     };
+
+    const timingLines = preHandover
+        ? [
+            'If the crew has not handed over the cargo yet, portray them ' +
+                'delivering it to the recipient in this reply, then display ' +
+                'the System cards above immediately after the handover.',
+            'If the handover was already portrayed in the previous reply, ' +
+                'continue from it naturally without staging a second delivery.'
+        ]
+        : [
+            'In the next reply, continue from the already-described handover ' +
+                'and report these exact rewards naturally.',
+            'This retrieval quest has locked turn-in cargo: it was handed ' +
+                'over in the previous reply. Do not stage a second delivery.'
+        ];
 
     return [
         'AUTHORITATIVE QUEST COMPLETION CONTRACT — use these values exactly.',
@@ -20232,12 +20251,9 @@ function questDeliveryNarrationPacket(result, quest) {
             result.state?.crew,
             result.levelUps || []
         ),
-        'In the next reply, continue from the already-described handover and report these exact rewards naturally.',
+        ...timingLines,
+        'The System, not the recipient, supplied the rewards after that handover.',
         'Do not calculate, alter, repeat, or grant any additional rewards.',
-        'This retrieval quest has locked turn-in cargo: it was handed ' +
-            'over in the previous reply.',
-        'The System, not the recipient, supplied the rewards after ' +
-            'that handover. Do not stage a second delivery.',
         'Do not mention software, extensions, protocol tags, or reward administration in story prose.'
     ].join('\n');
 }
@@ -21044,7 +21060,8 @@ async function runStoredMechanic(args) {
             caseResult.created !== false
                 ? questDeliveryNarrationPacket(
                     caseResult,
-                    caseResult.quest
+                    caseResult.quest,
+                    { preHandover: oneCase.name === 'manual_quest_delivery' }
                 )
                 : null;
 
@@ -23356,9 +23373,10 @@ async function renderQuestTab(host) {
                         ? 'CARGO READY TO DELIVER'
                         : 'RETURN WITH THE CARGO',
                     quest.deliveryReady
-                        ? `Give ${cargoName} to ` +
-                            `${quest.turnIn.recipient}. The System pays ` +
-                            'after the handover is reported.'
+                        ? `Press "Finish Quest (Deliver on Next Reply)" right ` +
+                            `before sending your handover scene with ` +
+                            `${quest.turnIn.recipient} so completion, ` +
+                            'level-up, and achievements all land together.'
                         : `Bring ${cargoName} back to ` +
                             `${quest.turnIn.recipient}. Recovery alone ` +
                             'does not complete the quest.',
@@ -23377,7 +23395,7 @@ async function renderQuestTab(host) {
 
             if (canConfirmHandover) {
                 const confirmHandover = makeAethermoorAction(
-                    'Confirm Cargo Handover',
+                    'Finish Quest (Deliver on Next Reply)',
                     'quest',
                     async () => {
                         confirmHandover.disabled = true;
@@ -23391,7 +23409,7 @@ async function renderQuestTab(host) {
                                     kind: 'quest_delivery',
                                     questId: quest.id
                                 },
-                                'Cargo handover confirmed. Rewards applied.'
+                                'Quest completed! Send your handover scene to trigger the System cards.'
                             );
                         } finally {
                             confirmHandover.disabled = false;
@@ -23400,7 +23418,7 @@ async function renderQuestTab(host) {
                 );
 
                 confirmHandover.title =
-                    'Manual fallback if the GM misses the <AETHERMOOR:DELIVERED> tag.';
+                    'Click right before sending your handover message so completion, level-up, and achievements land in that reply (also works as a fallback if <AETHERMOOR:DELIVERED> was missed).';
                 body.appendChild(confirmHandover);
             }
         }

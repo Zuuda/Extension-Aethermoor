@@ -19571,26 +19571,7 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
     }
 
     const normalMaxRoll = tansyAction === 'vitals' ? 4 : 5;
-    const minEx = Math.max(1, effectiveAtk - targetDef + 2 + vitalsBonus) + fireDmg;
-    const maxEx = Math.max(1, effectiveAtk - targetDef + normalMaxRoll + vitalsBonus) + fireDmg;
-    const turnMin = minEx * 3 + exposed;
-    const turnMax = maxEx * 3 + exposed;
-
-    const critMinRoll = tansyAction === 'vitals' ? 5 : 6;
-    const critMin =
-        Math.round(Math.max(1, effectiveAtk - targetDef + critMinRoll + vitalsBonus) * 1.5) +
-        stats.luk + fireDmg;
-    const critMax =
-        Math.round(Math.max(1, effectiveAtk - targetDef + 6 + vitalsBonus) * 1.5) +
-        stats.luk + fireDmg;
-    const critText = critMin === critMax
-        ? `crit ${critMax}/exch`
-        : `crit ${critMin}–${critMax}/exch`;
-
-    return `Combo (${qLabel} + ${tLabel} vs ${targetLabel || 'target'}): ` +
-        `~${turnMin}–${turnMax} turn (~${minEx}–${maxEx}/exch ×3 · ${critText}${exposedNote})`;
-}
-
+ 
 function updateCombatTooltips(host, state) {
     const crew = state.crew;
     const stats = derived(crew);

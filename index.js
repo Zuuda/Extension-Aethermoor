@@ -1196,11 +1196,26 @@ function savedZoneRecord(state, zone = state.zone) {
 
 function savedPrimarySettlement(state, zone = state.zone) {
     const zoneRecord = savedZoneRecord(state, zone);
-    const settlement =
-        state.world.settlements[zoneRecord.primarySettlementId];
-
+    const settlement = state.world.settlements[zoneRecord.primarySettlementId];
     assert(settlement, `Zone ${zone} has no primary settlement`);
     return settlement;
+}
+
+function hasLiveEncounter(state) {
+    return ['active', 'spotted'].includes(state?.encounter?.status);
+}
+
+function currentZoneSettlement(state) {
+    return Object.values(state?.world?.settlements || {}).find(
+        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
+    ) || null;
+}
+
+function freeZoneSettlement(state) {
+    if (!state || state.currentJourney || state.activeInstanceId || hasLiveEncounter(state)) {
+        return null;
+    }
+    return currentZoneSettlement(state);
 }
 
 function questIssuerSettlement(state, test = {}) {
@@ -9283,9 +9298,8 @@ function resolveTradeAction(test) {
 function resolveVendorSelection(test) {
     assert(test.state && typeof test.state === 'object', 'Vendor selection requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(state.world?.settlements || {}).find(
-        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
-    );
+    const settlement = freeZoneSettlement(state);
+    assert(settlement, 'Trade selection requires presence at the open shop');
 
     assert(
         settlement && !state.currentJourney && !['active', 'spotted'].includes(state.encounter?.status),
@@ -9384,14 +9398,8 @@ function resolveVendorSelection(test) {
 function resolveVendorTradeCommit(test) {
     assert(test.state && typeof test.state === 'object', 'Trade commit requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(state.world?.settlements || {}).find(
-        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
-    );
-
-    assert(
-        settlement && !state.currentJourney && !['active', 'spotted'].includes(state.encounter?.status),
-        'The crew must be free at a saved settlement to trade'
-    );
+    const settlement = freeZoneSettlement(state);
+    assert(settlement, 'The crew must be free at a saved settlement to trade');
 
     const requested = test.basket;
     assert(
@@ -9778,25 +9786,10 @@ function normalizeConsumableInventory(inventory) {
  * atomically. No potion is equipped or used here.
  */
 function resolveHerbalistAction(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Herbalist interaction requires saved state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'Herbalist interaction requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Herbalist trade requires presence at a free settlement'
-    );
+    const settlement = freeZoneSettlement(state);
+    assert(settlement, 'Herbalist trade requires presence at a free settlement');
 
     assert(
         test.action === 'commit',
@@ -9979,25 +9972,10 @@ const INN_SERVICES = [
 ];
 
 function resolveInnAction(test) {
-    assert(
-        test.state && typeof test.state === 'object',
-        'Inn interaction requires saved state'
-    );
-
+    assert(test.state && typeof test.state === 'object', 'Inn interaction requires saved state');
     const state = clone(test.state);
-    const settlement = Object.values(
-        state.world?.settlements || {}
-    ).find(entry =>
-        entry.locationId === state.currentLocationId &&
-        entry.zone === state.zone
-    );
-
-    assert(
-        settlement &&
-        !state.currentJourney &&
-        !['active', 'spotted'].includes(state.encounter?.status),
-        'Inn services require presence at a free settlement'
-    );
+    const settlement = freeZoneSettlement(state);
+    assert(settlement, 'Inn services require presence at a free settlement');
 
     assert(
         test.action === 'commit',
@@ -15224,26 +15202,26 @@ async function runAethermoorPanelCase(host, tab, caseData, successText) {
         return null;
     }
 }
-async function renderQuestTab(host) {
-    let snapshot;
-
+async function loadTabSnapshot(host, heading, accent = 'world') {
     try {
-        snapshot = await readStoredCombatState();
+        return await readStoredCombatState();
     } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
+        host.replaceChildren(
             makeAethermoorSection(
-                'QUEST JOURNAL',
+                heading,
                 !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
                     ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
-                'quest'
+                    : error instanceof Error ? error.message : String(error),
+                accent
             )
         );
-        return;
+        return null;
     }
+}
+
+async function renderQuestTab(host) {
+    const snapshot = await loadTabSnapshot(host, 'QUEST JOURNAL', 'quest');
+    if (!snapshot) return;
 
     const state = snapshot.state;
     const movementBlocked =
@@ -16331,20 +16309,8 @@ async function openAethermoorInnWindow() {
  * itself is strictly read-only.
  */
 async function renderInventoryTab(host) {
-    let snapshot;
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        host.replaceChildren(makeAethermoorSection(
-            'INVENTORY',
-            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                ? 'No campaign yet. Open World to start one.'
-                : error instanceof Error ? error.message : String(error),
-            'world'
-        ));
-        return;
-    }
-
+    const snapshot = await loadTabSnapshot(host, 'INVENTORY', 'world');
+    if (!snapshot) return;
     const state = snapshot.state;
     const inventory = state.inventory || {};
     const gear = state.crew?.gear || {};
@@ -16790,22 +16756,8 @@ async function openAethermoorCharacterSheetWindow() {
 }
 
 async function renderAetherNetTab(host) {
-    let snapshot;
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        host.replaceChildren(
-            makeAethermoorSection(
-                'AETHER-NET',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error ? error.message : String(error),
-                'world'
-            )
-        );
-        return;
-    }
-
+    const snapshot = await loadTabSnapshot(host, 'AETHER-NET', 'world');
+    if (!snapshot) return;
     const state = snapshot.state;
     const inventory = state.inventory || {};
     const listings = inventory.activeTradeListings || [];
@@ -16983,36 +16935,16 @@ async function renderAetherNetTab(host) {
 }
 
 async function renderShopsTab(host) {
-    let snapshot;
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        host.replaceChildren(
-            makeAethermoorSection(
-                'SHOPS',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error ? error.message : String(error),
-                'world'
-            )
-        );
-        return;
-    }
+    const snapshot = await loadTabSnapshot(host, 'SHOPS', 'world');
+    if (!snapshot) return;
 
     const state = snapshot.state;
-    const settlement = Object.values(state.world?.settlements || {}).find(
-        entry => entry.locationId === state.currentLocationId && entry.zone === state.zone
-    );
+    const settlement = freeZoneSettlement(state);
 
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
 
-    if (
-        !settlement ||
-        state.currentJourney ||
-        state.activeInstanceId ||
-        ['active', 'spotted'].includes(state.encounter?.status)
-    ) {
+    if (!settlement) {
         host.appendChild(
             makeAethermoorSection(
                 'SHOPS UNAVAILABLE',
@@ -17172,22 +17104,8 @@ async function copyAethermoorAchievementsTable(state) {
 }
 
 async function renderAchievementsTab(host) {
-    let snapshot;
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        host.replaceChildren(
-            makeAethermoorSection(
-                'ACHIEVEMENTS',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error ? error.message : String(error),
-                'quest'
-            )
-        );
-        return;
-    }
-
+    const snapshot = await loadTabSnapshot(host, 'ACHIEVEMENTS', 'quest');
+    if (!snapshot) return;
     const state = snapshot.state;
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
@@ -17523,27 +17441,8 @@ function appendEncounterCard(host, state, originTab) {
  * Overland travel to the entrance uses the ordinary route resolver.
  */
 async function renderInstanceTab(host) {
-
-    let snapshot;
-
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        host.replaceChildren();
-        host.appendChild(
-            makeAethermoorSection(
-                'INSTANCE',
-                !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                    ? 'No campaign yet. Open World to start one.'
-                    : error instanceof Error
-                        ? error.message
-                        : String(error),
-                'world'
-            )
-        );
-        return;
-    }
-
+    const snapshot = await loadTabSnapshot(host, 'INSTANCE', 'world');
+    if (!snapshot) return;
     const state = snapshot.state;
     host.replaceChildren();
     markCampaignViewRendered(snapshot);
@@ -18447,16 +18346,7 @@ function renderAethermoorTab(tab) {
         AETHERMOOR_METADATA_KEY
     ]?.state;
 
-    const shopsAvailable = Boolean(
-        state &&
-        !state.currentJourney &&
-        !state.activeInstanceId &&
-        !['active', 'spotted'].includes(state.encounter?.status) &&
-        Object.values(state.world?.settlements || {}).some(entry =>
-            entry.locationId === state.currentLocationId &&
-            entry.zone === state.zone
-        )
-    );
+    const shopsAvailable = Boolean(freeZoneSettlement(state));
 
     if (tab === 'shops' && !shopsAvailable) {
         tab = 'world';
@@ -18929,17 +18819,9 @@ function updateAethermoorStatusStrip(state) {
 
     strip.replaceChildren(...items, copy);
     strip.hidden = false;
-
     const shopsTab = aethermoorPanelElement?.querySelector('.aethermoor-tab[data-tab="shops"]');
     if (shopsTab) {
-        const shopsAvailable = Boolean(
-            !state.currentJourney &&
-            !state.activeInstanceId &&
-            !['active', 'spotted'].includes(state.encounter?.status) &&
-            Object.values(state.world?.settlements || {}).some(entry =>
-                entry.locationId === state.currentLocationId && entry.zone === state.zone
-            )
-        );
+        const shopsAvailable = Boolean(freeZoneSettlement(state));
         shopsTab.disabled = !shopsAvailable;
         shopsTab.title = shopsAvailable ? 'Open settlement shops' : 'Shops are available at a free settlement';
     }
@@ -19647,21 +19529,8 @@ function appendCombatCommandPreview(inlineHost, state) {
 async function openCombatPanel(inlineHost) {
     addAethermoorPanelStyles();
     assert(inlineHost instanceof HTMLElement, 'Combat must render inside the Aethermoor Combat tab');
-
-    let snapshot;
-    try {
-        snapshot = await readStoredCombatState();
-    } catch (error) {
-        inlineHost.replaceChildren(makeAethermoorSection(
-            'COMBAT',
-            !getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]
-                ? 'No campaign yet. Open World to start one.'
-                : error instanceof Error ? error.message : String(error),
-            'combat'
-        ));
-        return;
-    }
-
+    const snapshot = await loadTabSnapshot(inlineHost, 'COMBAT', 'combat');
+    if (!snapshot) return;
     const state = snapshot.state;
     const encounter = state.encounter;
 
@@ -20805,14 +20674,7 @@ function exploreRegionCommand() {
 }
 
 function travelStepId(message) {
-    let hash = 2166136261;
-
-    for (let index = 0; index < message.text.length; index++) {
-        hash ^= message.text.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-    }
-
-    return `chat-message-${message.index}-${(hash >>> 0).toString(36)}`;
+    return `chat-message-${message.index}-${worldHash(message.text).toString(36)}`;
 }
 
 /*

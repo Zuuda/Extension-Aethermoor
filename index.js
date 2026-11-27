@@ -4657,7 +4657,7 @@ function resolveTurn({ state, actions, rolls }) {
 
         // Shadow-Mender life-leech: drains a living foe and feeds the lowest-HP% living ally.
         const menderDrain = shadowMechanics(c).menderDrain;
-        if (menderDrain > 0 && live(s).length > 0 && (c.qtik.hp > 0 || c.tansy.hp > 0)) {
+        if (!fleeing && menderDrain > 0 && live(s).length > 0 && (c.qtik.hp > 0 || c.tansy.hp > 0)) {
             const drainTarget = target.hp > 0 ? target : lowestHpFoe();
             if (drainTarget) {
                 const drainHits = dealDamage(s, drainTarget, menderDrain, kills);
@@ -4723,7 +4723,7 @@ function resolveTurn({ state, actions, rolls }) {
         if (restored > 0) turnEffects.push(`Swarm Momentum reformed ${restored} weasel(s)`);
     }
 
-    if (shadowMechanics(c).menderDrain > 0) {
+    if (!fleeing && shadowMechanics(c).menderDrain > 0) {
         const livingIds = new Set(live(s).map(foe => foe.id));
         const hex = Object.keys(encounter.hexStacks || {}).find(
             id => livingIds.has(id) && encounter.hexStacks[id] > 0
@@ -9538,10 +9538,12 @@ function resolveQuestAction(test) {
                 questId: quest.id,
                 title: completion.quest.title,
                 rank: completion.quest.rank,
+                isMsq: completion.quest.isMsq === true,
                 rewards: completion.rewards,
                 levelUps: completion.levelUps || []
             }
         };
+
     }
 
     // action === 'complete'
@@ -13457,7 +13459,8 @@ function travelNarrationPacket(result) {
             contractCompleteCardHtml({
                 title: completion.title,
                 rank: completedQuest?.rank || null,
-                rewards: completion.rewards
+                rewards: completion.rewards,
+                isMsq: completedQuest?.isMsq === true
             }),
             ...xpProgressNarrationLines(
                 result.state?.crew,
@@ -13479,7 +13482,8 @@ function travelNarrationPacket(result) {
             contractCompleteCardHtml({
                 title: completedQuest?.title || 'Contract',
                 rank: completedQuest?.rank || null,
-                rewards
+                rewards,
+                isMsq: completedQuest?.isMsq === true
             }),
             ...xpProgressNarrationLines(
                 result.state?.crew,
@@ -13487,7 +13491,6 @@ function travelNarrationPacket(result) {
             )
         );
     }
-
 
     if (result.zoneTransition) {
         const transition = result.zoneTransition;
@@ -18243,11 +18246,11 @@ function combatRecapPrompt(receipt) {
                 contractCompleteCardHtml({
                     title: questGate.questCompletion.title || 'Contract',
                     rank: questGate.questCompletion.rank || null,
-                    rewards
+                    rewards,
+                    isMsq: questGate.questCompletion.isMsq === true
                 })
             );
         }
-
     }
 
     return lines.join('\n');

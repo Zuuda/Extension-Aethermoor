@@ -2521,6 +2521,7 @@ function shadowBindNarrationPacket(result) {
 
     lines.push(
         'Portray Tansy binding these shadow-imprints naturally in this reply (short, evocative class moment; ordinary NPCs cannot see System prompts, though they may notice her shadow-craft).',
+        'If the combat recap above also listed these imprints as pending, Tansy has ALREADY chosen to bind them—portray her binding them now instead of waiting for a choice.',
         'The shadow deck update is ALREADY applied to saved state; do not ask her to bind them again.'
     );
 
@@ -4719,13 +4720,18 @@ function resolveTurn({ state, actions, rolls }) {
     }
 
     if (shadowMechanics(c).menderDrain > 0) {
-        const hex = Object.keys(encounter.hexStacks || {}).find(id => encounter.hexStacks[id] > 0);
+        const livingIds = new Set(live(s).map(foe => foe.id));
+        const hex = Object.keys(encounter.hexStacks || {}).find(
+            id => livingIds.has(id) && encounter.hexStacks[id] > 0
+        );
         if (hex) {
             encounter.hexStacks[hex] -= 1;
             if (encounter.hexStacks[hex] === 0) delete encounter.hexStacks[hex];
             turnEffects.push('Shadow-Mender cleansed one Hexer stack');
         } else {
-            const passiveFoe = eliteBossFoes.find(foe => Number(foe.passiveStacks || 0) > 0);
+            const passiveFoe = eliteBossFoes.find(
+                foe => foe.hp > 0 && Number(foe.passiveStacks || 0) > 0
+            );
             if (passiveFoe) {
                 passiveFoe.passiveStacks -= 1;
                 turnEffects.push(`Shadow-Mender cleansed one ${passiveFoe.id} passive stack`);
@@ -20040,10 +20046,7 @@ function updateCombatAbilityButtons(panel, state) {
             (group === 'tansy' && value === 'raise_shadow' && !canRaiseShadow) ||
             (group === 'tansy' && value === 'unfuse_shadow' && !canUnfuseShadow);
 
-        button.disabled = false;
-        button.setAttribute('aria-disabled', String(Boolean(exhausted)));
-        button.dataset.exhausted = exhausted ? 'true' : 'false';
-        button.title = exhausted
+        const exhaustedReason = exhausted
             ? value === 'drink'
                 ? (!hasPotions
                     ? 'No potions in stock'
@@ -20055,6 +20058,11 @@ function updateCombatAbilityButtons(panel, state) {
                         : 'Already used in this encounter'
             : '';
 
+        button.disabled = false;
+        button.setAttribute('aria-disabled', String(Boolean(exhausted)));
+        button.dataset.exhausted = exhausted ? 'true' : 'false';
+        button.dataset.exhaustedReason = exhaustedReason;
+        button.title = exhaustedReason;
         button.setAttribute(
             'aria-pressed',
             String(
@@ -20499,7 +20507,7 @@ function updateCombatTooltips(host, state) {
 
         const prefix =
             button.dataset.exhausted === 'true'
-                ? 'Unavailable: already used to its limit.\n\n'
+                ? `Unavailable: ${button.dataset.exhaustedReason || 'already used to its limit'}.\n\n`
                 : '';
 
         button.title = `${prefix}${description}`;

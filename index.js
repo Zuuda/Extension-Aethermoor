@@ -2767,7 +2767,10 @@ function evaluateAethermoorAchievements(
         }
     }
 
-    if (oneCase?.kind === 'travel' && caseResult?.created) {
+    if (
+        (oneCase?.kind === 'travel' || oneCase?.kind === 'investigate_sign') &&
+        caseResult?.created
+    ) {
         if (caseResult.event === 'hidden_cache') stats.caches += 1;
     }
 
@@ -3952,9 +3955,10 @@ function finishEncounterRespawns(state, totalDefeat = false) {
             state,
             state.zone
         );
-
+        
         state.currentJourney = null;
         state.activeInstanceId = null;
+        state.trailSign = null;
 
         for (const instance of Object.values(
             state.instances || {}
@@ -6118,12 +6122,13 @@ function resolveInstanceAction(test) {
         'Reach the instance entrance and resolve travel or combat first'
     );
 
+    state.trailSign = null;
     let room = null;
     let encounter = null;
     let exitedFromRoomId = null;
     let passedThrough = [];
-
     if (test.action === 'enter') {
+
         assert(
             !state.activeInstanceId &&
             instance.currentRoomId === null,
@@ -6970,6 +6975,8 @@ function resolveTravelStep(test) {
     let journey = state.currentJourney;
     if (journey?.status === 'paused') journey.status = 'traveling';
 
+    state.trailSign = null;
+
     // Last route segment: destination content supplies the arrival scene without a random travel roll.
     if (journey && journey.completedSegments >= journey.totalSegments - 1) {
         int(journey.totalSegments, 'journey.totalSegments', 1);
@@ -7057,12 +7064,12 @@ function resolveTravelStep(test) {
 
     const travelRoll = roll(state, 100);
     const event =
-        travelRoll <= 28 ? 'quiet_travel' :
-        travelRoll <= 55 ? 'passing_vignette' :
-        travelRoll <= 63 ? 'hidden_cache' :
-        travelRoll <= 73 ? 'environmental_sign' :
-        travelRoll <= 82 ? 'point_of_interest' :
-        travelRoll <= 90 ? 'wild_encounter' :
+        travelRoll <= 22 ? 'quiet_travel' :
+        travelRoll <= 49 ? 'passing_vignette' :
+        travelRoll <= 57 ? 'hidden_cache' :
+        travelRoll <= 67 ? 'environmental_sign' :
+        travelRoll <= 76 ? 'point_of_interest' :
+        travelRoll <= 84 ? 'wild_encounter' :
         travelRoll <= 97 ? 'social_opportunity' :
         'hidden_instance';
 
@@ -7098,9 +7105,17 @@ function resolveTravelStep(test) {
             'fresh tracks cross the route',
             'recent smoke or cooking smells drift from nearby',
             'a damaged trail marker suggests recent passage',
-            'the local wildlife abruptly falls quiet'
+            'the local wildlife abruptly falls quiet',
+            'a torn pack or discarded salvage lies just off the path',
+            'carrion birds circle low over a nearby rise',
+            'a faint Pre-Calamity conduit hums or glints off the trail',
+            'freshly disturbed earth and loose masonry break the ground nearby',
+            'half-erased surveyor blazes branch away from the main track'
         ];
-        outcome.environmentalSign = signs[roll(state, signs.length) - 1];
+        const pool = signs.filter(entry => entry !== state.lastEnvironmentalSign);
+        const chosen = (pool.length > 0 ? pool : signs)[roll(state, (pool.length > 0 ? pool : signs).length) - 1];
+        state.lastEnvironmentalSign = chosen;
+        outcome.environmentalSign = chosen;
     } else if (event === 'point_of_interest') {
         // Memorable scenic landmark discovered in passing: minor 2–5% discovery XP, no map node.
         const percent = roll(state, 4) + 1;
@@ -7129,7 +7144,7 @@ function resolveTravelStep(test) {
         state = social.state;
         outcome.social = clone(social.seed);
 
-        if (roll(state, 2) === 1) {
+        if (roll(state, 4) <= 3) {
             const template = TRAVELER_RUMORS[roll(state, TRAVELER_RUMORS.length) - 1];
             const leadId = `rumor-${test.stepId}`;
             const placeId = `place-z${state.zone}-${template.id}-${test.stepId}`;
@@ -7185,12 +7200,149 @@ function resolveTravelStep(test) {
         outcome.journey = clone(journey);
     }
 
+    if (event === 'environmental_sign' && outcome.environmentalSign) {
+        state.trailSign = {
+            id: `sign-${test.stepId}`,
+            stepId: test.stepId,
+            zone: state.zone,
+            sign: outcome.environmentalSign,
+            locationId: state.currentLocationId,
+            position: clone(
+                state.currentPosition || { nodeId: state.currentLocationId }
+            )
+        };
+        outcome.trailSignId = state.trailSign.id;
+    }
+
     const activeMsq = state.world?.zones?.[state.zone]?.msq;
     if (activeMsq?.status === 'active' && Number(activeMsq.pendingBeatDelay || 0) > 0) {
         activeMsq.pendingBeatDelay -= 1;
     }
 
     state.travelSteps[test.stepId] = clone(outcome);
+    return { ok: true, created: true, ...outcome, state };
+}
+
+/*
+ * Transient roadside follow-through for environmental_sign rolls.
+ * Consumes no journey segment; moving on without investigating clears
+ * state.trailSign automatically.
+ */
+function resolveTrailSignInvestigation(test) {
+    assert(test.state && typeof test.state === 'object', 'Sign investigation requires saved state');
+    assert(typeof test.stepId === 'string' && test.stepId.length > 0, 'Sign investigation requires a stable stepId');
+
+    let state = clone(test.state);
+    state.trailSignSteps ||= {};
+
+    const existing = state.trailSignSteps[test.stepId];
+    if (existing) {
+        return { ok: true, created: false, ...clone(existing), state };
+    }
+
+    assert(!state.activeInstanceId, 'Leave the instance before investigating a trail sign');
+    assert(
+        !['active', 'spotted'].includes(state.encounter?.status),
+        'Resolve or avoid the current encounter first'
+    );
+
+    const signRecord = state.trailSign;
+    assert(signRecord && typeof signRecord === 'object', 'There is no active trail sign to investigate here');
+    if (test.signId) {
+        assert(signRecord.id === test.signId, 'That trail sign is no longer nearby');
+    }
+
+    state.trailSign = null;
+
+    const signRoll = roll(state, 10);
+    const event =
+        signRoll <= 3 ? 'cold_trail' :
+        signRoll <= 6 ? 'wild_encounter' :
+        signRoll <= 8 ? 'hidden_cache' :
+        signRoll === 9 ? 'social_opportunity' :
+        'point_of_interest';
+
+    const outcome = {
+        stepId: test.stepId,
+        signId: signRecord.id,
+        sign: signRecord.sign,
+        zone: state.zone,
+        signRoll,
+        event,
+        encounterId: null,
+        encounter: null,
+        cache: null,
+        discovery: null,
+        social: null,
+        rumor: null
+    };
+
+    if (event === 'wild_encounter') {
+        const spawned = spawnEncounter({
+            state,
+            zone: state.zone,
+            encounterType: 'wild',
+            siteAffinity: 'ordinary',
+            encounterId: `sign-${test.stepId}`
+        });
+        state.rngState = spawned.state.rngState;
+        state.encounter = spawned.encounter;
+        outcome.encounterId = state.encounter.id;
+        outcome.encounter = clone(state.encounter);
+        if (state.currentJourney) {
+            state.currentJourney.status = 'paused';
+        }
+    } else if (event === 'hidden_cache') {
+        outcome.cache = rollChestLoot(state, state.zone, test.stepId, 'trail_sign');
+    } else if (event === 'social_opportunity') {
+        const socialId = `sign-traveler-${test.stepId}`;
+        const social = resolveSocialSeed({ state, socialId });
+        state = social.state;
+        outcome.social = clone(social.seed);
+
+        if (roll(state, 4) <= 3) {
+            const template = TRAVELER_RUMORS[roll(state, TRAVELER_RUMORS.length) - 1];
+            const leadId = `rumor-${test.stepId}`;
+            const placeId = `place-z${state.zone}-${template.id}-${test.stepId}`;
+
+            state.places[placeId] ||= {
+                id: placeId,
+                label: template.place,
+                zone: state.zone,
+                knownFrom: 'rumor',
+                visited: false
+            };
+            state.leads[leadId] = {
+                id: leadId,
+                kind: 'rumor',
+                claim: template.claim,
+                sourceId: socialId,
+                targetType: 'place',
+                targetId: placeId,
+                status: 'known'
+            };
+
+            ensureWorldRecords(state);
+            recordCrewKnowledge(state, {
+                id: `knowledge-testimony-${leadId}`,
+                kind: 'testimony',
+                knowledgeType: 'testimony',
+                certainty: 'unverified_claim',
+                summary: template.claim,
+                source: { id: socialId, type: 'traveler' },
+                learnedAtLocationId: state.currentLocationId,
+                learnedAtZone: state.zone
+            });
+            outcome.rumor = { id: leadId, claim: template.claim, targetId: placeId, targetLabel: template.place };
+        }
+    } else if (event === 'point_of_interest') {
+        const percent = roll(state, 4) + 1;
+        const xp = Math.max(1, Math.round(nextXp(state.crew.level) * percent / 100));
+        const levelUps = applyXp(state.crew, xp);
+        outcome.discovery = { xp, percent, levelUps };
+    }
+
+    state.trailSignSteps[test.stepId] = clone(outcome);
     return { ok: true, created: true, ...outcome, state };
 }
 
@@ -9163,6 +9315,48 @@ function resolveSelectedQuestEvent(test) {
         `Cannot find discovery from state ${discovery.state}`
     );
 
+    const isImmediateOnSiteCompletion =
+        gate?.step === quest.gates &&
+        !quest.objectiveResolution &&
+        !(quest.structureV2?.family === 'retrieve_item' && quest.requiresDelivery !== false) &&
+        quest.structureV2?.family !== 'rescue_person';
+
+    if (test.deferCompletion === true && isImmediateOnSiteCompletion) {
+        state.pendingQuestCompletions ||= [];
+        const pendingId = `found:${discovery.id}`;
+        if (state.pendingQuestCompletions.some(entry => entry.id === pendingId)) {
+            return {
+                ok: true,
+                created: false,
+                deferred: true,
+                action: 'quest_event',
+                event: 'found',
+                questId: quest.id,
+                discovery: clone(discovery),
+                state
+            };
+        }
+
+        state.pendingQuestCompletions.push({
+            id: pendingId,
+            kind: 'quest_event',
+            event: 'found',
+            questId: quest.id,
+            questItemId: discovery.id
+        });
+
+        return {
+            ok: true,
+            created: true,
+            deferred: true,
+            action: 'quest_event',
+            event: 'found',
+            questId: quest.id,
+            discovery: clone(discovery),
+            state
+        };
+    }
+
     discovery.state = discovery.acquisitionPolicy === 'auto_on_reveal'
         ? 'acquired'
         : 'found';
@@ -9172,6 +9366,13 @@ function resolveSelectedQuestEvent(test) {
         discovery,
         quest.id
     );
+
+    if (Array.isArray(progression.state.pendingQuestCompletions)) {
+        progression.state.pendingQuestCompletions =
+            progression.state.pendingQuestCompletions.filter(
+                entry => entry.id !== `found:${discovery.id}`
+            );
+    }
 
     const updatedQuest = findQuestById(
         progression.state,
@@ -9303,11 +9504,15 @@ function resolveQuestAction(test) {
                 }
             }
         }
-
         for (const lead of Object.values(state.leads || {})) {
             if (lead.id === `quest-return-${quest.id}` || lead.id === `quest-lead-${quest.id}`) {
                 lead.status = 'resolved';
             }
+        }
+        if (Array.isArray(state.pendingQuestCompletions)) {
+            state.pendingQuestCompletions = state.pendingQuestCompletions.filter(
+                entry => entry.questId !== quest.id
+            );
         }
         if (state.activeQuest?.id === quest.id) state.activeQuest = null;
     }
@@ -12478,6 +12683,9 @@ function resolveBatch(args) {
                 case 'travel':
                     result = resolveTravelStep(test);
                     break;
+                case 'investigate_sign':
+                    result = resolveTrailSignInvestigation(test);
+                    break;
                 case 'instance':
                     result = test.action === 'theme'
                         ? resolveInstanceTheme(test)
@@ -12709,6 +12917,36 @@ function resolveBatch(args) {
                         'The locked quest cargo has not been recovered'
                     );
 
+                    if (test.deferCompletion === true) {
+                        state.pendingQuestCompletions ||= [];
+                        const pendingId = `delivered:${quest.id}`;
+                        if (state.pendingQuestCompletions.some(entry => entry.id === pendingId)) {
+                            result = {
+                                ok: true,
+                                created: false,
+                                deferred: true,
+                                action: 'quest_delivery',
+                                questId: quest.id,
+                                state
+                            };
+                            break;
+                        }
+                        state.pendingQuestCompletions.push({
+                            id: pendingId,
+                            kind: 'quest_delivery',
+                            questId: quest.id
+                        });
+                        result = {
+                            ok: true,
+                            created: true,
+                            deferred: true,
+                            action: 'quest_delivery',
+                            questId: quest.id,
+                            state
+                        };
+                        break;
+                    }
+
                     result = resolveQuestAction({
                         state,
                         questId: quest.id,
@@ -12719,6 +12957,7 @@ function resolveBatch(args) {
                     });
                     result.action = 'quest_delivery';
                     break;
+
                 }
                 case 'quest':
                     result = test.action ? resolveQuestAction(test) : resolveQuestSeed(test);
@@ -13326,9 +13565,10 @@ function travelNarrationPacket(result) {
     } else if (result.event === 'environmental_sign') {
         lines.push(
             `Environmental sign: ${result.environmentalSign}.`,
-            'This is a sign only; it does not establish an encounter, NPC, or quest.'
+            'Portray this roadside sign naturally without resolving what lies behind it. Leave the choice to pause and investigate or keep moving to the protagonists.'
         );
     } else if (result.event === 'point_of_interest' && result.discovery) {
+
         const { xp, levelUps = [] } = result.discovery;
 
         lines.push(
@@ -13510,6 +13750,60 @@ function travelNarrationPacket(result) {
                 ]
                 : []),
             'Describe the geographic transition gradually. Do not treat the region change as a teleport.'
+        );
+    }
+
+    return lines.join('\n');
+}
+
+function trailSignInvestigationNarrationPacket(result) {
+    const lines = [
+        `The crew paused to investigate the roadside sign: ${result.sign}.`,
+        'No journey segment was consumed by this detour.'
+    ];
+
+    if (result.event === 'cold_trail') {
+        lines.push(
+            'INVESTIGATION RESULT: Cold trail / benign oddity.',
+            'Following the sign leads to a grounded, mundane explanation or a trail that fades out cleanly. ' +
+                'Make it clear there is nothing further to find here—do not add encounters, loot, or quests.'
+        );
+    } else if (result.event === 'wild_encounter') {
+        lines.push(
+            `INVESTIGATION RESULT: Following the sign led to spotted encounter ${result.encounterId}.`,
+            'The encounter is spotted, not engaged. Leave the choice to engage, avoid, or retreat to the protagonists.'
+        );
+    } else if (result.event === 'hidden_cache' && result.cache) {
+        lines.push(
+            '* **INVESTIGATION RESULT: HIDDEN CACHE FOUND!**',
+            'Following the sign led the crew to a tucked-away stash or salvageable cache. ' +
+                'The contents below are ALREADY added to saved state. Do not add extra coin, gear, traps, or combat.',
+            ...chestLootNarrationLines(result.cache)
+        );
+    } else if (result.event === 'social_opportunity' && result.social) {
+        lines.push(
+            'INVESTIGATION RESULT: Following the sign led to a traveler or local nearby.',
+            `First-meeting manner: ${result.social.demeanor}.`,
+            `Private inclination: ${result.social.inclination || 'not recorded'}.`,
+            'The manner is observable; the inclination is not. Give any consequential hidden truth a plausible, ' +
+                'scene-specific one-line <template> precommit. Do not report this traveler with INTRODUCE_NPC.',
+            ...(result.rumor
+                ? [
+                    `The traveler shares this claim: ${result.rumor.claim}`,
+                    `The claim points to ${result.rumor.targetLabel}.`,
+                    'Whether the claim is true has not been established.'
+                ]
+                : ['The traveler offers no rumor or quest lead.'])
+        );
+    } else if (result.event === 'point_of_interest' && result.discovery) {
+        const { xp, levelUps = [] } = result.discovery;
+        lines.push(
+            '* **INVESTIGATION RESULT: LANDMARK DISCOVERED!** Following the sign revealed a memorable local landmark or Pre-Calamity curiosity.',
+            `Discovery XP (+${xp} XP) is ALREADY applied to saved state. Display this exact System HTML card verbatim (replacing ONLY [Landmark Name] and [Short 1–2 sentence lore blurb]):`,
+            landmarkDiscoveredCardHtml(xp, result.state?.crew),
+            ...(levelUps.length > 0
+                ? xpProgressNarrationLines(result.state?.crew, levelUps)
+                : [])
         );
     }
 
@@ -14638,6 +14932,7 @@ async function runStoredMechanic(args) {
             caseResult.created === false &&
             (
                 oneCase.kind === 'travel' ||
+                oneCase.kind === 'investigate_sign' ||
                 oneCase.kind === 'instance' ||
                 oneCase.kind === 'encounter_request' ||
                 oneCase.kind === 'stock_names' ||
@@ -14789,7 +15084,8 @@ async function runStoredMechanic(args) {
         const questDeliveryPacket =
             batch &&
             oneCase?.kind === 'quest_delivery' &&
-            caseResult.created !== false
+            caseResult.created !== false &&
+            caseResult.deferred !== true
                 ? questDeliveryNarrationPacket(
                     caseResult,
                     caseResult.quest,
@@ -14877,6 +15173,13 @@ async function runStoredMechanic(args) {
                         )
                             ? [travelNarrationPacket(caseResult)]
                             : []
+                    ),
+                    ...(
+                        batch &&
+                        oneCase?.kind === 'investigate_sign' &&
+                        caseResult.created
+                            ? [trailSignInvestigationNarrationPacket(caseResult)]
+                            : []
                     )
                 ].join('\n\n')
 
@@ -14929,7 +15232,8 @@ async function runStoredMechanic(args) {
 
             : batch &&
               oneCase?.kind === 'quest_event' &&
-              caseResult.created
+              caseResult.created &&
+              caseResult.deferred !== true
                 ? questDiscoveryNarrationPacket(
                     caseResult,
                     caseResult.quest ||
@@ -14943,6 +15247,11 @@ async function runStoredMechanic(args) {
               oneCase?.kind === 'avoid' &&
               caseResult.created
                 ? avoidEncounterNarrationPacket(nextEncounter)
+
+            : batch &&
+              oneCase?.kind === 'investigate_sign' &&
+              caseResult.created
+                ? trailSignInvestigationNarrationPacket(caseResult)
 
             : batch &&
               oneCase?.kind === 'travel' &&
@@ -15048,11 +15357,13 @@ async function runStoredMechanic(args) {
             throw error;
         }
 
-        scheduleAethermoorContractNotifications(
-            savedState,
-            nextState,
-            metadata
-        );
+        if (oneCase?.deferNotifications !== true) {
+            scheduleAethermoorContractNotifications(
+                savedState,
+                nextState,
+                metadata
+            );
+        }
 
         /*
          * The full machine state stays in chat metadata, rather than
@@ -15603,6 +15914,10 @@ function addAethermoorPanelStyles() {
 .aethermoor-ui-action:hover:not(:disabled), .aethermoor-ui-action:focus-visible:not(:disabled) { color:#ffffff; border-color:#4da6ff; }
 .aethermoor-ui-action:disabled { opacity:0.45; cursor:not-allowed; }
 .aethermoor-ui-action[data-accent="quest"]:hover, .aethermoor-ui-action[data-accent="quest"]:focus-visible { border-color:#d99b26; }
+.aethermoor-action-row { display:flex; flex-wrap:wrap; gap:6px; }
+.aethermoor-action-row .aethermoor-ui-action { width:auto; flex:1 1 0; min-width:110px; padding:6px 9px; text-align:center; font-size:11px; font-weight:700; }
+.aethermoor-action-row-danger .aethermoor-ui-action { padding:4px 8px; font-size:10px; font-weight:400; color:#9caab8; }
+.aethermoor-action-row-danger .aethermoor-ui-action:hover:not(:disabled) { color:#f87171; border-color:#f87171; }
 .aethermoor-debug-records { display:grid; gap:8px; }
 .aethermoor-debug-record { display:grid; gap:6px; padding:8px; background:#181d23; border:1px solid #2b3542; border-left:3px solid #c084fc; }
 .aethermoor-map-node-clickable { cursor:pointer; }
@@ -16253,6 +16568,19 @@ async function renderQuestTab(host) {
             { isMsq, open: true }
         );
 
+        const hasPendingCompletion = (state.pendingQuestCompletions || []).some(
+            entry => entry.questId === quest.id
+        );
+        const primaryRow = el('div', { className: 'aethermoor-action-row' });
+
+        if (hasPendingCompletion) {
+            body.appendChild(el('div', {
+                className: 'aethermoor-ui-text',
+                style: { color: '#4ade80' },
+                text: 'Completion pending — rewards and System cards will land on your next reply.'
+            }));
+        }
+
         const canRevealTerminal =
             quest.currentGate?.mode === 'combat_twist_showdown' &&
             quest.terminalThreat?.resolved !== true &&
@@ -16262,7 +16590,7 @@ async function renderQuestTab(host) {
             !['active', 'spotted'].includes(state.encounter?.status);
 
         if (canRevealTerminal) {
-            body.appendChild(
+            primaryRow.appendChild(
                 makeAethermoorAction(
                     'Reveal Quest Threat',
                     'combat',
@@ -16281,6 +16609,7 @@ async function renderQuestTab(host) {
         }
 
         const pendingDiscovery =
+            !hasPendingCompletion &&
             !quest.objectiveResolution &&
             !state.currentJourney &&
             !state.activeInstanceId &&
@@ -16321,7 +16650,7 @@ async function renderQuestTab(host) {
 
             markFound.title =
                 'Manual fallback if the GM misses the <AETHERMOOR:FOUND> tag.';
-            body.appendChild(markFound);
+            primaryRow.appendChild(markFound);
         }
 
         const bringingPersonToSafety =
@@ -16371,6 +16700,7 @@ async function renderQuestTab(host) {
             );
 
             const canConfirmHandover =
+                !hasPendingCompletion &&
                 quest.deliveryReady === true &&
                 state.currentLocationId === quest.turnIn?.locationId &&
                 !state.currentJourney &&
@@ -16405,7 +16735,7 @@ async function renderQuestTab(host) {
 
                 confirmHandover.title =
                     'Click right before sending your handover message so completion, level-up, and achievements land in that reply (also works as a fallback if <AETHERMOOR:DELIVERED> was missed).';
-                body.appendChild(confirmHandover);
+                primaryRow.appendChild(confirmHandover);
             }
         }
 
@@ -16417,7 +16747,7 @@ async function renderQuestTab(host) {
             state.encounter?.questTerminal?.questId === quest.id;
 
         if (isQuestLinkedFight) {
-            body.appendChild(
+            primaryRow.appendChild(
                 makeAethermoorAction(
                     'Fight!',
                     'combat',
@@ -16448,7 +16778,7 @@ async function renderQuestTab(host) {
             }
 
             if (journey?.status === 'paused' && hasLiveEncounter) {
-                body.appendChild(
+                primaryRow.appendChild(
                     makeAethermoorAction(
                         'Fight!',
                         'combat',
@@ -16458,14 +16788,14 @@ async function renderQuestTab(host) {
             } else {
                 const move = makeAethermoorAction(
                     journey?.completedSegments === journey?.totalSegments
-                        ? 'Start journey to quest destination'
+                        ? 'Finish Journey'
                         : journey
-                            ? 'Continue to quest destination'
+                            ? 'Continue Journey'
                             : bringingPersonToSafety
-                                ? 'Bring person to safety'
+                                ? 'Bring to Safety'
                                 : returningWithCargo
-                                    ? 'Return with quest cargo'
-                                    : 'Travel to quest objective',
+                                    ? 'Return Cargo'
+                                    : 'Travel to Objective',
                     'quest',
                     () => copyAethermoorCommand(
                         destinationCommand(destinationId)
@@ -16473,11 +16803,30 @@ async function renderQuestTab(host) {
                 );
 
                 move.disabled = movementBlocked;
-                body.appendChild(move);
+                primaryRow.appendChild(move);
+
+                if (journey && state.trailSign && !movementBlocked) {
+                    const investigate = makeAethermoorAction(
+                        'Pause & Investigate',
+                        'world',
+                        () => copyAethermoorCommand(
+                            investigateSignCommand(state.trailSign.id)
+                        )
+                    );
+                    investigate.title = `Investigate: ${state.trailSign.sign}`;
+                    primaryRow.appendChild(investigate);
+                }
             }
         }
-        addQuestAction(body, quest, 'Fail Quest', 'fail');
-        addQuestAction(body, quest, 'Cancel Quest', 'cancel');
+
+        if (primaryRow.childElementCount > 0) {
+            body.appendChild(primaryRow);
+        }
+
+        const dangerRow = el('div', { className: 'aethermoor-action-row aethermoor-action-row-danger' });
+        addQuestAction(dangerRow, quest, 'Fail Quest', 'fail');
+        addQuestAction(dangerRow, quest, 'Cancel Quest', 'cancel');
+        body.appendChild(dangerRow);
         host.appendChild(drawer);
     }
 
@@ -16490,8 +16839,10 @@ async function renderQuestTab(host) {
             { isMsq, open: true }
         );
 
-        addQuestAction(body, quest, 'Accept Quest', 'accept');
-        addQuestAction(body, quest, 'Decline Quest', 'decline');
+        const row = el('div', { className: 'aethermoor-action-row' });
+        addQuestAction(row, quest, 'Accept Quest', 'accept');
+        addQuestAction(row, quest, 'Decline Quest', 'decline');
+        body.appendChild(row);
         host.appendChild(drawer);
     }
 
@@ -16593,6 +16944,15 @@ function parseQueuedMoveCommand(command, state) {
             kind: 'travel',
             destinationId,
             label: `Travel to ${label}`
+        };
+    }
+
+    const signMatch = command.match(AETHERMOOR_INVESTIGATE_SIGN_COMMAND);
+    if (signMatch) {
+        return {
+            kind: 'investigate_sign',
+            signId: signMatch[1],
+            label: 'Pause & Investigate sign'
         };
     }
 
@@ -18972,6 +19332,7 @@ async function renderWorldTab(host) {
             'world'
         );
 
+        const journeyRow = el('div', { className: 'aethermoor-action-row' });
         const continueButton = makeAethermoorAction(
             arrivalPending
                 ? `Finish journey to ${journey.destinationLabel}`
@@ -18983,8 +19344,21 @@ async function renderWorldTab(host) {
         );
 
         continueButton.disabled = movementBlocked;
+        journeyRow.appendChild(continueButton);
 
-        section.appendChild(continueButton);
+        if (state.trailSign && !movementBlocked) {
+            const investigateButton = makeAethermoorAction(
+                'Pause & Investigate',
+                'quest',
+                () => copyAethermoorCommand(
+                    investigateSignCommand(state.trailSign.id)
+                )
+            );
+            investigateButton.title = `Investigate: ${state.trailSign.sign}`;
+            journeyRow.appendChild(investigateButton);
+        }
+
+        section.appendChild(journeyRow);
         host.appendChild(section);
     }
 
@@ -19026,32 +19400,37 @@ async function renderWorldTab(host) {
         Number(state.places[lead.targetId]?.zone) === state.zone
     );
 
-    const rumorSection = makeAethermoorSection(
-        'RUMORS · CURRENT ZONE',
-        rumors.length
-            ? 'Known rumors and their destinations in this zone.'
-            : 'No open rumors in this zone.',
-        'world'
-    );
+    if (rumors.length > 0) {
+        const rumorSection = makeAethermoorSection(
+            `RUMORS · CURRENT ZONE (${rumors.length})`,
+            'Known rumors and their destinations in this zone.',
+            'world'
+        );
 
-    for (const lead of rumors) {
-        const place = state.places[lead.targetId];
-        rumorSection.appendChild(el('div', {
-            className: 'aethermoor-ui-text',
-            text: `${place.label}\n${lead.claim || lead.label || lead.id}`
-        }));
-
-        if (lead.targetId === currentLocationId) {
+        for (const lead of rumors) {
+            const place = state.places[lead.targetId];
             rumorSection.appendChild(el('div', {
                 className: 'aethermoor-ui-text',
-                text: 'The crew is here. A confirmed arrival resolves this rumor; check its saved result or any resulting quest offer.'
+                text: `${place.label}\n${lead.claim || lead.label || lead.id}`
             }));
-        } else {
-            addTravelAction(rumorSection, `Travel to ${place.label}`, lead.targetId);
-        }
-    }
 
-    host.appendChild(rumorSection);
+            if (lead.targetId === currentLocationId) {
+                rumorSection.appendChild(el('div', {
+                    className: 'aethermoor-ui-text',
+                    text: 'The crew is here. A confirmed arrival resolves this rumor; check its saved result or any resulting quest offer.'
+                }));
+            } else {
+                addTravelAction(rumorSection, `Travel to ${place.label}`, lead.targetId);
+            }
+        }
+
+        host.appendChild(rumorSection);
+    } else {
+        host.appendChild(el('details', { className: 'aethermoor-knowledge' },
+            el('summary', { className: 'aethermoor-ui-heading', text: 'RUMORS · CURRENT ZONE · 0' }),
+            el('div', { className: 'aethermoor-ui-text', style: { marginTop: '6px' }, text: 'No open rumors in this zone.' })
+        ));
+    }
 
     const olderRumors = Object.values(state.leads || {}).filter(lead => {
         const place = state.places?.[lead?.targetId];
@@ -19092,6 +19471,7 @@ async function renderWorldTab(host) {
         .filter(settlement => {
             if (!settlement?.locationId) return false;
             if (settlement.locationId === currentLocationId) return false;
+            if (settlement.locationId === journey?.destinationId) return false;
             if (settlement.locationId === nearbySettlement?.locationId) {
                 return false;
             }
@@ -19155,10 +19535,13 @@ async function renderWorldTab(host) {
     if (!journey) {
         const exploreSection = makeAethermoorSection(
             'EXPLORE',
-            'Travel without choosing a destination.',
+            state.trailSign
+                ? `Roadside sign nearby: ${state.trailSign.sign}.`
+                : 'Travel without choosing a destination.',
             'world'
         );
 
+        const exploreRow = el('div', { className: 'aethermoor-action-row' });
         const exploreButton = makeAethermoorAction(
             'Explore the surrounding region',
             'world',
@@ -19168,7 +19551,21 @@ async function renderWorldTab(host) {
         );
 
         exploreButton.disabled = movementBlocked;
-        exploreSection.appendChild(exploreButton);
+        exploreRow.appendChild(exploreButton);
+
+        if (state.trailSign && !movementBlocked) {
+            const investigateButton = makeAethermoorAction(
+                'Pause & Investigate',
+                'quest',
+                () => copyAethermoorCommand(
+                    investigateSignCommand(state.trailSign.id)
+                )
+            );
+            investigateButton.title = `Investigate: ${state.trailSign.sign}`;
+            exploreRow.appendChild(investigateButton);
+        }
+
+        exploreSection.appendChild(exploreRow);
         host.appendChild(exploreSection);
     }
 
@@ -21876,7 +22273,8 @@ async function processAethermoorAssistantEvents(data) {
                     cases: [{
                         name: 'assistant_herb_handover',
                         kind: 'quest_delivery',
-                        questId: event.questId
+                        questId: event.questId,
+                        deferCompletion: true
                     }]
                 });
             } else {
@@ -21885,7 +22283,8 @@ async function processAethermoorAssistantEvents(data) {
                         name: 'assistant_quest_event',
                         kind: 'quest_event',
                         event: event.event,
-                        questItemId: event.questItemId
+                        questItemId: event.questItemId,
+                        deferCompletion: true
                     }]
                 });
             }
@@ -21936,8 +22335,19 @@ const AETHERMOOR_MOVE_COMMAND =
 const AETHERMOOR_EXPLORE_COMMAND =
     /\[\s*AETHERMOOR:EXPLORE_REGION\s*\]/i;
 
+const AETHERMOOR_INVESTIGATE_SIGN_COMMAND =
+    /\[\s*AETHERMOOR:INVESTIGATE_SIGN\s+id="([A-Za-z0-9._:-]+)"\s*\]/i;
+
 const AETHERMOOR_INSTANCE_COMMAND =
     /\[\s*AETHERMOOR:INSTANCE\s+instance="([A-Za-z0-9._:-]+)"\s+action="(enter|move|exit)"(?:\s+room="([A-Za-z0-9._:-]+)")?\s*\]/i;
+
+function investigateSignCommand(signId) {
+    assert(
+        typeof signId === 'string' && signId.length > 0,
+        'Investigate sign command requires a sign ID'
+    );
+    return `[AETHERMOOR:INVESTIGATE_SIGN id="${signId}"]`;
+}
 
 function instanceCommand(instanceId, action, roomId = null) {
     return `[AETHERMOOR:INSTANCE instance="${instanceId}" ` +
@@ -22242,8 +22652,66 @@ globalThis.aethermoorMechanicsInterceptor =
             return;
         }
 
-         let movedThisTurn = false;
+        let movedThisTurn = false;
+        let deferredCompletionNotice = null;
         const activeChatMetadata = getContext().chatMetadata;
+
+        // Commit deferred assistant quest completions before any travel moves the crew away.
+        const preFlushState = activeChatMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
+        const pendingCompletions = Array.isArray(preFlushState?.pendingQuestCompletions)
+            ? clone(preFlushState.pendingQuestCompletions)
+            : [];
+
+        if (pendingCompletions.length > 0) {
+            const beforeFlush = clone(preFlushState);
+            let flushedAny = false;
+
+            for (const item of pendingCompletions) {
+                try {
+                    const flushCase = item.kind === 'quest_delivery'
+                        ? {
+                            name: 'flush_pending_quest_delivery',
+                            kind: 'quest_delivery',
+                            questId: item.questId,
+                            deferNotifications: true
+                        }
+                        : {
+                            name: 'flush_pending_quest_event',
+                            kind: 'quest_event',
+                            event: item.event || 'found',
+                            questId: item.questId,
+                            questItemId: item.questItemId,
+                            deferNotifications: true
+                        };
+
+                    const output = await runStoredMechanic({
+                        cases: [flushCase]
+                    });
+
+                    assert(
+                        output?.ok === true &&
+                        output.results?.[0]?.ok !== false,
+                        output?.results?.[0]?.error ||
+                            'Pending quest completion failed'
+                    );
+                    flushedAny = true;
+                } catch (error) {
+                    reportAethermoorError(
+                        error,
+                        'Deferred quest completion failed',
+                        `pending-complete:${item.id}`
+                    );
+                }
+            }
+
+            if (flushedAny && activeChatMetadata?.[AETHERMOOR_METADATA_KEY]?.state) {
+                deferredCompletionNotice = {
+                    before: beforeFlush,
+                    after: clone(activeChatMetadata[AETHERMOOR_METADATA_KEY].state)
+                };
+            }
+        }
+
         const queuedInn =
             aethermoorQueuedInn &&
             aethermoorQueuedInn.metadata === activeChatMetadata
@@ -22307,8 +22775,17 @@ globalThis.aethermoorMechanicsInterceptor =
                     ? null
                     : findLatestUserInstanceMovement(chat);
 
+        const signInvestigation =
+            queuedMove?.parsed.kind === 'investigate_sign'
+                ? {
+                    index: lastUserIndex,
+                    text: `${lastUserText}\n${queuedMove.command}`,
+                    signId: queuedMove.parsed.signId
+                }
+                : null;
+
         const movement =
-            localMovement
+            localMovement || signInvestigation
                 ? null
                 : queuedMove?.parsed.kind === 'travel'
                     ? {
@@ -22319,7 +22796,32 @@ globalThis.aethermoorMechanicsInterceptor =
                     }
                     : findLatestUserMovement(chat);
 
-        if (localMovement) {
+        if (signInvestigation) {
+            movedThisTurn = true;
+            try {
+                const output = await runStoredMechanic({
+                    cases: [{
+                        name: 'resolve_trail_sign_investigation',
+                        kind: 'investigate_sign',
+                        stepId: travelStepId(signInvestigation),
+                        signId: signInvestigation.signId
+                    }]
+                });
+
+                assert(
+                    output?.ok === true,
+                    output?.results?.[0]?.error ||
+                        'Trail sign investigation was rejected'
+                );
+            } catch (error) {
+                reportAethermoorError(
+                    error,
+                    'Trail sign investigation failed',
+                    `sign:${travelStepId(signInvestigation)}:` +
+                        `${error instanceof Error ? error.message : String(error)}`
+                );
+            }
+        } else if (localMovement) {
             movedThisTurn = true;
             try {
                 const output = await runStoredMechanic({
@@ -23000,7 +23502,8 @@ globalThis.aethermoorMechanicsInterceptor =
             ids: entries.map(entry => entry.id),
             pendingWorkReveals: entries
                 .map(entry => entry.pendingWorkReveal)
-                .filter(Boolean)
+                .filter(Boolean),
+            deferredCompletionNotice
         };
 
         console.log(
@@ -23079,6 +23582,14 @@ async function consumeAethermoorHandoff(injected) {
             scheduleAethermoorContractNotifications(
                 publishedWorkBefore,
                 stored.state,
+                injected.metadata
+            );
+        }
+
+        if (injected.deferredCompletionNotice) {
+            scheduleAethermoorContractNotifications(
+                injected.deferredCompletionNotice.before,
+                injected.deferredCompletionNotice.after,
                 injected.metadata
             );
         }

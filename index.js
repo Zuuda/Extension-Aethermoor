@@ -7102,7 +7102,6 @@ function resolveTravelStep(test) {
         ];
         outcome.environmentalSign = signs[roll(state, signs.length) - 1];
     } else if (event === 'point_of_interest') {
-    } else if (event === 'point_of_interest') {
         // Memorable scenic landmark discovered in passing: minor 2–5% discovery XP, no map node.
         const percent = roll(state, 4) + 1;
         const xp = Math.max(1, Math.round(nextXp(state.crew.level) * percent / 100));

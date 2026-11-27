@@ -2461,6 +2461,23 @@ function achievementUnlockedCardHtml(unlocked) {
     });
 }
 
+function landmarkDiscoveredCardHtml(xp, crew) {
+    const xpLine = crew
+        ? `<div style="margin-top:4px; color:#9caab8;"><b>XP:</b> <b style="color:#4ade80;">${crew.xp} / ${nextXp(crew.level)}</b></div>`
+        : '';
+
+    return systemLogCardHtml({
+        accent: '#38bdf8',
+        heading: 'System Log // Landmark Discovered',
+        rightHtml: `<b style="color:#4ade80;">+${xp} XP</b>`,
+        bodyHtml:
+            `<div><b style="color:#ffffff;">[Landmark Name]</b></div>` +
+            `<div style="color:#9caab8; font-style:italic;">[Short 1–2 sentence lore blurb]</div>` +
+            xpLine,
+        buttons: ['close']
+    });
+}
+
 function shadowImprintsCardHtml(imprintOffer) {
     const imprints = imprintOffer?.imprints || [];
     if (imprints.length === 0) return '';
@@ -6468,26 +6485,6 @@ function applyArrivalLocation(state, locationId, outcome) {
     // The new zone's known instance becomes available on arrival.
     ensureKnownInstance(state);
 
-    if (state.places[locationId].kind === 'point_of_interest') {
-        outcome.poiArrival = {
-            placeId: locationId,
-            label: state.places[locationId].label
-        };
-
-        recordCrewKnowledge(state, {
-            id: `knowledge-poi-visit-${locationId}`,
-            kind: 'place_visit',
-            knowledgeType: 'observation',
-            certainty: 'engine_established',
-            summary: `The crew visited ${state.places[locationId].label}.`,
-            source: {
-                id: locationId,
-                type: 'place'
-            },
-            learnedAtLocationId: locationId,
-            learnedAtZone: destinationZone
-        });
-    }
     if (previousZone !== destinationZone) {
         const previousZoneRecord =
             state.world.zones?.[previousZone];
@@ -7080,7 +7077,7 @@ function resolveTravelStep(test) {
         environmentalSign: null,
         cache: null,
         hiddenInstance: null,
-        site: null,
+        discovery: null,
         social: null,
         rumor: null
     };
@@ -7105,36 +7102,12 @@ function resolveTravelStep(test) {
         ];
         outcome.environmentalSign = signs[roll(state, signs.length) - 1];
     } else if (event === 'point_of_interest') {
-        // Ordinary POIs are scenic places only; no hidden loot, hazard, encounter, or quest.
-        const siteId = `site-${test.stepId}`;
-        state.places[siteId] ||= {
-            id: siteId,
-            label: 'Uncharted point of interest',
-            zone: state.zone,
-            kind: 'point_of_interest',
-            knownFrom: 'direct_observation',
-            visited: false,
-            sourceStepId: test.stepId
-        };
-
-        state.routeEdges ||= [];
-        const anchor = savedPrimarySettlement(state, state.zone);
-        const linked = state.routeEdges.some(
-            edge =>
-                (edge.fromId === anchor.locationId && edge.toId === siteId) ||
-                (edge.fromId === siteId && edge.toId === anchor.locationId)
-        );
-        if (!linked) {
-            state.routeEdges.push({
-                fromId: anchor.locationId,
-                toId: siteId,
-                length: 2,
-                kind: 'poi_access',
-                fromZone: state.zone,
-                toZone: state.zone
-            });
-        }
-        outcome.site = { id: siteId, zone: state.zone, label: state.places[siteId].label };
+    } else if (event === 'point_of_interest') {
+        // Memorable scenic landmark discovered in passing: minor 2–5% discovery XP, no map node.
+        const percent = roll(state, 4) + 1;
+        const xp = Math.max(1, Math.round(nextXp(state.crew.level) * percent / 100));
+        const levelUps = applyXp(state.crew, xp);
+        outcome.discovery = { xp, percent, levelUps };
     } else if (event === 'wild_encounter') {
         assert(
             !state.encounter || ['cleared', 'fled', 'dead'].includes(state.encounter.status),
@@ -13356,17 +13329,25 @@ function travelNarrationPacket(result) {
             `Environmental sign: ${result.environmentalSign}.`,
             'This is a sign only; it does not establish an encounter, NPC, or quest.'
         );
-    } else if (result.event === 'point_of_interest') {
-        const site = result.site;
+    } else if (result.event === 'point_of_interest' && result.discovery) {
+        const { xp, levelUps = [] } = result.discovery;
 
         lines.push(
-            `The crew noticed a point of interest: ${site.label} ` +
-                `(reference: ${site.id}).`,
-            'It is a known, reachable scenic place; the crew has not ' +
-                'necessarily arrived there.',
-            'Give it modest, setting-appropriate visible features. ' +
-                'This travel result establishes no hidden content, ' +
-                'encounter, quest, or reward.'
+            '* **LANDMARK DISCOVERED!** The crew came across a memorable ' +
+                'landmark, vista, Pre-Calamity monument, natural wonder, or ' +
+                'local curiosity fitting the saved geography and regional flavor ' +
+                '(bigger and more lasting than a minor passing vignette).',
+            'Give the landmark an evocative name and weave a short blurb of ' +
+                'local or Pre-Calamity lore around it. Do NOT add hidden loot, ' +
+                'encounters, or quests.',
+            `Discovery XP (+${xp} XP) is ALREADY applied to saved state. ` +
+                'Display this exact System HTML card verbatim (visible to Q’tik ' +
+                'and Tansy, not ordinary NPCs), replacing ONLY [Landmark Name] ' +
+                'and [Short 1–2 sentence lore blurb]:',
+            landmarkDiscoveredCardHtml(xp, result.state?.crew),
+            ...(levelUps.length > 0
+                ? xpProgressNarrationLines(result.state?.crew, levelUps)
+                : [])
         );
 
     } else if (result.event === 'wild_encounter') {
@@ -13432,17 +13413,6 @@ function travelNarrationPacket(result) {
                 'Describe the journey naturally. Do not mention numeric segment counters.'
             );
         }
-    }
-
-    if (result.poiArrival) {
-        lines.push(
-            `Confirmed arrival at ${result.poiArrival.label}.`,
-            'Describe the visible site in a way that fits the saved ' +
-                'geography. This ordinary point of interest is scenic.',
-            'Arrival does not grant loot, reveal a hidden result, start ' +
-                'an encounter, or create a quest. Do not imply that ' +
-                'searching it will unlock an unestablished reward.'
-        );
     }
 
     for (const questGate of result.questGates || []) {
@@ -20714,6 +20684,11 @@ function appendOutOfCombatShadowFormation(inlineHost, state) {
             `Bind Pending Shadow Imprints (${pendingCount})`,
             'quest',
             () => {
+                const existing = document.getElementById('aethermoor_shadow_imprint_popup');
+                if (existing) {
+                    existing.querySelector('button[data-primary="true"]')?.focus();
+                    return;
+                }
                 void showAethermoorShadowImprintPopup(
                     getContext().chatMetadata,
                     aethermoorContractNotificationEpoch,
@@ -20721,6 +20696,7 @@ function appendOutOfCombatShadowFormation(inlineHost, state) {
                 );
             }
         );
+
         openPending.style.borderColor = '#7c3aed';
         openPending.style.color = '#e9d5ff';
         section.appendChild(openPending);

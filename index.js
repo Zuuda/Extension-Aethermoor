@@ -1613,6 +1613,98 @@ function rollTrinketFromState(
     };
 }
 
+const SHADOW_UNLOCK_LEVEL = 10;
+
+const SHADOW_SOURCE_ROLE_MAP = {
+    archer: 'archer',
+    mender: 'mender',
+    hexer: 'hexer',
+    brute: 'warder'
+};
+
+const SHADOW_TYPE_LABELS = {
+    archer: 'Shadow-Ranged',
+    mender: 'Shadow-Mender',
+    hexer: 'Shadow-Hexer',
+    warder: 'Shadow-Warder'
+};
+
+function shadowTierFromLevel(level) {
+    return Math.ceil(int(level, 'shadow.sourceMobLevel', 1) / 5);
+}
+
+function shadowSummaryText(type, tier) {
+    if (type === 'archer') {
+        return '+5 ATK · Ranged (immune to Carapace & Cleave · 3 slots)';
+    }
+    if (type === 'mender') {
+        return `Drains ${1 + tier} HP/exch to lowest-HP% ally · 1 cleanse/turn (3 slots)`;
+    }
+    if (type === 'hexer') {
+        return `+${tier} ATK · −${2 * tier} Target DEF (3 slots)`;
+    }
+    if (type === 'warder') {
+        const bleedRed = Math.floor((tier + 1) / 2);
+        return `+${tier} ATK · −${bleedRed} Frontline Bleed · 1/fight lethal save (3 slots)`;
+    }
+    return '';
+}
+
+function detectPostCombatShadowImprints(state) {
+    if ((state.crew?.level || 1) < SHADOW_UNLOCK_LEVEL) return null;
+    const foes = state.encounter?.foes || [];
+    if (!foes.length) return null;
+
+    const bestByType = new Map();
+    for (const foe of foes) {
+        const shadowType = SHADOW_SOURCE_ROLE_MAP[foe.role];
+        if (!shadowType) continue;
+        const prev = bestByType.get(shadowType) || 0;
+        if (foe.level > prev) bestByType.set(shadowType, foe.level);
+    }
+
+    const deck = state.crew.shadows?.deck || [];
+    const imprints = [];
+
+    for (const [type, sourceMobLevel] of bestByType.entries()) {
+        const existing = deck.find(entry => entry.type === type);
+        const tier = shadowTierFromLevel(sourceMobLevel);
+
+        if (!existing) {
+            imprints.push({
+                type,
+                shadowId: `shadow-${type}`,
+                sourceMobLevel,
+                shadowTier: tier,
+                isNew: true,
+                previousLevel: null,
+                previousTier: null
+            });
+        } else if (type !== 'archer') {
+            const prevTier = shadowTierFromLevel(existing.sourceMobLevel);
+            if (tier > prevTier) {
+                imprints.push({
+                    type,
+                    shadowId: existing.id,
+                    sourceMobLevel,
+                    shadowTier: tier,
+                    isNew: false,
+                    previousLevel: existing.sourceMobLevel,
+                    previousTier: prevTier
+                });
+            }
+        }
+    }
+
+    if (imprints.length === 0) return null;
+
+    return {
+        encounterId: state.encounter.id,
+        zone: state.encounter.zone,
+        imprints
+    };
+}
+
 function shadowMechanics(crew) {
     const active = crew.shadows?.active || [];
     const deck = crew.shadows?.deck || [];
@@ -1621,7 +1713,7 @@ function shadowMechanics(crew) {
 
     const result = {
         slots: 0, attack: 0, archerAttack: 0,
-        menderHeal: 0, hexStrip: 0, bruteReduction: 0
+        menderDrain: 0, hexStrip: 0, bruteReduction: 0
     };
     const ids = new Set();
     const uniqueRoles = new Set();
@@ -1637,9 +1729,7 @@ function shadowMechanics(crew) {
             `Active shadow ${shadow.id} must match its deck entry`);
 
         const count = int(shadow.count, `${shadow.id}.count`, 1);
-        const tier = 1 + Math.floor(
-            int(shadow.sourceMobLevel, `${shadow.id}.sourceMobLevel`, 1) / 10
-        );
+        const tier = shadowTierFromLevel(shadow.sourceMobLevel);
         assert(shadow.shadowTier === tier,
             `${shadow.id} has an incorrect Shadow Tier`);
 
@@ -1651,18 +1741,18 @@ function shadowMechanics(crew) {
 
         result.slots += 3 * count;
         if (shadow.type === 'archer') {
-            // 5 ATK per Archer (~83% of 3 loose weasels' 6 ATK): always the
+            // 5 ATK per Shadow-Ranged (~83% of 3 loose weasels' 6 ATK): always the
             // safe ranged trade-off without overtaking loose-weasel DPS.
             result.archerAttack += count * 5;
             result.attack += count * 5;
         } else if (shadow.type === 'mender') {
-            result.menderHeal += 2 * tier;
+            result.menderDrain += 1 + tier;
         } else if (shadow.type === 'hexer') {
-            result.attack += 1 + tier;
-            result.hexStrip += 4 * tier;
+            result.attack += tier;
+            result.hexStrip += 2 * tier;
         } else if (shadow.type === 'warder') {
-            result.attack += 1 + tier;
-            result.bruteReduction += Math.max(1, Math.floor(tier / 2));
+            result.attack += tier;
+            result.bruteReduction += Math.floor((tier + 1) / 2);
         } else {
             throw new Error(`Unsupported active shadow type: ${shadow.type}`);
         }
@@ -3808,7 +3898,7 @@ function resolveTurn({ state, actions, rolls }) {
             `Unsupported Q'tik action: ${actions.qtik}`
         );
         assert(
-            ['visor', 'vitals', 'overrun', 'recall', 'surge', 'drink', 'raise_shadow'].includes(actions.tansy),
+            ['visor', 'vitals', 'overrun', 'recall', 'surge', 'drink', 'raise_shadow', 'unfuse_shadow'].includes(actions.tansy),
             `Unsupported Tansy action: ${actions.tansy}`
         );
         assert(typeof actions.target === 'string', 'A combat target is required');
@@ -3957,8 +4047,27 @@ function resolveTurn({ state, actions, rolls }) {
         });
         c.weasels = activation.state.crew.weasels;
         c.shadows = activation.state.crew.shadows;
-        turnEffects.push(`Summoned ${actions.shadowId}; fused ${activation.weaselsFused} loose weasel(s)`);
+        turnEffects.push(
+            `Summoned ${SHADOW_TYPE_LABELS[activation.shadow.type] || actions.shadowId}; ` +
+            `fused ${activation.weaselsFused} loose weasel(s)`
+        );
     }
+    if (actions.tansy === 'unfuse_shadow') {
+        assert(typeof actions.shadowId === 'string', 'Unfuse Shadow requires actions.shadowId');
+        const deactivation = resolveShadowDeckAction({
+            action: 'deactivate',
+            shadowId: actions.shadowId,
+            count: actions.count ?? 1,
+            state: s
+        });
+        c.weasels = deactivation.state.crew.weasels;
+        c.shadows = deactivation.state.crew.shadows;
+        turnEffects.push(
+            `Unfused ${SHADOW_TYPE_LABELS[deactivation.shadow.type] || actions.shadowId}; ` +
+            `restored ${deactivation.weaselsRefunded} loose weasel(s)`
+        );
+    }
+
     if (actions.tansy === 'surge') {
         assert(!encounter.used.surge, 'Surge has already been used this fight');
         encounter.used.surge = true;
@@ -4439,20 +4548,49 @@ function resolveTurn({ state, actions, rolls }) {
 
         // End-of-exchange regeneration includes Grave-Chill stacks inflicted this exchange.
         const effectiveRegen = crewStats.regen - passiveRegenPenalty(encounter);
-        const menderHeal = shadowMechanics(c).menderHeal;
-        const menderHealed = [];
 
         if (c.qtik.hp > 0) {
-            c.qtik.hp = Math.max(0, Math.min(crewStats.qtikMaxHp, c.qtik.hp + effectiveRegen + menderHeal));
+            c.qtik.hp = Math.max(0, Math.min(crewStats.qtikMaxHp, c.qtik.hp + effectiveRegen));
             if (effectiveRegen < 0) effects.push(`Negative regeneration dealt ${-effectiveRegen} internal damage`);
-            if (menderHeal > 0) menderHealed.push("Q'tik");
         }
-        if (c.tansy.hp > 0 && menderHeal > 0) {
-            c.tansy.hp = Math.min(crewStats.tansyMaxHp, c.tansy.hp + menderHeal);
-            menderHealed.push('Tansy');
-        }
-        if (menderHealed.length > 0) {
-            effects.push(`Shadow-Mender healed ${menderHealed.join(' & ')} for ${menderHeal} HP`);
+
+        // Shadow-Mender life-leech: drains a living foe and feeds the lowest-HP% living ally.
+        const menderDrain = shadowMechanics(c).menderDrain;
+        if (menderDrain > 0 && live(s).length > 0 && (c.qtik.hp > 0 || c.tansy.hp > 0)) {
+            const drainTarget = target.hp > 0 ? target : lowestHpFoe();
+            if (drainTarget) {
+                const drainHits = dealDamage(s, drainTarget, menderDrain, kills);
+                const drained = drainHits.reduce((sum, hit) => sum + hit.damage, 0);
+                hits.push(...drainHits);
+                damage += drained;
+
+                let healedOwner = null;
+                let healedAmount = 0;
+                if (drained > 0) {
+                    const qtikAlive = c.qtik.hp > 0;
+                    const tansyAlive = c.tansy.hp > 0;
+                    const qtikPct = qtikAlive ? c.qtik.hp / crewStats.qtikMaxHp : Infinity;
+                    const tansyPct = tansyAlive ? c.tansy.hp / crewStats.tansyMaxHp : Infinity;
+                    const recipient = qtikPct <= tansyPct
+                        ? (qtikAlive ? 'qtik' : null)
+                        : (tansyAlive ? 'tansy' : null);
+
+                    if (recipient) {
+                        const maxHp = recipient === 'qtik' ? crewStats.qtikMaxHp : crewStats.tansyMaxHp;
+                        const beforeHp = c[recipient].hp;
+                        c[recipient].hp = Math.min(maxHp, beforeHp + drained);
+                        healedAmount = c[recipient].hp - beforeHp;
+                        healedOwner = recipient;
+                    }
+
+                    const recipientName = healedOwner === 'qtik' ? "Q'tik" : 'Tansy';
+                    effects.push(
+                        healedAmount > 0
+                            ? `Shadow-Mender drained ${drained} HP from ${drainTarget.id} and healed ${recipientName} for ${healedAmount} HP`
+                            : `Shadow-Mender drained ${drained} HP from ${drainTarget.id}`
+                    );
+                }
+            }
         }
 
         if (actions.tansy === 'visor' && e === 1) {
@@ -4484,7 +4622,7 @@ function resolveTurn({ state, actions, rolls }) {
         if (restored > 0) turnEffects.push(`Swarm Momentum reformed ${restored} weasel(s)`);
     }
 
-    if (shadowMechanics(c).menderHeal > 0) {
+    if (shadowMechanics(c).menderDrain > 0) {
         const hex = Object.keys(encounter.hexStacks || {}).find(id => encounter.hexStacks[id] > 0);
         if (hex) {
             encounter.hexStacks[hex] -= 1;
@@ -4585,6 +4723,10 @@ function resolveTurn({ state, actions, rolls }) {
     };
 
     if (encounterRewards.resolved) {
+        const shadowImprints = detectPostCombatShadowImprints(s);
+        s.pendingShadowImprints = shadowImprints ? clone(shadowImprints) : null;
+        result.shadowImprints = shadowImprints ? clone(shadowImprints) : null;
+
         encounter.victoryReceipt = {
             encounterId: encounter.id,
             xp: encounterRewards.xp,
@@ -4599,6 +4741,7 @@ function resolveTurn({ state, actions, rolls }) {
                 tansy: c.tansy.hp, tansyMax: finalStats.tansyMaxHp
             },
             death: victoryDeath ? clone(victoryDeath) : null,
+            shadowImprints: shadowImprints ? clone(shadowImprints) : null,
             narrativeTurns: clone(encounter.narrativeTurns || [])
         };
     }
@@ -11266,7 +11409,9 @@ function resolveShadowDeckAction(test) {
             'replace',
             'remove',
             'activate',
-            'deactivate'
+            'deactivate',
+            'bind_imprints',
+            'dismiss_imprints'
         ].includes(test.action),
         `Unsupported shadow deck action: ${test.action}`
     );
@@ -11280,6 +11425,7 @@ function resolveShadowDeckAction(test) {
 
     const deck = state.crew.shadows.deck;
     const active = state.crew.shadows.active;
+    const totalSlots = 3 + Math.floor((state.crew.level || 1) / 2);
 
     function validateShadow(shadow) {
         assert(
@@ -11302,8 +11448,7 @@ function resolveShadowDeckAction(test) {
 
         return {
             ...shadow,
-            shadowTier:
-                1 + Math.floor(shadow.sourceMobLevel / 10)
+            shadowTier: shadowTierFromLevel(shadow.sourceMobLevel)
         };
     }
 
@@ -11312,6 +11457,69 @@ function resolveShadowDeckAction(test) {
             (total, shadow) => total + 3 * shadow.count,
             0
         );
+    }
+
+    if (test.action === 'dismiss_imprints') {
+        state.pendingShadowImprints = null;
+        return {
+            ok: true,
+            action: 'dismiss_imprints',
+            state
+        };
+    }
+
+    if (test.action === 'bind_imprints') {
+        const pending = state.pendingShadowImprints;
+        assert(
+            pending && Array.isArray(pending.imprints) && pending.imprints.length > 0,
+            'No pending shadow imprints available to bind'
+        );
+        assert(
+            Array.isArray(test.shadowTypes) && test.shadowTypes.length > 0,
+            'Select at least one shadow imprint to bind'
+        );
+
+        const bound = [];
+        for (const type of [...new Set(test.shadowTypes)]) {
+            const imprint = pending.imprints.find(entry => entry.type === type);
+            assert(imprint, `Imprint ${type} is not available`);
+
+            const existingIndex = deck.findIndex(entry => entry.type === type);
+            const updated = validateShadow({
+                id: existingIndex >= 0 ? deck[existingIndex].id : imprint.shadowId,
+                type: imprint.type,
+                sourceMobLevel: imprint.sourceMobLevel,
+                capturedFrom: null
+            });
+
+            if (existingIndex >= 0) {
+                deck[existingIndex] = updated;
+                const activeEntry = active.find(entry => entry.id === updated.id);
+                if (activeEntry) {
+                    activeEntry.sourceMobLevel = updated.sourceMobLevel;
+                    activeEntry.shadowTier = updated.shadowTier;
+                    activeEntry.capturedFrom = updated.capturedFrom;
+                }
+            } else {
+                deck.push(updated);
+            }
+
+            bound.push({
+                ...imprint,
+                shadowId: updated.id,
+                shadowTier: updated.shadowTier
+            });
+        }
+
+        state.pendingShadowImprints = null;
+
+        return {
+            ok: true,
+            action: 'bind_imprints',
+            zone: pending.zone,
+            bound,
+            state
+        };
     }
 
     if (test.action === 'record') {
@@ -11333,8 +11541,8 @@ function resolveShadowDeckAction(test) {
         );
 
         assert(
-            !deck.some(shadow => shadow.id === test.shadowId),
-            `Shadow ${test.shadowId} is already in the deck`
+            !deck.some(shadow => shadow.id === test.shadowId || shadow.type === test.shadowType),
+            `Shadow ${test.shadowType} is already in the deck`
         );
 
         const shadow = validateShadow({
@@ -11373,11 +11581,6 @@ function resolveShadowDeckAction(test) {
 
     if (test.action === 'replace') {
         assert(
-            !active.some(entry => entry.id === test.shadowId),
-            'Cannot replace an active shadow; deactivate it first'
-        );
-
-        assert(
             allowedTypes.includes(test.shadowType),
             `Unsupported replacement type: ${test.shadowType}`
         );
@@ -11394,6 +11597,17 @@ function resolveShadowDeckAction(test) {
         });
 
         deck[shadowIndex] = replacement;
+
+        const activeEntry = active.find(entry => entry.id === test.shadowId);
+        if (activeEntry) {
+            assert(
+                activeEntry.type === replacement.type,
+                'Cannot change an active shadow’s role in place; unfuse it first'
+            );
+            activeEntry.sourceMobLevel = replacement.sourceMobLevel;
+            activeEntry.shadowTier = replacement.shadowTier;
+            activeEntry.capturedFrom = replacement.capturedFrom;
+        }
 
         return {
             ok: true,
@@ -11429,14 +11643,36 @@ function resolveShadowDeckAction(test) {
             `Shadow ${test.shadowId} is not active`
         );
 
-        const [deactivated] =
+        const activeEntry = active[activeIndex];
+        const removeCount = test.count === undefined
+            ? (activeEntry.type === 'archer' ? 1 : activeEntry.count)
+            : int(test.count, 'count', 1);
+
+        assert(
+            removeCount <= activeEntry.count,
+            `Cannot unfuse ${removeCount} copies; only ${activeEntry.count} active`
+        );
+
+        const deactivated = clone(activeEntry);
+        if (removeCount < activeEntry.count) {
+            activeEntry.count -= removeCount;
+        } else {
             active.splice(activeIndex, 1);
+        }
+
+        const slotsReleased = 3 * removeCount;
+        const looseCapacity = Math.max(0, totalSlots - activeSlotCount());
+        const beforeWeasels = Number(state.crew.weasels.active || 0);
+        state.crew.weasels.active = Math.min(looseCapacity, beforeWeasels + slotsReleased);
+        state.crew.weasels.max = totalSlots;
 
         return {
             ok: true,
             action: 'deactivate',
             shadow: deactivated,
-            shadowSlotsReleased: 3 * deactivated.count,
+            removedCount: removeCount,
+            shadowSlotsReleased: slotsReleased,
+            weaselsRefunded: state.crew.weasels.active - beforeWeasels,
             state
         };
     }
@@ -11449,12 +11685,12 @@ function resolveShadowDeckAction(test) {
     if (shadow.type !== 'archer') {
         assert(
             requestedCount === 1,
-            'Only Shadow Archers may have multiple active copies'
+            'Only Shadow-Ranged may have multiple active copies'
         );
 
         assert(
             !active.some(entry => entry.type === shadow.type),
-            `Only one active Shadow ${shadow.type[0].toUpperCase() + shadow.type.slice(1)} is allowed`
+            `Only one active ${SHADOW_TYPE_LABELS[shadow.type] || shadow.type} is allowed`
         );
     }
 
@@ -11470,9 +11706,6 @@ function resolveShadowDeckAction(test) {
         additionalCount > 0,
         `Shadow ${shadow.id} is already active at that count`
     );
-
-    const totalSlots =
-        3 + Math.floor(state.crew.level / 2);
 
     const occupiedBefore =
         Number(state.crew.weasels.active) +

@@ -2461,6 +2461,72 @@ function achievementUnlockedCardHtml(unlocked) {
     });
 }
 
+function shadowImprintsCardHtml(imprintOffer) {
+    const imprints = imprintOffer?.imprints || [];
+    if (imprints.length === 0) return '';
+
+    const rows = imprints.map((entry, index) => {
+        const divider = index > 0
+            ? 'border-top:1px solid #241838; margin-top:6px; padding-top:6px;'
+            : '';
+        const name = SHADOW_TYPE_LABELS[entry.type] || entry.type;
+        const meta = entry.type === 'archer'
+            ? `(Lv ${entry.sourceMobLevel})`
+            : `(Lv ${entry.sourceMobLevel} · Tier ${entry.shadowTier})`;
+        const badge = entry.isNew
+            ? '<b style="color:#4ade80;">New Imprint</b>'
+            : `<b style="color:#ffd166;">Replaces Tier ${entry.previousTier} (Lv ${entry.previousLevel})</b>`;
+        const summary = shadowSummaryText(entry.type, entry.shadowTier);
+
+        return `<div style="${divider}">` +
+            `<b style="color:#e9d5ff;">${escapeSystemLogHtml(name)}</b> ` +
+            `<span style="color:#9caab8;">${escapeSystemLogHtml(meta)}</span> — ${badge}` +
+            `<div style="color:#9caab8;">${escapeSystemLogHtml(summary)}</div>` +
+        `</div>`;
+    }).join('');
+
+    const zoneTag = Number.isInteger(imprintOffer.zone)
+        ? `Zone ${imprintOffer.zone}`
+        : '';
+
+    return `<div style="background:#100c18; border:1px solid #2e1f47; border-left:3px solid #7c3aed; border-radius:2px; padding:8px 10px; font-family:'Segoe UI', Tahoma, sans-serif; font-size:11px; color:#d0d7de; line-height:1.45; max-width:440px;">` +
+        `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; border-bottom:1px solid #241838; padding-bottom:4px; margin-bottom:6px;">` +
+            `<i style="color:#d8b4fe; letter-spacing:0.2px;">Lingering shadow-imprints cling to the fallen.</i>` +
+            (zoneTag ? `<span style="color:#9caab8; white-space:nowrap;">${escapeSystemLogHtml(zoneTag)}</span>` : '') +
+        `</div>` +
+        rows +
+        `<div style="display:flex; justify-content:flex-end; gap:6px; margin-top:7px; padding-top:5px; border-top:1px solid #241838;">` +
+            `<span style="display:inline-block; padding:2px 8px; border:1px solid #7c3aed; background:#1c1330; color:#e9d5ff; border-radius:2px; font-weight:700;">Bind</span>` +
+            `<span style="display:inline-block; padding:2px 8px; border:1px solid #2e1f47; background:#14101f; color:#9caab8; border-radius:2px; font-weight:700;">Dismiss</span>` +
+        `</div>` +
+    `</div>`;
+}
+
+function shadowBindNarrationPacket(result) {
+    const bound = result?.bound || [];
+    if (bound.length === 0) return null;
+
+    const lines = [
+        'PRIVATE SHADOW BINDING RESULT — do not recite this heading.',
+        'Tansy drew the lingering shadow-imprint(s) from the fallen into her Shadow Deck:'
+    ];
+
+    for (const entry of bound) {
+        const name = SHADOW_TYPE_LABELS[entry.type] || entry.type;
+        const status = entry.isNew
+            ? `newly bound (Lv ${entry.sourceMobLevel}${entry.type === 'archer' ? '' : `, Tier ${entry.shadowTier}`})`
+            : `upgraded to Lv ${entry.sourceMobLevel}, Tier ${entry.shadowTier} (replaced Lv ${entry.previousLevel}, Tier ${entry.previousTier})`;
+        lines.push(`- ${name}: ${status}.`);
+    }
+
+    lines.push(
+        'Portray Tansy binding these shadow-imprints naturally in this reply (short, evocative class moment; ordinary NPCs cannot see System prompts, though they may notice her shadow-craft).',
+        'The shadow deck update is ALREADY applied to saved state; do not ask her to bind them again.'
+    );
+
+    return lines.join('\n');
+}
+
 const TRADE_MARKET_LABELS = {
     lowball_trolls: 'Lowball Trolls (Unsold)',
     standard_market: 'Standard Market',
@@ -3677,6 +3743,8 @@ function combatNarrativeTurn(
         ])
     );
 
+    const foeLabelOrFallback = id => labels.get(id) || 'An opponent';
+
     const actionLabels = {
         fire_melee: 'Fire Melee',
         bodyguard: 'Bodyguard',
@@ -3689,7 +3757,8 @@ function combatNarrativeTurn(
         overrun: 'Overrun',
         recall: 'Recall',
         surge: 'Surge',
-        raise_shadow: 'Raise Shadow'
+        raise_shadow: 'Raise Shadow',
+        unfuse_shadow: 'Unfuse Shadow'
     };
 
     const formatAction = (owner, action) => {
@@ -3746,13 +3815,36 @@ function combatNarrativeTurn(
             if (exchange.frontlineDamage > 0) {
                 events.push("Q'tik was struck by the enemy.");
             }
-            if (exchange.backlineDamage > 0) {
-                events.push('Tansy was struck by the enemy.');
-            }
+
+            let describedBacklineHit = false;
 
             for (const effect of exchange.effects || []) {
-                if (effect.includes('Bodyguard intercepted')) {
-                    events.push("Q'tik intercepted an attack aimed at Tansy.");
+                const bodyguardMatch = /^Bodyguard intercepted (\S+)'s shot/.exec(effect);
+                const rangedHitMatch = /^(\S+) dealt \d+ damage to Tansy$/.exec(effect);
+                const healedMatch = /^(\S+) healed (\S+) for \d+$/.exec(effect);
+                const hexMatch = /^(\S+) added \d+ hex stack/.exec(effect);
+                const bufferMatch = /^(\S+) activated \+\d+ Pack DEF$/.exec(effect);
+                const menderDrainHealMatch = /^Shadow-Mender drained \d+ HP from (\S+) and healed (Q'tik|Tansy) for \d+ HP$/.exec(effect);
+                const menderDrainOnlyMatch = /^Shadow-Mender drained \d+ HP from (\S+)$/.exec(effect);
+
+                if (bodyguardMatch) {
+                    events.push(`Q'tik intercepted a ranged attack from ${foeLabelOrFallback(bodyguardMatch[1])} aimed at Tansy.`);
+                } else if (rangedHitMatch) {
+                    describedBacklineHit = true;
+                    events.push(`${foeLabelOrFallback(rangedHitMatch[1])} attacked Tansy from range.`);
+                } else if (healedMatch) {
+                    events.push(`${foeLabelOrFallback(healedMatch[1])} healed ${foeLabelOrFallback(healedMatch[2])}.`);
+                } else if (hexMatch) {
+                    events.push(`${foeLabelOrFallback(hexMatch[1])} afflicted the crew with a hex.`);
+                } else if (bufferMatch) {
+                    events.push(`${foeLabelOrFallback(bufferMatch[1])} bolstered the pack's defenses.`);
+                } else if (menderDrainHealMatch) {
+                    events.push(`Tansy's Shadow-Mender drained life from ${foeLabelOrFallback(menderDrainHealMatch[1])} to mend ${menderDrainHealMatch[2]}.`);
+                } else if (menderDrainOnlyMatch) {
+                    events.push(`Tansy's Shadow-Mender drained life from ${foeLabelOrFallback(menderDrainOnlyMatch[1])}.`);
+                } else if (effect.startsWith('Shadow-Warder ') && effect.includes('sacrificed itself')) {
+                    describedBacklineHit = true;
+                    events.push("Tansy's Shadow-Warder sacrificed itself to intercept a lethal blow on Tansy.");
                 } else if (effect.includes('intercepted')) {
                     events.push('An opponent intercepted an attack.');
                 } else if (
@@ -3767,6 +3859,10 @@ function combatNarrativeTurn(
                 } else if (effect.includes('reinforcements')) {
                     events.push('Enemy reinforcements arrived.');
                 }
+            }
+
+            if (exchange.backlineDamage > 0 && !describedBacklineHit) {
+                events.push('Tansy was struck by the enemy.');
             }
 
             return {
@@ -13416,9 +13512,22 @@ function travelNarrationPacket(result) {
     return lines.join('\n');
 }
 
+const NARRATIVE_ROLE_CUES = {
+    brute: 'frontline bruiser',
+    archer: 'ranged attacker (weapons like bow, sling, or spell, or natural like spit or thrown hazard)',
+    mender: 'healer / support',
+    hexer: 'debuffer / hexer',
+    buffer: 'pack protector / buffer',
+    elite: 'elite threat',
+    boss: 'regional boss threat'
+};
+
 function discoveryNarrationPacket(encounter, state = null) {
-    const foes = encounter.foes
-        .map((foe, index) => narrativeFoeLabel(foe, index));
+    const foes = encounter.foes.map((foe, index) => {
+        const label = narrativeFoeLabel(foe, index);
+        const cue = NARRATIVE_ROLE_CUES[foe.role];
+        return cue ? `${label} (${cue})` : label;
+    });
     const regionLabel = state
         ? zoneDisplayName(state, encounter.zone)
         : 'the current region';
@@ -13426,10 +13535,12 @@ function discoveryNarrationPacket(encounter, state = null) {
     return [
         'A new encounter has been discovered.',
         `Region: ${regionLabel}.`,
-        `${foes.length} distinct opponent(s): ${foes.join(', ')}.`,
-        'These references identify combatants, not species, weapons, ' +
-            'jobs, or visible abilities. Dress them to fit the saved ' +
-            'quest and location. Keep the number of opponents consistent.',
+        `${foes.length} distinct opponent(s): ${foes.join('; ')}.`,
+        'These cues describe combat roles, not fixed species or gear. ' +
+            'Dress each opponent to fit the saved quest and location so ' +
+            'their role makes fictional sense (e.g., if a beast pack has a ' +
+            'ranged attacker or healer, explain how—such as a rider, ' +
+            'spitting variant, or shamanic leader). Keep the opponent count consistent.',
         ...(encounter.type === 'normal_pack' &&
             encounter.packTactic?.id !== 'none'
             ? [
@@ -13443,6 +13554,7 @@ function discoveryNarrationPacket(encounter, state = null) {
             'or retreat to the protagonists.'
     ].join('\n');
 }
+
 const PUBLIC_QUEST_FACT_KEYS = {
     sealed_cache: ['cache', 'place', 'stakes'],
     dormant_hazard: ['site', 'threat', 'stakes'],
@@ -14037,7 +14149,8 @@ function combatNarrationPacket(result, actions) {
         recall: 'Recall',
         surge: 'Surge',
         drink: 'Drink',
-        raise_shadow: 'Raise Shadow'
+        raise_shadow: 'Raise Shadow',
+        unfuse_shadow: 'Unfuse Shadow'
     };
 
     const roster = result.summary?.encounter?.foes || [];
@@ -14141,7 +14254,15 @@ function combatNarrationPacket(result, actions) {
                 result.levelUps || []
             )
         );
+
+        if (result.shadowImprints?.imprints?.length > 0) {
+            lines.push(
+                'SHADOW IMPRINTS DETECTED — display this exact class HTML card verbatim, separate from the victory/loot cards (visible only to Tansy and Q’tik; leave binding or dismissing to the player):',
+                shadowImprintsCardHtml(result.shadowImprints)
+            );
+        }
     } else if (result.packCleared) {
+
         lines.push(
             'The encounter was cleared; no rewards were applied.'
         );
@@ -14731,6 +14852,13 @@ async function runStoredMechanic(args) {
                 ].join('\n\n')
 
             : batch &&
+              oneCase?.kind === 'shadows' &&
+              oneCase.action === 'bind_imprints' &&
+              Array.isArray(caseResult.bound) &&
+              caseResult.bound.length > 0
+                ? shadowBindNarrationPacket(caseResult)
+
+            : batch &&
               oneCase?.kind === 'gear' &&
               oneCase.action === 'equip'
                 ? inventoryActionNarrationPacket(caseResult, 'equip')
@@ -15198,7 +15326,7 @@ function resolveLootSeed(test, state = null) {
 function combatFoeLabel(foe, index) {
     const roleNames = {
         brute: 'Brute',
-        archer: 'Archer',
+        archer: 'Ranged',
         mender: 'Mender',
         hexer: 'Hexer',
         buffer: 'Buffer',
@@ -17853,6 +17981,13 @@ function combatRecapPrompt(receipt) {
                 `${receipt.postFightHp.qtikMax} HP; ` +
                 `Tansy ${receipt.postFightHp.tansy}/` +
                 `${receipt.postFightHp.tansyMax} HP.`
+        );
+    }
+
+    if (receipt.shadowImprints?.imprints?.length > 0) {
+        lines.push(
+            'SHADOW IMPRINTS DETECTED — display this exact class HTML card verbatim, separate from the victory/loot cards (visible only to Tansy and Q’tik; leave binding or dismissing to the player):',
+            shadowImprintsCardHtml(receipt.shadowImprints)
         );
     }
 

@@ -3802,8 +3802,8 @@ function combatNarrativeTurn(
         actions: actions.flee === true
             ? { flee: true }
             : {
-                qtik: formatAction('qtik', actions.qtik),
-                tansy: formatAction('tansy', actions.tansy),
+                qtik: actions.qtik ? formatAction('qtik', actions.qtik) : 'Down (0 HP)',
+                tansy: actions.tansy ? formatAction('tansy', actions.tansy) : 'Down (0 HP)',
                 target: labels.get(actions.target) || null
             },
         exchanges: exchanges.map(exchange => {
@@ -4006,9 +4006,10 @@ function resolveTurn({ state, actions, rolls }) {
     assert(actions && typeof actions === 'object', 'Turn actions are required');
 
     const fleeing = actions.flee === true;
-    const fallenAtStart = ['qtik', 'tansy'].filter(owner => c[owner].hp === 0);
-    assert(fallenAtStart.length < 2, 'Both protagonists have fallen; combat must end');
-    assert(fallenAtStart.length === 0 || fleeing, 'A surviving protagonist can only attempt Flee');
+    const qtikDownAtStart = c.qtik.hp === 0;
+    const tansyDownAtStart = c.tansy.hp === 0;
+    const soloAtStart = qtikDownAtStart || tansyDownAtStart;
+    assert(!(qtikDownAtStart && tansyDownAtStart), 'Both protagonists have fallen; combat must end');
 
     if (fleeing) {
         assert(
@@ -4016,14 +4017,22 @@ function resolveTurn({ state, actions, rolls }) {
             'Flee cannot be combined with combat actions'
         );
     } else {
-        assert(
-            ['fire_melee', 'bodyguard', 'stun', 'ice_patch', 'frost_stomp', 'drink'].includes(actions.qtik),
-            `Unsupported Q'tik action: ${actions.qtik}`
-        );
-        assert(
-            ['visor', 'vitals', 'overrun', 'recall', 'surge', 'drink', 'raise_shadow', 'unfuse_shadow'].includes(actions.tansy),
-            `Unsupported Tansy action: ${actions.tansy}`
-        );
+        if (qtikDownAtStart) {
+            assert(actions.qtik === undefined || actions.qtik === null, "Q'tik is down and cannot act");
+        } else {
+            assert(
+                ['fire_melee', 'bodyguard', 'stun', 'ice_patch', 'frost_stomp', 'drink'].includes(actions.qtik),
+                `Unsupported Q'tik action: ${actions.qtik}`
+            );
+        }
+        if (tansyDownAtStart) {
+            assert(actions.tansy === undefined || actions.tansy === null, 'Tansy is down and cannot act');
+        } else {
+            assert(
+                ['visor', 'vitals', 'overrun', 'recall', 'surge', 'drink', 'raise_shadow', 'unfuse_shadow'].includes(actions.tansy),
+                `Unsupported Tansy action: ${actions.tansy}`
+            );
+        }
         assert(typeof actions.target === 'string', 'A combat target is required');
         assert(live(s).some(foe => foe.id === actions.target), `Target ${actions.target} is not alive`);
     }
@@ -4210,8 +4219,8 @@ function resolveTurn({ state, actions, rolls }) {
         return total + (hexer ? 2 * enemyTier(hexer.level) * Number(stacks) : 0);
     }, 0);
 
-    const tansyTrinketItem = equippedTrinket(c, 'tansy');
-    const qtikTrinketItem = equippedTrinket(c, 'qtik');
+    const tansyTrinketItem = tansyDownAtStart ? null : equippedTrinket(c, 'tansy');
+    const qtikTrinketItem = qtikDownAtStart ? null : equippedTrinket(c, 'qtik');
     const tansyTrinketId = tansyTrinketItem?.trinket?.id || null;
     const qtikTrinketId = qtikTrinketItem?.trinket?.id || null;
     const tansyTrinketPower = tansyTrinketItem
@@ -4239,7 +4248,8 @@ function resolveTurn({ state, actions, rolls }) {
         const sunderShred = tansyTrinketId === 'sundering_charm' && isFireTarget && !fleeing
             ? Math.max(2, Math.round(tansyTrinketPower * 0.3))
             : 0;
-        return Math.max(0, foe.def + bufferBonus + telegraphBonus - stunReduction - fireShred - sunderShred - shadowMechanics(c).hexStrip);
+        const hexStrip = tansyDownAtStart ? 0 : shadowMechanics(c).hexStrip;
+        return Math.max(0, foe.def + bufferBonus + telegraphBonus - stunReduction - fireShred - sunderShred - hexStrip);
     }
 
     function destroyWeasel(effects, cause) {
@@ -4252,7 +4262,7 @@ function resolveTurn({ state, actions, rolls }) {
     for (
         let ex = 0;
         ex < (fleeing ? 1 : 3) && live(s).length > 0 &&
-        (fleeing ? c.qtik.hp > 0 || c.tansy.hp > 0 : c.qtik.hp > 0 && c.tansy.hp > 0);
+        (fleeing || soloAtStart ? c.qtik.hp > 0 || c.tansy.hp > 0 : c.qtik.hp > 0 && c.tansy.hp > 0);
         ex++
     ) {
         const p = tape.player[ex];
@@ -4271,16 +4281,20 @@ function resolveTurn({ state, actions, rolls }) {
         const specialistInterrupted = actions.qtik === 'frost_stomp' && ex === 0;
         const hexPenalty = currentHexPenalty();
 
-        // Bodyguard forfeits Q'tik's personal attack (2 * level) to guard Tansy.
+        // Bodyguard or a downed Q'tik forfeits Q'tik's personal attack (2 * level).
+        // A downed Tansy forfeits her gear and summons, leaving Q'tik's own base + achievement ATK.
         const raised = shadowMechanics(c);
         const activeShadowAttack = activeDamageShadowAttack(raised);
-        const qtikBaseContribution = bodyguardActive ? 2 * c.level : 0;
-        const unpenalizedAttack = Math.max(
-            0,
-            (actions.tansy === 'recall'
-                ? baseAndGearAttack + activeShadowAttack
-                : baseAndGearAttack + looseWeaselAttack() + activeShadowAttack) - qtikBaseContribution
-        );
+        const qtikBaseContribution = (bodyguardActive || qtikDownAtStart) ? 2 * c.level : 0;
+        const unpenalizedAttack = tansyDownAtStart
+            ? (bodyguardActive ? 0 : 2 * c.level + achievementBonuses(c).atk)
+            : Math.max(
+                0,
+                (actions.tansy === 'recall'
+                    ? baseAndGearAttack + activeShadowAttack
+                    : baseAndGearAttack + looseWeaselAttack() + activeShadowAttack) - qtikBaseContribution
+            );
+
         const effectiveAttack = Math.max(0, unpenalizedAttack - hexPenalty - passiveAttackPenalty(encounter));
         const bodyguardDefenseBonus = bodyguardActive ? Math.max(2, Math.floor(crewStats.def / 3)) : 0;
         const effectiveDefense = Math.max(
@@ -4311,7 +4325,7 @@ function resolveTurn({ state, actions, rolls }) {
         const fireDamage = actions.qtik === 'fire_melee' ? Math.max(3, Math.floor(derived(c).atk / 5)) : 0;
         const targetDefense = enemyDefense(target, true);
 
-        const qtikPhysicalDamage = bodyguardActive ? 0 : p === 1 ? 1 : Math.max(1, 2 * c.level - targetDefense + p);
+        const qtikPhysicalDamage = (bodyguardActive || qtikDownAtStart) ? 0 : p === 1 ? 1 : Math.max(1, 2 * c.level - targetDefense + p);
         const qtikPersonalDamage = qtikPhysicalDamage + fireDamage;
         const vitalsBonus = actions.tansy === 'vitals' && p >= 2
             ? Math.min(targetDefense, Math.floor((c.weasels.active + raised.slots) / 2))
@@ -4494,9 +4508,13 @@ function resolveTurn({ state, actions, rolls }) {
 
             if (frontliners.length > 0) {
                 const lead = frontliners[0];
-                let baseBleed = Math.max(1, Math.round((lead.atk - effectiveDefense) / 10));
-                if (bodyguardActive) baseBleed = Math.max(1, baseBleed - 1);
-                baseBleed = Math.max(1, baseBleed - raised.bruteReduction);
+                // Without Q'tik on the frontline, her DEF and 90% (/10) mitigation are offline.
+                const unshielded = c.qtik.hp === 0;
+                let baseBleed = unshielded
+                    ? lead.atk
+                    : Math.max(1, Math.round((lead.atk - effectiveDefense) / 10));
+                if (!unshielded && bodyguardActive) baseBleed = Math.max(1, baseBleed - 1);
+                if (!tansyDownAtStart) baseBleed = Math.max(1, baseBleed - raised.bruteReduction);
                 baseBleed += enemyTier(lead.level) * Math.max(0, frontliners.length - 1);
 
                 const buffer = currentBuffer();
@@ -4509,6 +4527,9 @@ function resolveTurn({ state, actions, rolls }) {
                 const rollDamage = e === 6 ? 4 : e === 5 ? 2 : e >= 3 ? 1 : 0;
                 frontlineDamage = baseBleed + rollDamage + passiveBleedBonus(encounter);
                 enemyHitCount++;
+                if (unshielded) {
+                    effects.push(`${lead.id} struck unshielded Tansy for ${frontlineDamage} damage`);
+                }
 
                 if (telegraphDestroysMeleeWeasel && actions.tansy !== 'recall') {
                     destroyWeasel(effects, 'Sweeping Cleave');
@@ -4600,7 +4621,7 @@ function resolveTurn({ state, actions, rolls }) {
                     effects.push(`${foe.id} Aether-Drain restored ${healed} HP`);
                 }
             }
-        } else if (qtikTrinketId === 'rime_pulse' && !qtikTrinketTriggered && live(s).length > 0) {
+        } else if (c.qtik.hp > 0 && qtikTrinketId === 'rime_pulse' && !qtikTrinketTriggered && live(s).length > 0) {
             const pulseDmg = Math.max(2, Math.round(qtikTrinketStat * 1.4));
             const pulseTargets = [...live(s)];
             for (const foe of pulseTargets) {
@@ -4618,11 +4639,11 @@ function resolveTurn({ state, actions, rolls }) {
             effects.push(`Rime Pulse chilled all ${pulseTargets.length} foe(s) for ${pulseDmg} damage`);
         }
 
-        // During a survivor's failed escape, redirect all incoming damage to the survivor.
-        if (fleeing && c.qtik.hp === 0) {
+        // Whenever one protagonist is down, all incoming damage lands on the survivor.
+        if (c.qtik.hp === 0) {
             backlineDamage += frontlineDamage;
             frontlineDamage = 0;
-        } else if (fleeing && c.tansy.hp === 0) {
+        } else if (c.tansy.hp === 0) {
             frontlineDamage += backlineDamage;
             backlineDamage = 0;
         }
@@ -4680,7 +4701,7 @@ function resolveTurn({ state, actions, rolls }) {
 
         // Shadow-Mender life-leech: drains a living foe and feeds the lowest-HP% living ally.
         const menderDrain = shadowMechanics(c).menderDrain;
-        if (!fleeing && menderDrain > 0 && live(s).length > 0 && (c.qtik.hp > 0 || c.tansy.hp > 0)) {
+        if (!fleeing && !tansyDownAtStart && c.tansy.hp > 0 && menderDrain > 0 && live(s).length > 0) {
             const drainTarget = target.hp > 0 ? target : lowestHpFoe();
             if (drainTarget) {
                 const drainHits = dealDamage(s, drainTarget, menderDrain, kills);
@@ -4746,7 +4767,7 @@ function resolveTurn({ state, actions, rolls }) {
         if (restored > 0) turnEffects.push(`Swarm Momentum reformed ${restored} weasel(s)`);
     }
 
-    if (!fleeing && shadowMechanics(c).menderDrain > 0) {
+    if (!fleeing && !tansyDownAtStart && c.tansy.hp > 0 && shadowMechanics(c).menderDrain > 0) {
         const livingIds = new Set(live(s).map(foe => foe.id));
         const hex = Object.keys(encounter.hexStacks || {}).find(
             id => livingIds.has(id) && encounter.hexStacks[id] > 0
@@ -14478,8 +14499,8 @@ function combatNarrationPacket(result, actions) {
 
     const lines = [
         'COMBAT SCENE RESULT.',
-        `Q'tik used ${qtikLabel}.`,
-        `Tansy used ${tansyLabel}.`,
+        actions?.qtik ? `Q'tik used ${qtikLabel}.` : "Q'tik was down (0 HP) and could not act.",
+        actions?.tansy ? `Tansy used ${tansyLabel}.` : 'Tansy was down (0 HP) and could not act.',
         'Dramatize these established events as a coherent scene. ' +
         'Add atmosphere, pacing, dialogue, and physical description, ' +
         'but do not add attacks, injuries, decisions, enemy behavior, ' +
@@ -20661,6 +20682,8 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         ? Math.max(0, 3 + Math.floor(crew.level / 2) - shadows.slots)
         : crew.weasels.active;
 
+    const qtikDown = crew.qtik.hp === 0;
+    const tansyDown = crew.tansy.hp === 0;
     const baseAndGearAttack =
         stats.atk - 2 * crew.weasels.active - shadows.attack;
     const summonMult = tansyAction === 'vitals' ? 2 : 1;
@@ -20671,15 +20694,17 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         ? shadows.archerAttack
         : (shadows.attack - shadows.archerAttack) +
           shadows.archerAttack * summonMult;
-    const qtikBasePenalty = qtikAction === 'bodyguard' ? 2 * crew.level : 0;
+    const qtikBasePenalty = (qtikAction === 'bodyguard' || qtikDown) ? 2 * crew.level : 0;
 
-    const unpenalizedAtk = Math.max(
-        0,
-        (tansyAction === 'recall'
-            ? baseAndGearAttack + activeShadowAtk
-            : baseAndGearAttack + looseWeaselAtk + activeShadowAtk) -
-            qtikBasePenalty
-    );
+    const unpenalizedAtk = tansyDown
+        ? (qtikAction === 'bodyguard' ? 0 : 2 * crew.level + achievementBonuses(crew).atk)
+        : Math.max(
+            0,
+            (tansyAction === 'recall'
+                ? baseAndGearAttack + activeShadowAtk
+                : baseAndGearAttack + looseWeaselAtk + activeShadowAtk) -
+                qtikBasePenalty
+        );
 
     const livingFoes = (encounter?.foes || []).filter(foe => foe.hp > 0);
     const target = livingFoes.find(foe => foe.id === targetId) || livingFoes[0] || null;
@@ -20718,7 +20743,7 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         : null;
     const bufferBonus = buffer ? 3 * enemyTier(buffer.level) : 0;
 
-    const tansyTrinket = equippedTrinket(crew, 'tansy');
+    const tansyTrinket = tansyDown ? null : equippedTrinket(crew, 'tansy');
     const trinketId = tansyTrinket?.trinket?.id || null;
     const trinketPower = tansyTrinket
         ? trinketBudget(tansyTrinket, stats.luk, crew.level, tansyAction === 'vitals')
@@ -20777,8 +20802,8 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         trinketNote = ` · Sunder +${chip} (−${sunderShred} DEF)`;
     }
 
-    const qLabel = combatActionLabel('qtik', qtikAction);
-    const tLabel = combatActionLabel('tansy', tansyAction);
+    const qLabel = qtikDown ? "Q'tik Down" : combatActionLabel('qtik', qtikAction);
+    const tLabel = tansyDown ? 'Tansy Down' : combatActionLabel('tansy', tansyAction);
     const isAoE = qtikAction === 'frost_stomp' || tansyAction === 'overrun';
 
     if (isAoE) {
@@ -21332,26 +21357,13 @@ async function openCombatPanel(inlineHost) {
         return;
     }
 
-    if (encounter?.status === 'active' && (state.crew.qtik.hp === 0 || state.crew.tansy.hp === 0)) {
-        const survivor = state.crew.qtik.hp > 0 ? "Q'tik" : 'Tansy';
-        const section = makeAethermoorSection(
-            'COMPANION DOWN',
-            `${state.crew.qtik.hp === 0 ? "Q'tik" : 'Tansy'} is at 0 HP. Their commands are unavailable.\n` +
-                `${survivor} can attempt to flee. A failed escape allows one enemy response. ` +
-                'The death XP penalty has already been applied once.',
-            'combat'
-        );
-        const flee = makeAethermoorAction(`${survivor}: Attempt Flee`, 'combat', () => attemptFlee(flee));
-        section.appendChild(flee);
-        inlineHost.appendChild(section);
-        appendCombatCommandPreview(inlineHost, state);
-        return;
-    }
+    const qtikDown = state.crew.qtik.hp <= 0;
+    const tansyDown = state.crew.tansy.hp <= 0;
 
-    if (!encounter || encounter.status !== 'active' || state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0) {
+    if (!encounter || encounter.status !== 'active' || (qtikDown && tansyDown)) {
         const message =
-            state.crew.qtik.hp <= 0 || state.crew.tansy.hp <= 0
-                ? 'A crew member has fallen. Resolve death or respawn before continuing.'
+            qtikDown && tansyDown
+                ? 'Both crew members have fallen. Resolve death or respawn before continuing.'
                 : encounter?.status === 'cleared'
                     ? 'This encounter is cleared.'
                     : encounter?.status === 'spotted'
@@ -21375,7 +21387,10 @@ async function openCombatPanel(inlineHost) {
     const comboForecast = el('div', { className: 'aethermoor-combat-forecast' });
     const refreshComboForecast = () => {
         comboForecast.textContent = formatCombatComboPreview(
-            state, combatSelections.qtik, combatSelections.tansy, combatSelections.target
+            state,
+            qtikDown ? null : combatSelections.qtik,
+            tansyDown ? null : combatSelections.tansy,
+            combatSelections.target
         );
     };
 
@@ -21454,13 +21469,14 @@ async function openCombatPanel(inlineHost) {
             }
 
             const actionsInput = {
-                qtik: combatSelections.qtik,
-                tansy: combatSelections.tansy,
+                ...(qtikDown ? {} : { qtik: combatSelections.qtik }),
+                ...(tansyDown ? {} : { tansy: combatSelections.tansy }),
                 target: combatSelections.target,
-                ...(combatSelections.qtik === 'drink' ? { qtikItem: combatSelections.qtikItem } : {}),
-                ...(combatSelections.tansy === 'drink' ? { tansyItem: combatSelections.tansyItem } : {}),
-                ...shadowArgs
+                ...(!qtikDown && combatSelections.qtik === 'drink' ? { qtikItem: combatSelections.qtikItem } : {}),
+                ...(!tansyDown && combatSelections.tansy === 'drink' ? { tansyItem: combatSelections.tansyItem } : {}),
+                ...(tansyDown ? {} : shadowArgs)
             };
+
             const result = await runStoredMechanic({ actions: actionsInput });
             assert(result?.ok === true, result?.error || 'Combat turn failed');
 
@@ -21481,7 +21497,7 @@ async function openCombatPanel(inlineHost) {
             };
 
             aethermoorLastCombatLog = [
-                `Turn ${result.turn} · ${combatActionLabel('qtik', actionsInput.qtik)} / ${combatActionLabel('tansy', actionsInput.tansy)}`,
+                `Turn ${result.turn} · ${actionsInput.qtik ? combatActionLabel('qtik', actionsInput.qtik) : "Q'tik Down"} / ${actionsInput.tansy ? combatActionLabel('tansy', actionsInput.tansy) : 'Tansy Down'}`,
                 ...(result.exchanges || []).map(exchange => {
                     const hits = (exchange.hits || [])
                         .filter(hit => hit.damage > 0)
@@ -21539,10 +21555,28 @@ async function openCombatPanel(inlineHost) {
         }
     });
 
+    const survivorBanner = (qtikDown || tansyDown)
+        ? makeAethermoorSection(
+            'COMPANION DOWN · LAST STAND',
+            qtikDown
+                ? "Q'tik is at 0 HP. Her commands, DEF, and 90% frontline mitigation are offline — surviving frontline enemies will hit Tansy for full raw ATK.\nTansy can push for a solo kill or attempt to flee. The death XP penalty has already been applied once."
+                : "Tansy is at 0 HP. Her commands, gear, and summons are offline.\nQ'tik can fight solo with her own ATK/DEF or attempt to flee. The death XP penalty has already been applied once.",
+            'combat'
+        )
+        : null;
+
     const fleeButton = makeAethermoorAction('Attempt Flee', 'combat', () => attemptFlee(fleeButton));
     inlineHost.appendChild(el('div', { className: 'aethermoor-combat-controls' },
+        survivorBanner,
         el('pre', { className: 'aethermoor-combat-status', text: combatStatusText(state) }),
-        qtikGroup, qtikPotions, tansyGroup, tansyPotions, tansyRaiseShadows, tansyUnfuseShadows, targetGroup, comboForecast,
+        qtikDown ? null : qtikGroup,
+        qtikDown ? null : qtikPotions,
+        tansyDown ? null : tansyGroup,
+        tansyDown ? null : tansyPotions,
+        tansyDown ? null : tansyRaiseShadows,
+        tansyDown ? null : tansyUnfuseShadows,
+        targetGroup,
+        comboForecast,
         el('div', { className: 'aethermoor-combat-actions' }, resolveButton, fleeButton),
         resultBox
     ));

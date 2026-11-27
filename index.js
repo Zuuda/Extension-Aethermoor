@@ -11,6 +11,7 @@ const ZONE_NAMES = {
  * do not merely describe what an individual line does.
  *
  * World invariants:
+ * World invariants:
  * - Zone numbers control progression formulas, not settlement identity.
  * - Geography flows between neighboring regions via a 3-road forward
  *   Crossroads (1 Post-Calamity Frontier + 2 Pre-Calamity Flavors).
@@ -18,6 +19,13 @@ const ZONE_NAMES = {
  *   alongside STOCK_NAMES; stable IDs identify places and factions.
  * - Generated world records are saved and must not be regenerated later.
  * - World generation must not advance combat/loot RNG.
+ *
+ * Provider output quirk:
+ * - Never use title-case "F" + "inal" in identifiers, strings, or comments.
+ *   The LLM provider strips that exact token from replies, corrupting pasted
+ *   patches. Lowercase (`final`, `finale`) and all-caps (`FINAL`, `FINALE`)
+ *   are safe; prefer `isClimax` / `Last` / `Climax`.
+ */
  */
 
 const WORLD_SCHEMA_VERSION = 1;
@@ -2133,8 +2141,9 @@ function contractOfferedCardHtml(quest) {
     const salvage = quest.salvage || {};
     const salvageColor = salvage.rarityColor || '#ffffff';
     const gateLabel = `${quest.gates} ${quest.gates === 1 ? 'Gate' : 'Gates'}`;
+    const isClimax = quest.msq?.isClimax === true || quest.msq?.phase === 'finale';
     const rightBadge = isMsq
-        ? `<b style="color:#c084fc;">${quest.msq?.isFinale ? 'Finale' : `Ch. ${quest.msq?.chapter || 1}`} · Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`
+        ? `<b style="color:#c084fc;">${isClimax ? 'Climax' : `Ch. ${quest.msq?.chapter || 1}`} · Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`
         : `<b style="color:#4ade80;">Rank ${escapeSystemLogHtml(quest.rank)} · ${gateLabel}</b>`;
 
     return systemLogCardHtml({
@@ -4154,7 +4163,7 @@ function resolveTurn({ state, actions, rolls }) {
                 exchange: ex + 1, playerRoll: p, enemyRoll: null, target: target.id, crit: false,
                 damage, hits, enemyMiss: null, enemyAttackAbsorbed: false,
                 frontlineDamage: 0, backlineDamage: 0,
-                effects: [...effects, ' foe slain before enemy response'],
+                effects: [...effects, 'Last foe slain before enemy response'],
                 qtikHp: c.qtik.hp, tansyHp: c.tansy.hp, livingFoes: []
             });
             break;
@@ -6643,9 +6652,10 @@ function resolveTravelStep(test) {
     assert(!['active', 'spotted'].includes(state.encounter?.status), 'Resolve or avoid the current encounter before moving');
 
     let journey = state.currentJourney;
+    let journey = state.currentJourney;
     if (journey?.status === 'paused') journey.status = 'traveling';
 
-    //  route segment: destination content supplies the arrival scene without a random travel roll.
+    // Last route segment: destination content supplies the arrival scene without a random travel roll.
     if (journey && journey.completedSegments >= journey.totalSegments - 1) {
         int(journey.totalSegments, 'journey.totalSegments', 1);
         int(journey.completedSegments, 'journey.completedSegments');
@@ -8985,9 +8995,9 @@ function resolveQuestAction(test) {
             const msq = state.world?.zones?.[msqZone]?.msq;
             if (msq) {
                 msq.activeQuestId = null;
-                if (advanceMsq) {
+                 if (advanceMsq) {
                     msq.completedChapters = Math.max(Number(msq.completedChapters || 0), Number(quest.msq?.chapter || 0));
-                    if (quest.msq?.ise || msq.completedChapters >= msq.totalChapters) {
+                    if (quest.msq?.isClimax || quest.msq?.phase === 'finale' || msq.completedChapters >= msq.totalChapters) {
                         msq.status = 'completed';
                         msq.pendingBeatDelay = 0;
                     } else {
@@ -9097,7 +9107,7 @@ function resolveQuestAction(test) {
             Array.isArray(quest.gatesData) && quest.gatesData.length === quest.gates,
             'This legacy quest has no engine-authored gate plan'
         );
-        assert(quest.currentGate?.step < quest.gates, ' gate must use resolve_objective before complete');
+        assert(quest.currentGate?.step < quest.gates, 'Last gate must use resolve_objective before complete');
         assert(test.objectiveCompleted === true, 'Gate clearance requires objectiveCompleted: true');
         assert(
             typeof test.completionEvidence === 'string' && test.completionEvidence.trim().length > 0,
@@ -10582,15 +10592,15 @@ function buildMsqChapterQuest(state, zone) {
 
     const nextChapter = Number(msq.chapter || 0) + 1;
     const total = Number(msq.totalChapters || spine.chapterCount || 5);
-    const isFinale = nextChapter >= total;
+    const isClimax = nextChapter >= total;
     const revealChapter = Math.ceil(total / 2) + 1;
-    const phase = isFinale
+    const phase = isClimax
         ? 'finale'
         : nextChapter >= revealChapter
             ? 'escalation'
             : 'opening';
 
-    const rank = isFinale
+    const rank = isClimax
         ? 'B'
         : nextChapter === 1
             ? (total >= 5 ? 'F' : 'E')
@@ -10607,7 +10617,7 @@ function buildMsqChapterQuest(state, zone) {
     let gates;
     let terminalThreat;
 
-    if (isFinale) {
+    if (isClimax) {
         archetype = QUEST_ARCHETYPES.find(entry => entry.id === 'local_bounty');
         gates = 2;
         terminalThreat = { kind: 'boss', zone, roll: null };
@@ -10645,14 +10655,13 @@ function buildMsqChapterQuest(state, zone) {
         scenarios,
         rank
     );
-
     if (archetype.id === 'local_bounty') {
-        authored.facts.threat = isFinale
+        authored.facts.threat = isClimax
             ? spine.bossConcept
             : terminalThreat.kind === 'normal_pack'
                 ? 'the hostile group'
                 : 'the dangerous foe';
-        if (isFinale) {
+        if (isClimax) {
             authored.pitch =
                 `The regional conflict reaches its breaking point against ${spine.bossConcept}.`;
         }
@@ -10689,15 +10698,15 @@ function buildMsqChapterQuest(state, zone) {
     const questGatesData = clone(structureV2.gates);
     const quest = {
         id: `msq-z${zone}-ch${nextChapter}-${archetype.id}`,
-        title: isFinale
-            ? 'Main Story Finale · Regional Showdown'
+        title: isClimax
+            ? 'Main Story Climax · Regional Showdown'
             : `Main Story Ch. ${nextChapter} · ${archetype.label}`,
         rank,
         isMsq: true,
         msq: {
             zone,
             chapter: nextChapter,
-            isFinale,
+            isClimax,
             phase
         },
         archetype: {
@@ -15408,9 +15417,10 @@ async function showAethermoorContractOffer(
                 className: 'aethermoor-contract-popup-rank',
                 style: isMsq ? { color: '#c084fc' } : null,
                 text: isMsq
-                    ? `${quest.msq?.isFinale ? 'FINALE' : `CH. ${quest.msq?.chapter || 1}`} · RANK ${quest.rank}`
+                    ? `${(quest.msq?.isClimax || quest.msq?.phase === 'finale') ? 'FINALE' : `CH. ${quest.msq?.chapter || 1}`} · RANK ${quest.rank}`
                     : `RANK ${quest.rank}`
             })
+
         ),
         el('div', { className: 'aethermoor-contract-popup-title', text: quest.title }),
         el('div', { text: quest.pitch || '' }),

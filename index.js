@@ -4423,9 +4423,11 @@ function resolveTurn({ state, actions, rolls }) {
         // Spiked Carapace reflects Q'tik's personal damage only (never summons).
         if (targetedCarapace && actions.qtik !== 'frost_stomp' && hits.some(hit => hit.id === target.id)) {
             const reflected = Math.min(c.qtik.hp, qtikPersonalDamage);
-            c.qtik.hp -= reflected;
-            if (reflected > 0) encounter.crewTookDamage = true;
-            effects.push(`Spiked Carapace reflected ${reflected} pure damage to Q'tik`);
+            if (reflected > 0) {
+                c.qtik.hp -= reflected;
+                encounter.crewTookDamage = true;
+                effects.push(`Spiked Carapace reflected ${reflected} pure damage to Q'tik`);
+            }
             if (c.weasels.active > 0 && actions.tansy !== 'recall') destroyWeasel(effects, 'Spiked Carapace');
         }
 
@@ -12778,15 +12780,14 @@ function resolveBatch(args) {
 }
 
 /*
-/*
  * Between-fight recovery happens on the first overland travel step or
  * instance room move after combat, not immediately at victory. Leaving
  * Q'tik's post-fight HP visible lets the aftermath scene reflect the
- * damage she took while her regeneration tops her off on the move.
+ * damage she took while her regeneration tops her off on the move, and
+ * any loose Shadow-Weasels lost in the fight reform to loose capacity.
  *
- * Tansy deliberately receives no out-of-combat healing yet. Revisit that
- * only after the level-20 Mender and its authored quest are both established;
- * then decide whether the Mender supports the same full-recovery rule.
+ * Tansy deliberately receives no out-of-combat HP healing; Shadow-Mender
+ * only leeches in active combat so inns and potions keep their friction.
  */
 function applyOutOfCombatRecovery(previousState, nextState, oneCase) {
     const isMoveOperation =
@@ -12807,18 +12808,39 @@ function applyOutOfCombatRecovery(previousState, nextState, oneCase) {
 
     const maxHp = derived(nextState.crew).qtikMaxHp;
     const beforeHp = nextState.crew.qtik.hp;
-
-    if (beforeHp >= maxHp) {
-        return null;
+    const hpRecovered = Math.max(0, maxHp - beforeHp);
+    if (hpRecovered > 0) {
+        nextState.crew.qtik.hp = maxHp;
     }
 
-    nextState.crew.qtik.hp = maxHp;
+    const totalSlots = 3 + Math.floor((nextState.crew.level || 1) / 2);
+    const looseCapacity = Math.max(
+        0,
+        totalSlots - shadowMechanics(nextState.crew).slots
+    );
+    const beforeWeasels = Number(nextState.crew.weasels?.active || 0);
+    let weaselsRestored = 0;
+
+    if (nextState.crew.weasels) {
+        nextState.crew.weasels.max = totalSlots;
+        if (beforeWeasels < looseCapacity) {
+            weaselsRestored = looseCapacity - beforeWeasels;
+            nextState.crew.weasels.active = looseCapacity;
+        }
+    }
+
+    if (hpRecovered === 0 && weaselsRestored === 0) {
+        return null;
+    }
 
     return {
         character: 'qtik',
         beforeHp,
-        afterHp: maxHp,
-        recovered: maxHp - beforeHp,
+        afterHp: nextState.crew.qtik.hp,
+        recovered: hpRecovered,
+        weaselsBefore: beforeWeasels,
+        weaselsAfter: nextState.crew.weasels?.active ?? beforeWeasels,
+        weaselsRestored,
         reason: 'movement_out_of_combat'
     };
 }
@@ -14976,6 +14998,17 @@ async function runStoredMechanic(args) {
                         nextState.encounter.id
                 ) {
                     handoffQueue.splice(index, 1);
+                }
+            }
+        }
+
+        if (batch && oneCase?.kind === 'shadows' && oneCase.action === 'dismiss_imprints') {
+            for (const entry of handoffQueue) {
+                if (entry.type === 'combat' && typeof entry.packet === 'string') {
+                    entry.packet = entry.packet.replace(
+                        /\nSHADOW IMPRINTS DETECTED — [^\n]*\n[^\n]*/g,
+                        ''
+                    );
                 }
             }
         }

@@ -11,7 +11,6 @@ const ZONE_NAMES = {
  * do not merely describe what an individual line does.
  *
  * World invariants:
- * World invariants:
  * - Zone numbers control progression formulas, not settlement identity.
  * - Geography flows between neighboring regions via a 3-road forward
  *   Crossroads (1 Post-Calamity Frontier + 2 Pre-Calamity Flavors).
@@ -26,8 +25,7 @@ const ZONE_NAMES = {
  *   patches. Lowercase (`final`, `finale`) and all-caps (`FINAL`, `FINALE`)
  *   are safe; prefer `isClimax` / `Last` / `Climax`.
  */
- */
-
+ 
 const WORLD_SCHEMA_VERSION = 1;
 const WORLD_FLAVOR_COOLDOWN = 6;
 
@@ -6651,7 +6649,6 @@ function resolveTravelStep(test) {
 
     assert(!['active', 'spotted'].includes(state.encounter?.status), 'Resolve or avoid the current encounter before moving');
 
-    let journey = state.currentJourney;
     let journey = state.currentJourney;
     if (journey?.status === 'paused') journey.status = 'traveling';
 

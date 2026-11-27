@@ -14351,6 +14351,7 @@ function clearAethermoorContractNotifications() {
     aethermoorContractNotifications.length = 0;
     aethermoorContractNotificationBusy = false;
     document.getElementById('aethermoor_contract_popup')?.remove();
+    document.getElementById('aethermoor_shadow_imprint_popup')?.remove();
 }
 
 function scheduleAethermoorContractNotifications(before, after, metadata) {
@@ -14403,8 +14404,19 @@ function scheduleAethermoorContractNotifications(before, after, metadata) {
         }
     }
 
-    if (!notices.length) return;
+    const oldImprintId = before?.pendingShadowImprints?.encounterId || null;
+    const newImprints = after?.pendingShadowImprints;
+    if (
+        newImprints?.imprints?.length > 0 &&
+        newImprints.encounterId !== oldImprintId
+    ) {
+        notices.push({
+            type: 'shadow_imprints',
+            encounterId: newImprints.encounterId
+        });
+    }
 
+    if (!notices.length) return;
     const epoch = aethermoorContractNotificationEpoch;
     const scheduledNotices = notices.map(notice => ({
         ...notice,
@@ -14450,6 +14462,12 @@ async function showNextAethermoorContractNotification() {
                 notice.metadata,
                 epoch
             );
+        } else if (notice.type === 'shadow_imprints') {
+            await showAethermoorShadowImprintPopup(
+                notice.metadata,
+                epoch,
+                true
+            );
         } else if (
             epoch === aethermoorContractNotificationEpoch &&
             getContext().chatMetadata === notice.metadata
@@ -14470,6 +14488,7 @@ async function showNextAethermoorContractNotification() {
 
 function finishAethermoorContractNotification() {
     document.getElementById('aethermoor_contract_popup')?.remove();
+    document.getElementById('aethermoor_shadow_imprint_popup')?.remove();
     aethermoorContractNotificationBusy = false;
     void showNextAethermoorContractNotification();
 }
@@ -15505,6 +15524,7 @@ function addAethermoorPanelStyles() {
 .aethermoor-ui-section[data-accent="quest"] { border-left-color:#d99b26; }
 .aethermoor-ui-section[data-accent="msq"] { border-left-color:#c084fc; }
 .aethermoor-ui-section[data-accent="world"] { border-left-color:#4da6ff; }
+.aethermoor-ui-section[data-accent="shadow"] { border-left-color:#7c3aed; background:#100c18; border-color:#2e1f47; }
 .aethermoor-quest-drawer { padding:10px; background:#12161c; border:1px solid #2b3542; border-left:3px solid #d99b26; }
 .aethermoor-quest-drawer[data-msq="true"] { border-left-color:#c084fc; background:#161420; }
 .aethermoor-quest-drawer[data-history="true"] { border-left-color:#6e7f91; }
@@ -15593,7 +15613,17 @@ function addAethermoorPanelStyles() {
 .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-title, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-detail, .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-telegraph { display:block; width:100%; text-align:center; overflow-wrap:anywhere; }
 .aethermoor-tab-view[data-tab="combat"] .aethermoor-combat-choice-telegraph { color:#ffd166; font-size:11px; }
 .aethermoor-tab-view[data-tab="combat"] button, .aethermoor-tab-view[data-tab="combat"] button:hover, .aethermoor-tab-view[data-tab="combat"] button:focus, .aethermoor-tab-view[data-tab="combat"] button:active { animation:none !important; transition:none !important; transform:none !important; }
-@media (max-width:600px) { .aethermoor-panel { right:8px; bottom:72px; width:calc(100vw - 16px); height:min(70vh,560px); min-width:0; resize:both; } .aethermoor-tab { padding-inline:4px; } .aethermoor-trade-columns { grid-template-columns:1fr; } .aethermoor-charsheet-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+.aethermoor-shadow-popup { position:fixed; z-index:10003; top:50%; left:50%; transform:translate(-50%,-50%); width:min(450px,calc(100vw - 24px)); box-sizing:border-box; padding:12px; color:#d0d7de; background:#100c18; border:1px solid #2e1f47; border-left:3px solid #7c3aed; border-radius:2px; box-shadow:0 12px 36px rgba(0,0,0,0.72); font:11px/1.45 'Segoe UI',Tahoma,sans-serif; }
+.aethermoor-shadow-popup-header { display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding-bottom:6px; margin-bottom:8px; border-bottom:1px solid #241838; }
+.aethermoor-shadow-row { display:flex; align-items:flex-start; gap:8px; padding:7px 8px; margin-top:6px; background:#161024; border:1px solid #2e1f47; border-radius:2px; cursor:pointer; }
+.aethermoor-shadow-row:hover { border-color:#7c3aed; }
+.aethermoor-shadow-row input[type="checkbox"] { margin-top:2px; accent-color:#a855f7; cursor:pointer; }
+.aethermoor-shadow-popup-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; margin-top:12px; padding-top:8px; border-top:1px solid #241838; }
+.aethermoor-shadow-popup-actions button { padding:5px 10px; color:#d0d7de; background:#14101f; border:1px solid #2e1f47; border-radius:2px; cursor:pointer; font:inherit; font-weight:700; }
+.aethermoor-shadow-popup-actions button[data-primary="true"] { background:#1c1330; border-color:#7c3aed; color:#e9d5ff; }
+.aethermoor-shadow-popup-actions button:hover:not(:disabled), .aethermoor-shadow-popup-actions button:focus-visible:not(:disabled) { border-color:#a855f7; color:#ffffff; }
+.aethermoor-shadow-popup-actions button:disabled { opacity:0.45; cursor:not-allowed; }
+@media (max-width:600px) {.aethermoor-panel { right:8px; bottom:72px; width:calc(100vw - 16px); height:min(70vh,560px); min-width:0; resize:both; } .aethermoor-tab { padding-inline:4px; } .aethermoor-trade-columns { grid-template-columns:1fr; } .aethermoor-charsheet-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 `;
     document.head.appendChild(style);
 }
@@ -15876,6 +15906,190 @@ async function showAethermoorContractOffer(
 
     document.body.appendChild(popup);
     accept.focus();
+}
+
+async function showAethermoorShadowImprintPopup(
+    expectedMetadata = getContext().chatMetadata,
+    expectedEpoch = aethermoorContractNotificationEpoch,
+    fromQueue = false
+) {
+    const closePopup = () => {
+        if (fromQueue) {
+            finishAethermoorContractNotification();
+        } else {
+            document.getElementById('aethermoor_shadow_imprint_popup')?.remove();
+        }
+    };
+
+    if (
+        getContext().chatMetadata !== expectedMetadata ||
+        (fromQueue && expectedEpoch !== aethermoorContractNotificationEpoch)
+    ) {
+        if (fromQueue && expectedEpoch === aethermoorContractNotificationEpoch) {
+            aethermoorContractNotificationBusy = false;
+            void showNextAethermoorContractNotification();
+        }
+        return;
+    }
+
+    const snapshot = await readStoredCombatState();
+
+    if (
+        getContext().chatMetadata !== expectedMetadata ||
+        (fromQueue && expectedEpoch !== aethermoorContractNotificationEpoch)
+    ) {
+        if (fromQueue && expectedEpoch === aethermoorContractNotificationEpoch) {
+            aethermoorContractNotificationBusy = false;
+            void showNextAethermoorContractNotification();
+        }
+        return;
+    }
+
+    const offer = snapshot.state?.pendingShadowImprints;
+    const imprints = offer?.imprints || [];
+    if (imprints.length === 0) {
+        closePopup();
+        return;
+    }
+
+    addAethermoorPanelStyles();
+    document.getElementById('aethermoor_shadow_imprint_popup')?.remove();
+
+    const selected = new Set(imprints.map(entry => entry.type));
+    const bindBtn = el('button', {
+        type: 'button',
+        dataset: { primary: 'true' },
+        text: imprints.length > 1 ? 'Bind Selected' : 'Bind'
+    });
+    const dismissBtn = el('button', { type: 'button', text: 'Dismiss' });
+    const laterBtn = el('button', { type: 'button', text: 'Later', onClick: closePopup });
+
+    const refreshBindButton = () => {
+        bindBtn.disabled = selected.size === 0;
+        bindBtn.textContent = selected.size > 1
+            ? `Bind Selected (${selected.size})`
+            : 'Bind';
+    };
+
+    const rows = imprints.map(entry => {
+        const name = SHADOW_TYPE_LABELS[entry.type] || entry.type;
+        const meta = entry.type === 'archer'
+            ? `(Lv ${entry.sourceMobLevel})`
+            : `(Lv ${entry.sourceMobLevel} · Tier ${entry.shadowTier})`;
+        const checkbox = el('input', {
+            type: 'checkbox',
+            checked: true,
+            onChange: () => {
+                if (checkbox.checked) selected.add(entry.type);
+                else selected.delete(entry.type);
+                refreshBindButton();
+            }
+        });
+
+        return el('label', { className: 'aethermoor-shadow-row' },
+            checkbox,
+            el('div', { style: { minWidth: '0', flex: '1' } },
+                el('div', null,
+                    el('b', { style: { color: '#e9d5ff' }, text: name }),
+                    ' ',
+                    el('span', { style: { color: '#9caab8' }, text: meta }),
+                    ' — ',
+                    entry.isNew
+                        ? el('b', { style: { color: '#4ade80' }, text: 'New Imprint' })
+                        : el('b', {
+                            style: { color: '#ffd166' },
+                            text: `Replaces Tier ${entry.previousTier} (Lv ${entry.previousLevel})`
+                        })
+                ),
+                el('div', {
+                    style: { color: '#9caab8', marginTop: '2px' },
+                    text: shadowSummaryText(entry.type, entry.shadowTier)
+                })
+            )
+        );
+    });
+
+    bindBtn.addEventListener('click', async () => {
+        if (selected.size === 0) return;
+        bindBtn.disabled = true;
+        dismissBtn.disabled = true;
+        try {
+            assert(
+                getContext().chatMetadata === expectedMetadata,
+                'Chat changed; reopen this imprint offer in its original chat'
+            );
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'bind_shadow_imprints',
+                    kind: 'shadows',
+                    action: 'bind_imprints',
+                    shadowTypes: [...selected]
+                }]
+            });
+            assert(
+                output?.ok === true && output.results?.[0]?.ok !== false,
+                output?.results?.[0]?.error || 'Could not bind shadow imprints'
+            );
+            closePopup();
+            toastr.success(
+                `Bound ${selected.size} shadow imprint${selected.size === 1 ? '' : 's'}. Queued for the GM.`,
+                'Aethermoor'
+            );
+            if (aethermoorPanelOpen) renderAethermoorTab(aethermoorActiveTab);
+        } catch (error) {
+            bindBtn.disabled = false;
+            dismissBtn.disabled = false;
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+        }
+    });
+
+    dismissBtn.addEventListener('click', async () => {
+        bindBtn.disabled = true;
+        dismissBtn.disabled = true;
+        try {
+            assert(
+                getContext().chatMetadata === expectedMetadata,
+                'Chat changed; reopen this imprint offer in its original chat'
+            );
+            const output = await runStoredMechanic({
+                cases: [{
+                    name: 'dismiss_shadow_imprints',
+                    kind: 'shadows',
+                    action: 'dismiss_imprints'
+                }]
+            });
+            assert(
+                output?.ok === true && output.results?.[0]?.ok !== false,
+                output?.results?.[0]?.error || 'Could not dismiss shadow imprints'
+            );
+            closePopup();
+            toastr.info('Shadow imprints dismissed.', 'Aethermoor');
+            if (aethermoorPanelOpen) renderAethermoorTab(aethermoorActiveTab);
+        } catch (error) {
+            bindBtn.disabled = false;
+            dismissBtn.disabled = false;
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+        }
+    });
+
+    const popup = el('section', {
+        id: 'aethermoor_shadow_imprint_popup',
+        className: 'aethermoor-shadow-popup',
+        attrs: { role: 'dialog', 'aria-label': 'Shadow imprints detected' }
+    },
+        el('div', { className: 'aethermoor-shadow-popup-header' },
+            el('i', { style: { color: '#d8b4fe', letterSpacing: '0.2px' }, text: 'Lingering shadow-imprints cling to the fallen.' }),
+            Number.isInteger(offer.zone)
+                ? el('span', { style: { color: '#9caab8', whiteSpace: 'nowrap' }, text: `Zone ${offer.zone}` })
+                : null
+        ),
+        rows,
+        el('div', { className: 'aethermoor-shadow-popup-actions' }, bindBtn, dismissBtn, laterBtn)
+    );
+
+    refreshBindButton();
+    document.body.appendChild(popup);
+    bindBtn.focus();
 }
 
 async function runAethermoorPanelCase(host, tab, caseData, successText) {
@@ -19438,9 +19652,17 @@ function combatStatusText(state) {
 
     if (!encounter) return 'No encounter.';
 
+    const activeShadows = state.crew.shadows?.active || [];
+    const shadowText = activeShadows.length > 0
+        ? `Shadows: ${activeShadows.map(s =>
+            `${SHADOW_TYPE_LABELS[s.type] || s.type}${s.count > 1 ? ` ×${s.count}` : ''}`
+        ).join(', ')}`
+        : null;
+
     const lines = [
         `Turn ${encounter.turn} · ${encounter.status}`,
-        `Weasels: ${state.crew.weasels.active}/${state.crew.weasels.max}`
+        `Weasels: ${state.crew.weasels.active}/${state.crew.weasels.max}`,
+        ...(shadowText ? [shadowText] : [])
     ];
 
     const journey = state.currentJourney;
@@ -19458,7 +19680,9 @@ function combatStatusText(state) {
 const combatSelections = {
     qtik: 'fire_melee',
     tansy: 'visor',
-    target: null
+    target: null,
+    raiseShadowId: null,
+    unfuseShadowId: null
 };
 
 /*
@@ -19631,6 +19855,111 @@ function ensurePotionSelection(owner, state) {
 
     return options;
 }
+function shadowUiUnlocked(state) {
+    return (
+        (state?.crew?.level || 1) >= SHADOW_UNLOCK_LEVEL ||
+        (state?.crew?.shadows?.deck?.length || 0) > 0 ||
+        (state?.crew?.shadows?.active?.length || 0) > 0 ||
+        (state?.pendingShadowImprints?.imprints?.length || 0) > 0
+    );
+}
+
+function tansyCombatOptionsFor(state) {
+    if (shadowUiUnlocked(state)) return TANSY_COMBAT_OPTIONS;
+    return TANSY_COMBAT_OPTIONS.filter(
+        option => option.value !== 'raise_shadow' && option.value !== 'unfuse_shadow'
+    );
+}
+
+function raiseShadowOptionsFor(state) {
+    const crew = state?.crew;
+    if (!crew) return [];
+    const deck = crew.shadows?.deck || [];
+    const active = crew.shadows?.active || [];
+    const totalSlots = 3 + Math.floor((crew.level || 1) / 2);
+    const usedShadowSlots = active.reduce((sum, s) => sum + 3 * s.count, 0);
+    const looseCapacity = totalSlots - usedShadowSlots;
+
+    if (looseCapacity < 3) return [];
+
+    const options = [];
+    for (const entry of deck) {
+        const activeEntry = active.find(s => s.id === entry.id);
+        if (entry.type !== 'archer' && activeEntry) continue;
+        const currentCount = activeEntry ? activeEntry.count : 0;
+        const nextCount = currentCount + 1;
+        const tier = shadowTierFromLevel(entry.sourceMobLevel);
+
+        options.push({
+            value: entry.id,
+            shadowId: entry.id,
+            type: entry.type,
+            nextCount,
+            label: entry.type === 'archer' && currentCount > 0
+                ? `+1 ${SHADOW_TYPE_LABELS.archer}`
+                : (SHADOW_TYPE_LABELS[entry.type] || entry.type),
+            detail: entry.type === 'archer'
+                ? `${currentCount} → ${nextCount} · 3 slots`
+                : `T${tier} · 3 slots`,
+            summary: shadowSummaryText(entry.type, tier)
+        });
+    }
+    return options;
+}
+
+function unfuseShadowOptionsFor(state) {
+    const active = state?.crew?.shadows?.active || [];
+    return active.map(entry => {
+        const tier = shadowTierFromLevel(entry.sourceMobLevel);
+        return {
+            value: entry.id,
+            shadowId: entry.id,
+            type: entry.type,
+            label: entry.type === 'archer' && entry.count > 1
+                ? `−1 ${SHADOW_TYPE_LABELS.archer}`
+                : (SHADOW_TYPE_LABELS[entry.type] || entry.type),
+            detail: entry.type === 'archer'
+                ? `${entry.count} → ${entry.count - 1} · +3 weasels`
+                : 'Unfuse · +3 weasels',
+            summary: shadowSummaryText(entry.type, tier)
+        };
+    });
+}
+
+function makeShadowActionChoiceGroup(mode, state, onChange) {
+    const isRaise = mode === 'raise';
+    const key = isRaise ? 'raiseShadowId' : 'unfuseShadowId';
+    const options = isRaise ? raiseShadowOptionsFor(state) : unfuseShadowOptionsFor(state);
+
+    if (!options.some(option => option.value === combatSelections[key])) {
+        combatSelections[key] = options[0]?.value || null;
+    }
+
+    const group = makeChoiceGroup(
+        isRaise ? 'Fuse shadow (3 slots · uses Tansy’s turn)' : 'Unfuse shadow (+3 loose weasels · uses Tansy’s turn)',
+        key,
+        options,
+        combatSelections[key],
+        value => {
+            combatSelections[key] = value;
+            if (typeof onChange === 'function') onChange();
+        }
+    );
+
+    for (const button of group.querySelectorAll('.aethermoor-combat-choice')) {
+        const opt = options.find(entry => entry.value === button.dataset.value);
+        if (opt?.summary) button.title = opt.summary;
+    }
+
+    if (options.length === 0) {
+        group.appendChild(el('div', {
+            className: 'aethermoor-combat-choice-detail',
+            text: isRaise ? 'No eligible shadows or slots available.' : 'No active shadows to unfuse.'
+        }));
+    }
+    return group;
+}
+
 function makePotionChoiceGroup(owner, state) {
     const isQtik = owner === 'qtik';
     const key = isQtik ? 'qtikItem' : 'tansyItem';
@@ -19656,6 +19985,8 @@ function updateCombatAbilityButtons(panel, state) {
     const potionUses =
         normalizeEncounterPotionUses(state.encounter);
     const hasPotions = potionOptionsFor(state).length > 0;
+    const canRaiseShadow = raiseShadowOptionsFor(state).length > 0;
+    const canUnfuseShadow = unfuseShadowOptionsFor(state).length > 0;
 
     if (used.stun && combatSelections.qtik === 'stun') {
         combatSelections.qtik = 'fire_melee';
@@ -19683,6 +20014,14 @@ function updateCombatAbilityButtons(panel, state) {
         combatSelections.tansy = 'visor';
     }
 
+    if (!canRaiseShadow && combatSelections.tansy === 'raise_shadow') {
+        combatSelections.tansy = 'visor';
+    }
+
+    if (!canUnfuseShadow && combatSelections.tansy === 'unfuse_shadow') {
+        combatSelections.tansy = 'visor';
+    }
+
     for (const button of panel.querySelectorAll(
         '.aethermoor-combat-choice[data-group="qtik"], ' +
         '.aethermoor-combat-choice[data-group="tansy"]'
@@ -19697,7 +20036,9 @@ function updateCombatAbilityButtons(panel, state) {
             (group === 'qtik' && value === 'drink' &&
                 (!hasPotions || potionUses.qtik >= 4)) ||
             (group === 'tansy' && value === 'drink' &&
-                (!hasPotions || potionUses.tansy >= 4));
+                (!hasPotions || potionUses.tansy >= 4)) ||
+            (group === 'tansy' && value === 'raise_shadow' && !canRaiseShadow) ||
+            (group === 'tansy' && value === 'unfuse_shadow' && !canUnfuseShadow);
 
         button.disabled = false;
         button.setAttribute('aria-disabled', String(Boolean(exhausted)));
@@ -19707,7 +20048,11 @@ function updateCombatAbilityButtons(panel, state) {
                 ? (!hasPotions
                     ? 'No potions in stock'
                     : 'This character has used four potions this encounter')
-                : 'Already used in this encounter'
+                : value === 'raise_shadow'
+                    ? 'No bound shadow can be fused right now (need an unbound role or 3 free/weasel slots)'
+                    : value === 'unfuse_shadow'
+                        ? 'No active shadows to unfuse'
+                        : 'Already used in this encounter'
             : '';
 
         button.setAttribute(
@@ -19857,7 +20202,36 @@ function combatActionLabel(group, value) {
 }
 
 function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
-    const crew = state.crew;
+    let crew = state.crew;
+    if (tansyAction === 'raise_shadow' && combatSelections.raiseShadowId) {
+        const opt = raiseShadowOptionsFor(state).find(
+            entry => entry.value === combatSelections.raiseShadowId
+        );
+        if (opt) {
+            try {
+                crew = resolveShadowDeckAction({
+                    action: 'activate',
+                    shadowId: opt.shadowId,
+                    count: opt.nextCount,
+                    state: { crew: clone(state.crew) }
+                }).state.crew;
+            } catch (_error) {
+                crew = state.crew;
+            }
+        }
+    } else if (tansyAction === 'unfuse_shadow' && combatSelections.unfuseShadowId) {
+        try {
+            crew = resolveShadowDeckAction({
+                action: 'deactivate',
+                shadowId: combatSelections.unfuseShadowId,
+                count: 1,
+                state: { crew: clone(state.crew) }
+            }).state.crew;
+        } catch (_error) {
+            crew = state.crew;
+        }
+    }
+
     const encounter = state.encounter?.status === 'active'
         ? state.encounter
         : null;
@@ -20100,7 +20474,17 @@ function updateCombatTooltips(host, state) {
             drink:
                 'Choose a stocked potion below. Four potions per ' +
                 'character per encounter, including cleansing tonics. ' +
-                'Uses this command instead of Visor/Vitals/Overrun.'
+                'Uses this command instead of Visor/Vitals/Overrun.',
+
+            raise_shadow:
+                'Fuses 3 summon slots (consuming loose weasels if needed) to ' +
+                'summon a bound Shadow from your deck before this turn’s exchanges. ' +
+                'Shadow-Ranged can stack; Mender, Hexer, and Warder are 1 active each.',
+
+            unfuse_shadow:
+                'Unfuses an active Shadow (1 copy at a time for Shadow-Ranged) ' +
+                'before this turn’s exchanges, immediately restoring 3 loose ' +
+                'Shadow-Weasels for maximum swarm damage.'
         }
     };
 
@@ -20244,15 +20628,185 @@ const TANSY_COMBAT_OPTIONS = [
     { value: 'overrun', label: 'Overrun' },
     { value: 'recall', label: 'Recall' },
     { value: 'surge', label: 'Surge' },
-    { value: 'drink', label: 'Drink Potion' }
+    { value: 'drink', label: 'Drink Potion' },
+    { value: 'raise_shadow', label: 'Raise Shadow' },
+    { value: 'unfuse_shadow', label: 'Unfuse Shadow' }
 ];
+
+function appendOutOfCombatShadowFormation(inlineHost, state) {
+    if (!shadowUiUnlocked(state)) return;
+
+    const crew = state.crew;
+    const deck = crew.shadows?.deck || [];
+    const active = crew.shadows?.active || [];
+    const totalSlots = 3 + Math.floor((crew.level || 1) / 2);
+    const usedShadowSlots = active.reduce((sum, s) => sum + 3 * s.count, 0);
+    const looseCapacity = Math.max(0, totalSlots - usedShadowSlots);
+    const pendingCount = state.pendingShadowImprints?.imprints?.length || 0;
+
+    const section = makeAethermoorSection(
+        `SHADOW FORMATION · ${usedShadowSlots}/${totalSlots} SLOTS`,
+        `Loose Shadow-Weasels: ${crew.weasels.active}/${looseCapacity} · ` +
+            `Free / Fusable Slots: ${looseCapacity}\n` +
+            'Fuse or unfuse Shadows freely outside active combat.',
+        'shadow'
+    );
+
+    if (pendingCount > 0) {
+        const openPending = makeAethermoorAction(
+            `Bind Pending Shadow Imprints (${pendingCount})`,
+            'quest',
+            () => {
+                void showAethermoorShadowImprintPopup(
+                    getContext().chatMetadata,
+                    aethermoorContractNotificationEpoch,
+                    false
+                );
+            }
+        );
+        openPending.style.borderColor = '#7c3aed';
+        openPending.style.color = '#e9d5ff';
+        section.appendChild(openPending);
+    }
+
+    if (deck.length === 0) {
+        section.appendChild(el('div', {
+            className: 'aethermoor-ui-text',
+            text: 'No shadow imprints bound yet. Defeat Ranged, Mender, Hexer, or Brute foes to bind imprints.'
+        }));
+        inlineHost.appendChild(section);
+        return;
+    }
+
+    const runFormationAction = async (button, caseData, successText) => {
+        button.disabled = true;
+        try {
+            const output = await runStoredMechanic({ cases: [caseData] });
+            assert(
+                output?.ok === true && output.results?.[0]?.ok !== false,
+                output?.results?.[0]?.error || 'Shadow formation update failed'
+            );
+            toastr.info(successText, 'Aethermoor');
+            await openCombatPanel(inlineHost);
+        } catch (error) {
+            button.disabled = false;
+            toastr.error(error instanceof Error ? error.message : String(error), 'Aethermoor');
+        }
+    };
+
+    for (const entry of deck) {
+        const activeEntry = active.find(s => s.id === entry.id);
+        const activeCount = activeEntry ? activeEntry.count : 0;
+        const tier = shadowTierFromLevel(entry.sourceMobLevel);
+        const name = SHADOW_TYPE_LABELS[entry.type] || entry.type;
+        const meta = entry.type === 'archer'
+            ? `Lv ${entry.sourceMobLevel}`
+            : `Lv ${entry.sourceMobLevel} · Tier ${tier}`;
+        const statusBadge = activeCount > 1
+            ? `Active ×${activeCount}`
+            : activeCount === 1
+                ? 'Active'
+                : 'Inactive';
+
+        const actionButtons = [];
+        if (entry.type === 'archer') {
+            const addBtn = el('button', {
+                type: 'button',
+                text: '+1 Fuse',
+                disabled: looseCapacity < 3,
+                title: looseCapacity < 3 ? 'Need 3 free/weasel slots to fuse another copy.' : 'Fuse 1 more Shadow-Ranged (3 slots)',
+                onClick: () => runFormationAction(
+                    addBtn,
+                    {
+                        name: `ooc_fuse_${entry.id}`,
+                        kind: 'shadows',
+                        action: 'activate',
+                        shadowId: entry.id,
+                        count: activeCount + 1
+                    },
+                    `Fused ${name} (×${activeCount + 1}).`
+                )
+            });
+            const remBtn = el('button', {
+                type: 'button',
+                text: '−1 Unfuse',
+                disabled: activeCount <= 0,
+                onClick: () => runFormationAction(
+                    remBtn,
+                    {
+                        name: `ooc_unfuse_${entry.id}`,
+                        kind: 'shadows',
+                        action: 'deactivate',
+                        shadowId: entry.id,
+                        count: 1
+                    },
+                    `Unfused 1 ${name} (+3 loose weasels).`
+                )
+            });
+            actionButtons.push(addBtn, remBtn);
+        } else if (activeCount > 0) {
+            const unfuseBtn = el('button', {
+                type: 'button',
+                text: 'Unfuse',
+                onClick: () => runFormationAction(
+                    unfuseBtn,
+                    {
+                        name: `ooc_unfuse_${entry.id}`,
+                        kind: 'shadows',
+                        action: 'deactivate',
+                        shadowId: entry.id,
+                        count: 1
+                    },
+                    `Unfused ${name} (+3 loose weasels).`
+                )
+            });
+            actionButtons.push(unfuseBtn);
+        } else {
+            const fuseBtn = el('button', {
+                type: 'button',
+                text: 'Fuse',
+                disabled: looseCapacity < 3,
+                title: looseCapacity < 3 ? 'Need 3 free/weasel slots to fuse.' : `Fuse ${name} (3 slots)`,
+                onClick: () => runFormationAction(
+                    fuseBtn,
+                    {
+                        name: `ooc_fuse_${entry.id}`,
+                        kind: 'shadows',
+                        action: 'activate',
+                        shadowId: entry.id,
+                        count: 1
+                    },
+                    `Fused ${name}.`
+                )
+            });
+            actionButtons.push(fuseBtn);
+        }
+
+        section.appendChild(el('div', { className: 'aethermoor-inventory-item' },
+            el('div', { className: 'aethermoor-inventory-item-main' },
+                el('div', {
+                    className: 'aethermoor-vendor-name',
+                    style: { color: activeCount > 0 ? '#e9d5ff' : '#d0d7de' },
+                    text: `${name} · ${meta} · ${statusBadge}`
+                }),
+                el('div', {
+                    className: 'aethermoor-vendor-detail',
+                    text: shadowSummaryText(entry.type, tier)
+                })
+            ),
+            el('div', { className: 'aethermoor-inventory-item-actions' }, actionButtons)
+        ));
+    }
+
+    inlineHost.appendChild(section);
+}
 
 function appendCombatCommandPreview(inlineHost, state) {
     const currentStats = derived(state.crew);
     const controls = el('div', { className: 'aethermoor-combat-controls' },
         el('div', { className: 'aethermoor-ui-text', text: 'Commands locked outside active combat — hover for ability details.' }),
         makeChoiceGroup(`Q'tik (${state.crew.qtik.hp}/${currentStats.qtikMaxHp} HP)`, 'qtik', QTIK_COMBAT_OPTIONS, null, () => {}),
-        makeChoiceGroup(`Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`, 'tansy', TANSY_COMBAT_OPTIONS, null, () => {})
+        makeChoiceGroup(`Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`, 'tansy', tansyCombatOptionsFor(state), null, () => {})
     );
 
     for (const button of controls.querySelectorAll('.aethermoor-combat-choice')) {
@@ -20344,6 +20898,7 @@ async function openCombatPanel(inlineHost) {
         );
         section.appendChild(actions);
         inlineHost.appendChild(section);
+        appendOutOfCombatShadowFormation(inlineHost, state);
         appendCombatCommandPreview(inlineHost, state);
         return;
     }
@@ -20382,6 +20937,7 @@ async function openCombatPanel(inlineHost) {
         if (aethermoorLastCombatLog && aethermoorLastCombatLogKey === combatLogKey(state)) {
             inlineHost.appendChild(makeAethermoorSection('FINAL TURN LOG', aethermoorLastCombatLog, 'combat'));
         }
+        appendOutOfCombatShadowFormation(inlineHost, state);
         appendCombatCommandPreview(inlineHost, state);
         return;
     }
@@ -20396,9 +20952,13 @@ async function openCombatPanel(inlineHost) {
 
     const qtikPotions = makePotionChoiceGroup('qtik', state);
     const tansyPotions = makePotionChoiceGroup('tansy', state);
-    const showSelectedPotionGroups = () => {
+    const tansyRaiseShadows = makeShadowActionChoiceGroup('raise', state, refreshComboForecast);
+    const tansyUnfuseShadows = makeShadowActionChoiceGroup('unfuse', state, refreshComboForecast);
+    const showSelectedSubGroups = () => {
         qtikPotions.hidden = combatSelections.qtik !== 'drink';
         tansyPotions.hidden = combatSelections.tansy !== 'drink';
+        tansyRaiseShadows.hidden = combatSelections.tansy !== 'raise_shadow';
+        tansyUnfuseShadows.hidden = combatSelections.tansy !== 'unfuse_shadow';
     };
 
     const qtikGroup = makeChoiceGroup(
@@ -20406,14 +20966,14 @@ async function openCombatPanel(inlineHost) {
         'qtik',
         QTIK_COMBAT_OPTIONS,
         combatSelections.qtik,
-        value => { combatSelections.qtik = value; showSelectedPotionGroups(); refreshComboForecast(); }
+        value => { combatSelections.qtik = value; showSelectedSubGroups(); refreshComboForecast(); }
     );
     const tansyGroup = makeChoiceGroup(
         `Tansy (${state.crew.tansy.hp}/${currentStats.tansyMaxHp} HP)`,
         'tansy',
-        TANSY_COMBAT_OPTIONS,
+        tansyCombatOptionsFor(state),
         combatSelections.tansy,
-        value => { combatSelections.tansy = value; showSelectedPotionGroups(); refreshComboForecast(); }
+        value => { combatSelections.tansy = value; showSelectedSubGroups(); refreshComboForecast(); }
     );
 
     if (!encounter.foes.some(foe => foe.id === combatSelections.target && foe.hp > 0)) {
@@ -20452,12 +21012,25 @@ async function openCombatPanel(inlineHost) {
         resultBox.textContent = 'Resolving combat turn...';
 
         try {
+            let shadowArgs = {};
+            if (combatSelections.tansy === 'raise_shadow') {
+                const selectedRaise = raiseShadowOptionsFor(state).find(
+                    entry => entry.value === combatSelections.raiseShadowId
+                );
+                assert(selectedRaise, 'Select a shadow to raise');
+                shadowArgs = { shadowId: selectedRaise.shadowId, count: selectedRaise.nextCount };
+            } else if (combatSelections.tansy === 'unfuse_shadow') {
+                assert(combatSelections.unfuseShadowId, 'Select an active shadow to unfuse');
+                shadowArgs = { shadowId: combatSelections.unfuseShadowId, count: 1 };
+            }
+
             const actionsInput = {
                 qtik: combatSelections.qtik,
                 tansy: combatSelections.tansy,
                 target: combatSelections.target,
                 ...(combatSelections.qtik === 'drink' ? { qtikItem: combatSelections.qtikItem } : {}),
-                ...(combatSelections.tansy === 'drink' ? { tansyItem: combatSelections.tansyItem } : {})
+                ...(combatSelections.tansy === 'drink' ? { tansyItem: combatSelections.tansyItem } : {}),
+                ...shadowArgs
             };
             const result = await runStoredMechanic({ actions: actionsInput });
             assert(result?.ok === true, result?.error || 'Combat turn failed');
@@ -20540,13 +21113,13 @@ async function openCombatPanel(inlineHost) {
     const fleeButton = makeAethermoorAction('Attempt Flee', 'combat', () => attemptFlee(fleeButton));
     inlineHost.appendChild(el('div', { className: 'aethermoor-combat-controls' },
         el('pre', { className: 'aethermoor-combat-status', text: combatStatusText(state) }),
-        qtikGroup, qtikPotions, tansyGroup, tansyPotions, targetGroup, comboForecast,
+        qtikGroup, qtikPotions, tansyGroup, tansyPotions, tansyRaiseShadows, tansyUnfuseShadows, targetGroup, comboForecast,
         el('div', { className: 'aethermoor-combat-actions' }, resolveButton, fleeButton),
         resultBox
     ));
 
     updateCombatAbilityButtons(inlineHost, state);
-    showSelectedPotionGroups();
+    showSelectedSubGroups();
     refreshComboForecast();
 
     // Tooltips and debuff display are auxiliary UI. They must never prevent

@@ -1762,9 +1762,22 @@ const AETHERMOOR_ACHIEVEMENTS = [
     achDef('shop_silver_1000', 'Liquidator', 'Earn 1,000 cumulative silver selling items at shops.', 'A thousand silver moved in local trade. Every merchant knows your pockets.', { hp: 10, luk: 1 }, 'shop_silver'),
     achDef('trade_silver_100', 'Aether-Net Debut', 'Earn 100 cumulative silver from the Aether-Net Trade-Stream.', 'First hundred silver off the market board. Welcome to the hustle.', { luk: 1 }, 'trade_silver'),
     achDef('trade_silver_500', 'Stream Hustler', 'Earn 500 cumulative silver from the Aether-Net Trade-Stream.', 'Five hundred silver from Immortals who hate farming their own gear.', { hp: 10 }, 'trade_silver'),
-    achDef('trade_silver_1000', 'Market Shark', 'Earn 1,000 cumulative silver from the Aether-Net Trade-Stream.', 'A thousand silver off the Trade-Stream. Certified loot tycoons.', { hp: 10, luk: 2 }, 'trade_silver')
-];
+    achDef('trade_silver_1000', 'Market Shark', 'Earn 1,000 cumulative silver from the Aether-Net Trade-Stream.', 'A thousand silver off the Trade-Stream. Certified loot tycoons.', { hp: 10, luk: 2 }, 'trade_silver'),
 
+    // Keystone Trinkets & Combat Synergies
+    achDef('trinket_first', 'First Keystone', 'Equip your first Keystone Trinket.', 'A little Pre-Calamity engineering goes a long way when the dice turn sour.', { luk: 1 }, 'trinkets'),
+    achDef('trinket_pair', 'Synchronized Pair', 'Equip a Keystone Trinket on both Tansy and Q’tik at the same time.', 'Necklace humming, amulet glowing—now you are fighting with both hands.', { hp: 10, luk: 1 }, 'trinkets'),
+    achDef('trinket_collector', 'Keystone Collector', 'Equip 4 distinct Keystone Trinkets over the campaign.', 'Four different charms field-tested. You are building a proper kit.', { hp: 10, luk: 1 }, 'trinkets'),
+    achDef('trinket_reliquary', 'Full Reliquary', 'Equip all 7 distinct Keystone Trinkets over the campaign.', 'Every charm in the deck worn and field-tested. Nothing left on the shelf.', { hp: 15, atk: 1, def: 1, luk: 1 }, 'trinkets'),
+    achDef('trinket_epic', 'Sovereign’s Charm', 'Equip an Epic Keystone Trinket.', 'Pried off a regional terror and still humming with Imperial charge.', { hp: 10, atk: 1 }),
+    achDef('trinket_stop_hitting', 'Stop Hitting Yourself', 'Defeat a foe using Q’tik’s Thorns Ward or Rime Pulse.', 'Why swing when the enemy is happy to finish themselves off?', { def: 1 }),
+    achDef('trinket_no_dent', 'Not Even a Dent', 'Negate an incoming frontline hit to 0 damage with Bastion Seal.', 'The shield-charm flared, the blow bounced off, and Q’tik did not even blink.', { qtikHp: 10, def: 1 }),
+    achDef('trinket_flash_freeze', 'Flash Freeze', 'Trigger Rime Pulse on the same turn Q’tik uses Ice Patch.', 'Slippery floor, frozen air, miserable enemies.', { hp: 5, def: 1 }),
+    achDef('trinket_collateral', 'Collateral Spill', 'Kill a foe on Exchange 1 via Executioner’s Fang overkill spill.', 'One clean strike, two problems solved.', { atk: 1 }),
+    achDef('trinket_crowd_control', 'Crowd Control', 'Hit 4 living foes at once with Ember Burst Charm.', 'Nothing clears a crowded room like an Imperial fire-charm.', { atk: 1 }),
+    achDef('trinket_blood_price', 'Blood Price', 'Heal a wounded Tansy with Siphon Fang and win the fight.', 'Borrowing a little vitality straight out of the opposition.', { tansyHp: 10, luk: 1 }),
+    achDef('trinket_crack_shell', 'Crack the Shell', 'Shred an Elite or Boss’s DEF with Sundering Charm and win the fight.', 'Even thick armor stops looking impressive once the charm bites in.', { atk: 1, luk: 1 })
+];
 
 function achievementBonuses(crew) {
     const unlocked = new Set(
@@ -2490,6 +2503,7 @@ function evaluateAethermoorAchievements(
     stats.caches = Number(stats.caches || 0);
     stats.chests = Number(stats.chests || 0);
     stats.enteredInstanceIds ||= [];
+    stats.equippedTrinketIds ||= [];
     stats.potionsUsed = Number(stats.potionsUsed || 0);
     stats.curiosSold = Number(stats.curiosSold || 0);
     stats.mobSilver = Number(stats.mobSilver || 0);
@@ -2531,6 +2545,12 @@ function evaluateAethermoorAchievements(
     if (caseResult?.death?.fallen?.length > 0) {
         stats.deaths += 1;
     }
+    const trinketFeats = afterState.encounter?.trinketFeats || {};
+    if (trinketFeats.reactiveKill) stats.trinketReactiveKill = true;
+    if (trinketFeats.noDent) stats.trinketNoDent = true;
+    if (trinketFeats.flashFreeze) stats.trinketFlashFreeze = true;
+    if (trinketFeats.collateralSpill) stats.trinketCollateral = true;
+    if (trinketFeats.crowdControl) stats.trinketCrowdControl = true;
 
     const justClearedEncounter =
         afterState.encounter?.status === 'cleared' &&
@@ -2539,6 +2559,8 @@ function evaluateAethermoorAchievements(
     if (justClearedEncounter) {
         const enc = afterState.encounter;
         stats.mobSilver += Number(caseResult?.rewards?.silver || 0);
+        if (trinketFeats.bloodPrice) stats.trinketBloodPrice = true;
+        if (trinketFeats.crackShell) stats.trinketCrackShell = true;
 
         if (enc.crewTookDamage !== true) {
             stats.untouchable = true;
@@ -2643,7 +2665,19 @@ function evaluateAethermoorAchievements(
         allWorn.map(item => String(item.rarity || 'Common').toLowerCase())
     );
 
+    const wornTansyTrinket = equippedTrinket(afterState.crew, 'tansy');
+    const wornQtikTrinket = equippedTrinket(afterState.crew, 'qtik');
+    for (const worn of [wornTansyTrinket, wornQtikTrinket]) {
+        if (worn?.trinket?.id && !stats.equippedTrinketIds.includes(worn.trinket.id)) {
+            stats.equippedTrinketIds.push(worn.trinket.id);
+        }
+    }
+    const hasEpicTrinket = [wornTansyTrinket, wornQtikTrinket].some(item =>
+        item && ['epic', 'legendary'].includes(String(item.rarity || '').toLowerCase())
+    );
+
     const checks = {
+
         first_blood: stats.kills >= 1,
         kills_10: stats.kills >= 10,
         kills_50: stats.kills >= 50,
@@ -2711,7 +2745,19 @@ function evaluateAethermoorAchievements(
         shop_silver_1000: stats.shopSilver >= 1000,
         trade_silver_100: stats.tradeSilver >= 100,
         trade_silver_500: stats.tradeSilver >= 500,
-        trade_silver_1000: stats.tradeSilver >= 1000
+        trade_silver_1000: stats.tradeSilver >= 1000,
+        trinket_first: stats.equippedTrinketIds.length >= 1,
+        trinket_pair: Boolean(wornTansyTrinket && wornQtikTrinket),
+        trinket_collector: stats.equippedTrinketIds.length >= 4,
+        trinket_reliquary: stats.equippedTrinketIds.length >= 7,
+        trinket_epic: hasEpicTrinket,
+        trinket_stop_hitting: Boolean(stats.trinketReactiveKill),
+        trinket_no_dent: Boolean(stats.trinketNoDent),
+        trinket_flash_freeze: Boolean(stats.trinketFlashFreeze),
+        trinket_collateral: Boolean(stats.trinketCollateral),
+        trinket_crowd_control: Boolean(stats.trinketCrowdControl),
+        trinket_blood_price: Boolean(stats.trinketBloodPrice),
+        trinket_crack_shell: Boolean(stats.trinketCrackShell)
     };
 
     for (const lvl of [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) {
@@ -3830,6 +3876,7 @@ function resolveTurn({ state, actions, rolls }) {
     encounter.used ||= { stun: false, icePatch: false, surge: false };
     encounter.used.surge ??= false;
     encounter.hexStacks ||= {};
+    encounter.trinketFeats ||= {};
     encounter.exposed = Number(encounter.exposed || 0);
     let eliteBossFoes = live(s).filter(foe => ['elite', 'boss'].includes(foe.role));
 
@@ -4112,10 +4159,16 @@ function resolveTurn({ state, actions, rolls }) {
                 const procHits = dealDamage(s, procTarget, tansyTrinketPower, kills);
                 hits.push(...procHits);
                 damage += tansyTrinketPower;
+                if (procHits.length >= 2 && procHits.slice(1).some(h => h.hp === 0)) {
+                    encounter.trinketFeats.collateralSpill = true;
+                }
                 effects.push(`Executioner’s Fang struck for ${tansyTrinketPower} bonus damage`);
             } else if (tansyTrinketId === 'ember_burst' && live(s).length > 0) {
                 const burstDmg = Math.max(1, Math.round(tansyTrinketPower * 0.55));
                 const burstTargets = [...live(s)];
+                if (burstTargets.length >= 4) {
+                    encounter.trinketFeats.crowdControl = true;
+                }
                 for (const foe of burstTargets) {
                     const applied = Math.min(foe.hp, burstDmg);
                     foe.hp -= applied;
@@ -4133,11 +4186,20 @@ function resolveTurn({ state, actions, rolls }) {
                 }
                 const healReq = Math.max(1, Math.round(tansyTrinketPower * 0.25));
                 const healed = c.tansy.hp > 0 ? Math.min(crewStats.tansyMaxHp - c.tansy.hp, healReq) : 0;
-                if (healed > 0) c.tansy.hp += healed;
+                if (healed > 0) {
+                    c.tansy.hp += healed;
+                    encounter.trinketFeats.bloodPrice = true;
+                }
                 effects.push(`Siphon Fang dealt ${procTarget ? drainDmg : 0} damage and healed Tansy for ${healed} HP`);
             } else if (tansyTrinketId === 'sundering_charm') {
                 const chipDmg = Math.max(1, Math.round(tansyTrinketPower * 0.35));
                 const shredAmt = Math.max(2, Math.round(tansyTrinketPower * 0.3));
+                if (
+                    ['elite', 'boss'].includes(target.role) ||
+                    ['elite', 'boss'].includes(procTarget?.role)
+                ) {
+                    encounter.trinketFeats.crackShell = true;
+                }
                 if (procTarget) {
                     const procHits = dealDamage(s, procTarget, chipDmg, kills);
                     hits.push(...procHits);
@@ -4311,8 +4373,12 @@ function resolveTurn({ state, actions, rolls }) {
                 const applied = Math.min(foe.hp, pulseDmg);
                 foe.hp -= applied;
                 hits.push({ id: foe.id, damage: applied, hp: foe.hp, overkillAfterHit: 0 });
-                if (foe.hp === 0) kills.push({ id: foe.id, level: foe.level, role: foe.role });
+                if (foe.hp === 0) {
+                    kills.push({ id: foe.id, level: foe.level, role: foe.role });
+                    encounter.trinketFeats.reactiveKill = true;
+                }
             }
+            if (patchActive) encounter.trinketFeats.flashFreeze = true;
             damage += pulseDmg * pulseTargets.length;
             qtikTrinketTriggered = true;
             effects.push(`Rime Pulse chilled all ${pulseTargets.length} foe(s) for ${pulseDmg} damage`);
@@ -4330,6 +4396,7 @@ function resolveTurn({ state, actions, rolls }) {
         if (qtikTrinketId === 'bastion_seal' && !qtikTrinketTriggered && frontlineDamage > 0) {
             const absorb = Math.min(frontlineDamage, Math.max(2, Math.round(qtikTrinketStat * 1.2)));
             frontlineDamage -= absorb;
+            if (frontlineDamage === 0) encounter.trinketFeats.noDent = true;
             qtikTrinketTriggered = true;
             effects.push(`Bastion Seal absorbed ${absorb} frontline damage`);
         }
@@ -4344,6 +4411,9 @@ function resolveTurn({ state, actions, rolls }) {
                 const thornsHits = dealDamage(s, thornsTarget, thornsDmg, kills);
                 hits.push(...thornsHits);
                 damage += thornsDmg;
+                if (thornsHits.some(hit => hit.hp === 0)) {
+                    encounter.trinketFeats.reactiveKill = true;
+                }
                 qtikTrinketTriggered = true;
                 effects.push(`Thorns Ward reflected ${thornsDmg} damage to ${thornsTarget.id}`);
             }
@@ -17336,7 +17406,9 @@ function achievementProgressText(state, ach) {
         shop_silver_1000: [stats.shopSilver || 0, 1000],
         trade_silver_100: [stats.tradeSilver || 0, 100],
         trade_silver_500: [stats.tradeSilver || 0, 500],
-        trade_silver_1000: [stats.tradeSilver || 0, 1000]
+        trade_silver_1000: [stats.tradeSilver || 0, 1000],
+        trinket_collector: [(stats.equippedTrinketIds || []).length, 4],
+        trinket_reliquary: [(stats.equippedTrinketIds || []).length, 7]
     };
 
     const levelMatch = /^level_(\d+)$/.exec(ach.id);

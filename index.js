@@ -3761,11 +3761,16 @@ function combatNarrativeTurn(
         raise_shadow: 'Raise Shadow',
         unfuse_shadow: 'Unfuse Shadow'
     };
-
+    
     const formatAction = (owner, action) => {
         const label = actionLabels[action] || action;
         if (action === 'drink' && itemUse?.[owner]?.itemName) {
             return `${label} (${itemUse[owner].itemName})`;
+        }
+        if (owner === 'tansy' && (action === 'raise_shadow' || action === 'unfuse_shadow') && actions.shadowId) {
+            const typeKey = String(actions.shadowId).replace(/^shadow-/, '');
+            const shadowName = SHADOW_TYPE_LABELS[typeKey] || actions.shadowId;
+            return `${label} (${shadowName})`;
         }
         return label;
     };
@@ -4636,9 +4641,8 @@ function resolveTurn({ state, actions, rolls }) {
                 c.tansy.hp = 1;
                 shadowWarderSavedTansy = true;
                 const saveMessage =
-                    `Shadow-Warder ${sacrificed.id} sacrificed itself to intercept a lethal blow on Tansy (1 HP remaining)`;
+                    'Shadow-Warder sacrificed itself to intercept a lethal blow on Tansy (1 HP remaining)';
                 effects.push(saveMessage);
-                turnEffects.push(saveMessage);
             }
         }
         if (!shadowWarderSavedTansy) c.tansy.hp = Math.max(0, c.tansy.hp - backlineDamage);
@@ -14172,11 +14176,17 @@ function combatNarrationPacket(result, actions) {
         (actions?.qtik === 'drink' && result.itemUse?.qtik?.itemName
             ? ` (${result.itemUse.qtik.itemName})`
             : '');
+    const shadowActionName =
+        (actions?.tansy === 'raise_shadow' || actions?.tansy === 'unfuse_shadow') && actions?.shadowId
+            ? (SHADOW_TYPE_LABELS[String(actions.shadowId).replace(/^shadow-/, '')] || actions.shadowId)
+            : null;
     const tansyLabel =
         (tansyActions[actions?.tansy] || actions?.tansy || 'a command') +
         (actions?.tansy === 'drink' && result.itemUse?.tansy?.itemName
             ? ` (${result.itemUse.tansy.itemName})`
-            : '');
+            : shadowActionName
+                ? ` (${shadowActionName})`
+                : '');
 
     const lines = [
         'COMBAT SCENE RESULT.',
@@ -20340,7 +20350,10 @@ function formatCombatComboPreview(state, qtikAction, tansyAction, targetId) {
         ? Math.min(targetDef, Math.floor((activeWeasels + shadows.slots) / 2))
         : 0;
     const exposed = Number(encounter?.exposed || 0);
-    const exposedNote = exposed > 0 ? ` · +${exposed} Exposed` : '';
+    const menderTurnDrain = shadows.menderDrain > 0 ? shadows.menderDrain * 3 : 0;
+    const exposedNote =
+        (menderTurnDrain > 0 ? ` · Mender +${menderTurnDrain} drain/heal` : '') +
+        (exposed > 0 ? ` · +${exposed} Exposed` : '');
 
     let trinketTurnBonus = 0;
     let trinketNote = '';

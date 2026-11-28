@@ -3746,10 +3746,12 @@ function completeLinkedCombatQuestGate(state) {
         `Linked combat lost quest ${questId}`
     );
 
+    state.world = progression.state.world;
     state.quests = progression.state.quests;
     state.leads = progression.state.leads;
     state.inventory = progression.state.inventory;
     state.reputation = progression.state.reputation;
+    state.pendingQuestCompletions = progression.state.pendingQuestCompletions;
 
     /*
      * resolveTurn retains a reference to state.crew. Update that object
@@ -6259,8 +6261,14 @@ function resolveInstanceAction(test) {
         );
     }
 
-    refreshInstanceStatus(instance);
+    if (firstVisit && test.action === 'move') {
+        const activeMsq = state.world?.zones?.[state.zone]?.msq;
+        if (activeMsq?.status === 'active' && Number(activeMsq.pendingBeatDelay || 0) > 0) {
+            activeMsq.pendingBeatDelay -= 1;
+        }
+    }
 
+    refreshInstanceStatus(instance);
     const outcome = {
         stepId: test.stepId,
         instanceId: instance.id,
@@ -7390,6 +7398,11 @@ function resolveTrailSignInvestigation(test) {
         const xp = Math.max(1, Math.round(nextXp(state.crew.level) * percent / 100));
         const levelUps = applyXp(state.crew, xp);
         outcome.discovery = { xp, percent, levelUps };
+    }
+
+    const activeMsq = state.world?.zones?.[state.zone]?.msq;
+    if (activeMsq?.status === 'active' && Number(activeMsq.pendingBeatDelay || 0) > 0) {
+        activeMsq.pendingBeatDelay -= 1;
     }
 
     state.trailSignSteps[test.stepId] = clone(outcome);
@@ -9543,11 +9556,10 @@ function resolveQuestAction(test) {
                         msq.pendingBeatDelay = 0;
                     } else {
                         const nextChapter = msq.completedChapters + 1;
-                        const hotLead = nextChapter >= msq.totalChapters ||
-                            (worldHash(`${state.world.seed}:msq-pace:${msqZone}:${nextChapter}`) % 2 === 0);
-                        msq.pendingBeatDelay = hotLead
-                            ? 1
-                            : 2 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
+                        const isBeforeClimax = nextChapter >= msq.totalChapters;
+                        msq.pendingBeatDelay = isBeforeClimax
+                            ? 5 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2)
+                            : 4 + (worldHash(`${state.world.seed}:msq-delay:${msqZone}:${nextChapter}`) % 2);
                     }
                 } else {
                     msq.status = 'declined';
@@ -11360,6 +11372,29 @@ function resolveMsqAction(test) {
     }
 
     const journal = ensureQuestJournal(state);
+    const hasCompletedClimax = journal.completed.some(
+        quest =>
+            quest?.isMsq === true &&
+            (quest.msq?.zone ?? quest.seed?.zone) === zone &&
+            (quest.msq?.isClimax === true || quest.msq?.phase === 'finale')
+    );
+
+    if (
+        hasCompletedClimax ||
+        Number(msq.completedChapters || 0) >= Number(msq.totalChapters || 0)
+    ) {
+        msq.status = 'completed';
+        msq.activeQuestId = null;
+        msq.pendingBeatDelay = 0;
+        return {
+            ok: true,
+            created: true,
+            action: 'check',
+            quest: null,
+            state
+        };
+    }
+
     const hasOpenMsq = [...journal.offered, ...journal.accepted].some(
         quest =>
             quest?.isMsq === true &&
@@ -11394,17 +11429,39 @@ function resolveMsqAction(test) {
             state
         };
     }
-
     if (Number(msq.pendingBeatDelay || 0) > 0) {
-        msq.pendingBeatDelay -= 1;
         return {
             ok: true,
-            created: true,
+            created: false,
             action: 'check',
-            cooledDown: true,
             quest: null,
             state
         };
+    }
+
+    if (Number(msq.chapter || 0) === 0 && test.checkId) {
+        if (msq.lastOpeningCheckId === test.checkId) {
+            return {
+                ok: true,
+                created: false,
+                action: 'check',
+                quest: null,
+                state
+            };
+        }
+
+        msq.lastOpeningCheckId = test.checkId;
+
+        if (roll(state, 2) !== 1) {
+            return {
+                ok: true,
+                created: true,
+                action: 'check',
+                deferredOpening: true,
+                quest: null,
+                state
+            };
+        }
     }
 
     const quest = buildMsqChapterQuest(state, zone);
@@ -12122,6 +12179,73 @@ function resolveSocialWorkReveal(test) {
         `${settlement.id}:${test.socialId}`
     ];
 
+    if (contact?.result === 'rumor') {
+        if (!contact.pendingRumor) {
+            return {
+                ok: true,
+                created: false,
+                action: 'reveal_work',
+                socialId: contact.id,
+                rumorId: contact.rumorId || null,
+                state
+            };
+        }
+
+        const rumor = contact.pendingRumor;
+        state.places ||= {};
+        state.leads ||= {};
+
+        state.places[rumor.placeId] ||= {
+            id: rumor.placeId,
+            label: rumor.placeLabel,
+            zone: rumor.zone,
+            knownFrom: 'rumor',
+            visited: false
+        };
+
+        state.leads[rumor.id] = {
+            id: rumor.id,
+            kind: 'rumor',
+            label: `Local rumor · ${settlement.label}`,
+            claim: rumor.claim,
+            sourceId: contact.id,
+            targetType: 'place',
+            targetId: rumor.placeId,
+            status: 'known'
+        };
+
+        ensureWorldRecords(state);
+        recordCrewKnowledge(state, {
+            id: `knowledge-testimony-${rumor.id}`,
+            kind: 'testimony',
+            knowledgeType: 'testimony',
+            certainty: 'unverified_claim',
+            summary: rumor.claim,
+            source: { id: rumor.id, type: 'local' },
+            learnedAtLocationId: state.currentLocationId,
+            learnedAtZone: rumor.zone
+        });
+
+        contact.rumorId = rumor.id;
+        delete contact.pendingRumor;
+
+        const counter =
+            state.socialOpportunities.settlements?.[settlement.id];
+
+        if (counter?.pendingSocialId === contact.id) {
+            counter.pendingSocialId = null;
+        }
+
+        return {
+            ok: true,
+            created: true,
+            action: 'reveal_work',
+            socialId: contact.id,
+            rumorId: rumor.id,
+            state
+        };
+    }
+
     assert(
         contact?.result === 'offer' && contact.questId,
         'This contact has no locked work offer to reveal here'
@@ -12246,11 +12370,13 @@ function resolveSocialWorkOpportunity(test) {
      * A saved offer waits for disclosure. Do not roll another merely
      * because the conversation takes another reply.
      */
+    const pendingContactRecord = counter.pendingSocialId
+        ? contacts[`${settlement.id}:${counter.pendingSocialId}`]
+        : null;
+
     assert(
-        !counter.pendingSocialId ||
-            !contacts[
-                `${settlement.id}:${counter.pendingSocialId}`
-            ]?.pendingQuest,
+        !pendingContactRecord?.pendingQuest &&
+        !pendingContactRecord?.pendingRumor,
         'This settlement already has an unpublished opportunity'
     );
 
@@ -12292,6 +12418,57 @@ function resolveSocialWorkOpportunity(test) {
     counter.checks++;
 
     if (!hasWork) {
+        const openZoneRumors = Object.values(state.leads || {}).filter(lead =>
+            lead?.kind === 'rumor' &&
+            lead.status === 'known' &&
+            lead.testOnly !== true &&
+            Number(state.places?.[lead.targetId]?.zone) === state.zone
+        ).length;
+
+        if (openZoneRumors < 2 && roll(state, 4) === 1) {
+            const settlementRumors = [
+                {
+                    id: 'unused-site',
+                    place: 'Disused site',
+                    claim: 'Locals say there have been signs of activity at a disused local site.'
+                },
+                {
+                    id: 'route-marker',
+                    place: 'Isolated route marker',
+                    claim: 'Word around town says supplies or tracks have turned up beside an isolated route marker.'
+                },
+                {
+                    id: 'old-structure',
+                    place: 'Old structure',
+                    claim: 'Tavern talk mentions lights or movement seen around an old local structure after dark.'
+                }
+            ];
+            const template = settlementRumors[roll(state, settlementRumors.length) - 1];
+            const leadId = `rumor-${settlement.id}-${contact.id}`;
+            const placeId = `place-z${state.zone}-${template.id}-${contact.id}`;
+
+            contact.result = 'rumor';
+            contact.pendingRumor = {
+                id: leadId,
+                placeId,
+                placeLabel: template.place,
+                claim: template.claim,
+                zone: state.zone
+            };
+            counter.pendingSocialId = contact.id;
+
+            return {
+                ok: true,
+                created: true,
+                action: 'check_work',
+                socialId: contact.id,
+                outcome: 'rumor',
+                rumor: clone(contact.pendingRumor),
+                questId: null,
+                state
+            };
+        }
+
         return {
             ok: true,
             created: true,
@@ -22581,6 +22758,29 @@ function onwardRoadsContextPacket(state) {
 }
 
 function settlementWorkContextPacket(state, settlement) {
+    const pendingRumorContact = Object.values(
+        state.socialOpportunities?.contacts || {}
+    ).find(contact =>
+        contact.settlementId === settlement.id &&
+        contact.result === 'rumor' &&
+        contact.pendingRumor
+    );
+
+    if (pendingRumorContact) {
+        const rumor = pendingRumorContact.pendingRumor;
+        return [
+            `LOCAL RUMOR HEARD — ${settlement.label}.`,
+            `Rumor: ${rumor.claim}`,
+            `Destination mentioned: ${rumor.placeLabel}.`,
+            'Weave this local rumor naturally into tavern chatter, overheard ' +
+                'gossip, or an NPC remark in this reply, dressed to fit the ' +
+                'settlement and regional flavor.',
+            'Whether the claim is true has NOT been established. Do not ' +
+                'invent a quest, encounter, or reward—no paid job offer is ' +
+                'saved for this reply.'
+        ].join('\n');
+    }
+
     const pending = Object.values(
         state.socialOpportunities?.contacts || {}
     ).find(contact =>
@@ -22982,6 +23182,12 @@ globalThis.aethermoorMechanicsInterceptor =
         let msqOfferedThisTurn = false;
         const msqCheckState =
             getContext().chatMetadata?.[AETHERMOOR_METADATA_KEY]?.state;
+        const msqUserIndex = findLastUserMessage(chat);
+        const msqUserText = chat[msqUserIndex]?.mes;
+        const msqCheckId =
+            msqUserIndex >= 0 && typeof msqUserText === 'string'
+                ? `msq-${chat.slice(0, msqUserIndex).filter(item => item?.is_system !== true).length}-${worldHash(msqUserText).toString(36)}`
+                : null;
 
         if (
             msqCheckState?.world?.zones?.[msqCheckState.zone]?.spine?.established === true &&
@@ -22994,7 +23200,8 @@ globalThis.aethermoorMechanicsInterceptor =
                     cases: [{
                         name: 'check_zone_msq_progression',
                         kind: 'msq',
-                        action: 'check'
+                        action: 'check',
+                        ...(msqCheckId ? { checkId: msqCheckId } : {})
                     }]
                 });
 
@@ -23034,7 +23241,7 @@ globalThis.aethermoorMechanicsInterceptor =
                 currentState.socialOpportunities?.contacts || {}
             ).some(contact =>
                 contact.settlementId === currentSettlement.id &&
-                Boolean(contact.pendingQuest)
+                (Boolean(contact.pendingQuest) || Boolean(contact.pendingRumor))
             );
 
             if (
@@ -23409,8 +23616,10 @@ globalThis.aethermoorMechanicsInterceptor =
                     contextState.socialOpportunities?.contacts || {}
                 ).find(contact =>
                     contact.settlementId === settlement.id &&
-                    contact.result === 'offer' &&
-                    contact.pendingQuest
+                    (
+                        (contact.result === 'offer' && contact.pendingQuest) ||
+                        (contact.result === 'rumor' && contact.pendingRumor)
+                    )
                 );
 
                 entries.push({
@@ -23630,12 +23839,18 @@ async function consumeAethermoorHandoff(injected) {
                     `${reveal.settlementId}:${reveal.socialId}`
                 ];
 
-            if (
+            const hasPendingOffer =
                 contact?.result === 'offer' &&
                 contact.pendingQuest &&
-                contact.questId === contact.pendingQuest.id
-            ) {
-                publishedWorkBefore ||= clone(stored.state);
+                contact.questId === contact.pendingQuest.id;
+            const hasPendingRumor =
+                contact?.result === 'rumor' &&
+                Boolean(contact.pendingRumor);
+
+            if (hasPendingOffer || hasPendingRumor) {
+                if (hasPendingOffer) {
+                    publishedWorkBefore ||= clone(stored.state);
+                }
                 const published = resolveSocialWorkReveal({
                     state: stored.state,
                     socialId: reveal.socialId

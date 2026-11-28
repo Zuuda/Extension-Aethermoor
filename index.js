@@ -2658,6 +2658,35 @@ function tradeSettleNarrationPacket(result) {
     ].join('\n');
 }
 
+function tradeListingNarrationPacket(result) {
+    const item = result.item || {};
+    const label = formatGearLabel(item);
+    const rarity = item.rarity || 'Common';
+    const slot = gearSlotLabel(item);
+    const activeCount = Number.isInteger(result.activeCount)
+        ? ` (${result.activeCount}/3 active listings)`
+        : '';
+
+    if (result.action === 'withdraw') {
+        return [
+            'PRIVATE AETHER-NET WITHDRAWAL — do not recite this heading.',
+            `Withdrew from Aether-Net Trade-Stream: ${label} (${rarity}${slot ? `, ${slot}` : ''})${activeCount}.`,
+            'The item is already returned to Bag Reserves in saved state; no silver changed hands.'
+        ].join('\n');
+    }
+
+    return [
+        'PRIVATE AETHER-NET DEPOSIT — do not recite this heading.',
+        `Listed on Aether-Net Trade-Stream: ${label} (${rarity}${slot ? `, ${slot}` : ''})${activeCount}.`,
+        ...(item.trinket?.name
+            ? [`Keystone Trinket: ${item.trinket.name} — ${item.trinket.summary || ''}`]
+            : []),
+        'The item has already been moved from Bag Reserves into System Escrow. ' +
+            'Do not invent different items, and do not invent a buyer, sale price, ' +
+            'or silver payout yet—the market result stays hidden until the listing is settled.'
+    ].join('\n');
+}
+
 function evaluateAethermoorAchievements(
     beforeState,
     afterState,
@@ -9982,7 +10011,8 @@ function resolveTradeAction(test) {
 
         state.inventory.bagReserves.splice(test.itemIndex, 1);
         state.inventory.activeTradeListings.push(lockedListing);
-        result.item = { name: lockedListing.name, listingId, locked: true };
+        result.item = { ...clone(item), listingId, locked: true };
+        result.activeCount = state.inventory.activeTradeListings.length;
         result.status = 'listed';
         return result;
     }
@@ -10000,6 +10030,7 @@ function resolveTradeAction(test) {
         result.status = 'withdrawn';
         result.returnedToBag = true;
         result.item = listing;
+        result.activeCount = state.inventory.activeTradeListings.length;
         return result;
     }
 
@@ -15233,6 +15264,12 @@ async function runStoredMechanic(args) {
               Array.isArray(caseResult.settlements) &&
               caseResult.settlements.length > 0
                 ? tradeSettleNarrationPacket(caseResult)
+
+            : batch &&
+              oneCase?.kind === 'trade' &&
+              ['list', 'withdraw'].includes(oneCase.action) &&
+              caseResult.item
+                ? tradeListingNarrationPacket(caseResult)
 
             : batch && oneCase?.kind === 'follow_breadcrumb' &&
               caseResult.created &&
